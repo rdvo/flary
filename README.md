@@ -18,7 +18,7 @@ npm install flary
 
 ```typescript
 import { z } from 'zod';
-import { MCP } from '../../flary/src/mcp/index.js';
+import { MCP } from flary';
 
 // Initialize MCP instance
 const app = new MCP({
