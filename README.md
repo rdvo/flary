@@ -45,6 +45,33 @@ export default app;
 export const { McpObject } = app;
 ```
 
+## Configuring Durable Objects
+
+To use MCP in your Cloudflare Worker, you need to configure the Durable Object in your `wrangler.json`:
+
+```json
+{
+  "name": "your-worker",
+  "main": "src/index.ts",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "McpObject",
+        "class_name": "McpObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["McpObject"]
+    }
+  ]
+}
+```
+
+Make sure to export the `McpObject` from your worker entry point as shown in the usage example above.
+
 ## CLI
 
 ```bash
