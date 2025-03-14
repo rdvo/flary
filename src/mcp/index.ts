@@ -48,12 +48,24 @@ export class MCP {
 		// Set up authentication middleware
 		this.#app.use('*', async (c, next) => {
 			if (this.#config.auth?.type === 'bearer') {
+				// Get token from either the Authorization header or the key query parameter
 				const authHeader = c.req.header('Authorization');
-				if (!authHeader || !authHeader.startsWith('Bearer ')) {
-					return new Response('Unauthorized - Bearer token required', { status: 401 });
+				const queryKey = c.req.query('key');
+				let token: string | null = null;
+
+				// Check Authorization header first
+				if (authHeader && authHeader.startsWith('Bearer ')) {
+					token = authHeader.split(' ')[1];
+				}
+				// Check query parameter if header is not present
+				else if (queryKey) {
+					token = queryKey;
 				}
 				
-				const token = authHeader.split(' ')[1];
+				// If no token found in either place, return unauthorized
+				if (!token) {
+					return new Response('Unauthorized - Bearer token required in header or key parameter', { status: 401 });
+				}
 				
 				// If a validate function is provided, use it
 				if (this.#config.auth.validate) {
@@ -221,9 +233,15 @@ class MCPDurableObject {
 		console.log(`[MCP] Current sseTransport:`, this.sseTransport ? 'exists' : 'null');
 		
 		if (!this.sseTransport) {
-			const messageUrl = `${url.origin}/message`;
-			console.log(`[MCP] Creating new SSE transport with messageUrl: ${messageUrl}`);
-			this.sseTransport = new EdgeSSETransport(messageUrl, this.state.id.toString());
+			// Preserve all query parameters by appending them to the messageUrl
+			const messageUrl = new URL(`${url.origin}/message`);
+			// Copy all URL parameters to the messageUrl
+			url.searchParams.forEach((value, key) => {
+				messageUrl.searchParams.set(key, value);
+			});
+			
+			console.log(`[MCP] Creating new SSE transport with messageUrl: ${messageUrl.toString()}`);
+			this.sseTransport = new EdgeSSETransport(messageUrl.toString(), this.state.id.toString());
 			
 			// Set up message forwarding to the server
 			console.log(`[MCP] Setting up onmessage handler for SSE transport`);
@@ -303,8 +321,13 @@ class MCPDurableObject {
 
 	private async setupWSTransport(url: URL, connectionId: string): Promise<WebSocketTransport> {
 		// Create a new WS transport for each connection
-		const messageUrl = `${url.origin}/message`;
-		const transport = new WebSocketTransport(messageUrl, connectionId);
+		const messageUrl = new URL(`${url.origin}/message`);
+		// Copy all URL parameters to the messageUrl
+		url.searchParams.forEach((value, key) => {
+			messageUrl.searchParams.set(key, value);
+		});
+		
+		const transport = new WebSocketTransport(messageUrl.toString(), connectionId);
 		this.wsTransports.set(connectionId, transport);
 		return transport;
 	}
@@ -434,8 +457,26 @@ class MCPDurableObject {
 				request.headers.get('Accept')?.includes('application/json')) {
 				console.log(`[MCP] Returning JSON info response`);
 				const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-				const wsUrl = `${wsProtocol}//${url.host}/?sessionId=${this.state.id.toString()}`;
-				const sseUrl = `${url.origin}/?sessionId=${this.state.id.toString()}`;
+				
+				// Create base URLs and preserve all existing query parameters
+				const wsBaseUrl = new URL(`${wsProtocol}//${url.host}/`);
+				const sseBaseUrl = new URL(`${url.origin}/`);
+				
+				// Add sessionId parameter
+				wsBaseUrl.searchParams.set('sessionId', this.state.id.toString());
+				sseBaseUrl.searchParams.set('sessionId', this.state.id.toString());
+				
+				// Copy all URL parameters from the original request except sessionId
+				// which we've already set
+				url.searchParams.forEach((value, key) => {
+					if (key !== 'sessionId') {
+						wsBaseUrl.searchParams.set(key, value);
+						sseBaseUrl.searchParams.set(key, value);
+					}
+				});
+				
+				const wsUrl = wsBaseUrl.toString();
+				const sseUrl = sseBaseUrl.toString();
 				
 				return new Response(JSON.stringify({
 					status: 'ready',
@@ -454,9 +495,9 @@ class MCPDurableObject {
 						}
 					},
 					backward_compatibility: {
-						sse: `${url.origin}/sse?sessionId=${this.state.id.toString()}`,
-						websocket: `${url.origin}/ws?sessionId=${this.state.id.toString()}`,
-						message: `${url.origin}/message?sessionId=${this.state.id.toString()}`
+						sse: this.createCompatibilityUrl(url, '/sse', this.state.id.toString()),
+						websocket: this.createCompatibilityUrl(url, '/ws', this.state.id.toString()),
+						message: this.createCompatibilityUrl(url, '/message', this.state.id.toString())
 					}
 				}), {
 					headers: {
@@ -476,6 +517,21 @@ class MCPDurableObject {
 				}
 			});
 		}
+	}
+
+	private createCompatibilityUrl(url: URL, endpoint: string, sessionId: string): string {
+		const baseUrl = new URL(url.origin);
+		baseUrl.pathname = endpoint;
+		
+		// Copy all existing URL parameters
+		url.searchParams.forEach((value, key) => {
+			baseUrl.searchParams.set(key, value);
+		});
+		
+		// Ensure sessionId is included (overriding any existing one)
+		baseUrl.searchParams.set('sessionId', sessionId);
+		
+		return baseUrl.toString();
 	}
 }
 
