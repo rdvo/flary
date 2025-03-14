@@ -15,6 +15,11 @@ interface MCPConfig {
 	name: string;
 	version: string;
 	description?: string;
+	auth?: {
+		type: 'bearer';
+		token?: string;
+		validate?: (token: string) => boolean | Promise<boolean>;
+	};
 }
 
 export class MCP {
@@ -34,11 +39,36 @@ export class MCP {
 				prompts: {},
 				tools: {},
 				resources: {}
-			},
+			}
 		});
 
 		// Initialize Hono app
 		this.#app = new Hono();
+		
+		// Set up authentication middleware
+		this.#app.use('*', async (c, next) => {
+			if (this.#config.auth?.type === 'bearer') {
+				const authHeader = c.req.header('Authorization');
+				if (!authHeader || !authHeader.startsWith('Bearer ')) {
+					return new Response('Unauthorized - Bearer token required', { status: 401 });
+				}
+				
+				const token = authHeader.split(' ')[1];
+				
+				// If a validate function is provided, use it
+				if (this.#config.auth.validate) {
+					const isValid = await this.#config.auth.validate(token);
+					if (!isValid) {
+						return new Response('Unauthorized - Invalid token', { status: 401 });
+					}
+				}
+				// If a specific token is provided, check against it
+				else if (this.#config.auth.token && token !== this.#config.auth.token) {
+					return new Response('Unauthorized - Invalid token', { status: 401 });
+				}
+			}
+			return next();
+		});
 		
 		// Set up a unified route handler for all MCP endpoints
 		this.#app.all('/*', async (c: Context) => {

@@ -45,6 +45,72 @@ export default app;
 export const { McpObject } = app;
 ```
 
+## Authentication for MCP Servers
+
+You can secure your MCP endpoints with authentication to ensure only authorized clients can access your services:
+
+### Bearer Token Authentication
+
+Currently, MCP servers support Bearer token authentication:
+
+```typescript
+const app = new MCP({
+	name: 'test-mcp',
+	description: 'A test MCP',
+	version: '1.0.0',
+	auth: {
+		type: 'bearer',
+		// Option 1: Specify a fixed token
+		token: 'your-secret-token',
+		// OR Option 2: Use a custom validation function
+		validate: async (token) => {
+			// Implement your custom token validation logic
+			// Examples:
+			// - Query a database
+			// - Call an external auth service
+			// - Verify a JWT
+			return token === await getValidToken();
+		}
+	}
+});
+```
+
+When authentication is enabled, your MCP server will:
+1. Check every incoming request for the Authorization header
+2. Verify the token format is correct (`Bearer your-token`)
+3. Validate the token using either the fixed token or your custom validation function
+4. Return a 401 Unauthorized response if validation fails
+
+### Client Usage
+
+Clients must include a valid Bearer token in the Authorization header with every request:
+
+```
+Authorization: Bearer your-secret-token
+```
+
+In JavaScript/TypeScript:
+```javascript
+fetch('https://your-worker.workers.dev/', {
+  headers: {
+    'Authorization': 'Bearer your-secret-token'
+  }
+})
+```
+
+### No Authentication
+
+If you don't specify any auth configuration, your MCP server will be publicly accessible:
+
+```typescript
+const app = new MCP({
+	name: 'test-mcp',
+	description: 'A test MCP',
+	version: '1.0.0'
+	// No auth = publicly accessible
+});
+```
+
 ## Configuring Durable Objects
 
 To use MCP in your Cloudflare Worker, you need to configure the Durable Object in your `wrangler.json`:
