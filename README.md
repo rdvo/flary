@@ -51,12 +51,7 @@ You can secure your MCP endpoints with authentication to ensure only authorized 
 
 ### Bearer Token Authentication
 
-MCP servers support two methods of Bearer token authentication:
-
-1. HTTP Authorization Header (default for all requests)
-2. URL Parameter (only for SSE/EventSource connections)
-
-Here's how to configure authentication:
+Currently, MCP servers support Bearer token authentication:
 
 ```typescript
 const app = new MCP({
@@ -81,38 +76,74 @@ const app = new MCP({
 ```
 
 When authentication is enabled, your MCP server will:
-1. Check for authentication in this order:
-   - Authorization header (`Bearer your-token`)
-   - URL parameter for SSE connections (`?token=your-token`)
-2. Verify the token format is correct
+1. Check every incoming request for the Authorization header or the `key` query parameter
+2. Verify the token format is correct (`Bearer your-token` in header or `key=your-token` in URL)
 3. Validate the token using either the fixed token or your custom validation function
 4. Return a 401 Unauthorized response if validation fails
 
 ### Client Usage
 
-For regular HTTP requests, include a valid Bearer token in the Authorization header:
-
+#### For HTTP/Fetch requests:
 ```javascript
+// Using Authorization header
 fetch('https://your-worker.workers.dev/', {
   headers: {
     'Authorization': 'Bearer your-secret-token'
   }
 })
+
+// Using query parameter
+fetch('https://your-worker.workers.dev/?key=your-secret-token')
 ```
 
-For SSE/EventSource connections, you can use either the header method or append the token as a URL parameter:
-
+#### For SSE/EventSource connections:
 ```javascript
-// Method 1: Using Authorization header
-const events = new EventSource('https://your-worker.workers.dev/events', {
-  headers: {
-    'Authorization': 'Bearer your-secret-token'
-  }
-});
+// Method 1: Using URL parameter (recommended for SSE clients)
+const events = new EventSource('https://your-worker.workers.dev/?key=your-secret-token');
 
-// Method 2: Using URL parameter (recommended for SSE clients)
-const events = new EventSource('https://your-worker.workers.dev/events?token=your-secret-token');
+// Note: Many EventSource implementations don't support custom headers,
+// so using the URL parameter method is recommended for SSE
 ```
+
+#### For WebSocket connections:
+```javascript
+// Using URL parameter
+const socket = new WebSocket('wss://your-worker.workers.dev/?key=your-secret-token');
+
+// Some WebSocket implementations support headers
+const socket = new WebSocket('wss://your-worker.workers.dev/');
+socket.setRequestHeader('Authorization', 'Bearer your-secret-token');
+```
+
+### Connection Endpoints
+
+The MCP server supports the following connection methods:
+
+- **SSE (Server-Sent Events)**: 
+  - Connect to the root path (`/`) or `/sse` with proper Accept headers
+  - For clients like Cursor that only support SSE, use the URL parameter for auth: `/?key=your-token`
+
+- **WebSockets**: 
+  - Connect to the root path (`/`) or `/ws` with WebSocket upgrade headers
+  - Use URL parameter for auth: `/?key=your-token`
+
+For both connection types, you'll receive a `sessionId` which should be included in subsequent connections.
+
+### Cursor-Specific Integration
+
+To integrate an MCP server with Cursor (which uses SSE exclusively):
+
+1. In your Cursor MCP configuration, set the endpoint URL with authentication:
+   ```
+   https://your-worker.workers.dev/?key=your-secret-token
+   ```
+
+2. Cursor will connect to your MCP server using SSE, and the server will:
+   - Generate a `sessionId` if one isn't provided
+   - Establish the SSE connection
+   - Allow Cursor to call your registered tools
+
+3. For production use with Cursor, always enable authentication with a secure token.
 
 ### No Authentication
 
