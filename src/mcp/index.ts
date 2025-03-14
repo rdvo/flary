@@ -59,27 +59,64 @@ export class MCP {
 	}
 
 	/**
-	 * Add a tool to the MCP server
+	 * Add a tool to the MCP server with type inference from Zod schema
 	 */
-	tool(name: string, schema: any, handler: (args: any) => any) {
-		const wrappedHandler = async (args: any, extra: any) => {
-			const result = await handler(args);
-			
-			if (result && typeof result === 'object' && Array.isArray(result.content)) {
-				return result;
+	tool<T extends z.ZodObject<any>>(
+		name: string,
+		schemaOrHandler: T | ((args: any) => any),
+		handler?: (args: z.infer<T>) => any
+	) {
+		// If only two arguments are provided and the second is a function,
+		// try to get schema from the function's schema property
+		let schema: T;
+		let finalHandler: (args: any) => any;
+
+		if (typeof schemaOrHandler === 'function' && !handler) {
+			const fn = schemaOrHandler as any;
+			if (!fn.schema || typeof fn.schema !== 'object') {
+				throw new Error(`Function ${name} must have a schema property when used directly`);
 			}
-			
-			return {
-				content: [
-					{
-						type: 'text',
-						text: String(result)
-					}
-				]
-			};
+			schema = fn.schema;
+			finalHandler = fn;
+		} else {
+			schema = schemaOrHandler as T;
+			finalHandler = handler!;
+		}
+
+		const wrappedHandler = async (args: any, extra: any) => {
+			try {
+				// Parse and validate the input with the schema
+				const validatedArgs = schema.parse(args);
+				const result = await finalHandler(validatedArgs);
+				
+				if (result && typeof result === 'object' && Array.isArray(result.content)) {
+					return result;
+				}
+				
+				return {
+					content: [
+						{
+							type: 'text',
+							text: String(result)
+						}
+					]
+				};
+			} catch (error) {
+				console.error(`[MCP] Error in tool handler for ${name}:`, error);
+				throw error;
+			}
 		};
 		
-		this.#server.tool(name, schema, wrappedHandler);
+		// Make sure schema is properly defined before passing it to the server
+		if (!schema || typeof schema !== 'object') {
+			console.error(`[MCP] Invalid schema for tool ${name}`);
+			throw new Error(`Invalid schema for tool ${name}`);
+		}
+		
+		// Pass the schema directly to the server - it knows how to handle Zod schemas
+		console.log(`[MCP] Registering tool: ${name}`);
+		// Use the schema's shape for the MCP server which expects ZodRawShape
+		this.#server.tool(name, schema.shape as any, (args: any, extra: any) => wrappedHandler(args, extra));
 		return this;
 	}
 
@@ -158,13 +195,34 @@ class MCPDurableObject {
 			console.log(`[MCP] Creating new SSE transport with messageUrl: ${messageUrl}`);
 			this.sseTransport = new EdgeSSETransport(messageUrl, this.state.id.toString());
 			
-			// Ensure the onmessage handler is set
-			if (!this.sseTransport.onmessage) {
-				console.log(`[MCP] Setting up onmessage handler for SSE transport`);
-				this.sseTransport.onmessage = (message) => {
-					console.log(`[MCP] Received message from client:`, message);
-				};
-			}
+			// Set up message forwarding to the server
+			console.log(`[MCP] Setting up onmessage handler for SSE transport`);
+			this.sseTransport.onmessage = async (message) => {
+				console.log(`[MCP] Received message from client:`, message);
+				try {
+					// Connect to the server if not already connected
+					if (!this.sseTransport?.onmessage) {
+						await this.server.connect(this.sseTransport!);
+					}
+				} catch (error) {
+					console.error(`[MCP] Error handling message:`, error);
+					if (this.sseTransport?.onerror) {
+						this.sseTransport.onerror(error as Error);
+					}
+					// Send error response if possible
+					const rpcMessage = message as { id?: number | string };
+					if (rpcMessage.id !== undefined) {
+						await this.sseTransport?.send({
+							jsonrpc: '2.0',
+							id: rpcMessage.id,
+							error: {
+								code: -32000,
+								message: String(error)
+							}
+						});
+					}
+				}
+			};
 			
 			console.log(`[MCP] SSE transport created`);
 		} else {
@@ -173,10 +231,41 @@ class MCPDurableObject {
 			// Double-check that the onmessage handler is still set
 			if (!this.sseTransport.onmessage) {
 				console.log(`[MCP] Re-setting onmessage handler for existing SSE transport`);
-				this.sseTransport.onmessage = (message) => {
+				this.sseTransport.onmessage = async (message) => {
 					console.log(`[MCP] Received message from client:`, message);
+					try {
+						// Connect to the server if not already connected
+						if (!this.sseTransport?.onmessage) {
+							await this.server.connect(this.sseTransport!);
+						}
+					} catch (error) {
+						console.error(`[MCP] Error handling message:`, error);
+						if (this.sseTransport?.onerror) {
+							this.sseTransport.onerror(error as Error);
+						}
+						// Send error response if possible
+						const rpcMessage = message as { id?: number | string };
+						if (rpcMessage.id !== undefined) {
+							await this.sseTransport?.send({
+								jsonrpc: '2.0',
+								id: rpcMessage.id,
+								error: {
+									code: -32000,
+									message: String(error)
+								}
+							});
+						}
+					}
 				};
 			}
+		}
+		
+		// Connect to the server immediately
+		try {
+			await this.server.connect(this.sseTransport);
+		} catch (error) {
+			console.error(`[MCP] Error connecting to server:`, error);
+			throw error;
 		}
 		
 		return this.sseTransport;

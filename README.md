@@ -17,15 +17,32 @@ npm install flary
 ## Usage
 
 ```typescript
-import MCP from 'flary';
+import { z } from 'zod';
+import { MCP } from '../../flary/src/mcp/index.js';
 
-// Initialize MCP
-const mcp = new MCP({
-  // Your configuration here
+// Initialize MCP instance
+const app = new MCP({
+	name: 'test-mcp',
+	description: 'A test MCP',
+	version: '1.0.0'
 });
 
-// Use MCP functionality
-// ...
+const sumSchema = z.object({
+	a: z.number().describe('The first number to add'),
+	b: z.number().describe('The second number to add')
+}).describe('Calculate the sum of two numbers');
+
+async function calculateSum({ a, b }: z.input<typeof sumSchema>) {
+	return a + b;
+}
+calculateSum.schema = sumSchema;
+
+// Register the tool using just the function
+app.tool('calculate_sum', calculateSum);
+
+// Export the app - it includes the McpObject directly
+export default app;
+export const { McpObject } = app;
 ```
 
 ## CLI
