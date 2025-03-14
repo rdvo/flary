@@ -31,7 +31,7 @@ const mcp = new MCP({
 ## CLI
 
 ```bash
-npx consoles-ai [command]
+flary [command]
 ```
 
 ## License
