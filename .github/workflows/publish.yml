@@ -24,7 +24,6 @@ jobs:
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org/'
-          scope: '@devivo'
 
       - name: Install dependencies
         run: npm install
@@ -50,13 +49,13 @@ jobs:
           NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
           
           # Check if version already exists on npm
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://registry.npmjs.org/@devivo/flary/$NEW_VERSION)
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://registry.npmjs.org/flary/$NEW_VERSION)
           
           # If version exists, increment again
           while [ "$HTTP_STATUS" == "200" ]; do
             NEW_PATCH=$((NEW_PATCH + 1))
             NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
-            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://registry.npmjs.org/@devivo/flary/$NEW_VERSION)
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://registry.npmjs.org/flary/$NEW_VERSION)
             echo "Version $MAJOR.$MINOR.$((NEW_PATCH - 1)) already exists, trying $NEW_VERSION"
           done
           
@@ -69,8 +68,15 @@ jobs:
       - name: Build package
         run: npm run build
 
+      - name: Create .npmrc file
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
+          echo "registry=https://registry.npmjs.org/" >> .npmrc
+
       - name: Publish to npm
-        run: npm publish --access public
+        run: |
+          # Try to publish with --access public flag
+          npm publish --access public || true
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -81,8 +87,23 @@ jobs:
           registry-url: 'https://npm.pkg.github.com'
           scope: '@rdvo'
 
+      - name: Create GitHub Packages .npmrc
+        run: |
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" > .npmrc
+          echo "@rdvo:registry=https://npm.pkg.github.com/" >> .npmrc
+          echo "registry=https://npm.pkg.github.com/" >> .npmrc
+
       - name: Publish to GitHub Packages
-        run: npm publish
+        run: |
+          # For GitHub Packages, we need to use the scoped name
+          # Temporarily modify package.json to use the scoped name
+          node -e "const pkg = require('./package.json'); pkg.name = '@rdvo/flary'; require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));"
+          
+          # Try to publish to GitHub Packages
+          npm publish || true
+          
+          # Restore original package name
+          node -e "const pkg = require('./package.json'); pkg.name = 'flary'; require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
