@@ -336,8 +336,14 @@ class MCPDurableObject {
 		const url = new URL(request.url);
 		const pathname = url.pathname;
 		
+		// Create a simple object from headers using a safer approach
+		const headerObj: Record<string, string> = {};
+		request.headers.forEach((value, key) => {
+			headerObj[key] = value;
+		});
+		
 		console.log(`[MCP] Request: ${request.method} ${pathname}`, {
-			headers: Object.fromEntries(request.headers.entries()),
+			headers: headerObj,
 			url: url.toString(),
 			sessionId: this.state.id.toString()
 		});
