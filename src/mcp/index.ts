@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { DurableObjectState, DurableObject, DurableObjectNamespace } from '@cloudflare/workers-types';
 import { EdgeSSETransport } from './transports/edgeSSE.js';
+import { WebSocketTransport } from './transports/webSockets.js';
 import { Hono, Context } from 'hono';
 import { z } from 'zod';
 
@@ -9,12 +10,21 @@ export interface Env {
 	MCP_OBJECT: DurableObjectNamespace;
 }
 
+// Simple config interface - no transport config needed
+interface MCPConfig {
+	name: string;
+	version: string;
+	description?: string;
+}
+
 export class MCP {
 	#server: McpServer;
 	#app: Hono;
 	McpObject: any;
+	#config: MCPConfig;
 
-	constructor(config: { name: string; version: string; description?: string }) {
+	constructor(config: MCPConfig) {
+		this.#config = config;
 		// Initialize the MCP server
 		this.#server = new McpServer({
 			name: config.name,
@@ -30,7 +40,7 @@ export class MCP {
 		// Initialize Hono app
 		this.#app = new Hono();
 		
-		// Set up the route handler for MCP endpoints
+		// Set up a unified route handler for all MCP endpoints
 		this.#app.all('/*', async (c: Context) => {
 			const sessionId = c.req.query('sessionId');
 			const object = c.env.MCP_OBJECT.get(
@@ -50,22 +60,15 @@ export class MCP {
 
 	/**
 	 * Add a tool to the MCP server
-	 * @param name Name of the tool
-	 * @param schema Schema for the tool's input parameters using zod or a raw object
-	 * @param handler Function that processes the input and returns a result
-	 * @returns The MCP instance for chaining
 	 */
 	tool(name: string, schema: any, handler: (args: any) => any) {
-		// Wrap the handler to format the response according to MCP requirements
 		const wrappedHandler = async (args: any, extra: any) => {
 			const result = await handler(args);
 			
-			// If the result is already in the MCP format, return it as is
 			if (result && typeof result === 'object' && Array.isArray(result.content)) {
 				return result;
 			}
 			
-			// Otherwise, convert the result to a text content item
 			return {
 				content: [
 					{
@@ -76,35 +79,28 @@ export class MCP {
 			};
 		};
 		
-		// Register the tool with the MCP server
 		this.#server.tool(name, schema, wrappedHandler);
 		return this;
 	}
 
 	/**
 	 * Add a resource to the MCP server
-	 * @param uri URI of the resource
-	 * @param handler Function that returns the resource content
-	 * @param options Additional options for the resource
-	 * @returns The MCP instance for chaining
 	 */
 	resource(uri: string, handler: () => Promise<string | object>, options: {
 		name?: string;
 		description?: string;
 		mimeType?: string;
 	} = {}) {
-		// Register the resource with the MCP server
 		this.#server.resource(
-			options.name || uri,                // Name of the resource
-			uri,                                // URI of the resource
-			{                                   // Metadata
+			options.name || uri,
+			uri,
+			{
 				description: options.description,
 				mimeType: options.mimeType || 'text/plain'
 			},
-			async () => {                       // Read callback
+			async () => {
 				const result = await handler();
 				
-				// Format the result based on its type
 				if (typeof result === 'string') {
 					return {
 						contents: [{
@@ -134,53 +130,233 @@ export class MCP {
 }
 
 /**
- * Durable Object implementation for MCP
+ * Durable Object implementation for MCP with protocol auto-detection
  */
 class MCPDurableObject {
-	private transport: EdgeSSETransport | null = null;
+	private sseTransport: EdgeSSETransport | null = null;
+	private wsTransports: Map<string, WebSocketTransport> = new Map();
 	private server: McpServer;
 	private state: DurableObjectState;
 	private env: Env;
 
-	constructor(state: DurableObjectState, env: Env, serverFactory: () => McpServer) {
+	constructor(
+		state: DurableObjectState,
+		env: Env,
+		serverFactory: () => McpServer,
+	) {
 		this.state = state;
 		this.env = env;
 		this.server = serverFactory();
 	}
 
+	private async setupSSETransport(url: URL): Promise<EdgeSSETransport> {
+		console.log(`[MCP] Setting up SSE transport for URL: ${url.toString()}`);
+		console.log(`[MCP] Current sseTransport:`, this.sseTransport ? 'exists' : 'null');
+		
+		if (!this.sseTransport) {
+			const messageUrl = `${url.origin}/message`;
+			console.log(`[MCP] Creating new SSE transport with messageUrl: ${messageUrl}`);
+			this.sseTransport = new EdgeSSETransport(messageUrl, this.state.id.toString());
+			
+			// Ensure the onmessage handler is set
+			if (!this.sseTransport.onmessage) {
+				console.log(`[MCP] Setting up onmessage handler for SSE transport`);
+				this.sseTransport.onmessage = (message) => {
+					console.log(`[MCP] Received message from client:`, message);
+				};
+			}
+			
+			console.log(`[MCP] SSE transport created`);
+		} else {
+			console.log(`[MCP] Reusing existing SSE transport`);
+			
+			// Double-check that the onmessage handler is still set
+			if (!this.sseTransport.onmessage) {
+				console.log(`[MCP] Re-setting onmessage handler for existing SSE transport`);
+				this.sseTransport.onmessage = (message) => {
+					console.log(`[MCP] Received message from client:`, message);
+				};
+			}
+		}
+		
+		return this.sseTransport;
+	}
+
+	private async setupWSTransport(url: URL, connectionId: string): Promise<WebSocketTransport> {
+		// Create a new WS transport for each connection
+		const messageUrl = `${url.origin}/message`;
+		const transport = new WebSocketTransport(messageUrl, connectionId);
+		this.wsTransports.set(connectionId, transport);
+		return transport;
+	}
+
 	async fetch(request: Request): Promise<Response> {
 		const url = new URL(request.url);
+		const pathname = url.pathname;
 		
-		// Create the transport if it doesn't exist
-		if (!this.transport) {
-			const messageUrl = `${url.origin}${url.pathname.replace('sse', 'message')}`;
-			this.transport = new EdgeSSETransport(messageUrl, this.state.id.toString());
-		}
+		console.log(`[MCP] Request: ${request.method} ${pathname}`, {
+			headers: Object.fromEntries(request.headers.entries()),
+			url: url.toString(),
+			sessionId: this.state.id.toString()
+		});
 		
-		// Handle SSE connection
-		if (request.method === 'GET' && url.pathname.endsWith('/sse')) {
-			await this.server.connect(this.transport);
-			return this.transport.sseResponse;
-		}
-		
-		// Handle message posting
-		if (request.method === 'POST' && url.pathname.endsWith('/message')) {
-			return this.transport.handlePostMessage(request);
-		}
-		
-		// Return information about the server for the root path
-		if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '')) {
-			return new Response(JSON.stringify({
-				status: 'ready',
-				message: 'MCP server is running'
-			}), {
+		try {
+			// For backward compatibility, handle the specific /sse and /ws endpoints
+			const isSpecificSseEndpoint = pathname.endsWith('/sse');
+			const isSpecificWsEndpoint = pathname.endsWith('/ws');
+			
+			// Auto-detect protocol based on headers
+			const upgradeHeader = request.headers.get('Upgrade');
+			const isWebSocketRequest = upgradeHeader && upgradeHeader.toLowerCase() === 'websocket';
+			const acceptHeader = request.headers.get('Accept');
+			const isSSERequest = acceptHeader && acceptHeader.includes('text/event-stream');
+			
+			console.log(`[MCP] Protocol detection:`, {
+				isSpecificSseEndpoint,
+				isSpecificWsEndpoint,
+				isWebSocketRequest,
+				isSSERequest,
+				acceptHeader,
+				upgradeHeader
+			});
+			
+			// Handle WebSocket connections (either through /ws or protocol detection)
+			if (isWebSocketRequest && (isSpecificWsEndpoint || pathname === '/')) {
+				console.log(`[MCP] Setting up WebSocket transport`);
+				// Generate a unique connection ID for this WebSocket
+				const connectionId = this.state.id.toString() + '-' + Date.now().toString();
+				const wsTransport = await this.setupWSTransport(url, connectionId);
+				try {
+					console.log(`[MCP] Connecting WebSocket transport to server`);
+					await this.server.connect(wsTransport);
+					console.log(`[MCP] WebSocket transport connected successfully`);
+				} catch (err) {
+					const error = err as Error;
+					console.error(`[MCP] Error connecting WebSocket transport:`, error);
+					return new Response(`WebSocket connection error: ${error.message}`, { 
+						status: 500,
+						headers: { 'Content-Type': 'text/plain' }
+					});
+				}
+				return wsTransport.handleUpgrade(request);
+			}
+			
+			// Handle SSE connections (either through /sse or protocol detection)
+			// If no specific protocol is requested via headers but it's a GET to root,
+			// default to SSE for backward compatibility
+			if (request.method === 'GET' && (
+				isSpecificSseEndpoint || 
+				isSSERequest || 
+				(pathname === '/' && !isWebSocketRequest)
+			)) {
+				console.log(`[MCP] Setting up SSE transport for GET request`);
+				
+				// Extract sessionId from query params or generate a new one
+				const urlSessionId = url.searchParams.get('sessionId');
+				const sessionId = urlSessionId || this.state.id.toString();
+				
+				// If client didn't provide a sessionId, we should redirect them to a URL with the sessionId
+				if (!urlSessionId) {
+					console.log(`[MCP] No sessionId provided, redirecting to URL with sessionId: ${sessionId}`);
+					const redirectUrl = new URL(url.toString());
+					redirectUrl.searchParams.set('sessionId', sessionId);
+					
+					return new Response(null, {
+						status: 307, // Temporary redirect
+						headers: {
+							'Location': redirectUrl.toString(),
+							'Content-Type': 'text/plain',
+							'Cache-Control': 'no-cache, no-store, must-revalidate'
+						}
+					});
+				}
+				
+				const sseTransport = await this.setupSSETransport(url);
+				console.log(`[MCP] Connecting SSE transport to server`);
+				try {
+					await this.server.connect(sseTransport);
+					console.log(`[MCP] SSE transport connected successfully`);
+				} catch (err) {
+					const error = err as Error;
+					console.error(`[MCP] Error connecting SSE transport:`, error);
+					return new Response(`SSE connection error: ${error.message}`, { 
+						status: 500,
+						headers: { 'Content-Type': 'text/plain' }
+					});
+				}
+				console.log(`[MCP] Returning SSE response`);
+				return sseTransport.sseResponse;
+			}
+			
+			// Handle message posting for SSE
+			if (request.method === 'POST' && (pathname.endsWith('/message') || pathname === '/')) {
+				console.log(`[MCP] Handling POST message`);
+				// If no SSE transport exists yet, create one
+				const sseTransport = await this.setupSSETransport(url);
+				console.log(`[MCP] Connecting SSE transport for POST`);
+				try {
+					await this.server.connect(sseTransport);
+					console.log(`[MCP] SSE transport connected successfully for POST`);
+				} catch (err) {
+					const error = err as Error;
+					console.error(`[MCP] Error connecting SSE transport for POST:`, error);
+					return new Response(`SSE connection error: ${error.message}`, { 
+						status: 500,
+						headers: { 'Content-Type': 'text/plain' }
+					});
+				}
+				console.log(`[MCP] Handling POST message with transport`);
+				return sseTransport.handlePostMessage(request);
+			}
+			
+			// Return information about the server for the root path with specific JSON request
+			// This is only reached if the client explicitly requests JSON
+			if (request.method === 'GET' && pathname === '/' && 
+				request.headers.get('Accept')?.includes('application/json')) {
+				console.log(`[MCP] Returning JSON info response`);
+				const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+				const wsUrl = `${wsProtocol}//${url.host}/?sessionId=${this.state.id.toString()}`;
+				const sseUrl = `${url.origin}/?sessionId=${this.state.id.toString()}`;
+				
+				return new Response(JSON.stringify({
+					status: 'ready',
+					message: 'MCP server is running',
+					sessionId: this.state.id.toString(),
+					transport_options: {
+						sse: {
+							info: "SSE transport with separate POST for messages",
+							connect: `GET ${sseUrl} with Accept: text/event-stream header`,
+							send_messages: `POST to ${sseUrl} with Content-Type: application/json`
+						},
+						websocket: {
+							info: "WebSocket transport with bidirectional messaging",
+							connect: `Connect to ${wsUrl} as WebSocket`,
+							send_messages: "Send directly through the WebSocket connection"
+						}
+					},
+					backward_compatibility: {
+						sse: `${url.origin}/sse?sessionId=${this.state.id.toString()}`,
+						websocket: `${url.origin}/ws?sessionId=${this.state.id.toString()}`,
+						message: `${url.origin}/message?sessionId=${this.state.id.toString()}`
+					}
+				}), {
+					headers: {
+						'Content-Type': 'application/json'
+					}
+				});
+			}
+			
+			console.log(`[MCP] No matching handler found, returning 404`);
+			return new Response('Not found', { status: 404 });
+		} catch (error) {
+			console.error(`[MCP] Error handling request:`, error);
+			return new Response(String(error), {
+				status: 500,
 				headers: {
-					'Content-Type': 'application/json'
+					'Content-Type': 'text/plain'
 				}
 			});
 		}
-		
-		return new Response('Not found', { status: 404 });
 	}
 }
 
