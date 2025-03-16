@@ -64,6 +64,10 @@ program
               name: "Full-Stack React App (with Cloudflare Workers)",
               value: "fullstack",
             },
+            {
+              name: "MCP Server (Model Context Protocol)",
+              value: "mcp",
+            },
           ],
         },
       ]);
@@ -72,7 +76,11 @@ program
 
       // Get paths
       const cwd = process.cwd();
-      const starterPath = resolve(__dirname, "..", "starter");
+      const templatePath = resolve(
+        __dirname,
+        "templates",
+        template === "mcp" ? "mcp" : "fullstack"
+      );
       const projectDir = resolve(cwd, projectName);
 
       console.log(chalk.blue("\n🚀 Creating your Flary project..."));
@@ -89,11 +97,11 @@ program
         throw error;
       }
 
-      // Copy starter template contents
+      // Copy template contents
       try {
-        // Read the contents of the starter directory
-        const starterContents = await glob("**/*", {
-          cwd: starterPath,
+        // Read the contents of the template directory
+        const templateContents = await glob("**/*", {
+          cwd: templatePath,
           dot: true,
           ignore: [
             "node_modules/**",
@@ -102,10 +110,10 @@ program
             "test-app/**",
             ".DS_Store",
             "tsconfig.tsbuildinfo",
-            "pnpm-lock.yaml", // We'll stick with npm
+            "pnpm-lock.yaml",
             "*.log",
           ],
-          nodir: false, // Include directories in the results
+          nodir: false,
         });
 
         // Create the project directory first
@@ -136,72 +144,9 @@ program
           JSON.stringify(vscodeSettings, null, 2)
         );
 
-        // Create .env from .env.example if it exists
-        const envExamplePath = join(starterPath, ".env.example");
-        const envPath = join(projectDir, ".env");
-        try {
-          const envExample = readFileSync(envExamplePath, "utf8");
-          writeFileSync(envPath, envExample);
-        } catch (error) {
-          console.log(
-            chalk.yellow("⚠️ No .env.example found, skipping .env creation")
-          );
-        }
-
-        // Create README.md
-        const readmeContent = `# ${projectName}
-
-A full-stack React application with Cloudflare Workers, built with Flary.
-
-## Getting Started
-
-1. Install dependencies:
-\`\`\`bash
-npm install
-\`\`\`
-
-2. Start the development server:
-\`\`\`bash
-npm run dev
-\`\`\`
-
-3. Open [http://localhost:5173](http://localhost:5173) in your browser.
-
-## Features
-
-- ⚡️ React + Vite for lightning-fast development
-- 🔥 Cloudflare Workers for serverless functions
-- 🎨 Tailwind CSS for styling
-- 📦 TypeScript for type safety
-- 🚀 Automatic deployments with Cloudflare
-
-## Scripts
-
-- \`npm run dev\` - Start development server
-- \`npm run build\` - Build for production
-- \`npm run preview\` - Preview production build locally
-- \`npm run deploy\` - Deploy to Cloudflare Workers
-
-## Project Structure
-
-\`\`\`
-${projectName}/
-├── app/          # React application code
-├── src/          # Worker and API routes
-├── public/       # Static assets
-└── ...config files
-\`\`\`
-
-## License
-
-MIT
-`;
-
-        writeFileSync(join(projectDir, "README.md"), readmeContent);
-
         // Copy each file individually to maintain correct structure
-        for (const file of starterContents) {
-          const sourcePath = join(starterPath, file);
+        for (const file of templateContents) {
+          const sourcePath = join(templatePath, file);
           const targetPath = join(projectDir, file);
 
           // Create parent directory if needed
@@ -214,26 +159,66 @@ MIT
             // Copy the file or directory
             await cp(sourcePath, targetPath, { recursive: true });
           } catch (err) {
-            // Only throw if it's not a directory exists error
             if (err.code !== "EISDIR") {
               throw err;
             }
           }
         }
 
-        // Clean up any accidentally created nested project directory
-        const nestedProjectDir = join(projectDir, projectName);
-        try {
-          const nestedStats = await stat(nestedProjectDir);
-          if (nestedStats.isDirectory()) {
-            await rm(nestedProjectDir, { recursive: true, force: true });
+        // Update package.json
+        const projPackageJsonPath = join(projectDir, "package.json");
+        const packageData = JSON.parse(
+          readFileSync(projPackageJsonPath, "utf8")
+        );
+        packageData.name = projectName;
+        writeFileSync(
+          projPackageJsonPath,
+          JSON.stringify(packageData, null, 2)
+        );
+
+        // Update wrangler.jsonc with project name and add Durable Objects config if MCP template
+        const wranglerPath = join(projectDir, "wrangler.jsonc");
+        let wranglerContent = readFileSync(wranglerPath, "utf8");
+        wranglerContent = wranglerContent.replace(
+          /"name":\s*"[^"]*"/,
+          `"name": "${projectName}"`
+        );
+
+        if (template === "mcp") {
+          // Add Durable Objects configuration if it doesn't exist
+          if (!wranglerContent.includes("durable_objects")) {
+            const durableConfig = `
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "McpObject",
+        "class_name": "McpObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["McpObject"]
+    }
+  ],`;
+            wranglerContent = wranglerContent.replace(
+              /{([^}]*)}/,
+              `{$1${durableConfig}}`
+            );
           }
-        } catch (err) {
-          // Ignore if nested directory doesn't exist
-          if (err.code !== "ENOENT") {
-            throw err;
-          }
+
+          // Update MCP instance name in src/index.ts
+          const indexPath = join(projectDir, "src", "index.ts");
+          let indexContent = readFileSync(indexPath, "utf8");
+          indexContent = indexContent.replace(
+            /name:\s*"[^"]*"/,
+            `name: "${projectName}"`
+          );
+          writeFileSync(indexPath, indexContent);
         }
+
+        writeFileSync(wranglerPath, wranglerContent);
 
         console.log(chalk.green("✓ Copied template files successfully"));
       } catch (error) {
@@ -245,38 +230,21 @@ MIT
         );
       }
 
-      // Update package.json
-      try {
-        const projPackageJsonPath = join(projectDir, "package.json");
-        const packageData = JSON.parse(
-          readFileSync(projPackageJsonPath, "utf8")
-        );
-        packageData.name = projectName;
-        writeFileSync(
-          projPackageJsonPath,
-          JSON.stringify(packageData, null, 2)
-        );
-
-        // Update wrangler.jsonc with project name
-        const wranglerPath = join(projectDir, "wrangler.jsonc");
-        const wranglerContent = readFileSync(wranglerPath, "utf8");
-        const updatedWranglerContent = wranglerContent.replace(
-          /"name":\s*"[^"]*"/,
-          `"name": "${projectName}"`
-        );
-        writeFileSync(wranglerPath, updatedWranglerContent);
-      } catch (error) {
-        console.error(
-          chalk.red("Failed to update configuration files:", error.message)
-        );
-        throw new Error("Failed to configure project. Please try again.");
-      }
-
       console.log(chalk.green("\n✨ Project created successfully!"));
-      console.log(chalk.yellow("\nNext steps:"));
-      console.log(chalk.white(`  1. cd ${projectName}`));
-      console.log(chalk.white("  2. npm install"));
-      console.log(chalk.white("  3. npm run dev"));
+
+      if (template === "mcp") {
+        console.log(chalk.yellow("\nGet started:"));
+        console.log(chalk.white(`cd ${projectName} && npm install`));
+        console.log(chalk.white("\nUpdate src/index.ts with your tools"));
+        console.log(chalk.white("Change the auth token in MCP config"));
+        console.log(chalk.yellow("\nCommands:"));
+        console.log(chalk.white("npm run dev     # local development"));
+        console.log(chalk.white("wrangler deploy # deploy to production"));
+      } else {
+        console.log(chalk.yellow("\nGet started:"));
+        console.log(chalk.white(`cd ${projectName} && npm install`));
+        console.log(chalk.white("npm run dev"));
+      }
 
       console.log(chalk.blue("\nHappy coding! 🎉"));
     } catch (error) {

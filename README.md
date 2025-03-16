@@ -22,7 +22,7 @@ A versatile toolkit for building and managing Cloudflare Workers applications, i
   - [Connection Types](#connection-types)
   - [Cursor Integration](#cursor-integration)
   - [No Authentication](#no-authentication)
-- [Configuring Durable Objects](#configuring-durable-objects)
+  - [Durable Objects Setup](#durable-objects-setup)
 - [License](#license)
 
 ---
@@ -132,18 +132,6 @@ Deploy your Flary application to Cloudflare Workers:
 
 Your application will be deployed to `https://<project-name>.<your-subdomain>.workers.dev`
 
-### Custom Domains
-
-To use a custom domain:
-
-1. Add your domain in the Cloudflare Dashboard
-2. Configure your `wrangler.toml`:
-   ```toml
-   routes = [
-     { pattern = "your-domain.com/*", zone_id = "your-zone-id" }
-   ]
-   ```
-
 ### Environment Variables
 
 Set environment variables for production:
@@ -230,11 +218,9 @@ const app = new MCP({
 });
 ```
 
----
+### Durable Objects Setup
 
-## Configuring Durable Objects
-
-Configure Durable Objects in `wrangler.json`:
+MCP requires Durable Objects for state management. Configure them in your `wrangler.json`:
 
 ```json
 {
@@ -244,6 +230,8 @@ Configure Durable Objects in `wrangler.json`:
   "migrations": [{ "tag": "v1", "new_classes": ["McpObject"] }]
 }
 ```
+
+Make sure to export the `McpObject` from your worker entry point as shown in the Basic Usage example.
 
 ---
 

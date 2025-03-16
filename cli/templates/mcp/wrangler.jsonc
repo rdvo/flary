@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/wrangler.json",
+  "name": "mcp-server",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-02-24",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "McpObject",
+        "class_name": "McpObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["McpObject"]
+    }
+  ]
+} 
