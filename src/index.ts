@@ -1,4 +1,4 @@
-import MCP from './mcp';
+import MCP from "./mcp";
 
 export default MCP;
 export { MCP };

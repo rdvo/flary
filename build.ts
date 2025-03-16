@@ -1,27 +1,29 @@
-import { exec } from 'child_process';
-import fs from 'fs';
-import path from 'path';
-import arg from 'arg';
-import { build, context, BuildOptions, Plugin } from 'esbuild';
-import * as glob from 'glob';
+import { exec } from "child_process";
+import fs from "fs";
+import path from "path";
+import arg from "arg";
+import { build, context, BuildOptions, Plugin } from "esbuild";
+import * as glob from "glob";
 
 const args = arg({
-  '--watch': Boolean,
-  '--force': Boolean,
+  "--watch": Boolean,
+  "--force": Boolean,
 });
 
-const isWatch = args['--watch'] || false;
-const isForce = args['--force'] || false;
+const isWatch = args["--watch"] || false;
+const isForce = args["--force"] || false;
 
 function removeDir(dirPath: string) {
   if (!fs.existsSync(dirPath)) {
     return;
   }
-  
+
   if (!isForce) {
     const stat = fs.statSync(dirPath);
     if (stat.isDirectory() && fs.readdirSync(dirPath).length > 0) {
-      console.warn(`Warning: ${dirPath} is not empty. Use --force to overwrite.`);
+      console.warn(
+        `Warning: ${dirPath} is not empty. Use --force to overwrite.`
+      );
       return;
     }
   }
@@ -37,23 +39,35 @@ function removeDir(dirPath: string) {
   fs.rmdirSync(dirPath);
 }
 
-const entryPoints = glob.sync('./src/**/*.ts', {
-  ignore: ['./src/**/*.test.ts', './src/mod.ts', './src/middleware.ts', './src/deno/**/*.ts'],
+const entryPoints = glob.sync("./src/**/*.ts", {
+  ignore: [
+    "./src/**/*.test.ts",
+    "./src/mod.ts",
+    "./src/middleware.ts",
+    "./src/deno/**/*.ts",
+  ],
 });
 
-const addExtension = (extension: string = '.js', fileExtension: string = '.ts'): Plugin => ({
-  name: 'add-extension',
+const addExtension = (
+  extension: string = ".js",
+  fileExtension: string = ".ts"
+): Plugin => ({
+  name: "add-extension",
   setup(build) {
     build.onResolve({ filter: /.*/ }, (args) => {
       if (args.importer) {
         const p = path.join(args.resolveDir, args.path);
         let tsPath = `${p}${fileExtension}`;
 
-        let importPath = '';
+        let importPath = "";
         if (fs.existsSync(tsPath)) {
           importPath = args.path + extension;
         } else {
-          tsPath = path.join(args.resolveDir, args.path, `index${fileExtension}`);
+          tsPath = path.join(
+            args.resolveDir,
+            args.path,
+            `index${fileExtension}`
+          );
           if (fs.existsSync(tsPath)) {
             importPath = `${args.path}/index${extension}`;
           }
@@ -66,16 +80,16 @@ const addExtension = (extension: string = '.js', fileExtension: string = '.ts'):
 
 const commonOptions: BuildOptions = {
   entryPoints,
-  logLevel: 'info',
-  platform: 'node',
+  logLevel: "info",
+  platform: "node",
 };
 
 const cjsBuild = async () => {
   const buildOptions: BuildOptions = {
     ...commonOptions,
-    outbase: './src',
-    outdir: './dist/cjs',
-    format: 'cjs',
+    outbase: "./src",
+    outdir: "./dist/cjs",
+    format: "cjs",
   };
 
   if (isWatch) {
@@ -90,10 +104,10 @@ const esmBuild = async () => {
   const buildOptions: BuildOptions = {
     ...commonOptions,
     bundle: true,
-    outbase: './src',
-    outdir: './dist',
-    format: 'esm',
-    plugins: [addExtension('.js')],
+    outbase: "./src",
+    outdir: "./dist",
+    format: "esm",
+    plugins: [addExtension(".js")],
   };
 
   if (isWatch) {
@@ -104,16 +118,19 @@ const esmBuild = async () => {
   }
 };
 
-removeDir('./dist');
+removeDir("./dist");
 // Generate type declarations first
-exec(`tsc ${isWatch ? '-w' : ''} --project tsconfig.build.json`, (error, stdout, stderr) => {
-  if (error) {
-    console.error(`TypeScript compilation failed:`);
-    console.error(stdout);
-    console.error(stderr);
-    return;
-  }
+exec(
+  `tsc ${isWatch ? "-w" : ""} --project tsconfig.build.json`,
+  (error, stdout, stderr) => {
+    if (error) {
+      console.error(`TypeScript compilation failed:`);
+      console.error(stdout);
+      console.error(stderr);
+      return;
+    }
 
-  // Then build the JavaScript code
-  Promise.all([esmBuild(), cjsBuild()]);
-});
+    // Then build the JavaScript code
+    Promise.all([esmBuild(), cjsBuild()]);
+  }
+);

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- SEO Meta Tags -->
+    <title>Flary Starter App</title>
+    <meta name="description" content="A simple Flary starter application" />
+
+    <!-- Open Graph Meta Tags -->
+    <meta property="og:title" content="Flary Starter App" />
+    <meta
+      property="og:description"
+      content="A simple Flary starter application"
+    />
+    <meta property="og:image" content="/og-image.png" />
+    <meta property="og:url" content="" />
+    <meta property="og:type" content="website" />
+
+    <!-- Twitter Card Meta Tags -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Flary Starter App" />
+    <meta
+      name="twitter:description"
+      content="A simple Flary starter application"
+    />
+    <meta name="twitter:image" content="/twitter-image.png" />
+
+    <script>
+      // Simple theme handling
+      (function () {
+        const savedTheme = localStorage.getItem("theme");
+        if (savedTheme === "light") {
+          document.documentElement.classList.remove("dark");
+        } else {
+          document.documentElement.classList.add("dark");
+        }
+      })();
+    </script>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

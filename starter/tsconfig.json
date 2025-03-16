@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    /* Paths (for shadcn/ui since paths in tsconfig.app.json are not working) */
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "esModuleInterop": true,
+    "skipLibCheck": true
+  },
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" }
+  ]
+}
