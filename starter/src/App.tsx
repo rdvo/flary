@@ -53,7 +53,7 @@ function App() {
           </p>
           <div className="mt-10 flex items-center justify-center gap-4">
             <Button>Get Started</Button>
-            <Button variant="outline">
+            <Button variant="outline" asChild>
               <a
                 href="https://github.com/your-repo"
                 target="_blank"
