@@ -1,6 +1,6 @@
 {
   "name": "flary",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "description": "mixed assortment of tools for cloudflare workers",
   "main": "dist/cjs/index.js",
   "module": "dist/index.js",
