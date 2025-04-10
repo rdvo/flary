@@ -8,11 +8,13 @@
     "type-check": "tsc"
   },
   "dependencies": {
-    "@cloudflare/workers-types": "^4.20240208.0",
-    "flary": "latest",
+    "flary": "^0.1.0",
     "zod": "^3.22.4"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240208.0",
+    "@jridgewell/sourcemap-codec": "^1.4.15",
+    "@rollup/plugin-inject": "^5.0.5",
     "typescript": "^5.3.3",
     "wrangler": "^3.28.1"
   }

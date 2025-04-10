@@ -1,3 +1,5 @@
-import app from './api';
+import app from "./api/index";
 
-export default app; 
+export default {
+  fetch: app.fetch,
+};

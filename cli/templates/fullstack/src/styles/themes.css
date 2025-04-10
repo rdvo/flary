@@ -1,0 +1,67 @@
+body {
+  @apply overscroll-none bg-transparent;
+}
+
+:root {
+  --font-sans: var(--font-inter);
+  --header-height: calc(var(--spacing) * 12 + 1px);
+}
+
+/* Base themes with consistent styling for all options */
+
+.theme-blue {
+  --primary: oklch(0.55 0.18 243.51);
+  --primary-foreground: oklch(0.98 0.005 240);
+  --sidebar-primary: oklch(0.55 0.18 243.51);
+  --sidebar-primary-foreground: oklch(0.98 0.005 240);
+
+  @variant dark {
+    --primary: oklch(0.67 0.2 250.77);
+    --primary-foreground: oklch(0.98 0.005 240);
+    --sidebar-primary: oklch(0.67 0.2 250.77);
+    --sidebar-primary-foreground: oklch(0.98 0.005 240);
+  }
+}
+
+.theme-green {
+  --primary: oklch(0.55 0.18 142.5);
+  --primary-foreground: oklch(0.98 0.005 140);
+  --sidebar-primary: oklch(0.55 0.18 142.5);
+  --sidebar-primary-foreground: oklch(0.98 0.005 140);
+
+  @variant dark {
+    --primary: oklch(0.67 0.2 145.77);
+    --primary-foreground: oklch(0.98 0.005 140);
+    --sidebar-primary: oklch(0.67 0.2 145.77);
+    --sidebar-primary-foreground: oklch(0.98 0.005 140);
+  }
+}
+
+.theme-amber {
+  --primary: oklch(0.6 0.18 75.6);
+  --primary-foreground: oklch(0.98 0.005 70);
+  --sidebar-primary: oklch(0.6 0.18 75.6);
+  --sidebar-primary-foreground: oklch(0.98 0.005 70);
+
+  @variant dark {
+    --primary: oklch(0.7 0.2 80.51);
+    --primary-foreground: oklch(0.98 0.005 70);
+    --sidebar-primary: oklch(0.7 0.2 80.51);
+    --sidebar-primary-foreground: oklch(0.98 0.005 70);
+  }
+}
+
+.theme-purple {
+  --primary: oklch(0.55 0.18 290.51);
+  --primary-foreground: oklch(0.98 0.005 290);
+  --sidebar-primary: oklch(0.55 0.18 290.51);
+  --sidebar-primary-foreground: oklch(0.98 0.005 290);
+
+  @variant dark {
+    --primary: oklch(0.67 0.2 290.77);
+    --primary-foreground: oklch(0.98 0.005 290);
+    --sidebar-primary: oklch(0.67 0.2 290.77);
+    --sidebar-primary-foreground: oklch(0.98 0.005 290);
+    --border-primary: #000;
+  }
+} 

@@ -58,10 +58,10 @@ program
         {
           type: "list",
           name: "template",
-          message: "Which template would you like to use?",
+          message: "Which template would you like to use for your worker?",
           choices: [
             {
-              name: "Full-Stack React App (with Cloudflare Workers)",
+              name: "Full-Stack App (React, Vite, Hono, Tailwind, shadcn)",
               value: "fullstack",
             },
             {
@@ -233,20 +233,21 @@ program
       console.log(chalk.green("\n✨ Project created successfully!"));
 
       if (template === "mcp") {
-        console.log(chalk.yellow("\nGet started:"));
-        console.log(chalk.white(`cd ${projectName} && npm install`));
-        console.log(chalk.white("\nUpdate src/index.ts with your tools"));
-        console.log(chalk.white("Change the auth token in MCP config"));
-        console.log(chalk.yellow("\nCommands:"));
-        console.log(chalk.white("npm run dev     # local development"));
-        console.log(chalk.white("wrangler deploy # deploy to production"));
+        console.log(chalk.yellow("\nSetup:"));
+        console.log(chalk.white(`cd ${projectName}`));
+        console.log(chalk.white("npm install"));
+        console.log(chalk.yellow("\nDevelopment:"));
+        console.log(chalk.white("npm run dev"));
+        console.log(chalk.yellow("\nDeploy:"));
+        console.log(chalk.white("wrangler deploy"));
       } else {
-        console.log(chalk.yellow("\nGet started:"));
-        console.log(chalk.white(`cd ${projectName} && npm install`));
+        console.log(chalk.yellow("\nSetup:"));
+        console.log(chalk.white(`cd ${projectName}`));
+        console.log(chalk.white("npm install"));
         console.log(chalk.white("npm run dev"));
       }
 
-      console.log(chalk.blue("\nHappy coding! 🎉"));
+      console.log(chalk.blue("\nHappy coding! 🚀"));
     } catch (error) {
       console.error(chalk.red("\nError:", error.message));
       process.exit(1);
