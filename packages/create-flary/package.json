@@ -1,0 +1,20 @@
+{
+  "name": "create-flary",
+  "version": "0.1.0",
+  "description": "Create a self-hosted Flary Cloudflare app",
+  "type": "module",
+  "bin": {
+    "create-flary": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.24",
+    "typescript": "^5.4.5"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "Apache-2.0"
+}

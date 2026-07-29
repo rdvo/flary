@@ -1,16 +1,17 @@
 {
   "name": "flary",
-  "version": "0.2.13",
-  "description": "mixed assortment of tools for cloudflare workers",
-  "main": "dist/cjs/index.js",
+  "version": "0.3.0-rc.1",
+  "description": "Durable, provider-neutral AI agent harness for Cloudflare Workers",
+  "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/types/index.d.ts",
-  "bin": {
-    "flary": "cli/index.js"
-  },
   "scripts": {
     "build": "rimraf dist && tsx build.ts",
     "build:watch": "rimraf dist && tsx build.ts --watch",
+    "check": "tsc --project tsconfig.build.json --noEmit",
+    "test": "tsx --test \"tests/**/*.test.ts\"",
+    "test:npm-install": "node scripts/test-npm-install.cjs",
+    "postinstall": "node scripts/apply-dependency-patches.cjs",
     "lint": "eslint . --ext .ts,.js",
     "format": "prettier --write .",
     "prepublishOnly": "npm run build"
@@ -32,64 +33,123 @@
     "tools"
   ],
   "author": "rdvo",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "homepage": "https://github.com/rdvo/flary",
   "dependencies": {
-    "@acusti/parsing": "^0.14.3",
-    "@cloudflare/ai-utils": "^1.0.1",
-    "@cloudflare/workers-types": "^4.20250313.0",
-    "@google/generative-ai": "^0.14.1",
-    "@modelcontextprotocol/sdk": "^1.7.0",
-    "@trpc/client": "^10.45.2",
-    "@trpc/server": "^10.45.2",
-    "@xyflow/react": "^12.4.4",
-    "ai": "^4.0.13",
-    "arg": "^5.0.2",
-    "chalk": "^5.4.1",
-    "commander": "^12.0.0",
-    "esbuild": "^0.21.5",
-    "figlet": "^1.7.0",
-    "form-data": "^4.0.2",
-    "glob": "^10.3.10",
+    "@cfworker/json-schema": "^4.1.1",
+    "@cloudflare/codemode": "0.5.1",
+    "@cloudflare/sandbox": "0.12.4",
+    "@cloudflare/shell": "0.4.3",
+    "@earendil-works/pi-ai": "0.80.10",
+    "@flue/runtime": "1.0.0-beta.9",
+    "@flue/sdk": "1.0.0-beta.9",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "hono": "^4.5.0",
-    "inquirer": "^12.4.3",
-    "install": "^0.13.0",
-    "node-fetch": "^3.3.2",
-    "open": "^10.1.0",
-    "openai-zod-functions": "^0.1.2",
-    "ora": "^8.2.0",
-    "os": "^0.1.2",
-    "pumpdotfun-sdk": "^1.3.2",
-    "react": "^19.0.0",
-    "turndown": "^7.2.0",
-    "tw-animate-css": "^1.2.2",
-    "zod": "^3.24.2",
-    "zod-to-json-schema": "^3.24.1"
+    "patch-package": "8.0.1",
+    "yaml": "^2.8.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@hono/node-server": "^1.11.4",
-    "@types/figlet": "^1.5.8",
+    "@cloudflare/workers-types": "^4.20250729.0",
     "@types/glob": "^8.1.0",
     "@types/node": "^20.17.24",
-    "@types/puppeteer": "^5.4.7",
-    "eslint": "^9.0.0",
-    "openai": "^4.87.3",
+    "arg": "^5.0.2",
+    "esbuild": "^0.28.1",
+    "eslint": "^10.8.0",
+    "glob": "^13.0.6",
     "prettier": "^2.8.4",
-    "puppeteer": "^24.4.0",
-    "rimraf": "^5.0.5",
+    "rimraf": "^6.1.3",
     "tsx": "^4.15.7",
     "typescript": "^5.4.5"
   },
   "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
   "files": [
     "dist/**/*",
-    "cli/**/*"
+    "npm-patches/*.patch",
+    "scripts/apply-dependency-patches.cjs"
   ],
   "exports": {
     ".": {
       "types": "./dist/types/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/cjs/index.js"
+      "import": "./dist/index.js"
+    },
+    "./harness": {
+      "types": "./dist/types/harness/index.d.ts",
+      "import": "./dist/harness/index.js"
+    },
+    "./client": {
+      "types": "./dist/types/harness/client/index.d.ts",
+      "import": "./dist/harness/client/index.js"
+    },
+    "./cloudflare": {
+      "types": "./dist/types/harness/cloudflare/index.d.ts",
+      "import": "./dist/harness/cloudflare/index.js"
+    },
+    "./contracts": {
+      "types": "./dist/types/harness/contracts/index.d.ts",
+      "import": "./dist/harness/contracts/index.js"
+    },
+    "./execution": {
+      "types": "./dist/types/harness/execution/index.d.ts",
+      "import": "./dist/harness/execution/index.js"
+    },
+    "./prompts": {
+      "types": "./dist/types/harness/prompts/index.d.ts",
+      "import": "./dist/harness/prompts/index.js"
+    },
+    "./providers": {
+      "types": "./dist/types/harness/providers/index.d.ts",
+      "import": "./dist/harness/providers/index.js"
+    },
+    "./recall": {
+      "types": "./dist/types/harness/recall/index.d.ts",
+      "import": "./dist/harness/recall/index.js"
+    },
+    "./storage": {
+      "types": "./dist/types/harness/storage/index.d.ts",
+      "import": "./dist/harness/storage/index.js"
+    },
+    "./subagents": {
+      "types": "./dist/types/harness/subagents/index.d.ts",
+      "import": "./dist/harness/subagents/index.js"
+    },
+    "./tools": {
+      "types": "./dist/types/harness/tools/index.d.ts",
+      "import": "./dist/harness/tools/index.js"
+    },
+    "./telemetry": {
+      "types": "./dist/types/harness/telemetry/index.d.ts",
+      "import": "./dist/harness/telemetry/index.js"
+    },
+    "./mcp": {
+      "types": "./dist/types/harness/mcp/index.d.ts",
+      "import": "./dist/harness/mcp/index.js"
+    },
+    "./history": {
+      "types": "./dist/types/harness/history/index.d.ts",
+      "import": "./dist/harness/history/index.js"
+    },
+    "./flue": {
+      "types": "./dist/types/harness/flue/index.d.ts",
+      "import": "./dist/harness/flue/index.js"
+    },
+    "./host": {
+      "types": "./dist/types/harness/host/index.d.ts",
+      "import": "./dist/harness/host/index.js"
+    },
+    "./vault": {
+      "types": "./dist/types/harness/vault/index.d.ts",
+      "import": "./dist/harness/vault/index.js"
+    }
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "@flue/runtime@1.0.0-beta.9": "patches/@flue__runtime@1.0.0-beta.9.patch",
+      "@earendil-works/pi-ai@0.80.10": "patches/@earendil-works__pi-ai@0.80.10.patch"
     }
   }
 }

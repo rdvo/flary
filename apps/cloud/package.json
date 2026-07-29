@@ -1,0 +1,49 @@
+{
+  "name": "flary-cloud",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Flary Cloud control plane and self-hostable Cloudflare app",
+  "type": "module",
+  "scripts": {
+    "font:build": "python3 fonts/build_flary_sans.py",
+    "dev": "vite",
+    "build": "vite build",
+    "build:production": "CLOUDFLARE_ENV=production vite build",
+    "build:flue": "flue build --target cloudflare --root .",
+    "deploy": "CLOUDFLARE_ENV=production pnpm run build:flue && wrangler deploy --config dist/flary_cloud_local/wrangler.json",
+    "types": "wrangler types worker-configuration.d.ts --env-interface CloudflareEnv --strict-vars",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply flary-cloud-local --local",
+    "db:migrate:remote": "wrangler d1 migrations apply flary-cloud --remote"
+  },
+  "dependencies": {
+    "@better-auth/drizzle-adapter": "^1.6.24",
+    "@cloudflare/shell": "0.4.3",
+    "@cloudflare/sandbox": "0.12.4",
+    "@flue/runtime": "1.0.0-beta.9",
+    "agents": "0.20.1",
+    "better-auth": "^1.6.24",
+    "drizzle-orm": "^0.45.2",
+    "flary": "workspace:*",
+    "hono": "^4.12.30",
+    "lucide-react": "^0.511.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "valibot": "1.4.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.21.0",
+    "@flue/cli": "1.0.0-beta.9",
+    "@tailwindcss/vite": "^4.1.13",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.7",
+    "@vitejs/plugin-react": "^4.7.0",
+    "drizzle-kit": "^0.31.4",
+    "tailwindcss": "^4.1.13",
+    "typescript": "^5.8.3",
+    "vite": "^7.1.7",
+    "wrangler": "^4.30.0"
+  }
+}

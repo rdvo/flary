@@ -1,0 +1,180 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "flary-cloud-local",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-07-23",
+  "compatibility_flags": ["nodejs_compat"],
+  "ai": {
+    "binding": "AI"
+  },
+  "assets": {
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/health"]
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1
+  },
+  "vars": {
+    "APP_URL": "http://localhost:5173",
+    "APP_ENV": "development",
+    "EMAIL_DELIVERY_ENABLED": "false",
+    "EMAIL_FROM": "Flary Local <noreply@example.com>",
+    "SANDBOX_TRANSPORT": "rpc",
+    "CODE_MODE_ENABLED": "false"
+  },
+  "worker_loaders": [
+    {
+      "binding": "LOADER"
+    }
+  ],
+  "artifacts": [
+    {
+      "binding": "ARTIFACTS",
+      "namespace": "default",
+      "remote": false
+    }
+  ],
+  "containers": [
+    {
+      "class_name": "FlarySandbox",
+      "image": "./Dockerfile",
+      "instance_type": "lite",
+      "max_instances": 10
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "flary-cloud-local",
+      "database_id": "00000000-0000-0000-0000-000000000001",
+      "migrations_dir": "migrations",
+      "remote": false
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "WORKSPACE_BLOBS",
+      "bucket_name": "flary-artifacts-local",
+      "remote": false
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ORG_COORDINATOR",
+        "class_name": "OrgCoordinator"
+      },
+      {
+        "name": "PROJECT_WORKSPACES",
+        "class_name": "WorkspaceFilesystem"
+      },
+      {
+        "name": "FLARY_SANDBOX",
+        "class_name": "FlarySandbox"
+      },
+      {
+        "name": "FLUE_FLARY_THREAD_AGENT",
+        "class_name": "FlueFlaryThreadAgent"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "OrgCoordinator",
+        "WorkspaceFilesystem",
+        "FlarySandbox",
+        "FlueFlaryThreadAgent",
+        "FlueRegistry"
+      ]
+    }
+  ],
+  "env": {
+    "production": {
+      "name": "flary-cloud",
+      "workers_dev": true,
+      "preview_urls": false,
+      "vars": {
+        "APP_URL": "https://flary-cloud.cosmicmarketing.workers.dev",
+        "APP_ENV": "production",
+        "EMAIL_DELIVERY_ENABLED": "false",
+        "EMAIL_FROM": "Flary <noreply@flary.dev>",
+        "SANDBOX_TRANSPORT": "rpc",
+        "CODE_MODE_ENABLED": "false"
+      },
+      "ai": {
+        "binding": "AI"
+      },
+      "worker_loaders": [
+        {
+          "binding": "LOADER"
+        }
+      ],
+      "artifacts": [
+        {
+          "binding": "ARTIFACTS",
+          "namespace": "default",
+          "remote": true
+        }
+      ],
+      "containers": [
+        {
+          "class_name": "FlarySandbox",
+          "image": "./Dockerfile",
+          "instance_type": "lite",
+          "max_instances": 10
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "flary-cloud",
+          "database_id": "34c753c7-ada0-462b-8c28-a70ab8b23ec3",
+          "migrations_dir": "migrations",
+          "remote": true
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "WORKSPACE_BLOBS",
+          "bucket_name": "flary-artifacts"
+        }
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "ORG_COORDINATOR",
+            "class_name": "OrgCoordinator"
+          },
+          {
+            "name": "PROJECT_WORKSPACES",
+            "class_name": "WorkspaceFilesystem"
+          },
+          {
+            "name": "FLARY_SANDBOX",
+            "class_name": "FlarySandbox"
+          },
+          {
+            "name": "FLUE_FLARY_THREAD_AGENT",
+            "class_name": "FlueFlaryThreadAgent"
+          }
+        ]
+      },
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": [
+            "OrgCoordinator",
+            "WorkspaceFilesystem",
+            "FlarySandbox",
+            "FlueFlaryThreadAgent",
+            "FlueRegistry"
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,361 @@
+diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js b/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
+index dadadbe33b5adea911dfcc1a82cd4e04fe489a71..738b27c260f78f49d3ac516efca359cc592e96f1 100644
+--- a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
++++ b/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
+@@ -156,12 +156,18 @@ export const stream = (model, context, options) => {
+                 throw new Error(`No API key for provider: ${model.provider}`);
+             }
+             const accountId = extractAccountId(apiKey);
+-            let body = buildRequestBody(model, context, options);
++            const effectiveSessionId = options?.cacheRetention === "none"
++                ? undefined
++                : options?.sessionId;
++            const effectiveOptions = effectiveSessionId === options?.sessionId
++                ? options
++                : { ...options, sessionId: undefined };
++            let body = buildRequestBody(model, context, effectiveOptions);
+             const nextBody = await options?.onPayload?.(body, model);
+             if (nextBody !== undefined) {
+                 body = nextBody;
+             }
+-            const codexSessionId = clampOpenAIPromptCacheKey(options?.sessionId);
++            const codexSessionId = clampOpenAIPromptCacheKey(effectiveSessionId);
+             const websocketRequestId = codexSessionId || createCodexRequestId();
+             const sseHeaders = buildSSEHeaders(model.headers, options?.headers, accountId, apiKey, codexSessionId);
+             const websocketHeaders = buildWebSocketHeaders(model.headers, options?.headers, accountId, apiKey, websocketRequestId);
+@@ -169,9 +175,9 @@ export const stream = (model, context, options) => {
+             const httpTimeoutMs = normalizeTimeoutMs(options?.timeoutMs);
+             const websocketConnectTimeoutMs = normalizeTimeoutMs(options?.websocketConnectTimeoutMs);
+             const transport = options?.transport || "auto";
+-            const websocketDisabledForSession = transport !== "sse" && isWebSocketSseFallbackActive(options?.sessionId);
++            const websocketDisabledForSession = transport !== "sse" && isWebSocketSseFallbackActive(effectiveSessionId);
+             if (websocketDisabledForSession) {
+-                recordWebSocketSseFallback(options?.sessionId);
++                recordWebSocketSseFallback(effectiveSessionId);
+             }
+             if (transport !== "sse" && !websocketDisabledForSession) {
+                 let websocketStarted = false;
+@@ -181,7 +187,7 @@ export const stream = (model, context, options) => {
+                     try {
+                         await processWebSocketStream(resolveCodexWebSocketUrl(model.baseUrl), body, websocketHeaders, output, stream, model, () => {
+                             websocketStarted = true;
+-                        }, httpTimeoutMs, websocketConnectTimeoutMs, options);
++                        }, httpTimeoutMs, websocketConnectTimeoutMs, effectiveOptions);
+                         if (options?.signal?.aborted) {
+                             throw new Error("Request was aborted");
+                         }
+@@ -210,11 +216,11 @@ export const stream = (model, context, options) => {
+                             phase: websocketStarted ? "after_message_stream_start" : "before_message_stream_start",
+                             requestBytes: new TextEncoder().encode(bodyJson).byteLength,
+                         }));
+-                        recordWebSocketFailure(options?.sessionId, error);
++                        recordWebSocketFailure(effectiveSessionId, error);
+                         if (websocketStarted) {
+                             throw error;
+                         }
+-                        recordWebSocketSseFallback(options?.sessionId);
++                        recordWebSocketSseFallback(effectiveSessionId);
+                         break;
+                     }
+                 }
+diff --git a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.d.ts b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.d.ts
+index 1e185878cd594eb72245958ecddfe2aa014d5723..feb0661cf796e8ddcfaf08e7b0f0cbd3d1988f21 100644
+--- a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.d.ts
++++ b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.d.ts
+@@ -5,5 +5,15 @@
+  * It is only intended for CLI use, not browser environments.
+  */
+ import type { OAuthAuth } from "../types.ts";
++import type { OAuthCredentials } from "../types.ts";
++export interface AnthropicManualOAuthStart {
++    authorizationUrl: string;
++    verifier: string;
++    state: string;
++    redirectUri: string;
++    expiresInSeconds: number;
++}
++export declare function startAnthropicManualOAuth(): Promise<AnthropicManualOAuthStart>;
++export declare function completeAnthropicManualOAuth(input: string, expectedState: string, verifier: string, redirectUri?: string): Promise<OAuthCredentials>;
+ export declare const anthropicOAuth: OAuthAuth;
+ //# sourceMappingURL=anthropic.d.ts.map
+\ No newline at end of file
+diff --git a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.js b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.js
+index 05ba3fc970f095bacc3f2b175186ceab68ff7f59..db2a72cf4a469dbac5c6c50ba14add63bb8c14af 100644
+--- a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.js
++++ b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.js
+@@ -185,6 +185,43 @@ async function exchangeAuthorizationCode(code, state, verifier, redirectUri) {
+         expires: Date.now() + tokenData.expires_in * 1000 - 5 * 60 * 1000,
+     };
+ }
++/**
++ * Start the Claude Pro/Max authorization-code flow without opening a local
++ * callback server. This is suitable for a Worker or another remote host.
++ */
++export async function startAnthropicManualOAuth() {
++    const { verifier, challenge } = await generatePKCE();
++    const authParams = new URLSearchParams({
++        code: "true",
++        client_id: CLIENT_ID,
++        response_type: "code",
++        redirect_uri: REDIRECT_URI,
++        scope: SCOPES,
++        code_challenge: challenge,
++        code_challenge_method: "S256",
++        state: verifier,
++    });
++    return {
++        authorizationUrl: `${AUTHORIZE_URL}?${authParams.toString()}`,
++        verifier,
++        state: verifier,
++        redirectUri: REDIRECT_URI,
++        expiresInSeconds: 15 * 60,
++    };
++}
++/**
++ * Complete a Worker-safe Claude Pro/Max authorization flow.
++ */
++export async function completeAnthropicManualOAuth(input, expectedState, verifier, redirectUri = REDIRECT_URI) {
++    const parsed = parseAuthorizationInput(input);
++    if (parsed.state && parsed.state !== expectedState) {
++        throw new Error("OAuth state mismatch");
++    }
++    if (!parsed.code) {
++        throw new Error("Missing authorization code");
++    }
++    return exchangeAuthorizationCode(parsed.code, parsed.state ?? expectedState, verifier, redirectUri);
++}
+ async function loginAnthropic(interaction) {
+     const { verifier, challenge } = await generatePKCE();
+     const server = await startCallbackServer(verifier);
+diff --git a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.d.ts b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.d.ts
+index 792fa803e087fdff4b09c82f2fb4d3205aaebc82..dde4ba15b5ec1294f22788031bd43bd31c44e466 100644
+--- a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.d.ts
++++ b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.d.ts
+@@ -5,5 +5,29 @@
+  * It is only intended for CLI use, not browser environments.
+  */
+ import type { OAuthAuth } from "../types.ts";
++import type { OAuthCredentials } from "../types.ts";
++export interface OpenAICodexDeviceAuthorization {
++    deviceAuthId: string;
++    userCode: string;
++    intervalSeconds: number;
++    verificationUri: string;
++    redirectUri: string;
++    expiresInSeconds: number;
++}
++export interface OpenAICodexManualOAuthStart {
++    authorizationUrl: string;
++    verifier: string;
++    state: string;
++    redirectUri: string;
++    expiresInSeconds: number;
++}
++export type OpenAICodexDevicePollResult =
++    | { status: "pending"; intervalSeconds: number }
++    | { status: "slow_down"; intervalSeconds: number }
++    | { status: "complete"; credential: OAuthCredentials };
++export declare function startOpenAICodexDeviceAuthorization(signal?: AbortSignal): Promise<OpenAICodexDeviceAuthorization>;
++export declare function startOpenAICodexManualOAuth(): Promise<OpenAICodexManualOAuthStart>;
++export declare function completeOpenAICodexManualOAuth(input: string, expectedState: string, verifier: string, redirectUri?: string, signal?: AbortSignal): Promise<OAuthCredentials>;
++export declare function pollOpenAICodexDeviceAuthorization(device: OpenAICodexDeviceAuthorization, signal?: AbortSignal): Promise<OpenAICodexDevicePollResult>;
+ export declare const openaiCodexOAuth: OAuthAuth;
+ //# sourceMappingURL=openai-codex.d.ts.map
+diff --git a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.js b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.js
+index 5275b3b7a81683fdcd207b7619103706e1ce4ad4..21d9d15082d2e37d77b9a42c7ab31f1c8dbe1de6 100644
+--- a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.js
++++ b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.js
+@@ -172,6 +172,101 @@ async function startOpenAICodexDeviceAuth(signal) {
+         intervalSeconds,
+     };
+ }
++/**
++ * Start an OpenAI Codex device-code flow without a local callback server.
++ */
++export async function startOpenAICodexDeviceAuthorization(signal) {
++    const device = await startOpenAICodexDeviceAuth(signal);
++    return {
++        ...device,
++        verificationUri: DEVICE_VERIFICATION_URI,
++        redirectUri: DEVICE_REDIRECT_URI,
++        expiresInSeconds: DEVICE_CODE_TIMEOUT_SECONDS,
++    };
++}
++/**
++ * Start a browser callback flow without opening a local server. A self-hosted
++ * client can listen on the returned localhost redirect and submit the final
++ * callback URL through `completeOpenAICodexManualOAuth`.
++ */
++export async function startOpenAICodexManualOAuth() {
++    const { verifier, challenge } = await generatePKCE();
++    const stateBytes = new Uint8Array(16);
++    globalThis.crypto.getRandomValues(stateBytes);
++    const state = Array.from(stateBytes, (value) => value.toString(16).padStart(2, "0")).join("");
++    const url = new URL(AUTHORIZE_URL);
++    url.searchParams.set("response_type", "code");
++    url.searchParams.set("client_id", CLIENT_ID);
++    url.searchParams.set("redirect_uri", REDIRECT_URI);
++    url.searchParams.set("scope", SCOPE);
++    url.searchParams.set("code_challenge", challenge);
++    url.searchParams.set("code_challenge_method", "S256");
++    url.searchParams.set("state", state);
++    url.searchParams.set("id_token_add_organizations", "true");
++    url.searchParams.set("codex_cli_simplified_flow", "true");
++    url.searchParams.set("originator", "flary");
++    return {
++        authorizationUrl: url.toString(),
++        verifier,
++        state,
++        redirectUri: REDIRECT_URI,
++        expiresInSeconds: 15 * 60,
++    };
++}
++/** Complete one browser callback flow from its final URL or code. */
++export async function completeOpenAICodexManualOAuth(input, expectedState, verifier, redirectUri = REDIRECT_URI, signal) {
++    const parsed = parseAuthorizationInput(input);
++    if (parsed.state && parsed.state !== expectedState) {
++        throw new Error("OAuth state mismatch");
++    }
++    if (!parsed.code) {
++        throw new Error("Missing authorization code");
++    }
++    return exchangeAuthorizationCodeForCredentials(parsed.code, verifier, redirectUri, signal);
++}
++/**
++ * Poll an OpenAI Codex device-code flow once. Remote runtimes persist the
++ * returned interval and call this again instead of holding one request open.
++ */
++export async function pollOpenAICodexDeviceAuthorization(device, signal) {
++    const response = await fetchWithLoginCancellation(DEVICE_TOKEN_URL, {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify({
++            device_auth_id: device.deviceAuthId,
++            user_code: device.userCode,
++        }),
++        signal,
++    });
++    if (response.ok) {
++        const json = await response.json();
++        if (!json?.authorization_code || !json.code_verifier) {
++            throw new Error("Invalid OpenAI Codex device authorization response");
++        }
++        const credential = await exchangeAuthorizationCodeForCredentials(json.authorization_code, json.code_verifier, device.redirectUri ?? DEVICE_REDIRECT_URI, signal);
++        return { status: "complete", credential };
++    }
++    const responseBody = await response.text().catch(() => "");
++    let errorCode;
++    try {
++        const json = JSON.parse(responseBody);
++        const error = json?.error;
++        errorCode = typeof error === "object" ? error?.code : error;
++    }
++    catch { }
++    if (response.status === 403 ||
++        response.status === 404 ||
++        errorCode === "deviceauth_authorization_pending") {
++        return { status: "pending", intervalSeconds: device.intervalSeconds };
++    }
++    if (errorCode === "slow_down") {
++        return {
++            status: "slow_down",
++            intervalSeconds: Math.max(1, device.intervalSeconds + 5),
++        };
++    }
++    throw new Error(`OpenAI Codex device authorization failed (${response.status})`);
++}
+ async function pollOpenAICodexDeviceAuth(device, signal) {
+     return pollOAuthDeviceCodeFlow({
+         intervalSeconds: device.intervalSeconds,
+diff --git a/node_modules/@earendil-works/pi-ai/dist/worker-oauth.d.ts b/node_modules/@earendil-works/pi-ai/dist/worker-oauth.d.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..e2353328c345a105a11044a3db669c7b54b52db5
+--- /dev/null
++++ b/node_modules/@earendil-works/pi-ai/dist/worker-oauth.d.ts
+@@ -0,0 +1,54 @@
++import type { OAuthCredentials } from "./auth/types.ts";
++
++export interface AnthropicManualOAuthStart {
++    authorizationUrl: string;
++    verifier: string;
++    state: string;
++    redirectUri: string;
++    expiresInSeconds: number;
++}
++
++export interface OpenAICodexDeviceAuthorization {
++    deviceAuthId: string;
++    userCode: string;
++    intervalSeconds: number;
++    verificationUri: string;
++    redirectUri: string;
++    expiresInSeconds: number;
++}
++export interface OpenAICodexManualOAuthStart {
++    authorizationUrl: string;
++    verifier: string;
++    state: string;
++    redirectUri: string;
++    expiresInSeconds: number;
++}
++
++export type OpenAICodexDevicePollResult =
++    | { status: "pending"; intervalSeconds: number }
++    | { status: "slow_down"; intervalSeconds: number }
++    | { status: "complete"; credential: OAuthCredentials };
++
++export declare function startAnthropicManualOAuth(): Promise<AnthropicManualOAuthStart>;
++export declare function completeAnthropicManualOAuth(
++    input: string,
++    state: string,
++    verifier: string,
++    redirectUri?: string,
++): Promise<OAuthCredentials>;
++export declare function startOpenAICodexDeviceAuthorization(
++    signal?: AbortSignal,
++): Promise<OpenAICodexDeviceAuthorization>;
++export declare function startOpenAICodexManualOAuth(): Promise<OpenAICodexManualOAuthStart>;
++export declare function completeOpenAICodexManualOAuth(
++    input: string,
++    expectedState: string,
++    verifier: string,
++    redirectUri?: string,
++    signal?: AbortSignal,
++): Promise<OAuthCredentials>;
++export declare function pollOpenAICodexDeviceAuthorization(
++    device: OpenAICodexDeviceAuthorization,
++    signal?: AbortSignal,
++): Promise<OpenAICodexDevicePollResult>;
++//# sourceMappingURL=worker-oauth.d.ts.map
+diff --git a/node_modules/@earendil-works/pi-ai/dist/worker-oauth.js b/node_modules/@earendil-works/pi-ai/dist/worker-oauth.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..667dbf075fc6047d6835ee8891b9034551cb6145
+--- /dev/null
++++ b/node_modules/@earendil-works/pi-ai/dist/worker-oauth.js
+@@ -0,0 +1,11 @@
++export {
++    completeAnthropicManualOAuth,
++    startAnthropicManualOAuth,
++} from "./auth/oauth/anthropic.js";
++export {
++    completeOpenAICodexManualOAuth,
++    pollOpenAICodexDeviceAuthorization,
++    startOpenAICodexManualOAuth,
++    startOpenAICodexDeviceAuthorization,
++} from "./auth/oauth/openai-codex.js";
++//# sourceMappingURL=worker-oauth.js.map
+diff --git a/node_modules/@earendil-works/pi-ai/package.json b/node_modules/@earendil-works/pi-ai/package.json
+index f8a499960b89886adfe4b2e934d26c1af3108b53..d00a41007ac6d1c18c49d48cef87deac8582e806 100644
+--- a/node_modules/@earendil-works/pi-ai/package.json
++++ b/node_modules/@earendil-works/pi-ai/package.json
+@@ -31,6 +31,10 @@
+ 			"types": "./dist/oauth.d.ts",
+ 			"import": "./dist/oauth.js"
+ 		},
++		"./worker-oauth": {
++			"types": "./dist/worker-oauth.d.ts",
++			"import": "./dist/worker-oauth.js"
++		},
+ 		"./bedrock-provider": {
+ 			"types": "./dist/bedrock-provider.d.ts",
+ 			"import": "./dist/bedrock-provider.js"

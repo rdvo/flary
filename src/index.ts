@@ -1,4 +1,1 @@
-import MCP from "./mcp";
-
-export default MCP;
-export { MCP };
+export * from "./harness/index.js";

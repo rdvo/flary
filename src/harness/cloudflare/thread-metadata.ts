@@ -1,0 +1,602 @@
+import {
+  ApprovalDecisionSchema,
+  ApprovalRequestSchema,
+  CapabilityLeaseSchema,
+  ThreadCursorSchema,
+  ThreadMetadataPatchSchema,
+  ThreadOperationalStateSchema,
+  ThreadRefSchema,
+  ThreadBindingSchema,
+  ThreadApprovalRecordSchema,
+  ProviderSessionSchema,
+  UsageRecordSchema,
+  type ApprovalDecision,
+  type ApprovalRequest,
+  type CapabilityLease,
+  type SandboxJob,
+  type ThreadMetadataPatch,
+  type ThreadOperationalState,
+  type ThreadRef,
+  type ThreadBinding,
+  type ProviderSession,
+  type UsageRecord,
+} from "../contracts/index.js";
+import { SandboxJobSchema } from "../contracts/runtime.js";
+
+type ThreadSql = {
+  exec<T = Record<string, unknown>>(
+    ...args: any[]
+  ): { toArray(): T[] };
+};
+
+type IdentityRow = { ref_json: string };
+type StateRow = {
+  mode_id: string;
+  status: ThreadOperationalState["status"];
+  active_run_id: string | null;
+  metadata_json: string | null;
+  updated_at: string;
+};
+type CursorRow = {
+  flue_offset: string;
+  flary_sequence: number;
+  updated_at: string;
+};
+type ProviderSessionRow = { session_json: string };
+type BindingRow = { binding_json: string };
+type ApprovalRow = {
+  approval_id: string;
+  request_json: string;
+  decision_json: string | null;
+  updated_at: string;
+};
+
+/**
+ * Operational state for one Flue agent instance.
+ *
+ * Flue owns the conversation stream. This store only keeps Flary metadata
+ * needed for authorization, approvals, provider handoff, usage, and replay
+ * cursors. It must never receive a model message or tool transcript entry.
+ */
+export class FlaryThreadMetadataStore {
+  readonly #sql: ThreadSql;
+  readonly #ref: ThreadRef;
+
+  constructor(sql: unknown, refInput: ThreadRef) {
+    this.#sql = sql as ThreadSql;
+    this.#ref = ThreadRefSchema.parse(refInput);
+    this.ensureSchema();
+    this.ensureIdentity();
+  }
+
+  /**
+   * Copy the D1 registry binding into this thread object.
+   *
+   * Workspace identity is write-once. Other fields can be refreshed from the
+   * registry because mode and connection grants are operational settings.
+   */
+  initializeBinding(bindingInput: ThreadBinding): ThreadBinding {
+    const binding = ThreadBindingSchema.parse(bindingInput);
+    if (JSON.stringify(binding.thread) !== JSON.stringify(this.#ref)) {
+      throw new Error("Thread binding identity does not match this Durable Object");
+    }
+    const stored = this.readBinding();
+    if (stored) {
+      if (JSON.stringify(stored.workspace) !== JSON.stringify(binding.workspace)) {
+        throw new Error("Thread workspace binding is immutable");
+      }
+      this.#sql.exec(
+        `UPDATE flary_thread_binding SET binding_json = ?, updated_at = ?
+         WHERE singleton = 1`,
+        JSON.stringify(binding),
+        new Date().toISOString(),
+      );
+    } else {
+      this.#sql.exec(
+        `INSERT INTO flary_thread_binding (singleton, binding_json, created_at, updated_at)
+         VALUES (1, ?, ?, ?)`,
+        JSON.stringify(binding),
+        binding.createdAt,
+        binding.updatedAt,
+      );
+    }
+    const current = this.read();
+    if (current.mode !== binding.defaultMode) {
+      this.#sql.exec(
+        `UPDATE flary_thread_operational SET mode_id = ?, updated_at = ?
+         WHERE singleton = 1`,
+        binding.defaultMode,
+        binding.updatedAt,
+      );
+    }
+    return binding;
+  }
+
+  readBinding(): ThreadBinding | undefined {
+    const row = this.#sql
+      .exec<BindingRow>(
+        `SELECT binding_json FROM flary_thread_binding WHERE singleton = 1`,
+      )
+      .toArray()[0];
+    return row
+      ? ThreadBindingSchema.parse(JSON.parse(row.binding_json))
+      : undefined;
+  }
+
+  setConnectionGrants(connectionIds: string[]): ThreadBinding {
+    const current = this.readBinding();
+    if (!current) throw new Error("Thread binding has not been initialized");
+    const next = ThreadBindingSchema.parse({
+      ...current,
+      connectionIds,
+      updatedAt: new Date().toISOString(),
+    });
+    this.#sql.exec(
+      `UPDATE flary_thread_binding SET binding_json = ?, updated_at = ?
+       WHERE singleton = 1`,
+      JSON.stringify(next),
+      next.updatedAt,
+    );
+    return next;
+  }
+
+  listApprovals() {
+    return this.#sql
+      .exec<ApprovalRow>(
+        `SELECT approval_id, request_json, decision_json, updated_at
+         FROM flary_thread_approvals ORDER BY updated_at DESC`,
+      )
+      .toArray()
+      .map((row) =>
+        ThreadApprovalRecordSchema.parse({
+          request: JSON.parse(row.request_json),
+          decision: row.decision_json ? JSON.parse(row.decision_json) : null,
+        }),
+      );
+  }
+
+  decideApproval(decisionInput: ApprovalDecision): void {
+    const decision = ApprovalDecisionSchema.parse(decisionInput);
+    const row = this.#sql
+      .exec<ApprovalRow>(
+        `SELECT approval_id, request_json, decision_json, updated_at
+         FROM flary_thread_approvals WHERE approval_id = ?`,
+        decision.requestId,
+      )
+      .toArray()[0];
+    if (!row) throw new Error("Approval request not found");
+    if (row.decision_json) {
+      const existing = ApprovalDecisionSchema.parse(JSON.parse(row.decision_json));
+      if (JSON.stringify(existing) !== JSON.stringify(decision)) {
+        throw new Error("Approval request has already been decided");
+      }
+      return;
+    }
+    this.#sql.exec(
+      `UPDATE flary_thread_approvals SET decision_json = ?, updated_at = ?
+       WHERE approval_id = ?`,
+      JSON.stringify(decision),
+      decision.decidedAt,
+      decision.requestId,
+    );
+  }
+
+  hasApprovedTool(toolId: string): boolean {
+    const now = Date.now();
+    return this.#sql
+      .exec<ApprovalRow>(
+        `SELECT approval_id, request_json, decision_json, updated_at
+         FROM flary_thread_approvals`,
+      )
+      .toArray()
+      .some((row) => {
+        if (!row.decision_json) return false;
+        const decision = JSON.parse(row.decision_json) as { status?: string };
+        if (decision.status !== "approved") return false;
+        const request = JSON.parse(row.request_json) as {
+          toolCallId?: string;
+          resourceId?: string;
+          expiresAt?: string;
+          context?: { toolId?: string };
+        };
+        if (request.expiresAt && Date.parse(request.expiresAt) <= now) return false;
+        return (
+          request.toolCallId === toolId ||
+          request.resourceId === toolId ||
+          request.context?.toolId === toolId
+        );
+      });
+  }
+
+  /** Issue a short-lived capability for one already approved tool. */
+  issueToolLease(toolId: string, ttlMs = 15 * 60_000): CapabilityLease {
+    const now = Date.now();
+    const row = this.#sql
+      .exec<ApprovalRow>(
+        `SELECT approval_id, request_json, decision_json, updated_at
+         FROM flary_thread_approvals ORDER BY updated_at DESC`,
+      )
+      .toArray()
+      .find((candidate) => {
+        if (!candidate.decision_json) return false;
+        const decision = JSON.parse(candidate.decision_json) as { status?: string };
+        if (decision.status !== "approved") return false;
+        const request = JSON.parse(candidate.request_json) as {
+          toolCallId?: string;
+          resourceId?: string;
+          expiresAt?: string;
+          context?: { toolId?: string };
+        };
+        return (
+          (!request.expiresAt || Date.parse(request.expiresAt) > now) &&
+          (request.toolCallId === toolId ||
+            request.resourceId === toolId ||
+            request.context?.toolId === toolId)
+        );
+      });
+    if (!row) throw new Error("No active approval grants this tool");
+    return this.issueCapabilityLease(row.approval_id, toolId, ttlMs);
+  }
+
+  createToolApproval(input: {
+    runId: string;
+    toolId: string;
+    reason: string;
+    requestedBy: ApprovalRequest["requestedBy"];
+  }): ApprovalRequest {
+    const pending = this.#sql
+      .exec<ApprovalRow>(
+        `SELECT approval_id, request_json, decision_json, updated_at
+         FROM flary_thread_approvals
+         WHERE decision_json IS NULL ORDER BY updated_at DESC`,
+      )
+      .toArray()
+      .map((row) => JSON.parse(row.request_json) as ApprovalRequest)
+      .find((request) =>
+        request.toolCallId === input.toolId ||
+        request.resourceId === input.toolId ||
+        request.context?.toolId === input.toolId,
+      );
+    if (pending) return ApprovalRequestSchema.parse(pending);
+
+    const request = ApprovalRequestSchema.parse({
+      id: `approval_${crypto.randomUUID().replaceAll("-", "")}`,
+      runId: input.runId,
+      action: "tool-call",
+      reason: input.reason,
+      requestedBy: input.requestedBy,
+      resourceId: input.toolId,
+      toolCallId: input.toolId,
+      requestedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+      context: { toolId: input.toolId },
+    });
+    this.recordApproval(request);
+    return request;
+  }
+
+  /** Issue a bounded capability after a matching approval was accepted. */
+  issueCapabilityLease(
+    approvalId: string,
+    toolId: string,
+    ttlMs = 15 * 60_000,
+  ): CapabilityLease {
+    const row = this.#sql
+      .exec<ApprovalRow>(
+        `SELECT approval_id, request_json, decision_json, updated_at
+         FROM flary_thread_approvals WHERE approval_id = ?`,
+        approvalId,
+      )
+      .toArray()[0];
+    if (!row) throw new Error("Approval request not found");
+    const request = ApprovalRequestSchema.parse(JSON.parse(row.request_json));
+    const decision = row.decision_json
+      ? ApprovalDecisionSchema.parse(JSON.parse(row.decision_json))
+      : undefined;
+    if (!decision || decision.status !== "approved") {
+      throw new Error("A capability lease requires an approved request");
+    }
+    if (
+      request.toolCallId !== toolId &&
+      request.resourceId !== toolId &&
+      request.context?.toolId !== toolId
+    ) {
+      throw new Error("Approval does not grant the requested tool");
+    }
+    const issuedAt = new Date().toISOString();
+    const requestedExpiry = request.expiresAt
+      ? Date.parse(request.expiresAt)
+      : Date.now() + ttlMs;
+    const expiresAt = new Date(
+      Math.min(Date.now() + ttlMs, requestedExpiry),
+    ).toISOString();
+    if (Date.parse(expiresAt) <= Date.now()) {
+      throw new Error("The approval request has expired");
+    }
+    return CapabilityLeaseSchema.parse({
+      id: `lease_${crypto.randomUUID().replaceAll("-", "")}`,
+      approvalId,
+      toolId,
+      issuedAt,
+      expiresAt,
+    });
+  }
+
+  read(): ThreadOperationalState {
+    const state = this.#sql
+      .exec<StateRow>(
+        `SELECT mode_id, status, active_run_id, metadata_json, updated_at
+           FROM flary_thread_operational WHERE singleton = 1`,
+      )
+      .toArray()[0];
+    const cursor = this.#sql
+      .exec<CursorRow>(
+        `SELECT flue_offset, flary_sequence, updated_at
+           FROM flary_thread_cursor WHERE singleton = 1`,
+      )
+      .toArray()[0];
+    const provider = this.#sql
+      .exec<ProviderSessionRow>(
+        `SELECT session_json FROM flary_thread_provider_session
+           WHERE singleton = 1`,
+      )
+      .toArray()[0];
+    if (!state || !cursor) {
+      const now = new Date().toISOString();
+      const binding = this.readBinding();
+      this.#sql.exec(
+        `INSERT OR IGNORE INTO flary_thread_operational
+          (singleton, mode_id, status, active_run_id, metadata_json, updated_at)
+         VALUES (1, ?, 'idle', NULL, NULL, ?)`,
+        binding?.defaultMode ?? "ask",
+        now,
+      );
+      this.#sql.exec(
+        `INSERT OR IGNORE INTO flary_thread_cursor
+          (singleton, flue_offset, flary_sequence, updated_at)
+         VALUES (1, '0', 0, ?)`,
+        now,
+      );
+      return this.read();
+    }
+    return ThreadOperationalStateSchema.parse({
+      thread: this.#ref,
+      mode: state.mode_id,
+      status: state.status,
+      ...(state.active_run_id ? { activeRunId: state.active_run_id } : {}),
+      cursor: ThreadCursorSchema.parse({
+        thread: this.#ref,
+        flueOffset: cursor.flue_offset,
+        flarySequence: Number(cursor.flary_sequence),
+        updatedAt: cursor.updated_at,
+      }),
+      ...(provider
+        ? { providerSession: ProviderSessionSchema.parse(JSON.parse(provider.session_json)) }
+        : {}),
+      ...(state.metadata_json
+        ? { metadata: JSON.parse(state.metadata_json) }
+        : {}),
+      updatedAt: state.updated_at,
+    });
+  }
+
+  patch(patchInput: ThreadMetadataPatch): ThreadOperationalState {
+    const patch = ThreadMetadataPatchSchema.parse(patchInput);
+    const current = this.read();
+    const now = new Date().toISOString();
+    const nextMode = patch.mode ?? current.mode;
+    const nextStatus = patch.status ?? current.status;
+    const nextRunId =
+      patch.activeRunId === undefined
+        ? current.activeRunId ?? null
+        : patch.activeRunId;
+    const nextMetadata = patch.metadata ?? current.metadata;
+    const nextOffset = patch.flueOffset ?? current.cursor.flueOffset;
+    const nextSequence = patch.flarySequence ?? current.cursor.flarySequence;
+    this.#sql.exec(
+      `UPDATE flary_thread_operational
+          SET mode_id = ?, status = ?, active_run_id = ?, metadata_json = ?, updated_at = ?
+        WHERE singleton = 1`,
+      nextMode,
+      nextStatus,
+      nextRunId,
+      nextMetadata ? JSON.stringify(nextMetadata) : null,
+      now,
+    );
+    this.#sql.exec(
+      `UPDATE flary_thread_cursor
+          SET flue_offset = ?, flary_sequence = ?, updated_at = ?
+        WHERE singleton = 1`,
+      nextOffset,
+      nextSequence,
+      now,
+    );
+    if (patch.providerSession !== undefined) {
+      if (patch.providerSession === null) {
+        this.#sql.exec(
+          "DELETE FROM flary_thread_provider_session WHERE singleton = 1",
+        );
+      } else {
+        const providerSession = ProviderSessionSchema.parse(patch.providerSession);
+        this.#sql.exec(
+          `INSERT INTO flary_thread_provider_session
+            (singleton, session_json, updated_at)
+           VALUES (1, ?, ?)
+           ON CONFLICT(singleton) DO UPDATE SET
+             session_json = excluded.session_json,
+             updated_at = excluded.updated_at`,
+          JSON.stringify(providerSession),
+          now,
+        );
+      }
+    }
+    return this.read();
+  }
+
+  recordProviderSession(sessionInput: ProviderSession): void {
+    const session = ProviderSessionSchema.parse(sessionInput);
+    this.#sql.exec(
+      `INSERT INTO flary_thread_provider_session
+        (singleton, session_json, updated_at)
+       VALUES (1, ?, ?)
+       ON CONFLICT(singleton) DO UPDATE SET
+         session_json = excluded.session_json,
+         updated_at = excluded.updated_at`,
+      JSON.stringify(session),
+      session.updatedAt,
+    );
+  }
+
+  recordApproval(
+    requestInput: ApprovalRequest,
+    decisionInput?: ApprovalDecision,
+  ): void {
+    const request = ApprovalRequestSchema.parse(requestInput);
+    const decision = decisionInput
+      ? ApprovalDecisionSchema.parse(decisionInput)
+      : undefined;
+    if (decision && decision.requestId !== request.id) {
+      throw new Error("Approval decision does not match the request");
+    }
+    this.#sql.exec(
+      `INSERT INTO flary_thread_approvals
+        (approval_id, request_json, decision_json, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(approval_id) DO UPDATE SET
+         request_json = excluded.request_json,
+         decision_json = excluded.decision_json,
+         updated_at = excluded.updated_at`,
+      request.id,
+      JSON.stringify(request),
+      decision ? JSON.stringify(decision) : null,
+      new Date().toISOString(),
+    );
+  }
+
+  recordUsage(recordInput: UsageRecord): void {
+    const record = UsageRecordSchema.parse({
+      ...recordInput,
+      threadId: recordInput.threadId,
+    });
+    if (record.threadId !== this.#ref.threadId) {
+      throw new Error("Usage record does not belong to this thread");
+    }
+    this.#sql.exec(
+      `INSERT OR REPLACE INTO flary_thread_usage
+        (usage_id, record_json, recorded_at)
+       VALUES (?, ?, ?)`,
+      record.id,
+      JSON.stringify(record),
+      record.recordedAt,
+    );
+  }
+
+  recordSandboxJob(jobInput: SandboxJob): void {
+    const job = SandboxJobSchema.parse(jobInput);
+    this.#sql.exec(
+      `INSERT OR REPLACE INTO flary_thread_sandbox_jobs
+        (job_id, job_json, updated_at)
+       VALUES (?, ?, ?)`,
+      job.id,
+      JSON.stringify(job),
+      new Date().toISOString(),
+    );
+  }
+
+  recordRun(runId: string, status: string, metadata?: Record<string, unknown>): void {
+    this.#sql.exec(
+      `INSERT OR REPLACE INTO flary_thread_runs
+        (run_id, status, metadata_json, updated_at)
+       VALUES (?, ?, ?, ?)`,
+      runId,
+      runStatus(status),
+      metadata ? JSON.stringify(metadata) : null,
+      new Date().toISOString(),
+    );
+  }
+
+  private ensureSchema(): void {
+    this.#sql.exec(`
+      CREATE TABLE IF NOT EXISTS flary_thread_identity (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        ref_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS flary_thread_binding (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        binding_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS flary_thread_operational (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        mode_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        active_run_id TEXT,
+        metadata_json TEXT,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS flary_thread_cursor (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        flue_offset TEXT NOT NULL,
+        flary_sequence INTEGER NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS flary_thread_provider_session (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        session_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS flary_thread_approvals (
+        approval_id TEXT PRIMARY KEY,
+        request_json TEXT NOT NULL,
+        decision_json TEXT,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS flary_thread_usage (
+        usage_id TEXT PRIMARY KEY,
+        record_json TEXT NOT NULL,
+        recorded_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS flary_thread_sandbox_jobs (
+        job_id TEXT PRIMARY KEY,
+        job_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS flary_thread_runs (
+        run_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        metadata_json TEXT,
+        updated_at TEXT NOT NULL
+      );
+    `);
+  }
+
+  private ensureIdentity(): void {
+    const existing = this.#sql
+      .exec<IdentityRow>(
+        `SELECT ref_json FROM flary_thread_identity WHERE singleton = 1`,
+      )
+      .toArray()[0];
+    if (existing) {
+      const stored = ThreadRefSchema.parse(JSON.parse(existing.ref_json));
+      if (JSON.stringify(stored) !== JSON.stringify(this.#ref)) {
+        throw new Error("Flary thread identity does not match this Durable Object");
+      }
+      return;
+    }
+    this.#sql.exec(
+      `INSERT INTO flary_thread_identity (singleton, ref_json, created_at)
+       VALUES (1, ?, ?)`,
+      JSON.stringify(this.#ref),
+      new Date().toISOString(),
+    );
+  }
+}
+
+function runStatus(value: string): string {
+  if (!/^[A-Za-z][A-Za-z0-9._-]{0,63}$/.test(value)) {
+    throw new Error("Run status must be a safe identifier");
+  }
+  return value;
+}

@@ -1,4 +1,5 @@
-import { exec } from "child_process";
+import { execFile } from "child_process";
+import { promisify } from "util";
 import fs from "fs";
 import path from "path";
 import arg from "arg";
@@ -12,6 +13,7 @@ const args = arg({
 
 const isWatch = args["--watch"] || false;
 const isForce = args["--force"] || false;
+const execFileAsync = promisify(execFile);
 
 function removeDir(dirPath: string) {
   if (!fs.existsSync(dirPath)) {
@@ -81,23 +83,7 @@ const addExtension = (
 const commonOptions: BuildOptions = {
   entryPoints,
   logLevel: "info",
-  platform: "node",
-};
-
-const cjsBuild = async () => {
-  const buildOptions: BuildOptions = {
-    ...commonOptions,
-    outbase: "./src",
-    outdir: "./dist/cjs",
-    format: "cjs",
-  };
-
-  if (isWatch) {
-    const ctx = await context(buildOptions);
-    await ctx.watch();
-  } else {
-    await build(buildOptions);
-  }
+  platform: "neutral",
 };
 
 const esmBuild = async () => {
@@ -119,18 +105,22 @@ const esmBuild = async () => {
 };
 
 removeDir("./dist");
-// Generate type declarations first
-exec(
-  `tsc ${isWatch ? "-w" : ""} --project tsconfig.build.json`,
-  (error, stdout, stderr) => {
-    if (error) {
-      console.error(`TypeScript compilation failed:`);
-      console.error(stdout);
-      console.error(stderr);
-      return;
-    }
 
-    // Then build the JavaScript code
-    Promise.all([esmBuild(), cjsBuild()]);
+async function main() {
+  if (isWatch) {
+    const typecheck = execFile("tsc", ["-w", "--project", "tsconfig.build.json"]);
+    typecheck.stdout?.pipe(process.stdout);
+    typecheck.stderr?.pipe(process.stderr);
+    await esmBuild();
+    return;
   }
-);
+
+  await execFileAsync("tsc", ["--project", "tsconfig.build.json"]);
+  await esmBuild();
+}
+
+main().catch((error: unknown) => {
+  console.error("Build failed.");
+  console.error(error);
+  process.exitCode = 1;
+});

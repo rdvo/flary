@@ -1,0 +1,17 @@
+BETTER_AUTH_SECRET=replace-with-a-long-random-secret
+FLARY_TOKEN_ENCRYPTION_KEY_B64=replace-with-32-byte-base64url-key
+# Optional managed fallback credentials. Tenant BYOK connections take priority.
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+MOONSHOT_API_KEY=
+GOOGLE_API_KEY=
+# Optional derived Recall index.
+TURBOPUFFER_API_KEY=
+TURBOPUFFER_BASE_URL=
+TURBOPUFFER_NAMESPACE=
+# Keep disabled until Dynamic Worker Code Mode is enabled for this deployment.
+CODE_MODE_ENABLED=false
+# Optional: enable Connect Cloudflare in the Flary Cloud BYOK card.
+CLOUDFLARE_OAUTH_CLIENT_ID=
+CLOUDFLARE_OAUTH_CLIENT_SECRET=
+CLOUDFLARE_OAUTH_SCOPES=account-settings.read memberships.read aig.read aig.run aig.write ai.read
