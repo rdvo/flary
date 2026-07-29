@@ -1,27 +1,72 @@
 # Flary
 
-Flary is a durable, provider-neutral AI agent harness for Cloudflare Workers.
-Use it to build support agents, coding agents, product copilots, scheduled
-automations, and long-running workflows with one reusable runtime.
+**Durable agent infrastructure for Cloudflare Workers.**
 
-Flary is the harness. Products such as Rend provide the user experience and
-install Flary as a dependency.
+Flary is an open-source TypeScript harness for agents that must keep working
+after a request, browser tab, Worker isolate, or provider session ends. It
+gives product developers one typed runtime for durable threads, streaming,
+tools, MCP connections, approvals, workspaces, provider credentials, prompt
+caching, history, recall, and usage.
 
-## Install
+Use Flary to add a coding agent, support agent, product copilot, research
+worker, or automation agent to an existing application. Flary is the agent
+backend. Your application owns authentication, billing, product policy, and
+the user interface.
+
+## Why Flary
+
+- **Durable threads:** Flue owns the canonical transcript and resumable
+  execution stream inside a Durable Object.
+- **Provider-neutral sessions:** Use OpenAI, Anthropic, Google, Moonshot, or
+  Cloudflare routes without changing the application contract.
+- **Native subscription and BYOK credentials:** Resolve the current user's
+  subscription first, then tenant BYOK, then a managed credential.
+- **Safe tools and MCP:** Search and load tools only when needed. Keep secrets
+  behind capability handles and explicit approvals.
+- **Tenant-safe workspaces:** Keep branch workspaces in Durable Object SQLite
+  and move large immutable blobs to R2.
+- **Recoverable history:** Project the durable stream into JSONL, checkpoints,
+  diffs, and scoped Recall results.
+- **Zod at every public boundary:** Validate threads, events, tools,
+  credentials, modes, approvals, usage, and storage references.
+
+## Product boundary
+
+```text
+Your product
+  ├─ authentication, organizations, billing, and UI
+  └─ Flary
+      ├─ durable agent threads and streaming
+      ├─ prompts, tools, MCP, approvals, and subagents
+      ├─ provider sessions, OAuth/BYOK, caching, and usage
+      └─ Durable Objects, D1, R2, Artifacts, and sandbox adapters
+```
+
+Flary does not force a chat UI, editor, authentication provider, or billing
+system on the host application.
+
+## Install the release candidate
 
 ```bash
-npm install flary
+npm install --save-exact flary@0.3.0-rc.2
 ```
 
-For local product development:
+The `next` npm tag points to the current release candidate. The `latest` tag
+remains on the stable `0.2.x` line until the live provider gates pass.
 
-```json
-{
-  "dependencies": {
-    "flary": "file:../flary"
-  }
-}
+## Package entry points
+
+```ts
+import { createFlaryHostRouter } from "flary/host";
+import { FlaryClient } from "flary/client";
+import { defineFlaryAgent } from "flary/flue";
+import { compilePrompt } from "flary/prompts";
+import { ToolCatalog } from "flary/tools";
 ```
+
+Flary also exports focused modules for contracts, providers, execution,
+storage, history, recall, telemetry, vaults, subagents, MCP, and Cloudflare
+adapters.
 
 ## Prompt files
 
@@ -155,7 +200,7 @@ credential without returning a raw token through Flary. Hosted OpenAI login uses
 authorization by default. Local self-hosted clients can select
 `browser_callback`. Claude uses authorization-code completion.
 
-Flary `0.3.0-rc.1` pins `@flue/runtime` and `@flue/sdk` to
+Flary `0.3.0-rc.2` pins `@flue/runtime` and `@flue/sdk` to
 `1.0.0-beta.9`, and pins `@earendil-works/pi-ai` to `0.80.10`. Until the
 required changes are available in upstream releases, the npm package applies
 the checked-in patches during installation. Run `npm run test:npm-install`
