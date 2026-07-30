@@ -29,13 +29,6 @@
       "binding": "LOADER"
     }
   ],
-  "artifacts": [
-    {
-      "binding": "ARTIFACTS",
-      "namespace": "default",
-      "remote": false
-    }
-  ],
   "containers": [
     {
       "class_name": "FlarySandbox",
@@ -82,13 +75,28 @@
   },
   "migrations": [
     {
-      "tag": "v1",
+      "tag": "v4",
       "new_sqlite_classes": [
+        "AgentSession",
         "OrgCoordinator",
-        "WorkspaceFilesystem",
         "FlarySandbox",
+        "ProjectFilesystem"
+      ]
+    },
+    {
+      "tag": "v5",
+      "renamed_classes": [
+        {
+          "from": "ProjectFilesystem",
+          "to": "WorkspaceFilesystem"
+        }
+      ],
+      "new_sqlite_classes": [
         "FlueFlaryThreadAgent",
         "FlueRegistry"
+      ],
+      "deleted_classes": [
+        "AgentSession"
       ]
     }
   ],
@@ -111,13 +119,6 @@
       "worker_loaders": [
         {
           "binding": "LOADER"
-        }
-      ],
-      "artifacts": [
-        {
-          "binding": "ARTIFACTS",
-          "namespace": "default",
-          "remote": true
         }
       ],
       "containers": [
@@ -165,13 +166,28 @@
       },
       "migrations": [
         {
-          "tag": "v1",
+          "tag": "v4",
           "new_sqlite_classes": [
+            "AgentSession",
             "OrgCoordinator",
-            "WorkspaceFilesystem",
             "FlarySandbox",
+            "ProjectFilesystem"
+          ]
+        },
+        {
+          "tag": "v5",
+          "renamed_classes": [
+            {
+              "from": "ProjectFilesystem",
+              "to": "WorkspaceFilesystem"
+            }
+          ],
+          "new_sqlite_classes": [
             "FlueFlaryThreadAgent",
             "FlueRegistry"
+          ],
+          "deleted_classes": [
+            "AgentSession"
           ]
         }
       ]
