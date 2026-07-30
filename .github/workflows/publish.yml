@@ -101,5 +101,6 @@ jobs:
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          name: Release ${{ github.ref_name }}
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          name: Release ${{ inputs.release_tag || github.ref_name }}
           generate_release_notes: true
