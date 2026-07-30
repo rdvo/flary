@@ -48,11 +48,11 @@ system on the host application.
 ## Install the release candidate
 
 ```bash
-npm install --save-exact flary@0.3.0-rc.2
+npm install --save-exact flary@0.3.0-rc.3
 ```
 
-The `next` npm tag points to the current release candidate. The `latest` tag
-remains on the stable `0.2.x` line until the live provider gates pass.
+The `next` npm tag points to the current release candidate. Pin the exact
+version in production until the live provider gates pass.
 
 ## Package entry points
 
@@ -200,7 +200,7 @@ credential without returning a raw token through Flary. Hosted OpenAI login uses
 authorization by default. Local self-hosted clients can select
 `browser_callback`. Claude uses authorization-code completion.
 
-Flary `0.3.0-rc.2` pins `@flue/runtime` and `@flue/sdk` to
+Flary `0.3.0-rc.3` pins `@flue/runtime` and `@flue/sdk` to
 `1.0.0-beta.9`, and pins `@earendil-works/pi-ai` to `0.80.10`. Until the
 required changes are available in upstream releases, the npm package applies
 the checked-in patches during installation. Run `npm run test:npm-install`
@@ -359,15 +359,93 @@ loading a capability returns a private handle. Secrets are resolved only for
 the duration of a callback through a secret reference.
 
 ```ts
-import { InMemoryToolCatalog } from "flary/tools";
+// src/tools/orders.ts
+import { z } from "zod";
+import { defineFlaryTool } from "flary/tools";
 
-const catalog = new InMemoryToolCatalog({ secretProvider });
-const matches = await catalog.search({ query: "orders", limit: 5 });
-const handle = await catalog.loadHandle({
-  toolId: matches.results[0].toolId,
-  capabilityId: matches.results[0].capabilityId,
+export const getOrder = defineFlaryTool({
+  id: "orders.get",
+  description: "Read one order",
+  input: z.object({ orderId: z.string() }),
+  output: z.object({ id: z.string(), status: z.string() }),
+  capabilities: ["orders.read"],
+  tags: ["orders"],
+  secretRefs: ["ORDERS_TOKEN"],
+  async execute({ orderId }, context) {
+    return context.useSecret(
+      "ORDERS_TOKEN",
+      (token) => readOrder(orderId, token),
+    );
+  },
 });
 ```
+
+```ts
+// src/tools/index.ts
+import { defineFlaryToolset } from "flary/tools";
+import { getOrder } from "./orders";
+
+export default defineFlaryToolset([getOrder]);
+```
+
+Register the toolset in the host's trusted agent setup:
+
+```ts
+import {
+  InMemoryToolCatalog,
+  LazyToolRuntime,
+} from "flary/tools";
+import { createFlueLazyTools } from "flary/flue";
+import tools from "./tools";
+
+const catalog = new InMemoryToolCatalog({ secretProvider });
+tools.register(catalog);
+
+const runtime = new LazyToolRuntime({
+  catalog,
+  mode,
+  approve: approvalService.require,
+});
+
+return createFlueLazyTools(runtime);
+```
+
+The model sees only four stable gateway schemas: `tool_search`,
+`tool_describe`, `tool_call`, and `tool_batch`. Search returns short summaries
+without input schemas. Describe loads one selected schema. Batch runs
+independent reads in parallel and keeps writes to the same resource in order.
+Write calls require an idempotency key. Approval-required tools fail closed
+when the host does not provide an approval handler.
+
+Code Mode is optional. It is useful when the model must filter, join, or
+transform several read results without putting all intermediate data in the
+conversation. Normal tool calls do not need an isolate. Sandbox execution is
+separate and is only for explicit Linux build, test, notebook, or deploy jobs.
+
+### Structured user input
+
+Flary owns the Zod schemas, durable pending state, and resume protocol for
+`request_user_input`. The host application owns the form, dialog, terminal,
+or chat UI.
+
+```ts
+import { createFlueRequestUserInputTool } from "flary/flue";
+
+const askUser = createFlueRequestUserInputTool({
+  threadKey,
+  createRequest: ({ questions }) =>
+    threadMetadata.createUserInputRequest({
+      questions,
+      requestedBy: agentIdentity,
+    }),
+});
+```
+
+The host lists pending requests and sends answers through the mounted thread
+API. `FlaryThreadClient.userInput()` and
+`FlaryThreadClient.respondToUserInput()` provide the matching client methods.
+A live answer resumes the waiting tool call. If the Durable Object restarted,
+Flary submits a bounded continuation message with the persisted answer.
 
 Provider adapters keep the session contract stable while the selected provider
 changes. `OpenAICompatibleAdapter` covers OpenAI-compatible endpoints such as
@@ -626,6 +704,10 @@ mode state, and replay cursors beside it.
 - `flary/cloudflare`
 - `flary/contracts`
 - `flary/execution`
+- `flary/flue`
+- `flary/history`
+- `flary/host`
+- `flary/mcp`
 - `flary/prompts`
 - `flary/providers`
 - `flary/recall`

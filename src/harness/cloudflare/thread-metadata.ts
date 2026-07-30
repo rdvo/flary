@@ -10,6 +10,9 @@ import {
   ThreadApprovalRecordSchema,
   ProviderSessionSchema,
   UsageRecordSchema,
+  UserInputRecordSchema,
+  UserInputRequestSchema,
+  UserInputResponseSchema,
   type ApprovalDecision,
   type ApprovalRequest,
   type CapabilityLease,
@@ -20,6 +23,10 @@ import {
   type ThreadBinding,
   type ProviderSession,
   type UsageRecord,
+  type UserInputQuestion,
+  type UserInputRecord,
+  type UserInputResponse,
+  type IdentityReference,
 } from "../contracts/index.js";
 import { SandboxJobSchema } from "../contracts/runtime.js";
 
@@ -48,6 +55,12 @@ type ApprovalRow = {
   approval_id: string;
   request_json: string;
   decision_json: string | null;
+  updated_at: string;
+};
+type UserInputRow = {
+  request_id: string;
+  request_json: string;
+  response_json: string | null;
   updated_at: string;
 };
 
@@ -179,6 +192,79 @@ export class FlaryThreadMetadataStore {
       decision.decidedAt,
       decision.requestId,
     );
+  }
+
+  listUserInputRequests(): UserInputRecord[] {
+    return this.#sql
+      .exec<UserInputRow>(
+        `SELECT request_id, request_json, response_json, updated_at
+         FROM flary_thread_user_input ORDER BY updated_at DESC`,
+      )
+      .toArray()
+      .map((row) =>
+        UserInputRecordSchema.parse({
+          request: JSON.parse(row.request_json),
+          response: row.response_json ? JSON.parse(row.response_json) : null,
+        }),
+      );
+  }
+
+  createUserInputRequest(input: {
+    questions: UserInputQuestion[];
+    requestedBy: IdentityReference;
+    expiresAt?: string;
+  }) {
+    const request = UserInputRequestSchema.parse({
+      id: `input_${crypto.randomUUID().replaceAll("-", "")}`,
+      threadId: this.#ref.threadId,
+      questions: input.questions,
+      requestedBy: input.requestedBy,
+      requestedAt: new Date().toISOString(),
+      ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
+    });
+    this.#sql.exec(
+      `INSERT INTO flary_thread_user_input
+        (request_id, request_json, response_json, updated_at)
+       VALUES (?, ?, NULL, ?)`,
+      request.id,
+      JSON.stringify(request),
+      request.requestedAt,
+    );
+    return request;
+  }
+
+  respondToUserInput(responseInput: UserInputResponse): UserInputRecord {
+    const response = UserInputResponseSchema.parse(responseInput);
+    const row = this.#sql
+      .exec<UserInputRow>(
+        `SELECT request_id, request_json, response_json, updated_at
+         FROM flary_thread_user_input WHERE request_id = ?`,
+        response.requestId,
+      )
+      .toArray()[0];
+    if (!row) throw new Error("User input request not found");
+    const request = UserInputRequestSchema.parse(JSON.parse(row.request_json));
+    if (request.threadId !== this.#ref.threadId) {
+      throw new Error("User input request belongs to another thread");
+    }
+    if (row.response_json) {
+      const existing = UserInputResponseSchema.parse(
+        JSON.parse(row.response_json),
+      );
+      if (JSON.stringify(existing) !== JSON.stringify(response)) {
+        throw new Error("User input request has already been answered");
+      }
+      return UserInputRecordSchema.parse({ request, response: existing });
+    }
+    this.#sql.exec(
+      `UPDATE flary_thread_user_input
+       SET response_json = ?, updated_at = ?
+       WHERE request_id = ? AND response_json IS NULL`,
+      JSON.stringify(response),
+      response.answeredAt,
+      response.requestId,
+    );
+    return UserInputRecordSchema.parse({ request, response });
   }
 
   hasApprovedTool(toolId: string): boolean {
@@ -551,6 +637,12 @@ export class FlaryThreadMetadataStore {
         approval_id TEXT PRIMARY KEY,
         request_json TEXT NOT NULL,
         decision_json TEXT,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS flary_thread_user_input (
+        request_id TEXT PRIMARY KEY,
+        request_json TEXT NOT NULL,
+        response_json TEXT,
         updated_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS flary_thread_usage (

@@ -22,6 +22,10 @@ import {
 import { ThreadOperationalStateSchema } from "../contracts/runtime.js";
 import { ApprovalDecisionSchema } from "../contracts/approvals.js";
 import {
+  UserInputAnswerRequestSchema,
+  UserInputRecordSchema,
+} from "../contracts/user-input.js";
+import {
   RecallDocumentSchema,
   RecallSearchResponseSchema,
 } from "../contracts/recall.js";
@@ -182,6 +186,46 @@ export function createFlaryHostRouter<TBindings extends object>(
           ),
         ),
       });
+    },
+  );
+
+  router.get("/apps/:appId/threads/:threadId/user-input", async (context) => {
+    const target = await targetFor(
+      context.req.raw,
+      context.env,
+      context.req.param("appId"),
+      context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.listUserInput) throw featureUnavailable("User input");
+    return context.json({
+      requests: (await service.listUserInput(target)).map(
+        (record) => UserInputRecordSchema.parse(record),
+      ),
+    });
+  });
+
+  router.post(
+    "/apps/:appId/threads/:threadId/user-input/:requestId",
+    async (context) => {
+      const target = await targetFor(
+        context.req.raw,
+        context.env,
+        context.req.param("appId"),
+        context.req.param("threadId"),
+      );
+      const response = UserInputAnswerRequestSchema.parse(
+        await context.req.json(),
+      );
+      const service = serviceFor(context.env);
+      if (!service.respondToUserInput) throw featureUnavailable("User input");
+      return context.json(
+        await service.respondToUserInput(
+          target,
+          context.req.param("requestId"),
+          response,
+        ),
+      );
     },
   );
 

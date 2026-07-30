@@ -24,4 +24,5 @@ export * from "./tools";
 export * from "./telemetry";
 export * from "./transfers";
 export * from "./threads";
+export * from "./user-input";
 export * from "./workspace-tools";

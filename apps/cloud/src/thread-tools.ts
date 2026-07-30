@@ -7,12 +7,16 @@ import {
   SandboxInputSchema,
   FlaryThreadMetadataStore,
   InMemoryToolCatalog,
+  LazyToolRuntime,
   registerWorkspaceTools,
   resolveAgentMode,
   modeAllowsCapability,
-  modeRequiresApproval,
   type WorkspaceToolTarget,
 } from "flary";
+import {
+  createFlueLazyTools,
+  createFlueRequestUserInputTool,
+} from "flary/flue";
 import type { ThreadBinding } from "flary/contracts";
 import { ThreadBindingSchema } from "flary/contracts";
 import type { ThreadRef, StorageScope } from "flary/contracts";
@@ -34,6 +38,7 @@ import {
 import {
   openThreadRecall,
   searchThreadRecall,
+  ThreadRecallOpenInputSchema,
   ThreadRecallSearchInputSchema,
 } from "../worker/recall";
 
@@ -105,16 +110,6 @@ function workspaceTarget(env: Env, binding: ThreadBinding): WorkspaceToolTarget 
     diff: (input) => call("diff", input as unknown as JsonInput),
     batchEdit: (input) => call("batch-edit", input as unknown as JsonInput),
   };
-}
-
-function isWriteTool(capabilities: readonly string[]): boolean {
-  return capabilities.some(
-    (capability) =>
-      capability.endsWith(".write") ||
-      capability.endsWith(".delete") ||
-      capability.includes("commit") ||
-      capability.includes("merge"),
-  );
 }
 
 type McpConnectionRow = typeof flaryConnection.$inferSelect;
@@ -197,23 +192,16 @@ export async function createThreadTools(
     requireApprovalForWrites: true,
   });
 
-  const toolSearch = defineTool({
-    name: "flary__tool_search",
-    description: "Search the approved Flary tool catalog before using a tool.",
-    input: v.object({ query: v.optional(v.string()) }),
-    async run({ input }) {
-      const response = await catalog.search({ query: input.query, limit: 20 });
-      return response.results.map((result) => ({
-        id: result.tool.id,
-        name: result.tool.name,
-        ...(result.tool.description
-          ? { description: result.tool.description }
-          : {}),
-        capabilities: result.tool.capabilities,
-        requiresApproval: result.tool.requiresApproval ?? false,
-      }));
-    },
-  });
+  let metadata: FlaryThreadMetadataStore | undefined;
+  try {
+    const context = getCloudflareContext();
+    metadata = new FlaryThreadMetadataStore(
+      context.storage.sql,
+      binding.thread,
+    );
+  } catch {
+    // Tests can create a catalog without a Durable Object context.
+  }
 
   const mcpRows = await loadMcpEndpoints(env, binding);
   const mcpEndpoints = new Map(mcpRows.map((row) => [row.id, endpointFor(row)]));
@@ -221,39 +209,62 @@ export async function createThreadTools(
     allowInsecureHttp: env.APP_ENV !== "production",
   });
   const mcpCredentials = credentialProvider(env, mcpRows);
-  const mcpDiscover = defineTool({
-    name: "flary__mcp_discover",
-    description: "Discover tools from an approved remote MCP connection without exposing its credential.",
-    input: v.object({ connectionId: v.string() }),
-    async run({ input }) {
+  catalog.register({
+    definition: {
+      id: "mcp.discover",
+      name: "Discover MCP tools",
+      description: "Discover tools from an approved remote MCP connection without exposing its credential.",
+      kind: "mcp",
+      operation: "read",
+      capabilities: ["connection.mcp.read"],
+      tags: ["mcp", "connection", "search"],
+      inputSchema: {
+        type: "object",
+        properties: { connectionId: { type: "string" } },
+        required: ["connectionId"],
+        additionalProperties: false,
+      },
+    },
+    async execute(raw) {
+      const input = v.parse(v.object({ connectionId: v.string() }), raw);
       const endpoint = mcpEndpoints.get(input.connectionId);
       if (!endpoint) throw new Error("MCP connection is not authorized for this thread");
       return JSON.parse(JSON.stringify(await mcpCache.discover(endpoint)));
     },
   });
-  const mcpCall = defineTool({
-    name: "flary__mcp_call",
-    description: "Call one tool from an approved remote MCP connection. The call requires approval.",
-    input: v.object({
-      connectionId: v.string(),
-      toolName: v.string(),
-      arguments: v.optional(v.record(v.string(), v.unknown())),
-    }),
-    async run({ input }) {
+  catalog.register({
+    definition: {
+      id: "mcp.call",
+      name: "Call MCP tool",
+      description: "Call one tool from an approved remote MCP connection.",
+      kind: "mcp",
+      operation: "write",
+      capabilities: ["connection.mcp.call"],
+      tags: ["mcp", "connection"],
+      requiresApproval: true,
+      inputSchema: {
+        type: "object",
+        properties: {
+          connectionId: { type: "string" },
+          toolName: { type: "string" },
+          arguments: { type: "object" },
+        },
+        required: ["connectionId", "toolName"],
+        additionalProperties: false,
+      },
+    },
+    resourceKey: (raw) =>
+      typeof raw === "object" && raw && "connectionId" in raw
+        ? `mcp:${String(raw.connectionId)}`
+        : "mcp",
+    async execute(raw) {
+      const input = v.parse(v.object({
+        connectionId: v.string(),
+        toolName: v.string(),
+        arguments: v.optional(v.record(v.string(), v.unknown())),
+      }), raw);
       const endpoint = mcpEndpoints.get(input.connectionId);
       if (!endpoint) throw new Error("MCP connection is not authorized for this thread");
-      const toolId = `mcp:${input.connectionId}:${input.toolName}`;
-      if (!metadata?.hasApprovedTool(toolId)) {
-        if (!metadata) throw new Error(`Approval required for ${toolId}`);
-        const request = metadata.createToolApproval({
-          runId: `flue_${binding.thread.threadId}`,
-          toolId,
-          reason: `The remote MCP tool ${input.toolName} can change external state.`,
-          requestedBy: { id: binding.thread.agentId, kind: "agent", version: "1" },
-        });
-        throw new Error(`Approval required. Resolve approval ${request.id} before retrying.`);
-      }
-      metadata.issueToolLease(toolId);
       const result = await mcpCache.client(endpoint).call(
         input.toolName,
         input.arguments ?? {},
@@ -263,72 +274,135 @@ export async function createThreadTools(
     },
   });
 
-  const results = await catalog.search({ limit: 100 });
-  const tools = [toolSearch] as ReturnType<typeof defineTool>[];
-  if (modeAllowsCapability(mode, "connection.mcp.read")) tools.push(mcpDiscover);
-  if (modeAllowsCapability(mode, "connection.mcp.call")) tools.push(mcpCall);
-  let metadata: FlaryThreadMetadataStore | undefined;
-  try {
-    const context = getCloudflareContext();
-    metadata = new FlaryThreadMetadataStore(
-      context.storage.sql,
-      binding.thread,
-    );
-  } catch {
-    // Tests and local catalog consumers can use the tools without DO context.
-  }
-
-  const recallSearch = defineTool({
-    name: "flary__recall_search",
-    description: "Search this thread's authorized project history. Results are short and scoped.",
-    input: v.object({
-      query: v.string(),
-      mode: v.optional(v.string()),
-      kinds: v.optional(v.array(v.string())),
-      limit: v.optional(v.number()),
-    }),
-    async run({ input }) {
+  catalog.register({
+    definition: {
+      id: "recall.search",
+      name: "Search history",
+      description: "Search this thread's authorized project history. Results are short and scoped.",
+      kind: "native",
+      operation: "read",
+      capabilities: ["recall.search"],
+      tags: ["recall", "history", "search"],
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          mode: { enum: ["exact", "semantic", "hybrid"] },
+          kinds: { type: "array", items: { type: "string" } },
+          limit: { type: "number" },
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+    },
+    async execute(raw) {
+      const input = ThreadRecallSearchInputSchema.parse(raw);
       return JSON.parse(JSON.stringify(await searchThreadRecall(
         env,
         binding,
-        ThreadRecallSearchInputSchema.parse(input),
+        input,
       )));
     },
   });
-  const recallOpen = defineTool({
-    name: "flary__recall_open",
-    description: "Open one scoped Recall result when the short result is not enough.",
-    input: v.object({
-      id: v.optional(v.string()),
-      reference: v.optional(v.record(v.string(), v.unknown())),
-    }),
-    async run({ input }) {
-      const document = await openThreadRecall(env, binding, input);
+  catalog.register({
+    definition: {
+      id: "recall.open",
+      name: "Open history result",
+      description: "Open one scoped Recall result when the short result is not enough.",
+      kind: "native",
+      operation: "read",
+      capabilities: ["recall.open"],
+      tags: ["recall", "history"],
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          reference: { type: "object" },
+        },
+        additionalProperties: false,
+      },
+    },
+    async execute(input) {
+      const document = await openThreadRecall(
+        env,
+        binding,
+        ThreadRecallOpenInputSchema.parse(input),
+      );
       if (!document) throw new Error("Recall document not found");
       return JSON.parse(JSON.stringify(document));
     },
   });
-  if (modeAllowsCapability(mode, "recall.search")) tools.push(recallSearch);
-  if (modeAllowsCapability(mode, "recall.open")) tools.push(recallOpen);
 
-  if (modeAllowsCapability(mode, "artifact.plan.write")) {
+  catalog.register({
+    definition: {
+      id: "artifact.plan.write",
+      name: "Write plan artifact",
+      description: "Write a Markdown plan under plans/ in the bound workspace.",
+      kind: "native",
+      operation: "write",
+      capabilities: ["artifact.plan.write"],
+      tags: ["plan", "artifact", "write"],
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          content: { type: "string" },
+        },
+        required: ["path", "content"],
+        additionalProperties: false,
+      },
+    },
+    resourceKey: (raw) =>
+      typeof raw === "object" && raw && "path" in raw
+        ? String(raw.path)
+        : "plans/",
+    async execute(raw) {
+      const input = v.parse(v.object({ path: v.string(), content: v.string() }), raw);
+      if (!input.path.startsWith("plans/")) {
+        throw new Error("Plan artifacts must stay under plans/");
+      }
+      return workspace.write({
+        path: input.path,
+        content: input.content,
+        encoding: "utf8",
+        mediaType: "text/markdown",
+      });
+    },
+  });
+
+  const runtime = new LazyToolRuntime({
+    catalog,
+    mode,
+    maxConcurrency: 8,
+    readParallelism: 8,
+    runId: `flue_${binding.thread.threadId}`,
+    async approve(tool) {
+      if (!metadata) throw new Error(`Approval required for ${tool.id}`);
+      if (metadata.hasApprovedTool(tool.id)) {
+        metadata.issueToolLease(tool.id);
+        return;
+      }
+      const request = metadata.createToolApproval({
+        runId: `flue_${binding.thread.threadId}`,
+        toolId: tool.id,
+        reason: `The ${mode.id} mode requires approval for ${tool.id}.`,
+        requestedBy: { id: binding.thread.agentId, kind: "agent", version: "1" },
+      });
+      throw new Error(`Approval required. Resolve approval ${request.id} before retrying.`);
+    },
+  });
+  const tools = createFlueLazyTools(runtime) as ReturnType<typeof defineTool>[];
+
+  if (modeAllowsCapability(mode, "interaction.user_input")) {
     tools.push(
-      defineTool({
-        name: "flary__plan_write",
-        description: "Write a plan artifact under plans/ in the bound workspace.",
-        input: v.object({
-          path: v.string(),
-          content: v.string(),
-        }),
-        async run({ input }) {
-          if (!input.path.startsWith("plans/")) {
-            throw new Error("Plan artifacts must stay under plans/");
-          }
-          return workspace.write({
-            path: input.path,
-            content: input.content,
-            encoding: "utf8",
-            mediaType: "text/markdown",
+      createFlueRequestUserInputTool({
+        threadKey: threadName(binding.thread),
+        createRequest({ questions }) {
+          if (!metadata) throw new Error("User input requires a thread Durable Object");
+          return metadata.createUserInputRequest({
+            questions,
+            requestedBy: { id: binding.thread.agentId, kind: "agent", version: "1" },
+            expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
           });
         },
       }),
@@ -336,29 +410,34 @@ export async function createThreadTools(
   }
 
   if (env.CODE_MODE_ENABLED === "true" && modeAllowsCapability(mode, "execution.codemode")) {
-    const readOnlyCodeTools: Record<string, (...args: unknown[]) => Promise<unknown>> = {};
-    for (const result of results.results) {
-      if (isWriteTool(result.tool.capabilities)) continue;
-      const handle = await catalog.loadHandle({ id: result.tool.id });
-      if (!handle) continue;
-      readOnlyCodeTools[result.tool.id] = (input) => handle.invoke(input);
-    }
+    const codeTools = {
+      search: async (query: unknown, maxResults?: unknown) =>
+        runtime.search({
+          query: String(query ?? ""),
+          limit: typeof maxResults === "number" ? Math.min(20, maxResults) : 5,
+        }),
+      describe: async (id: unknown) => runtime.describe(String(id)),
+      call: async (id: unknown, args?: unknown) => {
+        const loaded = await runtime.describe(String(id));
+        if (!loaded) throw new Error(`Tool not found: ${String(id)}`);
+        if (loaded.tool.operation === "write") {
+          throw new Error("Code Mode can compose read tools only. Use tool_call for writes.");
+        }
+        return runtime.call({
+          id: loaded.tool.id,
+          arguments:
+            typeof args === "object" && args !== null
+              ? args as Record<string, unknown>
+              : {},
+        });
+      },
+    };
     const codeMode = defineTool({
       name: "flary__code_mode",
-      description: "Run bounded JavaScript in a network-isolated Dynamic Worker using approved read-only tool handles.",
+      description: "Run bounded JavaScript in a network-isolated Dynamic Worker using read-only tool handles.",
       input: v.object({ code: v.string() }),
       async run({ input }) {
         if (!metadata) throw new Error("Code Mode requires a thread Durable Object");
-        if (!metadata.hasApprovedTool("execution.codemode")) {
-          const request = metadata.createToolApproval({
-            runId: `flue_${binding.thread.threadId}`,
-            toolId: "execution.codemode",
-            reason: "Code Mode executes model-written JavaScript in an isolated runtime.",
-            requestedBy: { id: binding.thread.agentId, kind: "agent", version: "1" },
-          });
-          throw new Error(`Approval required. Resolve approval ${request.id} before retrying.`);
-        }
-        metadata.issueToolLease("execution.codemode");
         const request = CodeModeInputSchema.parse(input);
         const router = createCloudExecutionRouter(env, binding.thread.organizationId);
         const result = await router.execute({
@@ -371,7 +450,7 @@ export async function createThreadTools(
           limits: { timeoutMs: 60_000, maxOutputBytes: 512 * 1024 },
           metadata: { threadId: binding.thread.threadId },
         }, {
-          toolNamespaces: [{ name: "workspace", tools: readOnlyCodeTools }],
+          toolNamespaces: [{ name: "tools", tools: codeTools }],
         });
         return JSON.parse(JSON.stringify(result));
       },
@@ -420,48 +499,6 @@ export async function createThreadTools(
     tools.push(sandboxJob);
   }
 
-  for (const result of results.results) {
-    const tool = result.tool;
-    const allowed = tool.capabilities.some((capability) =>
-      modeAllowsCapability(mode, capability),
-    );
-    if (!allowed) continue;
-    const handle = await catalog.loadHandle({ id: tool.id });
-    if (!handle) continue;
-    const write = isWriteTool(tool.capabilities);
-    const requiresApproval =
-      Boolean(tool.requiresApproval) ||
-      modeRequiresApproval(mode, {
-        capability: tool.capabilities.find((capability) => write && capability) ??
-          tool.capabilities[0] ??
-          "workspace.read",
-        operation: write ? "write" : "read",
-        resource: tool.id,
-        toolId: tool.id,
-      });
-
-    tools.push(
-      defineTool({
-        name: `flary__${tool.id.replaceAll(".", "__").replaceAll("-", "_")}`,
-        description: `${tool.description ?? tool.name} Tool id: ${tool.id}.`,
-        input: v.record(v.string(), v.unknown()),
-        async run({ input }) {
-          if (requiresApproval && !metadata?.hasApprovedTool(tool.id)) {
-            if (!metadata) throw new Error(`Approval required for ${tool.id}`);
-            const request = metadata.createToolApproval({
-              runId: `flue_${binding.thread.threadId}`,
-              toolId: tool.id,
-              reason: `The ${mode.id} mode requires approval for ${tool.id}.`,
-              requestedBy: { id: binding.thread.agentId, kind: "agent", version: "1" },
-            });
-            throw new Error(`Approval required. Resolve approval ${request.id} before retrying.`);
-          }
-          if (requiresApproval) metadata?.issueToolLease(tool.id);
-          return handle.invoke(input);
-        },
-      }),
-    );
-  }
   return tools;
 }
 

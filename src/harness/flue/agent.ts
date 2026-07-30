@@ -15,11 +15,15 @@ import {
   ModelSelectionSchema,
   ReasoningEffortSchema,
   ExecutionLimitsSchema,
+  AgentModeSchema,
+  type AgentMode,
 } from "../contracts/index.js";
+import { resolveAgentMode } from "../contracts/modes.js";
 import {
   TrustedRunContextSchema,
   type TrustedRunContext,
 } from "../host/runs.js";
+import { FLARY_LAZY_TOOL_INSTRUCTIONS } from "./tools.js";
 
 export const ResolvedFlaryAgentSchema = z
   .object({
@@ -70,6 +74,9 @@ export interface DefineFlaryAgentOptions<TEnv> {
   readonly resolveTools?: (
     input: FlaryAgentToolInput<TEnv>,
   ) => Promise<ToolDefinition[]> | ToolDefinition[];
+  readonly resolveMode?: (
+    input: FlaryAgentToolInput<TEnv>,
+  ) => Promise<AgentMode> | AgentMode;
   readonly configure?: (
     input: FlaryAgentToolInput<TEnv>,
   ) =>
@@ -124,11 +131,23 @@ export function defineFlaryAgent<TEnv = Record<string, unknown>>(
       const tools = options.resolveTools
         ? await options.resolveTools(resolved)
         : [];
+      const mode = AgentModeSchema.parse(
+        options.resolveMode
+          ? await options.resolveMode(resolved)
+          : resolveAgentMode(agent.mode),
+      );
 
       return {
         ...configured,
         model: await options.resolveModel(resolved),
-        instructions: agent.instructions,
+        instructions: [
+          agent.instructions,
+          `Active mode: ${mode.name ?? mode.id}.`,
+          mode.prompt,
+          tools.some((tool) => tool.name === "tool_search")
+            ? FLARY_LAZY_TOOL_INSTRUCTIONS
+            : "",
+        ].join("\n\n"),
         thinkingLevel: toFlueThinkingLevel(agent.thinkingLevel),
         tools,
         durability: {

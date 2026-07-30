@@ -24,6 +24,8 @@ import {
   ThreadHistoryListResponseSchema,
   ThreadMessageRequestSchema,
   ThreadModeRequestSchema,
+  UserInputAnswerRequestSchema,
+  UserInputRecordSchema,
   ThreadOperationalStateSchema,
   type ApprovalDecision,
   type ThreadBinding,
@@ -218,6 +220,37 @@ export class FlaryThreadClient {
     return Array.isArray((value as { approvals?: unknown }).approvals)
       ? (value as { approvals: unknown[] }).approvals
       : [];
+  }
+
+  async userInput(refInput: ThreadRef) {
+    const ref = ThreadRefSchema.parse(refInput);
+    const value = await this.apiJson(
+      `/api/apps/${encodeURIComponent(ref.appId)}/threads/${encodeURIComponent(ref.threadId)}/user-input`,
+    );
+    const requests =
+      typeof value === "object" && value !== null && "requests" in value
+        ? (value as { requests: unknown }).requests
+        : [];
+    return Array.isArray(requests)
+      ? requests.map((record) => UserInputRecordSchema.parse(record))
+      : [];
+  }
+
+  async respondToUserInput(
+    refInput: ThreadRef,
+    requestId: string,
+    responseInput: unknown,
+  ) {
+    const ref = ThreadRefSchema.parse(refInput);
+    const response = UserInputAnswerRequestSchema.parse(responseInput);
+    return this.apiJson(
+      `/api/apps/${encodeURIComponent(ref.appId)}/threads/${encodeURIComponent(ref.threadId)}/user-input/${encodeURIComponent(requestId)}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(response),
+      },
+    );
   }
 
   async historyCheckpoints(

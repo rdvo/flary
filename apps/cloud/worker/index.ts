@@ -26,6 +26,9 @@ import {
   TraceContextSchema,
   WorkspaceDownloadTicketRequestSchema,
   WorkspaceUploadTicketRequestSchema,
+  UserInputAnswerRequestSchema,
+  UserInputRequestSchema,
+  UserInputResponseSchema,
 } from "flary/contracts";
 import { createAuth } from "./auth";
 import { createDb } from "./db";
@@ -62,7 +65,11 @@ import {
   isCloudflareOAuthConfigured,
   revokeCloudflareToken,
 } from "./cloudflare-oauth";
-import { createTraceContext, selectPromptVariantWithTelemetry } from "flary";
+import {
+  createTraceContext,
+  frameRestoredUserInputResponse,
+  selectPromptVariantWithTelemetry,
+} from "flary";
 import { parseFlueModelSpecifier } from "flary/providers";
 import {
   prepareAdmittedFlueModel,
@@ -471,6 +478,10 @@ function threadStub(env: Env, binding: ReturnType<typeof threadBindingFromRow>) 
     patchOperational(patch: unknown): Promise<unknown>;
     listApprovals(): Promise<unknown[]>;
     decideApproval(decision: unknown): Promise<{ ok: true }>;
+    listUserInput(): Promise<unknown[]>;
+    respondToUserInput(
+      response: unknown,
+    ): Promise<{ live: boolean; record: { request: unknown; response: unknown } }>;
   };
 }
 
@@ -763,6 +774,90 @@ app.post("/api/apps/:appId/threads/:threadId/approvals/:approvalId", async (cont
   await threadStub(context.env, loaded.binding).decideApproval(input);
   return context.json({ ok: true });
 });
+
+app.get("/api/apps/:appId/threads/:threadId/user-input", async (context) => {
+  const loaded = await loadThreadRow(
+    context,
+    context.req.param("appId"),
+    context.req.param("threadId"),
+  );
+  if (!context.env.FLUE_FLARY_THREAD_AGENT) {
+    return context.json({ requests: [] });
+  }
+  return context.json({
+    requests: await threadStub(context.env, loaded.binding).listUserInput(),
+  });
+});
+
+app.post(
+  "/api/apps/:appId/threads/:threadId/user-input/:requestId",
+  async (context) => {
+    const loaded = await loadThreadRow(
+      context,
+      context.req.param("appId"),
+      context.req.param("threadId"),
+    );
+    if (!context.env.FLUE_FLARY_THREAD_AGENT) {
+      throw new HTTPException(503, {
+        message: "The Flue thread Durable Object binding is not configured",
+      });
+    }
+    const input = UserInputAnswerRequestSchema.parse(
+      await readJson<unknown>(context),
+    );
+    const response = UserInputResponseSchema.parse({
+      requestId: context.req.param("requestId"),
+      answers: input.answers,
+      ...(input.response ? { response: input.response } : {}),
+      canceled: input.canceled,
+      answeredBy: {
+        id: loaded.session.user.id,
+        kind: "user",
+        version: "1",
+      },
+      answeredAt: new Date().toISOString(),
+      ...(input.metadata ? { metadata: input.metadata } : {}),
+    });
+    const resolved = await threadStub(
+      context.env,
+      loaded.binding,
+    ).respondToUserInput(response);
+    if (resolved.live) {
+      return context.json({ live: true });
+    }
+
+    const message = frameRestoredUserInputResponse(
+      UserInputRequestSchema.parse(resolved.record.request),
+      response,
+    );
+    const requestUrl = new URL(context.req.raw.url);
+    requestUrl.pathname = `/api/apps/${encodeURIComponent(
+      loaded.binding.thread.appId,
+    )}/threads/${encodeURIComponent(
+      loaded.binding.thread.threadId,
+    )}/messages`;
+    const headers = new Headers(context.req.raw.headers);
+    headers.set("content-type", "application/json");
+    headers.delete("content-length");
+    const admitted = await app.fetch(
+      new Request(requestUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          message,
+          idempotencyKey: `input_${response.requestId}`,
+        }),
+      }),
+      context.env,
+      context.executionCtx,
+    );
+    if (!admitted.ok) return admitted;
+    return context.json({
+      live: false,
+      admission: await admitted.json(),
+    });
+  },
+);
 
 app.get("/api/apps/:appId/threads/:threadId/cursor", async (context) => {
   const loaded = await loadThreadRow(

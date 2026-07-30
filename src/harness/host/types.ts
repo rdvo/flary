@@ -28,6 +28,12 @@ import {
   type ThreadHistoryListResponse,
   type ThreadMessageRequest,
 } from "../contracts/threads.js";
+import {
+  UserInputAnswerRequestSchema,
+  UserInputRecordSchema,
+  type UserInputAnswerRequest,
+  type UserInputRecord,
+} from "../contracts/user-input.js";
 import { ThreadOperationalStateSchema } from "../contracts/runtime.js";
 import { ThreadRefSchema, type ThreadRef } from "../contracts/tenancy.js";
 import { AgentModeIdSchema, type AgentModeId } from "../contracts/modes.js";
@@ -182,6 +188,12 @@ export interface FlaryThreadHostService {
     target: FlaryThreadTarget,
     decision: ApprovalDecision,
   ): Promise<void>;
+  listUserInput?(target: FlaryThreadTarget): Promise<UserInputRecord[]>;
+  respondToUserInput?(
+    target: FlaryThreadTarget,
+    requestId: string,
+    response: UserInputAnswerRequest,
+  ): Promise<{ live: boolean; admission?: FlaryThreadAdmission }>;
   operationalState?(
     target: FlaryThreadTarget,
   ): Promise<z.output<typeof ThreadOperationalStateSchema>>;
@@ -218,6 +230,8 @@ export {
   ThreadHistoryDiffResponseSchema,
   ThreadHistoryListResponseSchema,
   ThreadMessageRequestSchema,
+  UserInputAnswerRequestSchema,
+  UserInputRecordSchema,
   ThreadOperationalStateSchema,
   ThreadRefSchema,
 };

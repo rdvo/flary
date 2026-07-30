@@ -20,6 +20,9 @@ import {
 export const ToolKindSchema = z.enum(["function", "http", "mcp", "native"]);
 export type ToolKind = z.infer<typeof ToolKindSchema>;
 
+export const ToolOperationSchema = z.enum(["read", "write"]);
+export type ToolOperation = z.infer<typeof ToolOperationSchema>;
+
 // Describe the input and output of one tool.
 export const ToolDefinitionSchema = z
   .object({
@@ -29,6 +32,8 @@ export const ToolDefinitionSchema = z
     kind: ToolKindSchema,
     inputSchema: JsonObjectSchema.optional(),
     outputSchema: JsonObjectSchema.optional(),
+    operation: ToolOperationSchema.default("read"),
+    concurrencyKey: IdentifierSchema.optional(),
     requiresApproval: z.boolean().optional(),
     secretRefs: z.array(IdentifierSchema).max(32).optional(),
     metadata: MetadataSchema.optional(),
@@ -111,6 +116,8 @@ export const ToolCapabilityDescriptorSchema = z
     kind: ToolKindSchema,
     capabilities: z.array(IdentifierSchema).max(64),
     secretRefs: z.array(IdentifierSchema).max(32),
+    operation: ToolOperationSchema,
+    concurrencyKey: IdentifierSchema.optional(),
     requiresApproval: z.boolean(),
   })
   .strict();
@@ -139,6 +146,26 @@ export const ToolCatalogLoadResponseSchema = z
 export type ToolCatalogLoadResponse = z.infer<
   typeof ToolCatalogLoadResponseSchema
 >;
+
+export const LazyToolCallSchema = z
+  .object({
+    id: IdentifierSchema,
+    arguments: JsonObjectSchema.default({}),
+    callId: IdentifierSchema.optional(),
+    idempotencyKey: IdentifierSchema.optional(),
+    dependsOn: z.array(IdentifierSchema).max(64).default([]),
+  })
+  .strict();
+export type LazyToolCall = z.infer<typeof LazyToolCallSchema>;
+export type LazyToolCallInput = z.input<typeof LazyToolCallSchema>;
+
+export const LazyToolBatchSchema = z
+  .object({
+    calls: z.array(LazyToolCallSchema).min(1).max(64),
+  })
+  .strict();
+export type LazyToolBatch = z.infer<typeof LazyToolBatchSchema>;
+export type LazyToolBatchInput = z.input<typeof LazyToolBatchSchema>;
 
 // Reference a tool by ID.
 export const ToolReferenceSchema = z.union([IdentifierSchema, ReferenceSchema]);

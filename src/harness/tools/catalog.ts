@@ -15,6 +15,7 @@ import {
   type ToolCatalogSearchResponse,
   type ToolCatalogSearchResult,
   type ToolCapabilityDescriptor,
+  type ToolOperation,
 } from "../contracts/tools";
 
 export type ToolSecretValue = string | Uint8Array;
@@ -50,10 +51,14 @@ export interface ToolCatalogRegistration<TInput = unknown, TOutput = unknown> {
   definition: ToolCatalogDefinitionInput;
   execute: ToolExecutor<TInput, TOutput>;
   capabilityId?: string;
+  resourceKey?: string | ((input: TInput) => string | undefined);
 }
 
 export interface CapabilityHandle<TInput = unknown, TOutput = unknown> {
   readonly descriptor: ToolCapabilityDescriptor;
+  readonly operation: ToolOperation;
+  readonly concurrencyKey?: string;
+  resourceKey(input: TInput): string | undefined;
   invoke(input: TInput): Promise<TOutput>;
   /** Returns the redacted descriptor, never the executor or secret provider. */
   toJSON(): ToolCapabilityDescriptor;
@@ -101,6 +106,7 @@ interface StoredTool {
   readonly definition: ToolCatalogDefinition;
   readonly capability: ToolCapabilityDescriptor;
   readonly execute: ToolExecutor;
+  readonly resourceKey?: string | ((input: unknown) => string | undefined);
 }
 
 function normalize(value: string): string {
@@ -195,6 +201,13 @@ function makeCapability(
 
   return {
     descriptor,
+    operation: descriptor.operation,
+    concurrencyKey: descriptor.concurrencyKey,
+    resourceKey(input: unknown): string | undefined {
+      return typeof stored.resourceKey === "function"
+        ? stored.resourceKey(input)
+        : stored.resourceKey;
+    },
     async invoke(input: unknown): Promise<unknown> {
       const context: ToolCapabilityContext = {
         tool: stored.definition,
@@ -273,12 +286,18 @@ export class InMemoryToolCatalog implements ToolCatalog {
       kind: definition.kind,
       capabilities: definition.capabilities,
       secretRefs: definition.secretRefs ?? [],
+      operation: definition.operation,
+      concurrencyKey: definition.concurrencyKey,
       requiresApproval: definition.requiresApproval ?? false,
     });
     const stored: StoredTool = {
       definition,
       capability,
       execute: registration.execute as ToolExecutor,
+      resourceKey: registration.resourceKey as
+        | string
+        | ((input: unknown) => string | undefined)
+        | undefined,
     };
     this.#tools.set(definition.id, stored);
     this.#capabilities.set(capability.id, definition.id);

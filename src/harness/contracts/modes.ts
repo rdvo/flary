@@ -87,6 +87,7 @@ export const BUILT_IN_AGENT_MODES: Readonly<
     name: "Ask",
     prompt: "Answer using approved read-only tools. Do not change external state.",
     allowedCapabilities: [
+      "interaction.user_input",
       "file.read",
       "workspace.read",
       "recall.search",
@@ -101,6 +102,7 @@ export const BUILT_IN_AGENT_MODES: Readonly<
     prompt:
       "Inspect the project and history, ask questions, and write a plan artifact. Do not perform external side effects.",
     allowedCapabilities: [
+      "interaction.user_input",
       "file.read",
       "workspace.read",
       "recall.search",
@@ -130,6 +132,7 @@ export const BUILT_IN_AGENT_MODES: Readonly<
     prompt:
       "Inspect files, checkpoints, history, and diffs. Report findings without changing the project.",
     allowedCapabilities: [
+      "interaction.user_input",
       "file.read",
       "workspace.read",
       "recall.search",

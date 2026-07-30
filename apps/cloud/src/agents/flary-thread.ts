@@ -8,8 +8,10 @@ import {
   ReasoningEffortSchema,
   ThreadBindingSchema,
   ThreadOperationalStateSchema,
+  UserInputResponseSchema,
   type ApprovalDecision,
   type ThreadBinding,
+  type UserInputResponse,
 } from "flary/contracts";
 import { parseThreadName } from "flary/storage";
 import { createAuth } from "../../worker/auth";
@@ -22,6 +24,8 @@ import {
 } from "../../worker/db/schema";
 import type { Env } from "../../worker/env";
 import { FlaryThreadMetadataStore } from "flary/cloudflare";
+import { resolveAgentMode, resolveLiveUserInput } from "flary";
+import { FLARY_LAZY_TOOL_INSTRUCTIONS } from "flary/flue";
 import { createThreadTools } from "../thread-tools";
 import { requireRecoveredFlueModel } from "../../worker/provider-credentials";
 import { internalRequestToken } from "../../worker/security/tokens";
@@ -255,6 +259,7 @@ export default defineAgent<Env>(async ({ env, id }) => {
   // every recent admitted provider before Flue replays a pending turn, not
   // only the newest row.
   if (binding) {
+    const activeMode = resolveAgentMode(binding.defaultMode);
     const recovered = await recoverUnsettledSubmissions(
       submissions.filter((submission) => Boolean(submission.model)),
       async (submission) =>
@@ -298,7 +303,9 @@ export default defineAgent<Env>(async ({ env, id }) => {
             ? `Work only within workspace ${binding.workspace.workspaceId} on branch ${binding.workspace.branch}.`
             : "Work only within the authorized workspace.",
           binding.persona ? `Persona: ${binding.persona}.` : "",
-          `Mode: ${binding.defaultMode}. Follow its capability restrictions.`,
+          `Active mode: ${activeMode.name ?? activeMode.id}.`,
+          activeMode.prompt,
+          FLARY_LAZY_TOOL_INSTRUCTIONS,
           "Use approved tools only. Keep responses clear and concise.",
         ]
           .filter(Boolean)
@@ -379,6 +386,20 @@ export const cloudflare = extend({
       decideApproval(decision: ApprovalDecision): { ok: true } {
         this.flaryMetadata.decideApproval(decision);
         return { ok: true };
+      }
+
+      listUserInput() {
+        return this.flaryMetadata.listUserInputRequests();
+      }
+
+      respondToUserInput(responseInput: UserInputResponse) {
+        const response = UserInputResponseSchema.parse(responseInput);
+        const record = this.flaryMetadata.respondToUserInput(response);
+        const live = resolveLiveUserInput(
+          (this as unknown as { name: string }).name,
+          response,
+        );
+        return { live, record };
       }
     },
 });

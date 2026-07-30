@@ -63,6 +63,7 @@ import type {
   ToolCatalog,
 } from "./catalog";
 import type { ToolCatalogDefinitionInput } from "../contracts/tools";
+import { z } from "zod";
 
 export interface WorkspaceToolTarget {
   read(input: ProjectFileReadRequest): Promise<ProjectFileReadResponse>;
@@ -114,12 +115,23 @@ function definition(
   inputSchema: JsonObject = OBJECT_SCHEMA,
   requiresApproval = false,
 ): ToolCatalogDefinitionInput {
+  const operation = capabilities.some(
+    (capability) =>
+      capability.endsWith(".write") ||
+      capability.endsWith(".delete") ||
+      capability.includes("commit") ||
+      capability.includes("merge"),
+  )
+    ? "write"
+    : "read";
   return {
     id,
     name,
     description,
     kind: "function",
     inputSchema,
+    operation,
+    concurrencyKey: operation === "write" ? "workspace.write" : "workspace.read",
     capabilities,
     tags: ["workspace", "flary"],
     requiresApproval,
@@ -128,6 +140,18 @@ function definition(
 
 function inputId(prefix: string, id: string): string {
   return prefix ? `${prefix}.${id}` : id;
+}
+
+function workspaceResourceKey(id: string, input: unknown): string {
+  if (typeof input !== "object" || input === null) return `workspace:${id}`;
+  const value = input as Record<string, unknown>;
+  if (typeof value.path === "string") return `workspace:file:${value.path}`;
+  if (typeof value.from === "string") return `workspace:file:${value.from}`;
+  if (typeof value.fromPath === "string") {
+    return `workspace:file:${value.fromPath}`;
+  }
+  if (id.startsWith("workspace.git.")) return "workspace:git";
+  return "workspace:mutation";
 }
 
 function requireGit(target: WorkspaceToolTarget): WorkspaceGitOperations {
@@ -158,8 +182,16 @@ export function registerWorkspaceTools(
     description: string,
     capabilities: string[],
     execute: (input: TInput) => TOutput | Promise<TOutput>,
+    inputSchema: z.ZodType,
     requiresApproval = false,
   ) => {
+    const write = capabilities.some(
+      (capability) =>
+        capability.endsWith(".write") ||
+        capability.endsWith(".delete") ||
+        capability.includes("commit") ||
+        capability.includes("merge"),
+    );
     descriptors.push(
       catalog.register({
         definition: definition(
@@ -167,10 +199,16 @@ export function registerWorkspaceTools(
           name,
           description,
           capabilities,
-          OBJECT_SCHEMA,
+          z.toJSONSchema(inputSchema) as JsonObject,
           requiresApproval,
         ),
         execute: async (input) => execute(input as TInput),
+        ...(write
+          ? {
+              resourceKey: (input: unknown) =>
+                workspaceResourceKey(inputId(prefix, id), input),
+            }
+          : {}),
       }),
     );
   };
@@ -181,6 +219,7 @@ export function registerWorkspaceTools(
     "Read a validated file from the current tenant workspace.",
     ["workspace.read"],
     (input) => target.read(ProjectFileReadRequestSchema.parse(input)),
+    ProjectFileReadRequestSchema,
   );
   register(
     "workspace.file.write",
@@ -188,6 +227,7 @@ export function registerWorkspaceTools(
     "Create or replace a file in the current tenant workspace.",
     ["workspace.write"],
     (input) => target.write(ProjectFileWriteRequestSchema.parse(input)),
+    ProjectFileWriteRequestSchema,
     approval,
   );
   register(
@@ -196,6 +236,7 @@ export function registerWorkspaceTools(
     "Apply exact text replacements to a workspace file.",
     ["workspace.write"],
     (input) => target.edit(ProjectFileEditRequestSchema.parse(input)),
+    ProjectFileEditRequestSchema,
     approval,
   );
   register(
@@ -204,6 +245,7 @@ export function registerWorkspaceTools(
     "Delete one file or a validated directory tree.",
     ["workspace.delete"],
     (input) => target.delete(ProjectFileDeleteRequestSchema.parse(input)),
+    ProjectFileDeleteRequestSchema,
     approval,
   );
   register(
@@ -212,6 +254,7 @@ export function registerWorkspaceTools(
     "Move a file inside the current workspace.",
     ["workspace.write"],
     (input) => target.move(ProjectFileMoveRequestSchema.parse(input)),
+    ProjectFileMoveRequestSchema,
     approval,
   );
   register(
@@ -220,6 +263,7 @@ export function registerWorkspaceTools(
     "List files below a validated workspace prefix.",
     ["workspace.read"],
     (input) => target.list(ProjectFileListRequestSchema.parse(input)),
+    ProjectFileListRequestSchema,
   );
   register(
     "workspace.file.stat",
@@ -230,6 +274,7 @@ export function registerWorkspaceTools(
       const request = ProjectFileReadRequestSchema.parse(input);
       return { file: await target.stat(request.path) };
     },
+    ProjectFileReadRequestSchema,
   );
   register(
     "workspace.file.glob",
@@ -237,6 +282,7 @@ export function registerWorkspaceTools(
     "Find workspace files using a relative, path-safe glob.",
     ["workspace.read"],
     (input) => target.glob(WorkspaceGlobRequestSchema.parse(input)),
+    WorkspaceGlobRequestSchema,
   );
   register(
     "workspace.file.grep",
@@ -244,6 +290,7 @@ export function registerWorkspaceTools(
     "Search workspace text and return bounded line matches.",
     ["workspace.read"],
     (input) => target.grep(WorkspaceGrepRequestSchema.parse(input)),
+    WorkspaceGrepRequestSchema,
   );
   register(
     "workspace.file.diff",
@@ -251,6 +298,7 @@ export function registerWorkspaceTools(
     "Compare a workspace file with another file or proposed text.",
     ["workspace.read"],
     (input) => target.diff(WorkspaceDiffRequestSchema.parse(input)),
+    WorkspaceDiffRequestSchema,
   );
   register(
     "workspace.file.batch-edit",
@@ -258,6 +306,7 @@ export function registerWorkspaceTools(
     "Apply bounded text edits across workspace files with optional rollback.",
     ["workspace.write"],
     (input) => target.batchEdit(WorkspaceBatchEditRequestSchema.parse(input)),
+    WorkspaceBatchEditRequestSchema,
     approval,
   );
 
@@ -268,6 +317,7 @@ export function registerWorkspaceTools(
       "Inspect changed files in the current workspace branch.",
       ["workspace.git", "workspace.read"],
       (input) => requireGit(target).status(GitStatusRequestSchema.parse(input)),
+      GitStatusRequestSchema,
     );
     register(
       "workspace.git.diff",
@@ -275,6 +325,7 @@ export function registerWorkspaceTools(
       "List the changed files in the current workspace branch.",
       ["workspace.git", "workspace.read"],
       (input) => requireGit(target).diff(GitDiffRequestSchema.parse(input)),
+      GitDiffRequestSchema,
     );
     register(
       "workspace.git.branch",
@@ -282,6 +333,7 @@ export function registerWorkspaceTools(
       "List, create, or delete a branch in the current workspace.",
       ["workspace.git", "workspace.write"],
       (input) => requireGit(target).branch(GitBranchRequestSchema.parse(input)),
+      GitBranchRequestSchema,
       approval,
     );
     register(
@@ -290,6 +342,7 @@ export function registerWorkspaceTools(
       "Create a commit in the current workspace branch.",
       ["workspace.git", "workspace.write"],
       (input) => requireGit(target).commit(GitCommitRequestSchema.parse(input)),
+      GitCommitRequestSchema,
       approval,
     );
     register(
@@ -298,6 +351,7 @@ export function registerWorkspaceTools(
       "Merge a validated ref into the current workspace branch.",
       ["workspace.git", "workspace.write"],
       (input) => requireGit(target).merge(GitMergeRequestSchema.parse(input)),
+      GitMergeRequestSchema,
       approval,
     );
   }
