@@ -104,3 +104,5 @@ jobs:
           tag_name: ${{ inputs.release_tag || github.ref_name }}
           name: Release ${{ inputs.release_tag || github.ref_name }}
           generate_release_notes: true
+          prerelease: ${{ contains(inputs.release_tag || github.ref_name, '-') }}
+          make_latest: ${{ contains(inputs.release_tag || github.ref_name, '-') && 'false' || 'true' }}
