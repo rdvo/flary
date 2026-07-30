@@ -13,9 +13,11 @@
   --muted: #626a79;
   --muted-soft: #858c9b;
   --line: rgba(32, 38, 51, 0.16);
-  --paper: #f7f8fc;
-  --paper-bright: #ffffff;
-  --accent: #665cff;
+  --paper: #f8f5ef;
+  --paper-bright: #fffdf9;
+  --accent: #c9672d;
+  --accent-deep: #7a4028;
+  --accent-soft: #e2b07b;
   color: var(--ink);
   background: var(--paper);
   font-family: "Flary Sans", ui-sans-serif, system-ui, sans-serif;
@@ -32,13 +34,102 @@ html {
 }
 
 body {
+  position: relative;
+  isolation: isolate;
   margin: 0;
   min-width: 320px;
+  overflow-x: hidden;
   background:
-    radial-gradient(circle at 78% 3%, rgba(102, 92, 255, 0.1), transparent 31rem),
-    linear-gradient(90deg, rgba(32, 38, 51, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(76, 54, 37, 0.035) 1px, transparent 1px),
     var(--paper);
   background-size: min(10vw, 144px) 100%;
+}
+
+body::before,
+body::after {
+  position: fixed;
+  z-index: -1;
+  pointer-events: none;
+  content: "";
+}
+
+body::before {
+  inset: -22%;
+  background:
+    radial-gradient(
+      ellipse at 17% 16%,
+      rgba(226, 176, 123, 0.36) 0,
+      rgba(201, 103, 45, 0.13) 23%,
+      transparent 51%
+    ),
+    radial-gradient(
+      ellipse at 84% 28%,
+      rgba(169, 102, 53, 0.2) 0,
+      rgba(122, 64, 40, 0.08) 25%,
+      transparent 50%
+    ),
+    radial-gradient(
+      ellipse at 54% 88%,
+      rgba(236, 199, 153, 0.24) 0,
+      rgba(201, 103, 45, 0.07) 28%,
+      transparent 55%
+    );
+  filter: blur(34px);
+  transform: translate3d(-2%, -1%, 0) scale(1.04);
+  animation: candle-flow 18s ease-in-out infinite alternate;
+}
+
+body::after {
+  top: -14rem;
+  right: -12rem;
+  width: min(48rem, 72vw);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(241, 184, 110, 0.2) 0,
+    rgba(190, 91, 38, 0.09) 36%,
+    transparent 68%
+  );
+  filter: blur(22px);
+  mix-blend-mode: multiply;
+  transform-origin: 58% 48%;
+  animation: candle-breathe 7s ease-in-out infinite;
+}
+
+@keyframes candle-flow {
+  0% {
+    opacity: 0.72;
+    transform: translate3d(-2%, -1%, 0) scale(1.04) rotate(-1deg);
+  }
+
+  45% {
+    opacity: 0.9;
+    transform: translate3d(3%, 2%, 0) scale(1.1) rotate(1deg);
+  }
+
+  100% {
+    opacity: 0.78;
+    transform: translate3d(-1%, 5%, 0) scale(1.07) rotate(-0.5deg);
+  }
+}
+
+@keyframes candle-breathe {
+  0%,
+  100% {
+    opacity: 0.58;
+    transform: scale(0.96);
+  }
+
+  38% {
+    opacity: 0.82;
+    transform: scale(1.04) translate3d(-1.5%, 1%, 0);
+  }
+
+  62% {
+    opacity: 0.7;
+    transform: scale(1.01) translate3d(1%, -1%, 0);
+  }
 }
 
 button,
@@ -51,6 +142,8 @@ a {
 }
 
 .page {
+  position: relative;
+  z-index: 0;
   width: min(1200px, calc(100% - 48px));
   margin: 0 auto;
 }
@@ -177,7 +270,8 @@ h1 {
 }
 
 .primary-link:hover {
-  background: #292d3a;
+  border-color: var(--accent-deep);
+  background: var(--accent-deep);
 }
 
 .install {
@@ -312,7 +406,7 @@ h2 {
 }
 
 .code-example__tabs button.active {
-  border-bottom-color: #8179ff;
+  border-bottom-color: var(--accent);
 }
 
 .capability-grid {
@@ -364,7 +458,9 @@ h3 {
   padding: 34px;
   border: 1px solid var(--ink);
   color: #f0f3fa;
-  background: var(--ink);
+  background:
+    radial-gradient(circle at 88% 12%, rgba(201, 103, 45, 0.15), transparent 38%),
+    var(--ink);
   font-size: clamp(13px, 1.5vw, 17px);
   line-height: 1.9;
 }
@@ -473,6 +569,17 @@ footer > a:last-child {
 
 .not-found .primary-link {
   padding: 0 18px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  body::before,
+  body::after {
+    animation: none;
+  }
 }
 
 @media (max-width: 780px) {
