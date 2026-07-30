@@ -22,8 +22,8 @@ npm run font:build
 
 Generated files:
 
-- `public/fonts/flary-sans-variable.woff2`
-- `public/fonts/flary-sans-variable.ttf`
+- `site-public/fonts/flary-sans-variable.woff2`
+- `site-public/fonts/flary-sans-variable.ttf`
 
 ## Source and license
 

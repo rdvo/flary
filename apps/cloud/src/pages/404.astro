@@ -1,0 +1,21 @@
+---
+import SiteLayout from "../layouts/SiteLayout.astro";
+---
+
+<SiteLayout
+  title="Page not found — Flary"
+  description="The requested Flary page was not found."
+  noindex
+>
+  <main class="not-found">
+    <a class="brand" href="/" aria-label="Flary home">
+      <span class="mark" aria-hidden="true">f</span>
+      <span>Flary</span>
+    </a>
+    <section>
+      <p class="eyebrow">404 / Page not found</p>
+      <h1>This route lost its place.</h1>
+      <a class="primary-link" href="/">Return home</a>
+    </section>
+  </main>
+</SiteLayout>

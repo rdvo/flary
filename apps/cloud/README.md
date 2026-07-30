@@ -1,11 +1,21 @@
-# Flary Cloud
+# Flary Workers
 
-This directory is the reference Cloudflare application for Flary. It is a
-small control plane, not the Flary runtime itself.
+This directory contains two separate Cloudflare Workers:
+
+- `flary-cloud` is Flary's managed runtime Worker. It owns the agent API,
+  Flue routes, Durable Objects, D1, R2, and containers.
+- `flary-web` is the website Worker. Astro prerenders the public pages, React
+  provides interactive islands and the `/app/*` SPA, and Hono owns website API
+  routes.
+
+In production, `flary-web` uses the `FLARY_RUNTIME` service binding to call
+`flary-cloud` without a public network hop.
 
 ## What it includes
 
-- React SPA served by one Cloudflare Worker.
+- Astro pages with static HTML for search engines.
+- React islands and a scoped `/app/*` SPA fallback.
+- A small Hono website API.
 - Better Auth with organization support.
 - Drizzle schema and migrations for D1.
 - R2 for prompt source, large files, and the immutable history fallback.
@@ -21,17 +31,20 @@ small control plane, not the Flary runtime itself.
 - Dynamic Workers for short Code Mode plans.
 - Cloudflare Sandboxes for full Linux workloads.
 
-This is a full-stack Workers application, not a Pages project. Vite builds the
-React SPA and the Worker together. Workers Static Assets serves the SPA with a
-single-page fallback, while `/api/*` and `/health` run through the Worker.
+This is a Workers application, not a Pages project. The Cloudflare Vite plugin
+builds each Worker. Workers Static Assets serves Astro output for the website.
+Only `/app/*` uses a single-page fallback. Other missing pages return a real
+404 response.
 
 The source layout is:
 
-- `src/` — React SPA and Tailwind v4 styles.
-- `worker/` — Hono API, Better Auth, middleware, Durable Objects, and runtime
-  integrations.
+- `src/pages/` — Astro website routes.
+- `src/components/` — React islands and the app shell.
+- `worker/site.ts` — small Hono website Worker.
+- `worker/` — Flary runtime API, Better Auth, Durable Objects, and integrations.
 - `migrations/` — additive D1 migrations.
-- `wrangler.jsonc` — local and production bindings.
+- `wrangler.site.jsonc` — website Worker configuration.
+- `wrangler.jsonc` — runtime Worker configuration.
 - `worker-configuration.d.ts` — generated Cloudflare binding types. Run
   `pnpm types` after changing Wrangler bindings.
 
@@ -43,6 +56,13 @@ pnpm install
 pnpm --filter flary build
 pnpm --dir apps/cloud db:migrate:local
 pnpm --dir apps/cloud dev
+```
+
+The default `dev` command starts the lightweight website Worker with the
+Cloudflare Vite plugin. Use this command for the full runtime Worker:
+
+```bash
+pnpm --dir apps/cloud dev:runtime
 ```
 
 Set `BETTER_AUTH_SECRET` and a base64url-encoded 32-byte
@@ -64,7 +84,8 @@ development.
 5. Add `BETTER_AUTH_SECRET`, `FLARY_TOKEN_ENCRYPTION_KEY_B64`,
    `CLOUDFLARE_OAUTH_CLIENT_ID`, and `CLOUDFLARE_OAUTH_CLIENT_SECRET` with
    `wrangler secret put`.
-6. Deploy with `pnpm deploy`.
+6. Deploy the runtime with `pnpm deploy:runtime`.
+7. Deploy the website with `pnpm deploy:web`.
 
 For the hosted Flary environment, the current Worker URL is
 `https://flary-cloud.cosmicmarketing.workers.dev`. A custom domain can be
@@ -182,13 +203,13 @@ never receives the raw API key. Tenant BYOK credentials take precedence over
 managed environment credentials. A missing credential returns the typed
 `provider_credentials_missing` response before Flue starts work.
 
-Run the generated Flue build before deployment:
+Build or deploy the runtime Worker with these commands:
 
 ```bash
-pnpm build:flue
-pnpm deploy
+pnpm build:runtime
+pnpm deploy:runtime
 ```
 
-`build:flue` generates the `FLUE_*` bindings. The initial migration in
+`build:runtime` generates the `FLUE_*` bindings. The initial migration in
 `wrangler.jsonc` must list `FlueFlaryThreadAgent` and `FlueRegistry` with the
 application-owned Durable Object classes.

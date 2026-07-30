@@ -13,7 +13,7 @@ from fontTools.varLib.instancer import instantiateVariableFont
 
 FONT_DIR = Path(__file__).resolve().parent
 UPSTREAM_FONT = FONT_DIR / "upstream" / "instrument-sans-variable.ttf"
-OUTPUT_DIR = FONT_DIR.parent / "public" / "fonts"
+OUTPUT_DIR = FONT_DIR.parent / "site-public" / "fonts"
 OUTPUT_TTF = OUTPUT_DIR / "flary-sans-variable.ttf"
 OUTPUT_WOFF2 = OUTPUT_DIR / "flary-sans-variable.woff2"
 

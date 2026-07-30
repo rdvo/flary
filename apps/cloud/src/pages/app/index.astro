@@ -1,0 +1,12 @@
+---
+import { AppShell } from "../../components/AppShell";
+import SiteLayout from "../../layouts/SiteLayout.astro";
+---
+
+<SiteLayout
+  title="Flary App"
+  description="The React application surface for Flary."
+  noindex
+>
+  <AppShell client:load />
+</SiteLayout>

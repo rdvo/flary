@@ -1,0 +1,136 @@
+---
+import { ArrowUpRight } from "lucide-react";
+import { CodeExamples } from "../components/CodeExamples";
+import { InstallCommand } from "../components/InstallCommand";
+import SiteLayout from "../layouts/SiteLayout.astro";
+
+const capabilities = [
+  {
+    title: "Persistent threads",
+    body: "Runs continue through disconnects and resume from an exact event cursor.",
+  },
+  {
+    title: "Provider neutral",
+    body: "Use OpenAI, Anthropic, Google, Moonshot, or Cloudflare behind one contract.",
+  },
+  {
+    title: "Tools and MCP",
+    body: "Discover tools when needed. Keep secrets behind scoped capabilities.",
+  },
+  {
+    title: "Workspaces",
+    body: "Give each agent an isolated branch with files, diffs, and checkpoints.",
+  },
+  {
+    title: "History and recall",
+    body: "Store canonical JSONL history and retrieve prior work with source references.",
+  },
+  {
+    title: "Typed boundaries",
+    body: "Validate events, tools, approvals, credentials, and usage with Zod.",
+  },
+];
+
+const title = "Flary — Open-source agent infrastructure";
+const description =
+  "Add persistent threads, tools, MCP, workspaces, history, and provider-neutral sessions to products on Cloudflare Workers.";
+---
+
+<SiteLayout title={title} description={description}>
+  <main class="page">
+    <header class="nav">
+      <a class="brand" href="#top" aria-label="Flary home">
+        <span class="mark" aria-hidden="true">f</span>
+        <span>Flary</span>
+      </a>
+      <nav aria-label="Main navigation">
+        <a href="#examples">Examples</a>
+        <a href="#details">What it does</a>
+        <a
+          href="https://github.com/rdvo/flary"
+          target="_blank"
+          rel="noreferrer"
+        >
+          GitHub <ArrowUpRight size={13} strokeWidth={1.7} />
+        </a>
+      </nav>
+    </header>
+
+    <section class="hero" id="top">
+      <p class="eyebrow">Open-source agent infrastructure</p>
+      <h1>Build agents that<br />keep their place.</h1>
+      <p class="lede">
+        Flary is a TypeScript runtime for adding stateful agents to products on
+        Cloudflare Workers.
+      </p>
+      <div class="actions">
+        <a
+          class="primary-link"
+          href="https://github.com/rdvo/flary"
+          target="_blank"
+          rel="noreferrer"
+        >
+          <ArrowUpRight size={16} strokeWidth={1.7} />
+          View on GitHub
+        </a>
+        <InstallCommand client:idle />
+      </div>
+      <p class="meta">Apache-2.0 · TypeScript · Cloudflare-native</p>
+    </section>
+
+    <section class="examples" id="examples">
+      <div class="section-intro">
+        <p class="eyebrow">Start where you are</p>
+        <h2>Create a Worker.<br />Or add Flary to yours.</h2>
+      </div>
+      <CodeExamples client:only="react" />
+    </section>
+
+    <section class="details" id="details">
+      <div class="section-intro">
+        <p class="eyebrow">The runtime layer</p>
+        <h2>Your product owns the experience.<br />Flary runs the agent.</h2>
+      </div>
+      <div class="capability-grid">
+        {
+          capabilities.map((capability, index) => (
+            <article>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <h3>{capability.title}</h3>
+              <p>{capability.body}</p>
+            </article>
+          ))
+        }
+      </div>
+    </section>
+
+    <section class="flow">
+      <div>
+        <p class="eyebrow">One clean boundary</p>
+        <h2>Bring your app.<br />Mount Flary behind it.</h2>
+      </div>
+      <pre aria-label="Flary application architecture"><code>your product
+  ↓
+flary
+  ↓
+agents · d1 · r2
+  ↓
+openai · anthropic · google · kimi</code></pre>
+    </section>
+
+    <footer>
+      <a class="brand" href="#top">
+        <span class="mark" aria-hidden="true">f</span>
+        <span>Flary</span>
+      </a>
+      <p>Open-source agent infrastructure for Cloudflare Workers.</p>
+      <a
+        href="https://www.npmjs.com/package/flary"
+        target="_blank"
+        rel="noreferrer"
+      >
+        npm <ArrowUpRight size={12} strokeWidth={1.7} />
+      </a>
+    </footer>
+  </main>
+</SiteLayout>

@@ -2576,7 +2576,17 @@ app.all("/api/organizations/:organizationId/events", async (context) => {
   return stub.fetch(new Request(target, context.req.raw));
 });
 
-app.all("*", (context) => context.env.ASSETS.fetch(context.req.raw));
+app.notFound((context) =>
+  context.json(
+    {
+      error: {
+        type: "not_found",
+        message: "Runtime route not found",
+      },
+    },
+    404,
+  ),
+);
 
 app.onError((error, context) => {
   if (error instanceof HTTPException) return error.getResponse();

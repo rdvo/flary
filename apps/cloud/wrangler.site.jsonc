@@ -1,0 +1,35 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "flary-web-local",
+  "main": "worker/site.ts",
+  "compatibility_date": "2026-07-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "run_worker_first": ["/api/*", "/health", "/app/*"]
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1
+  },
+  "vars": {
+    "APP_ENV": "development"
+  },
+  "env": {
+    "production": {
+      "name": "flary-web",
+      "workers_dev": true,
+      "preview_urls": false,
+      "vars": {
+        "APP_ENV": "production"
+      },
+      "services": [
+        {
+          "binding": "FLARY_RUNTIME",
+          "service": "flary-cloud"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "Flary",
+  "short_name": "Flary",
+  "description": "Open-source agent infrastructure for Cloudflare Workers.",
+  "start_url": "/app/",
+  "display": "standalone",
+  "background_color": "#f7f8fc",
+  "theme_color": "#171a23"
+}
