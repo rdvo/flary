@@ -67,11 +67,11 @@ The generated project starts with a real `*.prompt.md` file and a local
 prompt-preview route. It does not create production Cloudflare resources.
 Add durable threads with the focused guides:
 
-- [Getting started](https://github.com/rdvo/flary/blob/main/docs/getting-started.md)
-- [Cloudflare resources](https://github.com/rdvo/flary/blob/main/docs/cloudflare-resources.md)
-- [Prompt files](https://github.com/rdvo/flary/blob/main/docs/prompts.md)
-- [Support bot](https://github.com/rdvo/flary/blob/main/docs/examples/support-bot.md)
-- [Coding agent](https://github.com/rdvo/flary/blob/main/docs/examples/coding-agent.md)
+- [Getting started](https://flary.dev/docs/getting-started/)
+- [Cloudflare resources](https://flary.dev/docs/cloudflare-resources/)
+- [Prompt files](https://flary.dev/docs/prompts/)
+- [Support bot](https://flary.dev/docs/examples/support-bot/)
+- [Coding agent](https://flary.dev/docs/examples/coding-agent/)
 
 ### Runtime requirements
 

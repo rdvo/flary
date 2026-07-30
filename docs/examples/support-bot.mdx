@@ -1,4 +1,9 @@
-# Support bot
+---
+title: Support bot
+description: Mount a durable support agent behind your product-owned API and user interface.
+section: Examples
+order: 1
+---
 
 This example mounts one durable support agent behind a product-owned API.
 The product still owns login, organization roles, billing, and the chat UI.
@@ -110,4 +115,3 @@ for await (const event of runs.observe(run.runId)) {
 
 The UI can leave and reconnect with `afterSequence`. It does not keep the
 model request alive.
-

@@ -1,4 +1,9 @@
-# Prompt files
+---
+title: Prompt files
+description: Keep prompts in Git as typed Markdown files with strict input values.
+section: Core
+order: 1
+---
 
 Flary prompt files are Markdown files with YAML front matter. Store them in
 Git and review them like source code.
@@ -70,4 +75,3 @@ const compiled = await compilePrompt(
 Templates support strict `{{value.path}}` interpolation. Compilation fails on
 missing values, unknown values, or secret-like paths. Provider credentials do
 not enter the prompt.
-

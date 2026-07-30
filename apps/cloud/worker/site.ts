@@ -12,6 +12,39 @@ type SiteContext = {
 
 const app = new Hono<SiteContext>();
 const api = new Hono<SiteContext>();
+const DOCS_HOSTNAME = "docs.flary.dev";
+
+function resolveAssetRequest(request: Request): Request | Response {
+  const url = new URL(request.url);
+
+  if (url.hostname !== DOCS_HOSTNAME) {
+    return request;
+  }
+
+  if (url.pathname === "/docs" || url.pathname.startsWith("/docs/")) {
+    const target = new URL(url);
+    target.pathname =
+      url.pathname === "/docs" || url.pathname === "/docs/"
+        ? "/"
+        : url.pathname.slice("/docs".length);
+    return Response.redirect(target, 308);
+  }
+
+  const lastSegment = url.pathname.split("/").at(-1) ?? "";
+  const isStaticAsset =
+    url.pathname.startsWith("/_astro/") ||
+    url.pathname.startsWith("/fonts/") ||
+    lastSegment.includes(".");
+
+  if (isStaticAsset) {
+    return request;
+  }
+
+  const target = new URL(url);
+  target.pathname =
+    url.pathname === "/" ? "/docs/" : `/docs${url.pathname}`;
+  return new Request(target, request);
+}
 
 app.use("*", async (context, next) => {
   await next();
@@ -104,7 +137,13 @@ app.get("/app/*", async (context) => {
 
 app.all("*", async (context) => {
   if (context.env.ASSETS) {
-    return context.env.ASSETS.fetch(context.req.raw);
+    const assetRequest = resolveAssetRequest(context.req.raw);
+
+    if (assetRequest instanceof Response) {
+      return assetRequest;
+    }
+
+    return context.env.ASSETS.fetch(assetRequest);
   }
   return context.text("Not found", 404);
 });

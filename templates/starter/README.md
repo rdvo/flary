@@ -20,5 +20,5 @@ The preview compiles the real
 
 To add durable threads, follow:
 
-- https://github.com/rdvo/flary/blob/main/docs/examples/support-bot.md
-- https://github.com/rdvo/flary/blob/main/docs/cloudflare-resources.md
+- https://flary.dev/docs/examples/support-bot/
+- https://flary.dev/docs/cloudflare-resources/

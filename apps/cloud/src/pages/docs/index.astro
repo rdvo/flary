@@ -1,0 +1,62 @@
+---
+import { getCollection } from "astro:content";
+import { ArrowRight, Cloud, FileCode2, MessagesSquare } from "lucide-react";
+import { docPath, sortDocs } from "../../docs";
+import DocsLayout from "../../layouts/DocsLayout.astro";
+
+const entries = sortDocs(await getCollection("docs"));
+const examples = entries.filter((entry) => entry.data.section === "Examples");
+---
+
+<DocsLayout
+  title="Build with Flary"
+  description="Use typed prompt files on their own, or add durable threads, tools, approvals, and workspaces to a Cloudflare Worker."
+>
+  <section class="docs-start-grid">
+    <a href="/docs/getting-started/">
+      <FileCode2 size={18} strokeWidth={1.6} />
+      <span>Start here</span>
+      <h2>Install and run</h2>
+      <p>Compile your first prompt, then add a durable runtime only if you need it.</p>
+      <strong>Getting started <ArrowRight size={14} strokeWidth={1.7} /></strong>
+    </a>
+    <a href="/docs/cloudflare-resources/">
+      <Cloud size={18} strokeWidth={1.6} />
+      <span>Deploy</span>
+      <h2>Choose resources</h2>
+      <p>See when your app needs Workers, Durable Objects, D1, R2, or Sandbox.</p>
+      <strong>Resource guide <ArrowRight size={14} strokeWidth={1.7} /></strong>
+    </a>
+  </section>
+
+  <section class="docs-install-block">
+    <div>
+      <span>Release candidate</span>
+      <h2>Install the exact version.</h2>
+    </div>
+    <pre><code>npm install --save-exact flary@0.3.0-rc.5</code></pre>
+  </section>
+
+  <section class="docs-home-section">
+    <div class="docs-home-section__title">
+      <MessagesSquare size={18} strokeWidth={1.6} />
+      <div>
+        <span>Examples</span>
+        <h2>Start from a real product shape.</h2>
+      </div>
+    </div>
+    <div class="docs-example-links">
+      {
+        examples.map((entry) => (
+          <a href={docPath(entry.id)}>
+            <div>
+              <h3>{entry.data.title}</h3>
+              <p>{entry.data.description}</p>
+            </div>
+            <ArrowRight size={16} strokeWidth={1.7} />
+          </a>
+        ))
+      }
+    </div>
+  </section>
+</DocsLayout>

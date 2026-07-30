@@ -1,4 +1,9 @@
-# Getting started
+---
+title: Getting started
+description: Install Flary, compile a prompt file, and add a durable thread when your product needs one.
+section: Start
+order: 1
+---
 
 Flary has two usable layers:
 
@@ -31,8 +36,8 @@ npm run dev
 ```
 
 The starter proves the prompt-file path first. It does not create production
-Cloudflare resources. Follow the [support bot](./examples/support-bot.md) or
-[coding agent](./examples/coding-agent.md) guide when you add durable threads.
+Cloudflare resources. Follow the [support bot](/docs/examples/support-bot/) or
+[coding agent](/docs/examples/coding-agent/) guide when you add durable threads.
 
 ## Use a prompt file without Cloudflare
 
@@ -93,7 +98,7 @@ Your host application supplies authentication, tenant mapping, provider
 credentials, and product policy. Flary supplies the typed run API, durable
 execution adapter, tool runtime, modes, approvals, and event stream.
 
-Read [Cloudflare resources](./cloudflare-resources.md) before deployment.
+Read [Cloudflare resources](/docs/cloudflare-resources/) before deployment.
 
 ## Call the stable run API
 
@@ -119,4 +124,3 @@ for await (const event of runs.observe(run.runId)) {
 
 If the client disconnects, call `observe()` again with the last event
 sequence. Flary replays stored normalized events before it streams new events.
-

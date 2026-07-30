@@ -1,4 +1,9 @@
-# Coding agent
+---
+title: Coding agent
+description: Build a durable coding thread with lazy tools, workspace policy, and explicit modes.
+section: Examples
+order: 2
+---
 
 A coding agent uses the same thread runtime as a support bot. The difference
 is its workspace, mode, and tool policy.
@@ -115,4 +120,3 @@ const build = resolveAgentMode("build");
 Plan Mode can write only plan artifacts. Build Mode can write the bound
 workspace, but risky operations can still require approval. A model cannot
 grant itself a stronger mode.
-

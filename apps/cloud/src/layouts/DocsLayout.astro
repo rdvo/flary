@@ -1,0 +1,209 @@
+---
+import { getCollection } from "astro:content";
+import { ArrowLeft, ArrowRight, ArrowUpRight } from "lucide-react";
+import {
+  DOC_SECTION_ORDER,
+  docPath,
+  sortDocs,
+  type DocEntry,
+} from "../docs";
+import "../docs.css";
+import SiteLayout from "./SiteLayout.astro";
+
+interface Heading {
+  depth: number;
+  slug: string;
+  text: string;
+}
+
+interface Props {
+  title: string;
+  description: string;
+  section?: string;
+  activeId?: string;
+  headings?: Heading[];
+}
+
+const {
+  title,
+  description,
+  section = "Documentation",
+  activeId,
+  headings = [],
+} = Astro.props;
+
+const entries = sortDocs(await getCollection("docs"));
+const groupedEntries = DOC_SECTION_ORDER.map((name) => ({
+  name,
+  entries: entries.filter((entry) => entry.data.section === name),
+}));
+const currentIndex = activeId
+  ? entries.findIndex((entry) => entry.id === activeId)
+  : -1;
+const previousEntry = currentIndex > 0 ? entries[currentIndex - 1] : undefined;
+const nextEntry =
+  currentIndex >= 0 && currentIndex < entries.length - 1
+    ? entries[currentIndex + 1]
+    : undefined;
+const tableOfContents = headings.filter(
+  (heading) => heading.depth === 2 || heading.depth === 3,
+);
+
+function navigationGroups(): Array<{
+  name: (typeof DOC_SECTION_ORDER)[number];
+  entries: DocEntry[];
+}> {
+  return groupedEntries;
+}
+---
+
+<SiteLayout
+  title={`${title} — Flary Docs`}
+  description={description}
+  bodyClass="docs-body"
+>
+  <div class="docs-site">
+    <header class="docs-header">
+      <div class="docs-header__inner">
+        <a class="brand" href="https://flary.dev" aria-label="Flary home">
+          <span class="mark" aria-hidden="true">f</span>
+          <span>Flary</span>
+        </a>
+        <span class="docs-divider" aria-hidden="true"></span>
+        <a class="docs-wordmark" href="/docs/">Docs</a>
+        <nav aria-label="Documentation links">
+          <a href="/docs/getting-started/">Quickstart</a>
+          <a
+            href="https://github.com/rdvo/flary"
+            target="_blank"
+            rel="noreferrer"
+          >
+            GitHub <ArrowUpRight size={13} strokeWidth={1.7} />
+          </a>
+        </nav>
+      </div>
+    </header>
+
+    <details class="docs-mobile-nav">
+      <summary>Browse documentation</summary>
+      <nav aria-label="Mobile documentation navigation">
+        <a class:list={["docs-nav-home", { active: !activeId }]} href="/docs/">
+          Overview
+        </a>
+        {
+          navigationGroups().map((group) => (
+            <section>
+              <p>{group.name}</p>
+              {group.entries.map((entry) => (
+                <a
+                  class:list={{ active: activeId === entry.id }}
+                  href={docPath(entry.id)}
+                >
+                  {entry.data.title}
+                </a>
+              ))}
+            </section>
+          ))
+        }
+      </nav>
+    </details>
+
+    <div class="docs-grid">
+      <aside class="docs-sidebar">
+        <nav aria-label="Documentation navigation">
+          <a class:list={["docs-nav-home", { active: !activeId }]} href="/docs/">
+            Overview
+          </a>
+          {
+            navigationGroups().map((group) => (
+              <section>
+                <p>{group.name}</p>
+                {group.entries.map((entry) => (
+                  <a
+                    class:list={{ active: activeId === entry.id }}
+                    href={docPath(entry.id)}
+                  >
+                    {entry.data.title}
+                  </a>
+                ))}
+              </section>
+            ))
+          }
+        </nav>
+      </aside>
+
+      <main class="docs-main">
+        <article class="docs-article">
+          <header class="docs-article__header">
+            <p>{section}</p>
+            <h1>{title}</h1>
+            <div>{description}</div>
+          </header>
+
+          <div class="docs-prose">
+            <slot />
+          </div>
+
+          {
+            activeId && (
+              <nav class="docs-pager" aria-label="Previous and next pages">
+                {previousEntry ? (
+                  <a href={docPath(previousEntry.id)}>
+                    <span>
+                      <ArrowLeft size={14} strokeWidth={1.7} /> Previous
+                    </span>
+                    <strong>{previousEntry.data.title}</strong>
+                  </a>
+                ) : (
+                  <span />
+                )}
+                {nextEntry && (
+                  <a href={docPath(nextEntry.id)}>
+                    <span>
+                      Next <ArrowRight size={14} strokeWidth={1.7} />
+                    </span>
+                    <strong>{nextEntry.data.title}</strong>
+                  </a>
+                )}
+              </nav>
+            )
+          }
+        </article>
+      </main>
+
+      <aside class="docs-toc">
+        {
+          tableOfContents.length > 0 ? (
+            <nav aria-label="On this page">
+              <p>On this page</p>
+              {tableOfContents.map((heading) => (
+                <a
+                  class:list={{ nested: heading.depth === 3 }}
+                  href={`#${heading.slug}`}
+                >
+                  {heading.text}
+                </a>
+              ))}
+            </nav>
+          ) : (
+            <div class="docs-toc__note">
+              <span>Package</span>
+              <code>flary@next</code>
+            </div>
+          )
+        }
+      </aside>
+    </div>
+
+    <footer class="docs-footer">
+      <span>Flary documentation</span>
+      <a
+        href="https://github.com/rdvo/flary/issues"
+        target="_blank"
+        rel="noreferrer"
+      >
+        Report an issue <ArrowUpRight size={12} strokeWidth={1.7} />
+      </a>
+    </footer>
+  </div>
+</SiteLayout>

@@ -7,6 +7,7 @@ interface Props {
   description: string;
   image?: string;
   noindex?: boolean;
+  bodyClass?: string;
 }
 
 const {
@@ -14,6 +15,7 @@ const {
   description,
   image = "/og.png",
   noindex = false,
+  bodyClass,
 } = Astro.props;
 
 const siteUrl = Astro.site ?? Astro.url;
@@ -72,7 +74,7 @@ const structuredData = {
     />
     <ClientRouter />
   </head>
-  <body>
+  <body class={bodyClass}>
     <slot />
   </body>
 </html>
