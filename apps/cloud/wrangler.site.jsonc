@@ -8,7 +8,7 @@
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "404-page",
-    "run_worker_first": ["/api/*", "/health", "/app/*"]
+    "run_worker_first": true
   },
   "observability": {
     "enabled": true,
