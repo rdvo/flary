@@ -26,6 +26,13 @@ export const McpToolDescriptorSchema = z
     name: McpToolNameSchema,
     description: z.string().max(8_000).optional(),
     inputSchema: z.record(z.string(), z.unknown()),
+    annotations: z
+      .object({
+        readOnlyHint: z.boolean().optional(),
+        destructiveHint: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
     discoveredAt: z.string().datetime({ offset: true }),
     expiresAt: z.string().datetime({ offset: true }),
   })
@@ -158,6 +165,9 @@ export class McpConnectionClient {
           ? { description: value.description.slice(0, 8_000) }
           : {}),
         inputSchema,
+        ...(safeAnnotations(value.annotations)
+          ? { annotations: safeAnnotations(value.annotations) }
+          : {}),
         discoveredAt: now.toISOString(),
         expiresAt,
       });
@@ -246,6 +256,22 @@ export class McpConnectionClient {
     }
     return parsed;
   }
+}
+
+function safeAnnotations(value: unknown):
+  | { readOnlyHint?: boolean; destructiveHint?: boolean }
+  | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const annotations = {
+    ...(typeof record.readOnlyHint === "boolean"
+      ? { readOnlyHint: record.readOnlyHint }
+      : {}),
+    ...(typeof record.destructiveHint === "boolean"
+      ? { destructiveHint: record.destructiveHint }
+      : {}),
+  };
+  return Object.keys(annotations).length > 0 ? annotations : undefined;
 }
 
 export class McpToolCache {
@@ -367,7 +393,11 @@ async function fetchWithSafeRedirects(
       }
       const location = response.headers.get("location");
       if (!location) throw new McpSecurityError("MCP redirect did not contain a location");
-      url = assertSafeMcpUrl(new URL(location, url), options);
+      const next = assertSafeMcpUrl(new URL(location, url), options);
+      if (next.origin !== url.origin) {
+        throw new McpSecurityError("MCP redirects must stay on the same HTTPS origin");
+      }
+      url = next;
     } finally {
       clearTimeout(timer);
     }

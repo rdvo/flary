@@ -3,6 +3,8 @@ export * from "./mcp-descriptor-cache.js";
 export * from "./thread-metadata.js";
 export * from "./tool-journal.js";
 export * from "./run-repository.js";
+export * from "./sqlite-run-repository.js";
+export * from "./function-host.js";
 export * from "./sandbox.js";
 export * from "./scheduler.js";
 export * from "./webhooks.js";

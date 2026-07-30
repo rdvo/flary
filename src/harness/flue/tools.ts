@@ -28,6 +28,7 @@ export interface FlueUserInputToolOptions {
   }): Promise<UserInputRequest> | UserInputRequest;
   waitForResponse?: (
     request: UserInputRequest,
+    signal?: AbortSignal,
   ) => Promise<UserInputResponse>;
 }
 
@@ -148,7 +149,7 @@ export function createFlueRequestUserInputTool(
         multiSelect: v.optional(v.boolean()),
       })),
     }),
-    async run({ input }) {
+    async run({ input, signal }) {
       const questions = UserInputQuestionSchema.array().min(1).max(3).parse(
         input.questions.map((question) => ({
           ...question,
@@ -159,7 +160,7 @@ export function createFlueRequestUserInputTool(
         await options.createRequest({ questions }),
       );
       const response = options.waitForResponse
-        ? await options.waitForResponse(request)
+        ? await options.waitForResponse(request, signal)
         : await waitForUserInput(options.threadKey, request.id);
       return toJson(UserInputResponseSchema.parse(response));
     },

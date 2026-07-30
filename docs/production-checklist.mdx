@@ -12,7 +12,8 @@ Use this checklist before the first production release.
 - Pin Flary, Flue, Pi, and Cloudflare adapter versions.
 - Run typecheck, unit tests, Worker integration tests, and the clean npm
   installation test.
-- Apply the D1 run migration and verify the Flue Durable Object migration.
+- Apply the generated Durable Object SQLite migration and verify all Flue
+  function bindings.
 - Set an explicit default mode, model, cache policy, and run limits.
 - Confirm the production R2 binding exists when large files or history need it.
 

@@ -6,5 +6,10 @@
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
     "APP_ENV": "development"
-  }
+  },
+  "worker_loaders": [
+    {
+      "binding": "LOADER"
+    }
+  ]
 }

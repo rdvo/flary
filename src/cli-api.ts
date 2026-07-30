@@ -20,47 +20,45 @@ type PackageManifest = {
   devDependencies?: Record<string, string>;
 };
 
-const agentSource = `import { compilePrompt } from "flary/prompts";
+const appSource = `import { flary, z } from "flary";
 
-export function createSupportPrompt(source: string, input: {
-  customer: { name: string };
-  question: string;
-}) {
-  return compilePrompt(
-    {
-      path: "prompts/support/answer.prompt.md",
-      content: source,
-    },
-    {
-      callerModel: "openai/gpt-5",
-      values: input,
-    },
-  );
-}
+export const app = flary({
+  model: "openai/gpt-5",
+  bindings: z.object({ APP_ENV: z.string().default("development") }),
+});
 `;
 
-const promptSource = `---
-model: inherit
-thinking: high
-tools:
-  - docs.search
+const toolsSource = `import { z } from "flary";
+import { app } from "./flary";
 
-input:
-  customer.name: string
-  question: string
----
+export const searchDocs = app.fn({
+  description: "Search product documentation",
+  input: z.object({ query: z.string().min(1) }),
+  output: z.array(z.object({ title: z.string(), url: z.string().url() })),
+  run: ({ query }) => [{ title: query, url: "https://example.com/docs" }],
+});
 
-Answer {{customer.name}} with a concise, sourced response:
+export const tools = app.tools({ searchDocs });
+`;
 
-{{question}}
+const supportSource = `import { z } from "flary";
+import { app } from "./flary";
+import { tools } from "./tools";
+
+export const support = app.fn({
+  input: z.object({ question: z.string().min(1) }),
+  output: z.object({ answer: z.string() }),
+  tools,
+  prompt: ({ question }) => question,
+});
 `;
 
 function printHelp(): void {
   console.log(`Flary
 
 Usage:
-  flary create [directory]   Create a local prompt Worker starter
-  flary init [directory]     Add prompt files and a compiler helper
+  flary create [directory]   Create a local function Worker starter
+  flary init [directory]     Add function-first files
   flary help                 Show this help
 `);
 }
@@ -146,12 +144,16 @@ async function initProject(targetArg?: string): Promise<void> {
 
   const files = [
     {
-      path: join(target, "src", "flary", "support.ts"),
-      content: agentSource,
+      path: join(target, "src", "flary.ts"),
+      content: appSource,
     },
     {
-      path: join(target, "prompts", "support", "answer.prompt.md"),
-      content: promptSource,
+      path: join(target, "src", "tools.ts"),
+      content: toolsSource,
+    },
+    {
+      path: join(target, "src", "support.ts"),
+      content: supportSource,
     },
   ];
   const results = await Promise.all(
@@ -165,9 +167,9 @@ async function initProject(targetArg?: string): Promise<void> {
   for (const result of results) {
     console.log(`  ${result.status === "created" ? "created" : "kept"} ${result.path}`);
   }
-  console.log("\nRun your package manager install command, then import:");
-  console.log('  import { createSupportPrompt } from "./flary/support";');
-  console.log("  Pass the prompt file content using your framework's file loader.");
+  console.log("\nRun your package manager install command, then call:");
+  console.log('  import { support } from "./src/support";');
+  console.log('  await support({ question: "How do I upgrade?" });');
 }
 
 export async function runFlaryCli(args: readonly string[]): Promise<void> {

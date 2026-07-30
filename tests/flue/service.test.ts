@@ -133,3 +133,173 @@ test("Flue run service hides runs across tenant boundaries", async () => {
     /not found/i,
   );
 });
+
+test("Flue run service aborts and records a function limit failure", async () => {
+  const repository = new InMemoryFlaryRunRepository();
+  let aborted = 0;
+  const limitedGateway: FlueAgentGateway = {
+    async send() {
+      return {
+        streamUrl: "https://example.com/stream",
+        offset: "offset_limit",
+        submissionId: "submission_limit",
+      };
+    },
+    async wait(_admission, onEvent) {
+      await onEvent({
+        type: "message-started",
+        conversationId: "conversation_limit",
+        messageId: "message_1",
+        position: { batch: 1, index: 0 },
+      });
+      await onEvent({
+        type: "message-started",
+        conversationId: "conversation_limit",
+        messageId: "message_2",
+        position: { batch: 1, index: 1 },
+      });
+      return { answer: "unreachable" };
+    },
+    async abort() {
+      aborted += 1;
+      return { aborted: true };
+    },
+  };
+  const service = createFlueRunService({
+    repository,
+    gateway: limitedGateway,
+    createRunId: () => "run_limit",
+    pollMs: 1,
+  });
+  const run = await service.create(trusted, {
+    requestId: "request_limit",
+    channelId: "channel_limit",
+    execution: "agent",
+    input: "limit",
+    metadata: { flaryLimits: { steps: 1 } },
+  });
+  const deadline = Date.now() + 1_000;
+  let result = await service.get(trusted, run.runId);
+  while (result.status !== "failed" && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    result = await service.get(trusted, run.runId);
+  }
+  assert.equal(result.status, "failed");
+  assert.equal(result.error?.code, "function_limit_exceeded");
+  assert.equal(aborted, 1);
+});
+
+test("Flue run service enforces subagent delegation limits", async () => {
+  const repository = new InMemoryFlaryRunRepository();
+  let aborted = 0;
+  const limitedGateway: FlueAgentGateway = {
+    async send() {
+      return {
+        streamUrl: "https://example.com/stream",
+        offset: "offset_delegation",
+        submissionId: "submission_delegation",
+      };
+    },
+    async wait(_admission, onEvent) {
+      await onEvent({
+        type: "tool-input",
+        conversationId: "conversation_delegation",
+        messageId: "message_1",
+        toolCallId: "task_1",
+        toolName: "task",
+        input: { task: "one" },
+        position: { batch: 1, index: 0 },
+      });
+      await onEvent({
+        type: "tool-input",
+        conversationId: "conversation_delegation",
+        messageId: "message_1",
+        toolCallId: "task_2",
+        toolName: "task",
+        input: { task: "two" },
+        position: { batch: 1, index: 1 },
+      });
+      return { answer: "unreachable" };
+    },
+    async abort() {
+      aborted += 1;
+      return { aborted: true };
+    },
+  };
+  const service = createFlueRunService({
+    repository,
+    gateway: limitedGateway,
+    createRunId: () => "run_delegation",
+    pollMs: 1,
+  });
+  const run = await service.create(trusted, {
+    requestId: "request_delegation",
+    channelId: "channel_delegation",
+    execution: "agent",
+    input: "delegate",
+    metadata: { flaryDelegation: { maxTotal: 1, maxConcurrent: 1 } },
+  });
+  const deadline = Date.now() + 1_000;
+  let result = await service.get(trusted, run.runId);
+  while (result.status !== "failed" && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    result = await service.get(trusted, run.runId);
+  }
+  assert.equal(result.status, "failed");
+  assert.equal(result.error?.code, "delegation_limit_exceeded");
+  assert.equal(aborted, 1);
+});
+
+test("Flue run service enforces native workflow tool limits", async () => {
+  const repository = new InMemoryFlaryRunRepository();
+  let aborted = 0;
+  const limitedGateway: FlueAgentGateway = {
+    async send() {
+      throw new Error("not used");
+    },
+    async wait() {
+      throw new Error("not used");
+    },
+    async abort() {
+      throw new Error("not used");
+    },
+    async invokeWorkflow() {
+      return {
+        streamUrl: "https://example.com/runs/workflow_limit",
+        offset: "-1",
+        submissionId: "workflow_limit",
+      };
+    },
+    async waitWorkflow(_admission, onEvent) {
+      await onEvent({ type: "turn_start", turnId: "turn_1", purpose: "agent" } as never);
+      await onEvent({ type: "tool_start", toolName: "execute", toolCallId: "tool_1" } as never);
+      await onEvent({ type: "tool_start", toolName: "execute", toolCallId: "tool_2" } as never);
+      return { answer: "unreachable" };
+    },
+    async abortWorkflow() {
+      aborted += 1;
+    },
+  };
+  const service = createFlueRunService({
+    repository,
+    gateway: limitedGateway,
+    createRunId: () => "run_workflow_limit",
+    pollMs: 1,
+  });
+  const run = await service.create(trusted, {
+    requestId: "request_workflow_limit",
+    channelId: "channel_workflow_limit",
+    execution: "workflow",
+    input: "limit",
+    metadata: { flaryLimits: { toolCalls: 1 } },
+  });
+  const deadline = Date.now() + 1_000;
+  let result = await service.get(trusted, run.runId);
+  while (result.status !== "failed" && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    result = await service.get(trusted, run.runId);
+  }
+  assert.equal(result.status, "failed");
+  assert.equal(result.error?.code, "function_limit_exceeded");
+  assert.equal(aborted, 1);
+});

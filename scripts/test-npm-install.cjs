@@ -23,6 +23,7 @@ function run(command, args, cwd, options = {}) {
   }
 }
 
+run("npm", ["run", "build"], repository);
 run("npm", ["pack", "--pack-destination", temporary, "--silent"], repository);
 run("npm", ["init", "-y"], consumer, { quiet: true });
 const manifest = require(path.join(repository, "package.json"));
@@ -61,13 +62,42 @@ run(
       'if (typeof mcp.createMcpToolset !== "function") throw new Error("Missing createMcpToolset export");',
       'const cloudflare = await import("flary/cloudflare");',
       'if (typeof cloudflare.SqliteToolExecutionJournal !== "function") throw new Error("Missing SqliteToolExecutionJournal export");',
+      'const functions = await import("flary/functions");',
+      'if (typeof functions.flary !== "function") throw new Error("Missing functions flary export");',
+      'const vite = await import("flary/vite");',
+      'if (typeof vite.flaryVite !== "function") throw new Error("Missing flaryVite export");',
+      'const client = await import("flary/client");',
+      'if (typeof client.createFlaryFunctionClient !== "function") throw new Error("Missing typed client export");',
     ].join("\n"),
   ],
   consumer,
 );
 
-run(path.join(consumer, "node_modules/.bin/flary"), ["help"], consumer);
+const flaryBin = path.join(consumer, "node_modules/.bin/flary");
+run(flaryBin, ["help"], consumer);
+
+const starter = path.join(temporary, "starter");
+run(flaryBin, ["create", starter], consumer);
+const starterManifestPath = path.join(starter, "package.json");
+const starterManifest = JSON.parse(fs.readFileSync(starterManifestPath, "utf8"));
+starterManifest.dependencies.flary = tarball;
+fs.writeFileSync(
+  starterManifestPath,
+  `${JSON.stringify(starterManifest, null, 2)}\n`,
+);
+run("npm", ["install", "--loglevel", "error"], starter);
+run("npm", ["run", "build"], starter);
+
+const generatedWrangler = JSON.parse(
+  fs.readFileSync(path.join(starter, ".flue-vite.wrangler.jsonc"), "utf8"),
+);
+if (!generatedWrangler.exports?.FlaryRuntime) {
+  throw new Error("The generated starter did not use Durable Object exports");
+}
+if ("migrations" in generatedWrangler) {
+  throw new Error("The generated starter mixed exports with legacy migrations");
+}
 
 console.log(
-  "Clean npm install runs the CLI, exposes MCP and journal exports, and contains the pinned Flue/Pi patches.",
+  "Clean npm install verifies all function-first exports, builds the generated starter, and contains the pinned Flue/Pi patches.",
 );

@@ -355,9 +355,9 @@ export class FlaryThreadMetadataStore {
       .exec<ThreadEventRow>(
         runIdInput
           ? `SELECT event_id, run_id, event_json, created_at
-             FROM flary_thread_events WHERE run_id = ? ORDER BY created_at ASC, event_id ASC`
+             FROM flary_thread_events WHERE run_id = ? ORDER BY rowid ASC`
           : `SELECT event_id, run_id, event_json, created_at
-             FROM flary_thread_events ORDER BY created_at ASC, event_id ASC`,
+             FROM flary_thread_events ORDER BY rowid ASC`,
         ...(runIdInput ? [runIdInput] : []),
       )
       .toArray();

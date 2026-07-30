@@ -7,6 +7,10 @@ yarn-error.log*
 # Build output
 dist
 build
+.flue
+.flue-vite
+.flue-vite.wrangler.jsonc
+.wrangler
 
 # Environment variables
 .env

@@ -557,9 +557,6 @@ export async function createThreadTools(
       call: async (id: unknown, args?: unknown) => {
         const loaded = await runtime.describe(String(id));
         if (!loaded) throw new Error(`Tool not found: ${String(id)}`);
-        if (loaded.tool.operation === "write") {
-          throw new Error("Code Mode can compose read tools only. Use tool_call for writes.");
-        }
         return runtime.call({
           id: loaded.tool.id,
           arguments:
@@ -568,10 +565,29 @@ export async function createThreadTools(
               : {},
         });
       },
+      batch: async (calls: unknown) => {
+        if (!calls || typeof calls !== "object" || !Array.isArray((calls as { calls?: unknown }).calls)) {
+          throw new Error("Code Mode batch expects { calls: [...] }");
+        }
+        return runtime.batch({
+          calls: (calls as { calls: unknown[] }).calls.map((call) => {
+            if (!call || typeof call !== "object") throw new Error("Invalid Code Mode call");
+            const value = call as { id?: unknown; input?: unknown; arguments?: unknown };
+            if (typeof value.id !== "string") throw new Error("Code Mode call needs an id");
+            const args = value.arguments ?? value.input;
+            return {
+              id: value.id,
+              arguments: typeof args === "object" && args !== null
+                ? args as Record<string, unknown>
+                : {},
+            };
+          }),
+        });
+      },
     };
     const codeMode = defineTool({
       name: "flary__code_mode",
-      description: "Run bounded JavaScript in a network-isolated Dynamic Worker using read-only tool handles.",
+      description: "Run bounded JavaScript in a network-isolated Dynamic Worker using governed Flary tool handles.",
       input: v.object({ code: v.string() }),
       async run({ input }) {
         if (!metadata) throw new Error("Code Mode requires a thread Durable Object");

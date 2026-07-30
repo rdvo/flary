@@ -3,18 +3,26 @@ import { streamSSE } from "hono/streaming";
 import { z, ZodError } from "zod";
 
 import {
+  ApprovalDecisionSchema,
+  ApprovalRequestSchema,
   CancelRunRequestSchema,
   CreateRunRequestSchema,
   RunEventSchema,
   RunHandleSchema,
   RunInputSchema,
   RunResultSchema,
+  UserInputAnswerRequestSchema,
+  UserInputRecordSchema,
+  type ApprovalDecision,
+  type ApprovalRequest,
   type CancelRunRequest,
   type CreateRunRequest,
   type RunEvent,
   type RunHandle,
   type RunInput,
   type RunResult,
+  type UserInputAnswerRequest,
+  type UserInputRecord,
 } from "../contracts/index.js";
 import {
   IdentityReferenceSchema,
@@ -24,7 +32,13 @@ import {
   IdentifierSchema,
   MetadataSchema,
 } from "../contracts/common.js";
-import { FlaryHostError } from "./errors.js";
+import { FlaryHostError, featureUnavailable } from "./errors.js";
+
+const ApprovalAnswerRequestSchema = ApprovalDecisionSchema.pick({
+  status: true,
+  comment: true,
+  metadata: true,
+});
 
 export const TrustedRunContextSchema = z
   .object({
@@ -82,6 +96,29 @@ export interface FlaryRunService {
     context: TrustedRunContext,
     runId: string,
     input: CancelRunRequest,
+  ): Promise<RunResult>;
+  /** List approval requests after the service validates durable run ownership. */
+  listApprovals?(
+    context: TrustedRunContext,
+    runId: string,
+  ): Promise<ApprovalRequest[]>;
+  /** Persist one approval decision and wake the owning durable execution. */
+  decideApproval?(
+    context: TrustedRunContext,
+    runId: string,
+    decision: ApprovalDecision,
+  ): Promise<RunResult>;
+  /** List user-input requests after the service validates durable ownership. */
+  listUserInput?(
+    context: TrustedRunContext,
+    runId: string,
+  ): Promise<UserInputRecord[]>;
+  /** Persist user input and wake the owning durable execution. */
+  respondToUserInput?(
+    context: TrustedRunContext,
+    runId: string,
+    requestId: string,
+    input: UserInputAnswerRequest,
   ): Promise<RunResult>;
 }
 
@@ -257,6 +294,87 @@ export function createFlaryRunRouter<TBindings extends object>(
       202,
     );
   });
+
+  router.get("/runs/:runId/approvals", async (context) => {
+    const runId = IdentifierSchema.parse(context.req.param("runId"));
+    const trusted = await contextFor(context.req.raw, context.env, runId);
+    const service = serviceFor(context.env, executionFor(context));
+    if (!service.listApprovals) throw featureUnavailable("Run approvals");
+    return context.json({
+      approvals: (await service.listApprovals(trusted, runId)).map((value) =>
+        ApprovalRequestSchema.parse(value),
+      ),
+    });
+  });
+
+  router.post(
+    "/runs/:runId/approvals/:approvalId",
+    async (context) => {
+      const runId = IdentifierSchema.parse(context.req.param("runId"));
+      const approvalId = IdentifierSchema.parse(
+        context.req.param("approvalId"),
+      );
+      const trusted = await contextFor(context.req.raw, context.env, runId);
+      const input = ApprovalAnswerRequestSchema.parse(
+        await context.req.json(),
+      );
+      const service = serviceFor(context.env, executionFor(context));
+      if (!service.decideApproval) throw featureUnavailable("Run approvals");
+      const decision = ApprovalDecisionSchema.parse({
+        requestId: approvalId,
+        status: input.status,
+        decidedBy: trusted.identity,
+        decidedAt: new Date().toISOString(),
+        ...(input.comment ? { comment: input.comment } : {}),
+        ...(input.metadata ? { metadata: input.metadata } : {}),
+      });
+      return context.json(
+        RunResultSchema.parse(
+          await service.decideApproval(trusted, runId, decision),
+        ),
+        202,
+      );
+    },
+  );
+
+  router.get("/runs/:runId/user-input", async (context) => {
+    const runId = IdentifierSchema.parse(context.req.param("runId"));
+    const trusted = await contextFor(context.req.raw, context.env, runId);
+    const service = serviceFor(context.env, executionFor(context));
+    if (!service.listUserInput) throw featureUnavailable("Run user input");
+    return context.json({
+      requests: (await service.listUserInput(trusted, runId)).map((value) =>
+        UserInputRecordSchema.parse(value),
+      ),
+    });
+  });
+
+  router.post(
+    "/runs/:runId/user-input/:requestId",
+    async (context) => {
+      const runId = IdentifierSchema.parse(context.req.param("runId"));
+      const requestId = IdentifierSchema.parse(context.req.param("requestId"));
+      const trusted = await contextFor(context.req.raw, context.env, runId);
+      const input = UserInputAnswerRequestSchema.parse(
+        await context.req.json(),
+      );
+      const service = serviceFor(context.env, executionFor(context));
+      if (!service.respondToUserInput) {
+        throw featureUnavailable("Run user input");
+      }
+      return context.json(
+        RunResultSchema.parse(
+          await service.respondToUserInput(
+            trusted,
+            runId,
+            requestId,
+            input,
+          ),
+        ),
+        202,
+      );
+    },
+  );
 
   return router;
 }

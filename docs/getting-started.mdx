@@ -19,11 +19,12 @@ durable run, or expose the same function through HTTP.
 
 ## Install
 
-Flary 0.3.1 is available under the `next` tag while the live provider gates
-are pending. Pin the exact version in production.
+The current Flary release candidate is available under the `next` tag while
+the live provider and Cloudflare durability gates are pending. Pin the exact
+version in production only after those gates pass.
 
 ```bash
-npm install --save-exact flary@0.3.1
+npm install --save-exact flary@next
 ```
 
 Add a prompt example to an existing project:
@@ -41,8 +42,10 @@ npm install
 npm run dev
 ```
 
-The starter uses the function API. It does not create production Cloudflare
-resources. Use [One-off agent](/docs/one-off-agent/) for a small call or
+The starter uses the function API. Its Vite build generates the Flue runtime,
+the Flary run Durable Object, bindings, and SQLite migrations. Apply the
+generated Wrangler configuration before a production deploy. Use [One-off
+agent](/docs/one-off-agent/) for a small call or
 [Self-hosting](/docs/self-hosting/) for a durable deployment.
 
 ## Define a function
@@ -155,7 +158,9 @@ A production durable thread uses:
 
 - A Cloudflare Worker as the host.
 - One Flue Durable Object for each thread.
-- D1 for trusted run bindings, replay events, and materialized results.
+- The generated Flary Runtime Durable Object with SQLite for trusted run
+  bindings, replay events, idempotency, and materialized results.
+- D1 only when an application chooses the advanced low-level run adapter.
 - R2 only when the application stores large workspace files or uses the R2
   history fallback.
 

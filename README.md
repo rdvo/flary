@@ -39,21 +39,21 @@ Your product
       ├─ durable agent threads and streaming
       ├─ prompts, tools, MCP, approvals, and subagents
       ├─ provider sessions, OAuth/BYOK, caching, and usage
-      └─ Durable Objects, D1, R2, Artifacts, and sandbox adapters
+      └─ Durable Objects (SQLite by default), D1 adapters, R2, Artifacts, and sandbox adapters
 ```
 
 Flary does not force a chat UI, editor, authentication provider, or billing
 system on the host application.
 
-## Install 0.3.1
+## Install the current release candidate
 
 ```bash
-npm install --save-exact flary@0.3.1
+npm install --save-exact flary@next
 npx flary init
 ```
 
-The `next` npm tag points to 0.3.1. Pin the exact version in production until
-the live provider gates pass.
+The `next` tag is the release-candidate channel. Pin the exact version in
+production only after the Cloudflare Durable Object and provider gates pass.
 
 Use `flary init` to add function-first examples to an existing project. It
 does not replace the application's current framework or deployment setup.
@@ -64,7 +64,9 @@ npx flary create my-agent
 ```
 
 The generated project starts with Zod-backed functions and a local HTTP route.
-It does not create production Cloudflare resources.
+The Vite build also generates the Flue agent/workflow entry, the Flary run
+Durable Object, bindings, and SQLite migrations. Apply the generated Wrangler
+configuration before a production deploy.
 Add durable threads with the focused guides:
 
 - [Getting started](https://flary.dev/docs/getting-started/)
@@ -79,7 +81,8 @@ Add durable threads with the focused guides:
 | --- | --- | --- | --- | --- |
 | Compile prompt files | No | No | No | No |
 | Develop a Worker locally | No production account | Local if used | Local if used | No |
-| Run durable threads in production | Yes | Yes | Yes | Optional |
+| Run function-first durable work in production | Yes | Yes (SQLite) | Optional advanced adapter | Optional |
+| Run the low-level D1 host adapter | Yes | Optional | Yes | Optional |
 
 R2 is required for files larger than `1,500,000` bytes and for the R2 history
 fallback. Sandbox, Dynamic Workers, and Artifacts are optional.
@@ -145,7 +148,7 @@ Prompt functions expose one model-visible `execute` tool. The Dynamic Worker
 code searches and describes the private catalog before it calls a selected
 tool; credentials stay in trusted host closures. On Cloudflare, add a Worker
 Loader binding named `LOADER` and Flary detects it from the request bindings.
-For an explicit host setup, create the Flary-owned executor with
+For a custom low-level host setup, create the Flary-owned executor with
 `createFlaryCodemodeExecutor({ loader, ctx })` and pass it as `code`.
 
 ```ts
@@ -319,16 +322,15 @@ credential without returning a raw token through Flary. Hosted OpenAI login uses
 authorization by default. Local self-hosted clients can select
 `browser_callback`. Claude uses authorization-code completion.
 
-Flary `0.3.1` pins `@flue/runtime` and `@flue/sdk` to
-`1.0.0-beta.9`, and pins `@earendil-works/pi-ai` to `0.80.10`. Until the
-required changes are available in upstream releases, the npm package applies
-the checked-in patches during installation. Run `npm run test:npm-install`
-before publishing. This test installs the packed Flary package in an empty
-npm project and verifies both patched runtimes.
+The current release candidate pins `@flue/runtime` and `@flue/sdk` to
+`1.0.0-beta.9`, and pins `@earendil-works/pi-ai` to `0.80.10`. The package
+applies checked-in patches during installation. Run
+`npm run test:npm-install` before publishing. Stable `0.5.0` must use an
+upstream stable Flue release; it must not depend on a patched beta runtime.
 
-The three opt-in live provider tests are the stable-release gate. Install the
-pending release with `npm install flary@next`. Do not promote it to the
-`latest` tag until those live tests pass with real subscription connections.
+Install the pending release with `npm install flary@next`. Do not promote it
+to the `latest` tag until the live provider, Durable Object eviction/restart,
+tenant-isolation, approval/input, and clean-starter deployment tests pass.
 
 The host must store private login state and credentials with authenticated
 encryption. Public Flary schemas do not include PKCE verifiers, device
@@ -399,10 +401,12 @@ app.route(
 );
 ```
 
-Apply `FLARY_RUNS_D1_MIGRATION` through the host application's D1 migration
-process. The D1 tables contain trusted run bindings, Flue admission receipts,
-normalized replay events, and materialized results. They do not copy Flue's
-canonical transcript.
+This is the advanced low-level D1 adapter. The function-first API uses the
+generated Runtime Durable Object and SQLite by default; it does not need D1.
+If you choose this low-level adapter, apply `FLARY_RUNS_D1_MIGRATION` through
+the host application's D1 migration process. The D1 tables contain trusted run
+bindings, Flue admission receipts, normalized replay events, and materialized
+results. They do not copy Flue's canonical transcript.
 
 The Flue submission continues after the original HTTP request disconnects.
 Flary can restart event projection from the stored admission receipt after a

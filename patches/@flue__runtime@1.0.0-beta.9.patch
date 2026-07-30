@@ -244,6 +244,11 @@ index 1147b979db854e2c491a1ab802b4848a84e1dbd1..0661b4a7662fade4435fe0425508087f
  	};
  	if (!config.conversationWriter || !config.attachmentStore) throw new Error("[flue] Canonical conversation runtime is not configured.");
  	return new Harness(config.id, "default", agentConfig, env, emitEvent, definition.tools ?? [], toolFactory, config.conversationWriter, config.attachmentStore, definition.actions, config.runId === void 0 ? { instanceId: config.id } : { runId: config.runId });
+@@ -847,0 +849,4 @@
++		if (new URL(request.url).searchParams.get("flary") === "wake" && request.method === "GET") {
++			await this.wakeSubmissions();
++			return Response.json({ ok: true });
++		}
 diff --git a/dist/run-store-CYeXjR-d.mjs b/dist/run-store-CYeXjR-d.mjs
 index 7aad15d8afe459fc75d990bde7bacc0992a62529..c3f38a85d46066cc974a2512a7b4c4288f97d458 100644
 --- a/dist/run-store-CYeXjR-d.mjs

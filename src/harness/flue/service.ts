@@ -3,11 +3,14 @@ import {
   type AgentSendResult,
   type ConversationStreamChunk,
   type CreateFlueClientOptions,
+  type FlueEvent,
   type FlueClient,
 } from "@flue/sdk";
 import { z } from "zod";
 
 import {
+  ApprovalDecisionSchema,
+  ApprovalRequestSchema,
   CreateRunRequestSchema,
   IdentifierSchema,
   JsonObjectSchema,
@@ -17,11 +20,17 @@ import {
   RunInputSchema,
   RunResultSchema,
   TimestampSchema,
+  UserInputAnswerRequestSchema,
+  UserInputRecordSchema,
+  type ApprovalDecision,
+  type ApprovalRequest,
   type CreateRunRequest,
   type RunEvent,
   type RunHandle,
   type RunInput,
   type RunResult,
+  type UserInputAnswerRequest,
+  type UserInputRecord,
 } from "../contracts/index.js";
 import {
   TrustedRunContextSchema,
@@ -237,6 +246,22 @@ export interface FlueAgentGateway {
     onEvent: (event: ConversationStreamChunk) => Promise<void> | void,
   ): Promise<unknown>;
   abort(agentName: string, instanceId: string): Promise<{ aborted: boolean }>;
+  /** Start a generated Flue workflow for a native function. */
+  invokeWorkflow?(
+    workflowName: string,
+    input: unknown,
+  ): Promise<FlueAdmission>;
+  /** Wait for the same durable workflow after a host restart. */
+  waitWorkflow?(
+    admission: FlueAdmission,
+    onEvent: (event: FlueEvent) => Promise<void> | void,
+    workflowName?: string,
+  ): Promise<unknown>;
+  /** Cancel the generated durable workflow. */
+  abortWorkflow?(
+    workflowName: string,
+    runId: string,
+  ): Promise<{ aborted: boolean }>;
 }
 
 export interface CreateFlueRunServiceOptions {
@@ -253,6 +278,25 @@ export interface CreateFlueRunServiceOptions {
   readonly schedule?: (work: Promise<void>) => void;
   readonly pollMs?: number;
   readonly createRunId?: () => string;
+  /** Durable host bridge for approval records owned by the Flue agent. */
+  readonly listApprovals?: (
+    record: FlaryRunRecord,
+  ) => Promise<readonly ApprovalRequest[]> | readonly ApprovalRequest[];
+  /** Persist the decision and wake the same Flue submission. */
+  readonly decideApproval?: (
+    record: FlaryRunRecord,
+    decision: ApprovalDecision,
+  ) => Promise<void> | void;
+  /** Durable host bridge for user-input records owned by the Flue agent. */
+  readonly listUserInput?: (
+    record: FlaryRunRecord,
+  ) => Promise<readonly UserInputRecord[]> | readonly UserInputRecord[];
+  /** Persist the answer and wake the same Flue submission. */
+  readonly respondToUserInput?: (
+    record: FlaryRunRecord,
+    requestId: string,
+    input: UserInputAnswerRequest,
+  ) => Promise<void> | void;
 }
 
 /**
@@ -280,7 +324,7 @@ export function createFlueRunService(
           ...latest.result,
           status: "failed",
           error: {
-            code: "flue_projection_failed",
+            code: errorCode(cause),
             message: errorMessage(cause),
             retryable: true,
           },
@@ -313,6 +357,48 @@ export function createFlueRunService(
     return FlaryRunRecordSchema.parse(record);
   };
 
+  /**
+   * Materialize an external wait in the host projection.
+   *
+   * Flue keeps the agent submission active while an approval or user-input
+   * request is pending. Flary must still expose a stable waiting state to
+   * callers and persist it before the next Worker request.
+   */
+  const refreshWaiting = async (
+    record: FlaryRunRecord,
+  ): Promise<FlaryRunRecord> => {
+    if (isTerminal(record.result.status)) return record;
+    const approvals = options.listApprovals
+      ? await options.listApprovals(record)
+      : [];
+    const userInput = options.listUserInput
+      ? await options.listUserInput(record)
+      : [];
+    const approval = approvals[0];
+    const request = userInput[0];
+    if (!approval && !request) return record;
+    if (record.result.status === "waiting") return record;
+
+    const next = await options.repository.setResult(
+      record.runId,
+      RunResultSchema.parse({
+        ...record.result,
+        status: "waiting",
+      }),
+    );
+    await options.repository.appendEvent(
+      record.runId,
+      `waiting:${approval ? "approval" : "input"}:${approval?.id ?? request?.request.id ?? "pending"}`,
+      eventDraft(record, "run.waiting", {
+        reason: approval
+          ? approval.reason
+          : "The function is waiting for user input.",
+        ...(approval ? { approvalId: approval.id } : {}),
+      }),
+    );
+    return next;
+  };
+
   return {
     async create(trustedInput, requestInput): Promise<RunHandle> {
       const trusted = TrustedRunContextSchema.parse(trustedInput);
@@ -325,27 +411,54 @@ export function createFlueRunService(
         if (existing) return handle(existing);
       }
 
+      // Allocate the Flary run id before deriving the Flue instance. A
+      // function-first run gets one isolated agent instance, which prevents
+      // approvals and transcripts from different runs sharing a Codemode
+      // journal. Legacy low-level callers keep the older channel-scoped
+      // instance behaviour for backwards compatibility.
+      const runId = IdentifierSchema.parse(
+        options.createRunId?.() ?? `run_${crypto.randomUUID()}`,
+      );
+
       const agentName =
         options.agentName?.(trusted, request) ?? trusted.agentId;
       const instanceId =
         options.instanceId?.(trusted, request) ??
-        [
-          trusted.tenantId,
-          trusted.applicationId,
-          trusted.projectId ?? "global",
-          request.channelId,
-        ].join(".");
+        (isFunctionFirstRequest(request)
+          ? runId
+          : [
+              trusted.tenantId,
+              trusted.applicationId,
+              trusted.projectId ?? "global",
+              request.channelId,
+            ].join("."));
       const admission = FlueAdmissionSchema.parse(
-        await options.gateway.send(
-          IdentifierSchema.parse(agentName),
-          IdentifierSchema.parse(instanceId),
-          inputMessage(request.input),
-        ),
+        request.execution === "workflow"
+          ? options.gateway.invokeWorkflow
+            ? await options.gateway.invokeWorkflow(
+                IdentifierSchema.parse(agentName),
+                {
+                  __flary: {
+                    runId,
+                    revisionId: trusted.revisionId,
+                  },
+                  input: request.input,
+                },
+              )
+            : (() => {
+                throw new FlaryHostError(
+                  501,
+                  "workflow_gateway_missing",
+                  "Native Flary functions need a Flue workflow gateway",
+                );
+              })()
+          : await options.gateway.send(
+              IdentifierSchema.parse(agentName),
+              IdentifierSchema.parse(instanceId),
+              inputMessage(request.input),
+            ),
       );
       const now = new Date().toISOString();
-      const runId = IdentifierSchema.parse(
-        options.createRunId?.() ?? `run_${crypto.randomUUID()}`,
-      );
       const result = RunResultSchema.parse({
         runId,
         requestId: request.requestId,
@@ -388,7 +501,7 @@ export function createFlueRunService(
     },
 
     async get(trusted, runId): Promise<RunResult> {
-      const record = await load(trusted, runId);
+      const record = await refreshWaiting(await load(trusted, runId));
       if (!isTerminal(record.result.status)) track(record);
       return record.result;
     },
@@ -399,7 +512,7 @@ export function createFlueRunService(
       observeOptions: ObserveRunOptions,
     ): AsyncIterable<RunEvent> {
       let cursor = observeOptions.afterSequence;
-      let record = await load(trusted, runId);
+      let record = await refreshWaiting(await load(trusted, runId));
       if (!isTerminal(record.result.status)) track(record);
 
       while (!observeOptions.signal.aborted) {
@@ -408,7 +521,7 @@ export function createFlueRunService(
           cursor = Math.max(cursor, event.sequence);
           yield RunEventSchema.parse(event);
         }
-        record = await load(trusted, runId);
+        record = await refreshWaiting(await load(trusted, runId));
         if (isTerminal(record.result.status)) {
           const remaining = await options.repository.events(runId, cursor);
           for (const event of remaining) yield RunEventSchema.parse(event);
@@ -419,7 +532,7 @@ export function createFlueRunService(
     },
 
     async input(trusted, runId, inputValue): Promise<RunResult> {
-      const record = await load(trusted, runId);
+      const record = await refreshWaiting(await load(trusted, runId));
       const input = RunInputSchema.parse(inputValue);
       if (isTerminal(record.result.status)) {
         throw new FlaryHostError(
@@ -464,7 +577,21 @@ export function createFlueRunService(
     async cancel(trusted, runId, input): Promise<RunResult> {
       const record = await load(trusted, runId);
       if (isTerminal(record.result.status)) return record.result;
-      await options.gateway.abort(record.agentName, record.instanceId);
+      if (record.request.execution === "workflow") {
+        if (!options.gateway.abortWorkflow) {
+          throw new FlaryHostError(
+            501,
+            "workflow_cancel_unavailable",
+            "This Flue host does not support durable workflow cancellation",
+          );
+        }
+        await options.gateway.abortWorkflow(
+          record.agentName,
+          record.admission.submissionId,
+        );
+      } else {
+        await options.gateway.abort(record.agentName, record.instanceId);
+      }
       const completedAt = new Date().toISOString();
       const result = RunResultSchema.parse({
         ...record.result,
@@ -481,6 +608,92 @@ export function createFlueRunService(
       );
       return result;
     },
+
+    ...(options.listApprovals
+      ? {
+          async listApprovals(
+            trusted: TrustedRunContext,
+            runId: string,
+          ): Promise<ApprovalRequest[]> {
+            const record = await load(trusted, runId);
+            const current = await refreshWaiting(record);
+            return (await options.listApprovals!(current)).map((value) =>
+              ApprovalRequestSchema.parse(value),
+            );
+          },
+        }
+      : {}),
+
+    ...(options.decideApproval
+      ? {
+          async decideApproval(
+            trusted: TrustedRunContext,
+            runId: string,
+            decisionInput: ApprovalDecision,
+          ): Promise<RunResult> {
+            const record = await load(trusted, runId);
+            const decision = ApprovalDecisionSchema.parse(decisionInput);
+            await options.decideApproval!(record, decision);
+            await options.repository.appendEvent(
+              runId,
+              `approval:${decision.requestId}:${decision.status}`,
+              eventDraft(record, "approval.resolved", { decision }),
+            );
+            const latest = await load(trusted, runId);
+            const resumed = latest.result.status === "waiting"
+              ? await options.repository.setResult(
+                  latest.runId,
+                  RunResultSchema.parse({ ...latest.result, status: "running" }),
+                )
+              : latest;
+            if (!isTerminal(resumed.result.status)) track(resumed);
+            return resumed.result;
+          },
+        }
+      : {}),
+
+    ...(options.listUserInput
+      ? {
+          async listUserInput(
+            trusted: TrustedRunContext,
+            runId: string,
+          ): Promise<UserInputRecord[]> {
+            const record = await load(trusted, runId);
+            const current = await refreshWaiting(record);
+            return (await options.listUserInput!(current)).map((value) =>
+              UserInputRecordSchema.parse(value),
+            );
+          },
+        }
+      : {}),
+
+    ...(options.respondToUserInput
+      ? {
+          async respondToUserInput(
+            trusted: TrustedRunContext,
+            runId: string,
+            requestId: string,
+            inputValue: UserInputAnswerRequest,
+          ): Promise<RunResult> {
+            const record = await load(trusted, runId);
+            const input = UserInputAnswerRequestSchema.parse(inputValue);
+            await options.respondToUserInput!(
+              record,
+              IdentifierSchema.parse(requestId),
+              input,
+            );
+            const latest = await load(trusted, runId);
+            const resumed = latest.result.status === "waiting"
+              ? await options.repository.setResult(
+                  latest.runId,
+                  RunResultSchema.parse({ ...latest.result, status: "running" }),
+                )
+              : latest;
+            if (!isTerminal(resumed.result.status)) track(resumed);
+            return resumed.result;
+          },
+        }
+      : {}),
   };
 }
 
@@ -488,6 +701,10 @@ export function createFlueAgentGateway(
   options: CreateFlueClientOptions | FlueClient,
 ): FlueAgentGateway {
   const client = "agents" in options ? options : createFlueClient(options);
+  const baseUrl =
+    "agents" in options
+      ? "https://flue.invalid"
+      : options.baseUrl.replace(/\/+$/, "");
   return {
     async send(agentName, instanceId, message) {
       return FlueAdmissionSchema.parse(
@@ -500,6 +717,31 @@ export function createFlueAgentGateway(
     abort(agentName, instanceId) {
       return client.agents.abort(agentName, instanceId);
     },
+    async invokeWorkflow(workflowName, input) {
+      const admission = await client.workflows.invoke(workflowName, { input });
+      return FlueAdmissionSchema.parse({
+        streamUrl: `${baseUrl}/runs/${encodeURIComponent(admission.runId)}`,
+        offset: "-1",
+        submissionId: admission.runId,
+      });
+    },
+    async waitWorkflow(admission, onEvent) {
+      const stream = client.runs.stream(admission.submissionId, {
+        offset: admission.offset,
+        live: true,
+      });
+      for await (const event of stream) {
+        await onEvent(event);
+      }
+      const run = await client.runs.get(admission.submissionId);
+      if (run.status === "errored" || run.isError) {
+        throw new Error(errorMessage(run.error));
+      }
+      if (run.status !== "completed") {
+        throw new Error("The Flue workflow stream ended before completion");
+      }
+      return run.result;
+    },
   };
 }
 
@@ -507,18 +749,71 @@ async function trackAdmission(
   record: FlaryRunRecord,
   options: CreateFlueRunServiceOptions,
 ): Promise<void> {
+  if (record.request.execution === "workflow") {
+    await trackWorkflowAdmission(record, options);
+    return;
+  }
   const toolNames = new Map<string, string>();
   const toolInputs = new Map<string, unknown>();
   let toolCalls = record.result.usage?.toolCalls ?? 0;
+  let modelSteps = 0;
+  let costUsd = record.result.usage?.costUsd ?? 0;
   let lastUsage = record.result.usage;
+  const limits = functionLimits(record);
+  const delegation = functionDelegation(record);
+  let totalDelegations = 0;
+  const activeDelegations = new Set<string>();
 
   const output = await options.gateway.wait(
     record.admission,
-    async (chunk) => {
+    async (chunk: ConversationStreamChunk) => {
       const mapped = mapChunk(record, chunk, toolNames, toolInputs);
-      if (!mapped) return;
-      if (chunk.type === "tool-input") toolCalls += 1;
+      if (chunk.type === "message-started") {
+        modelSteps += 1;
+        await enforceFunctionLimit(limits.steps, modelSteps, "steps", async () => {
+          await options.gateway.abort(record.agentName, record.instanceId);
+        });
+      }
+      if (chunk.type === "tool-input") {
+        toolCalls += 1;
+        await enforceFunctionLimit(
+          limits.toolCalls,
+          toolCalls,
+          "tool calls",
+          async () => {
+            await options.gateway.abort(record.agentName, record.instanceId);
+          },
+        );
+        if (chunk.toolName === "task") {
+          totalDelegations += 1;
+          await enforceDelegationLimit(
+            delegation,
+            totalDelegations,
+            activeDelegations.size + 1,
+            async () => {
+              await options.gateway.abort(record.agentName, record.instanceId);
+            },
+          );
+          activeDelegations.add(chunk.toolCallId);
+        }
+      }
+      if (
+        (chunk.type === "tool-output" || chunk.type === "tool-output-error") &&
+        activeDelegations.has(chunk.toolCallId)
+      ) {
+        activeDelegations.delete(chunk.toolCallId);
+      }
       if (chunk.type === "message-completed" && chunk.usage) {
+        costUsd += Math.max(0, chunk.usage.cost.total);
+        await enforceFunctionLimit(
+          limits.costUsd,
+          costUsd,
+          "cost",
+          async () => {
+            await options.gateway.abort(record.agentName, record.instanceId);
+          },
+          "USD",
+        );
         const billingMode = record.request.metadata?.billingMode;
         const subscription = billingMode === "subscription";
         lastUsage = {
@@ -540,16 +835,17 @@ async function trackAdmission(
                   state: "known" as const,
                   microUnits: Math.max(
                     0,
-                    Math.round(chunk.usage.cost.total * 1_000_000),
+                    Math.round(costUsd * 1_000_000),
                   ),
                   unit: "USD" as const,
                 }),
           },
           ...(subscription && chunk.usage.cost.total === 0
             ? {}
-            : { costUsd: chunk.usage.cost.total }),
+            : { costUsd }),
         };
       }
+      if (!mapped) return;
       await options.repository.appendEvent(
         record.runId,
         chunkKey(chunk),
@@ -573,6 +869,262 @@ async function trackAdmission(
     `completed:${record.admission.submissionId}`,
     eventDraft(record, "run.completed", { output: result.output! }),
   );
+}
+
+async function trackWorkflowAdmission(
+  record: FlaryRunRecord,
+  options: CreateFlueRunServiceOptions,
+): Promise<void> {
+  const wait = options.gateway.waitWorkflow;
+  if (!wait) {
+    throw new Error("The Flue workflow gateway cannot resume this run.");
+  }
+  const limits = functionLimits(record);
+  const delegation = functionDelegation(record);
+  let totalDelegations = 0;
+  const activeDelegations = new Set<string>();
+  let costUsd = record.result.usage?.costUsd ?? 0;
+  let modelSteps = 0;
+  let toolCalls = record.result.usage?.toolCalls ?? 0;
+  const output = await wait.call(
+    options.gateway,
+    record.admission,
+    async (event) => {
+      if (event.type === "turn_start") {
+        modelSteps += 1;
+        await enforceFunctionLimit(
+          limits.steps,
+          modelSteps,
+          "steps",
+          async () => {
+            if (options.gateway.abortWorkflow) {
+              await options.gateway.abortWorkflow(record.agentName, record.admission.submissionId);
+            }
+          },
+        );
+      } else if (event.type === "tool_start") {
+        toolCalls += 1;
+        await enforceFunctionLimit(
+          limits.toolCalls,
+          toolCalls,
+          "tool calls",
+          async () => {
+            if (options.gateway.abortWorkflow) {
+              await options.gateway.abortWorkflow(record.agentName, record.admission.submissionId);
+            }
+          },
+        );
+      } else if (event.type === "task_start") {
+        totalDelegations += 1;
+        activeDelegations.add(event.taskId);
+        await enforceDelegationLimit(
+          delegation,
+          totalDelegations,
+          activeDelegations.size,
+          async () => {
+            if (options.gateway.abortWorkflow) {
+              await options.gateway.abortWorkflow(record.agentName, record.admission.submissionId);
+            }
+          },
+        );
+      } else if (event.type === "task") {
+        activeDelegations.delete(event.taskId);
+      }
+      if (event.type === "turn" && event.response.usage?.cost?.total !== undefined) {
+        costUsd += Math.max(0, Number(event.response.usage.cost.total));
+        await enforceFunctionLimit(
+          limits.costUsd,
+          costUsd,
+          "cost",
+          async () => {
+            if (options.gateway.abortWorkflow) {
+              await options.gateway.abortWorkflow(record.agentName, record.admission.submissionId);
+            }
+          },
+          "USD",
+        );
+      }
+      const mapped = mapWorkflowEvent(record, event);
+      if (!mapped) return;
+      await options.repository.appendEvent(
+        record.runId,
+        `workflow:${record.admission.submissionId}:${event.eventIndex}`,
+        mapped,
+      );
+    },
+    record.agentName,
+  );
+  const latest = await options.repository.get(record.runId);
+  if (!latest || latest.result.status === "cancelled") return;
+  const result = RunResultSchema.parse({
+    ...latest.result,
+    status: "completed",
+    output: JsonValueSchema.parse(jsonValue(output)),
+    usage: {
+      ...(latest.result.usage ?? {}),
+      ...(toolCalls > 0 ? { toolCalls } : {}),
+      ...(costUsd > 0 ? { costUsd } : {}),
+    },
+    completedAt: new Date().toISOString(),
+  });
+  await options.repository.setResult(record.runId, result);
+  await options.repository.appendEvent(
+    record.runId,
+    `completed:${record.admission.submissionId}`,
+    eventDraft(record, "run.completed", { output: result.output! }),
+  );
+}
+
+interface FunctionLimits {
+  readonly steps?: number;
+  readonly toolCalls?: number;
+  readonly costUsd?: number;
+}
+
+interface FunctionDelegation {
+  readonly maxConcurrent?: number;
+  readonly maxTotal?: number;
+}
+
+function functionLimits(record: FlaryRunRecord): FunctionLimits {
+  const value = record.request.metadata?.flaryLimits;
+  if (!isRecord(value)) return {};
+  return {
+    ...(positiveNumber(value.steps) ? { steps: value.steps } : {}),
+    ...(positiveNumber(value.toolCalls) ? { toolCalls: value.toolCalls } : {}),
+    ...(positiveNumber(value.costUsd) ? { costUsd: value.costUsd } : {}),
+  };
+}
+
+function functionDelegation(record: FlaryRunRecord): FunctionDelegation {
+  const value = record.request.metadata?.flaryDelegation;
+  if (!isRecord(value)) return {};
+  return {
+    ...(positiveNumber(value.maxConcurrent) ? { maxConcurrent: value.maxConcurrent } : {}),
+    ...(positiveNumber(value.maxTotal) ? { maxTotal: value.maxTotal } : {}),
+  };
+}
+
+async function enforceDelegationLimit(
+  policy: FunctionDelegation,
+  total: number,
+  concurrent: number,
+  abort: () => Promise<void>,
+): Promise<void> {
+  if (policy.maxTotal !== undefined && total > policy.maxTotal) {
+    await abort();
+    throw Object.assign(
+      new Error("The function exceeded its total subagent delegation limit."),
+      { code: "delegation_limit_exceeded" },
+    );
+  }
+  if (policy.maxConcurrent !== undefined && concurrent > policy.maxConcurrent) {
+    await abort();
+    throw Object.assign(
+      new Error("The function exceeded its concurrent subagent delegation limit."),
+      { code: "delegation_limit_exceeded" },
+    );
+  }
+}
+
+async function enforceFunctionLimit(
+  limit: number | undefined,
+  value: number,
+  label: string,
+  abort: () => Promise<void>,
+  unit = "",
+): Promise<void> {
+  if (limit === undefined || value <= limit) return;
+  await abort();
+  throw Object.assign(
+    new Error(
+      `The function exceeded its ${label} limit${unit ? ` in ${unit}` : ""}.`,
+    ),
+    { code: "function_limit_exceeded" },
+  );
+}
+
+function positiveNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function isFunctionFirstRequest(request: CreateRunRequest): boolean {
+  return isRecord(request.metadata?.flaryFunction);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function errorCode(cause: unknown): string {
+  if (isRecord(cause) && typeof cause.code === "string" && cause.code.length > 0) {
+    return cause.code;
+  }
+  return "flue_projection_failed";
+}
+
+function mapWorkflowEvent(
+  record: FlaryRunRecord,
+  event: FlueEvent,
+): RunEventDraft | undefined {
+  switch (event.type) {
+    case "text_delta":
+      return event.text
+        ? eventDraft(record, "message.delta", { delta: event.text })
+        : undefined;
+    case "thinking_delta":
+      return event.delta
+        ? eventDraft(record, "reasoning.delta", { delta: event.delta })
+        : undefined;
+    case "agent_start":
+      return eventDraft(record, "agent.started", {
+        agentId: record.trusted.agentId,
+      });
+    case "agent_end":
+      return eventDraft(record, "agent.completed", {
+        agentId: record.trusted.agentId,
+      });
+    case "tool_start":
+      return eventDraft(record, "tool.call", {
+        call: {
+          id: event.toolCallId,
+          toolId: event.toolName,
+          arguments: jsonObject(event.args),
+          runId: record.runId,
+          requestedAt: event.timestamp,
+        },
+      });
+    case "tool":
+      return eventDraft(record, "tool.result", {
+        result: {
+          id: `result_${event.toolCallId}`,
+          callId: event.toolCallId,
+          toolId: event.toolName,
+          status: event.isError ? "failed" : "succeeded",
+          ...(event.isError
+            ? {
+                error: {
+                  code: "tool_failed",
+                  message: errorMessage(event.result),
+                },
+              }
+            : { output: jsonObject(event.result) }),
+          completedAt: event.timestamp,
+        },
+      });
+    case "run_end":
+      if (event.isError) {
+        return eventDraft(record, "run.failed", {
+          error: {
+            code: "workflow_failed",
+            message: errorMessage(event.error),
+          },
+        });
+      }
+      return undefined;
+    default:
+      return undefined;
+  }
 }
 
 function mapChunk(
@@ -737,7 +1289,12 @@ function sameScope(
     left.tenantId === right.tenantId &&
     left.applicationId === right.applicationId &&
     left.projectId === right.projectId &&
-    left.agentId === right.agentId
+    left.agentId === right.agentId &&
+    // A durable run is admitted against one immutable function revision.
+    // Hosts that do not pin a revision (legacy low-level callers) keep the
+    // previous behaviour, while function-first callers fail closed after a
+    // deployment changes the build or tool catalog.
+    (!left.revisionId || !right.revisionId || left.revisionId === right.revisionId)
   );
 }
 

@@ -16,7 +16,7 @@ declarations small and makes the host boundary easy to audit.
 | flary/flue | Low-level Flue services, lazy tools, and user input |
 | flary/host | Authenticated host routers and trusted context |
 | flary/client | Function and low-level run/thread clients |
-| flary/vite | Vite manifest generation for registered functions and tools |
+| flary/vite | Vite generation for functions, Flue entries, bindings, and tools |
 | flary/tools | Zod tools, catalogs, lazy runtime, and capability handles |
 | flary/mcp | Remote MCP discovery and safe tool adapters |
 | flary/providers | Normalized model requests, adapters, OAuth, and cache policy |
@@ -46,9 +46,10 @@ import { createMcpTools } from "flary/mcp";
 Use the exact release in production:
 
 ~~~bash
-npm install --save-exact flary@0.3.1
+npm install --save-exact flary@next
 ~~~
 
-Flary 0.3.1 pins Flue runtime and SDK 1.0.0-beta.9 and Pi AI 0.80.10. Run
-the clean npm installation test in CI so a host does not silently lose the
-checked-in dependency patches.
+The current release candidate pins Flue runtime and SDK 1.0.0-beta.9 and Pi
+AI 0.80.10. Run the clean npm installation test in CI so a host does not
+silently lose the checked-in dependency patches. Stable 0.5.0 must use an
+upstream stable Flue release.

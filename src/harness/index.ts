@@ -58,3 +58,4 @@ export * from "./tools/index.js";
 export * from "./telemetry/index.js";
 export * from "./prompts/rollouts.js";
 export * from "./prompts/revisions.js";
+export * from "./functions/index.js";
