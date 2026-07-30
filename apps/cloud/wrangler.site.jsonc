@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "flary-web-local",
+  "account_id": "26fadb0e7fb3b317bc68bd136f7e9329",
   "main": "worker/site.ts",
   "compatibility_date": "2026-07-29",
   "compatibility_flags": ["nodejs_compat"],
@@ -21,6 +22,12 @@
       "name": "flary-web",
       "workers_dev": true,
       "preview_urls": false,
+      "routes": [
+        {
+          "pattern": "flary.dev",
+          "custom_domain": true
+        }
+      ],
       "vars": {
         "APP_ENV": "production"
       },
