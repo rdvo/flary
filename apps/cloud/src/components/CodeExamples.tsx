@@ -1,28 +1,4 @@
-import Editor, { loader, type Monaco } from "@monaco-editor/react";
-import * as monacoEditor from "monaco-editor/editor/editor.api.js";
-import EditorWorker from "monaco-editor/editor/editor.worker.js?worker";
-import "monaco-editor/language/typescript/monaco.contribution.js";
-import TypeScriptWorker from "monaco-editor/language/typescript/ts.worker.js?worker";
 import { useState } from "react";
-
-loader.config({ monaco: monacoEditor });
-
-if (typeof self !== "undefined") {
-  (
-    self as typeof self & {
-      MonacoEnvironment: {
-        getWorker(moduleId: string, label: string): Worker;
-      };
-    }
-  ).MonacoEnvironment = {
-    getWorker(_moduleId, label) {
-      if (label === "typescript" || label === "javascript") {
-        return new TypeScriptWorker();
-      }
-      return new EditorWorker();
-    },
-  };
-}
 
 const examples = [
   {
@@ -86,54 +62,6 @@ await flary.prompt(
   },
 ] as const;
 
-const typeDeclarations = `
-declare module "flary/prompts" {
-  export function compilePrompt(
-    source: string,
-    options: {
-      callerModel: string;
-      values: Record<string, unknown>;
-    },
-  ): Promise<unknown>;
-}
-
-declare module "flary/host" {
-  export function createFlaryHostRouter<T>(
-    options: Record<string, unknown>,
-  ): unknown;
-}
-
-declare module "flary/client" {
-  export function createFlaryThreadClient(options: {
-    baseUrl: string;
-  }): {
-    prompt(
-      ref: Record<string, string>,
-      input: { message: string },
-    ): Promise<unknown>;
-  };
-}
-`;
-
-function configureMonaco(monaco: Monaco) {
-  monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
-    target: monaco.languages.typescript.ScriptTarget.ES2022,
-    module: monaco.languages.typescript.ModuleKind.ESNext,
-    moduleResolution:
-      monaco.languages.typescript.ModuleResolutionKind.NodeJs,
-    allowNonTsExtensions: true,
-    strict: true,
-  });
-  monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
-    noSemanticValidation: true,
-    noSyntaxValidation: false,
-  });
-  monaco.languages.typescript.typescriptDefaults.addExtraLib(
-    typeDeclarations,
-    "file:///node_modules/flary/index.d.ts",
-  );
-}
-
 export function CodeExamples() {
   const [activeId, setActiveId] =
     useState<(typeof examples)[number]["id"]>("prompt");
@@ -159,6 +87,8 @@ export function CodeExamples() {
                 key={example.id}
                 type="button"
                 role="tab"
+                id={`code-tab-${example.id}`}
+                aria-controls={`code-panel-${example.id}`}
                 aria-selected={active.id === example.id}
                 className={active.id === example.id ? "active" : undefined}
                 onClick={() => setActiveId(example.id)}
@@ -169,39 +99,14 @@ export function CodeExamples() {
           </div>
           <span>{active.filename}</span>
         </div>
-        <Editor
-          beforeMount={configureMonaco}
-          height="420px"
-          language="typescript"
-          path={`file:///${active.filename}`}
-          value={active.code}
-          theme="vs-dark"
-          options={{
-            automaticLayout: true,
-            contextmenu: false,
-            folding: false,
-            fontFamily:
-              "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-            fontSize: 13,
-            lineHeight: 22,
-            lineNumbersMinChars: 3,
-            minimap: { enabled: false },
-            overviewRulerLanes: 0,
-            padding: { top: 22, bottom: 22 },
-            readOnly: true,
-            renderLineHighlight: "none",
-            scrollBeyondLastLine: false,
-            scrollbar: {
-              alwaysConsumeMouseWheel: false,
-              horizontalScrollbarSize: 8,
-              verticalScrollbarSize: 8,
-            },
-            smoothScrolling: true,
-            tabSize: 2,
-            wordWrap: "on",
-            wrappingIndent: "indent",
-          }}
-        />
+        <pre
+          className="code-example__pre"
+          id={`code-panel-${active.id}`}
+          role="tabpanel"
+          aria-labelledby={`code-tab-${active.id}`}
+        >
+          <code>{active.code}</code>
+        </pre>
       </div>
     </div>
   );

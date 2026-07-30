@@ -57,25 +57,29 @@ const description =
     </header>
 
     <section class="hero" id="top">
-      <p class="eyebrow">Open-source agent infrastructure</p>
-      <h1>Build agents that<br />keep their place.</h1>
-      <p class="lede">
-        Flary is a TypeScript runtime for adding stateful agents to products on
-        Cloudflare Workers.
-      </p>
-      <div class="actions">
-        <a
-          class="primary-link"
-          href="https://github.com/rdvo/flary"
-          target="_blank"
-          rel="noreferrer"
-        >
-          <ArrowUpRight size={16} strokeWidth={1.7} />
-          View on GitHub
-        </a>
-        <InstallCommand client:idle />
+      <div class="hero-label">
+        <p class="eyebrow">Open-source agent infrastructure</p>
       </div>
-      <p class="meta">Apache-2.0 · TypeScript · Cloudflare-native</p>
+      <div class="hero-copy">
+        <h1>Build agents that<br />keep their place.</h1>
+        <p class="lede">
+          Flary is a TypeScript runtime for adding stateful agents to products
+          on Cloudflare Workers.
+        </p>
+        <div class="actions">
+          <a
+            class="primary-link"
+            href="https://github.com/rdvo/flary"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <ArrowUpRight size={16} strokeWidth={1.7} />
+            View on GitHub
+          </a>
+          <InstallCommand client:idle />
+        </div>
+        <p class="meta">Apache-2.0 · TypeScript · Cloudflare-native</p>
+      </div>
     </section>
 
     <section class="examples" id="examples">
@@ -83,7 +87,7 @@ const description =
         <p class="eyebrow">Start where you are</p>
         <h2>Create a Worker.<br />Or add Flary to yours.</h2>
       </div>
-      <CodeExamples client:only="react" />
+      <CodeExamples client:load />
     </section>
 
     <section class="details" id="details">
