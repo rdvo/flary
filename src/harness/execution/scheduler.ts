@@ -10,6 +10,7 @@ import { ApprovalGate } from "./approval.js";
 import { checkModeAccess } from "./mode-policy.js";
 import { IdempotencyStore, idempotencyKeyForTask } from "./idempotency.js";
 import { reduceLimits } from "./limits.js";
+import { redactErrorMessage, redactSecrets } from "./redaction.js";
 import { resolveModel } from "./models.js";
 import {
   normalizeToolDefinition,
@@ -567,9 +568,16 @@ function normalizeError(error: unknown): ExecutionError {
       "code" in error && typeof error.code === "string"
         ? error.code
         : undefined;
-    return { name: error.name || "Error", message: error.message, code };
+    return {
+      name: error.name || "Error",
+      message: redactErrorMessage(error.message, "Tool execution failed."),
+      code,
+    };
   }
-  return { name: "Error", message: String(error) };
+  return {
+    name: "Error",
+    message: redactErrorMessage(error, "Tool execution failed."),
+  };
 }
 
 function enforceResultSize(
@@ -592,7 +600,9 @@ function jsonObject(value: unknown) {
 
 function lifecycleMetadata(task: ToolTask) {
   const metadata = JsonObjectSchema.safeParse(task.lifecycleMetadata);
-  return metadata.success ? metadata.data : undefined;
+  if (!metadata.success) return undefined;
+  const redacted = JsonObjectSchema.safeParse(redactSecrets(metadata.data));
+  return redacted.success ? redacted.data : undefined;
 }
 
 function isExplicitlySafeToRetry(error: unknown): boolean {

@@ -294,6 +294,7 @@ export default defineAgent<Env>(async ({ env, id }) => {
     const model = submission
       ? recovered.get(submission.id)!
       : env.FLARY_DEFAULT_MODEL ?? DEFAULT_MODEL;
+    const threadToolset = await createThreadTools(env, binding);
     return {
       model,
       instructions:
@@ -315,7 +316,10 @@ export default defineAgent<Env>(async ({ env, id }) => {
           binding.defaultThinkingLevel ??
           "medium",
       ),
-      tools: await createThreadTools(env, binding),
+      tools: threadToolset.tools,
+      ...(threadToolset.approvalContinuation
+        ? { approvalContinuation: threadToolset.approvalContinuation }
+        : {}),
       durability: { maxAttempts: 10, timeoutMs: 3_600_000 },
     };
   }
@@ -383,8 +387,27 @@ export const cloudflare = extend({
         return this.flaryMetadata.listApprovals();
       }
 
-      decideApproval(decision: ApprovalDecision): { ok: true } {
-        this.flaryMetadata.decideApproval(decision);
+      listEvents(runId?: string) {
+        return this.flaryMetadata.listEvents(runId);
+      }
+
+      async decideApproval(decision: ApprovalDecision): Promise<{ ok: true }> {
+        const hasLiveWaiter = this.flaryMetadata.hasApprovalWaiter(
+          decision.requestId,
+        );
+        const changed = this.flaryMetadata.decideApproval(decision);
+        if (changed && !hasLiveWaiter) {
+          await (this as unknown as {
+            schedule(
+              delaySeconds: number,
+              callback: "__flueWakeAgentSubmissions",
+              payload: undefined,
+              options?: { idempotent?: boolean },
+            ): Promise<unknown>;
+          }).schedule(0, "__flueWakeAgentSubmissions", undefined, {
+            idempotent: false,
+          });
+        }
         return { ok: true };
       }
 

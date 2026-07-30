@@ -27,6 +27,11 @@ export class InMemoryToolExecutionJournal
   async put(recordValue: ToolExecutionJournalRecord): Promise<void> {
     const record =
       ToolExecutionJournalRecordSchema.parse(recordValue);
-    this.#records.set(`${record.runId}:${record.callId}`, record);
+    const key = `${record.runId}:${record.callId}`;
+    const current = this.#records.get(key);
+    if (record.state === "started" && current?.state === "started") {
+      throw new Error(`Tool call ${record.callId} is already running`);
+    }
+    this.#records.set(key, record);
   }
 }

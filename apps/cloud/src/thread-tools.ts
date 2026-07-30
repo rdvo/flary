@@ -13,6 +13,13 @@ import {
   modeAllowsCapability,
   type WorkspaceToolTarget,
 } from "flary";
+import type { DurableToolCallSnapshot } from "flary/execution";
+import type {
+  ApprovalContinuation,
+  ApprovalRecoveryCall,
+  ApprovalRecoveryState,
+} from "flary/execution";
+import { redactErrorMessage, redactSecrets } from "flary/execution";
 import {
   SqliteMcpDescriptorCache,
   SqliteToolExecutionJournal,
@@ -21,7 +28,7 @@ import {
   createFlueLazyTools,
   createFlueRequestUserInputTool,
 } from "flary/flue";
-import type { ThreadBinding } from "flary/contracts";
+import type { JsonObject, JsonValue, ThreadBinding } from "flary/contracts";
 import { ThreadBindingSchema } from "flary/contracts";
 import type { ThreadRef, StorageScope } from "flary/contracts";
 import { threadName } from "flary/storage";
@@ -47,6 +54,11 @@ import {
 } from "../worker/recall";
 
 type JsonInput = Record<string, unknown>;
+
+export interface ThreadToolset {
+  tools: ReturnType<typeof defineTool>[];
+  approvalContinuation?: ApprovalContinuation;
+}
 
 function scopeFor(binding: ThreadBinding): StorageScope {
   return {
@@ -199,7 +211,7 @@ function credentialProvider(
 export async function createThreadTools(
   env: Env,
   bindingInput: ThreadBinding,
-): Promise<ReturnType<typeof defineTool>[]> {
+): Promise<ThreadToolset> {
   const binding = ThreadBindingSchema.parse(bindingInput);
   const mode = resolveAgentMode(binding.defaultMode);
   const catalog = new InMemoryToolCatalog();
@@ -340,6 +352,52 @@ export async function createThreadTools(
     },
   });
 
+  const executeSandbox = async (raw: unknown) => {
+    const request = SandboxInputSchema.parse(raw);
+    const router = createCloudExecutionRouter(env, binding.thread.organizationId);
+    const result = await router.execute({
+      executionId: `exec_${crypto.randomUUID().replaceAll("-", "")}`,
+      runId: `flue_${binding.thread.threadId}`,
+      engine: "sandbox",
+      runtime: "linux",
+      operation: "sandbox.command",
+      input: request,
+      limits: { timeoutMs: 15 * 60_000, maxOutputBytes: 1024 * 1024 },
+      metadata: { threadId: binding.thread.threadId, sandboxId: request.sandboxId },
+    });
+    return JSON.parse(JSON.stringify(result)) as JsonValue;
+  };
+  if (env.FLARY_SANDBOX && modeAllowsCapability(mode, "execution.sandbox")) {
+    catalog.register({
+      definition: {
+        id: "execution.sandbox",
+        name: "Run sandbox job",
+        description: "Run an approved build, test, notebook, or deploy command in the isolated Sandbox.",
+        kind: "native",
+        operation: "write",
+        capabilities: ["execution.sandbox"],
+        requiresApproval: true,
+        inputSchema: {
+          type: "object",
+          properties: {
+            sandboxId: { type: "string" },
+            command: { type: "string" },
+            files: { type: "array" },
+            cwd: { type: "string" },
+            destroyAfter: { type: "boolean" },
+          },
+          required: ["sandboxId", "command"],
+          additionalProperties: false,
+        },
+      },
+      resourceKey: (raw) =>
+        typeof raw === "object" && raw && "sandboxId" in raw
+          ? `sandbox:${String(raw.sandboxId)}`
+          : "sandbox",
+      execute: executeSandbox,
+    });
+  }
+
   const runtime = new LazyToolRuntime({
     catalog,
     mode,
@@ -347,22 +405,130 @@ export async function createThreadTools(
     readParallelism: 8,
     runId: `flue_${binding.thread.threadId}`,
     toolJournal,
-    async approve(tool) {
+    onToolEvent: metadata
+      ? async (event) => metadata!.recordToolEvent(event)
+      : undefined,
+    async approve(tool, _input, context) {
       if (!metadata) throw new Error(`Approval required for ${tool.id}`);
-      if (metadata.hasApprovedTool(tool.id)) {
-        metadata.issueToolLease(tool.id);
-        return;
-      }
-      const request = metadata.createToolApproval({
+      const toolCall: DurableToolCallSnapshot = {
+        runId: context.runId,
+        callId: context.callId,
+        toolId: context.toolId,
+        arguments: context.arguments as JsonObject,
+        operation: context.operation,
+        ...(context.resourceKey ? { resourceKey: context.resourceKey } : {}),
+        ...(context.idempotencyKey
+          ? { idempotencyKey: context.idempotencyKey }
+          : {}),
+      };
+      const existing = metadata.getToolApproval(toolCall);
+      const request = existing?.request ?? metadata.createToolApproval({
         runId: `flue_${binding.thread.threadId}`,
         toolId: tool.id,
         reason: `The ${mode.id} mode requires approval for ${tool.id}.`,
         requestedBy: { id: binding.thread.agentId, kind: "agent", version: "1" },
+        toolCall,
       });
-      throw new Error(`Approval required. Resolve approval ${request.id} before retrying.`);
+      const decision = existing?.decision;
+      const resolved = decision ?? await metadata.waitForToolApproval(request.id);
+      if (resolved.status === "approved") {
+        metadata.issueCapabilityLease(request.id, tool.id);
+        return;
+      }
+      throw new Error(
+        resolved.status === "expired"
+          ? "The tool approval expired."
+          : "The tool approval was not granted.",
+      );
     },
   });
   const tools = createFlueLazyTools(runtime) as ReturnType<typeof defineTool>[];
+  const approvalContinuation: ApprovalContinuation | undefined = metadata
+    ? {
+        async inspect(input): Promise<ApprovalRecoveryState> {
+          const calls = continuationCalls(input);
+          if (calls.length === 0) return "none";
+          let found = false;
+          for (const call of calls) {
+            const loaded = await runtime.describe(call.id);
+            if (!loaded) continue;
+            const record = metadata!.findToolApproval({
+              runId: `flue_${binding.thread.threadId}`,
+              toolId: call.id,
+              arguments: call.arguments,
+              ...(call.callId ? { callId: call.callId } : {}),
+              ...(call.idempotencyKey
+                ? { idempotencyKey: call.idempotencyKey }
+                : {}),
+              operation: loaded.tool.operation,
+            });
+            if (!record) continue;
+            found = true;
+            if (!record.decision) {
+              if (
+                record.request.expiresAt &&
+                Date.parse(record.request.expiresAt) <= Date.now()
+              ) {
+                metadata!.expireApproval(record.request.id);
+              } else {
+                return "waiting";
+              }
+            }
+          }
+          return found ? "ready" : "none";
+        },
+        async resume(input): Promise<{ content: string; isError?: boolean }> {
+          try {
+            if (input.toolName === "tool_call") {
+              const call = continuationCalls(input)[0];
+              if (!call) return { content: "{}", isError: true };
+              const restored = restoreContinuationCall(call, metadata!, binding);
+              const result = await runtime.call(restored);
+              return {
+                content: JSON.stringify(redactSecrets(result)),
+              };
+            }
+            if (input.toolName === "tool_batch") {
+              const calls = continuationCalls(input);
+              if (calls.length === 0) return { content: "{}", isError: true };
+              const restored = calls.map((call) =>
+                restoreContinuationCall(call, metadata!, binding),
+              );
+              const result = await runtime.batch({ calls: restored });
+              return {
+                content: JSON.stringify(redactSecrets(result)),
+              };
+            }
+            if (input.toolName === "flary__sandbox_job") {
+              const call = continuationCalls(input)[0];
+              if (!call) return { content: "{}", isError: true };
+              const restored = restoreContinuationCall(call, metadata!, binding);
+              const result = await runtime.call(restored);
+              if (result.status !== "fulfilled") {
+                return {
+                  content: JSON.stringify(redactSecrets(result)),
+                  isError: true,
+                };
+              }
+              return {
+                content: JSON.stringify(redactSecrets(result.value)),
+              };
+            }
+            return { content: "{}", isError: true };
+          } catch (error) {
+            return {
+              content: JSON.stringify({
+                error: redactErrorMessage(
+                  error,
+                  "The approved tool call did not complete.",
+                ),
+              }),
+              isError: true,
+            };
+          }
+        },
+      }
+    : undefined;
 
   if (modeAllowsCapability(mode, "interaction.user_input")) {
     tools.push(
@@ -442,35 +608,93 @@ export async function createThreadTools(
       }),
       async run({ input }) {
         if (!metadata) throw new Error("Sandbox jobs require a thread Durable Object");
-        if (!metadata.hasApprovedTool("execution.sandbox")) {
-          const request = metadata.createToolApproval({
-            runId: `flue_${binding.thread.threadId}`,
-            toolId: "execution.sandbox",
-            reason: "Sandbox jobs can build, test, or deploy code outside the workspace Durable Object.",
-            requestedBy: { id: binding.thread.agentId, kind: "agent", version: "1" },
-          });
-          throw new Error(`Approval required. Resolve approval ${request.id} before retrying.`);
-        }
-        metadata.issueToolLease("execution.sandbox");
-        const request = SandboxInputSchema.parse(input);
-        const router = createCloudExecutionRouter(env, binding.thread.organizationId);
-        const result = await router.execute({
-          executionId: `exec_${crypto.randomUUID().replaceAll("-", "")}`,
-          runId: `flue_${binding.thread.threadId}`,
-          engine: "sandbox",
-          runtime: "linux",
-          operation: "sandbox.command",
-          input: request,
-          limits: { timeoutMs: 15 * 60_000, maxOutputBytes: 1024 * 1024 },
-          metadata: { threadId: binding.thread.threadId, sandboxId: request.sandboxId },
+        const result = await runtime.call({
+          id: "execution.sandbox",
+          arguments: SandboxInputSchema.parse(input) as unknown as Record<string, unknown>,
         });
-        return JSON.parse(JSON.stringify(result));
+        if (result.status !== "fulfilled") {
+          throw new Error(result.error?.message ?? result.reason ?? "Sandbox job failed");
+        }
+        return result.value as JsonValue;
       },
     });
     tools.push(sandboxJob);
   }
 
-  return tools;
+  return { tools, approvalContinuation };
+}
+
+type ContinuationCall = {
+  id: string;
+  arguments: Record<string, unknown>;
+  callId?: string;
+  idempotencyKey?: string;
+  dependsOn?: string[];
+};
+
+function continuationCalls(input: ApprovalRecoveryCall): ContinuationCall[] {
+  const args = input.arguments;
+  if (input.toolName === "flary__sandbox_job") {
+    return [{ id: "execution.sandbox", arguments: args }];
+  }
+  if (input.toolName === "tool_call" && typeof args.id === "string") {
+    return [parseContinuationCall(args)];
+  }
+  if (input.toolName !== "tool_batch" || !Array.isArray(args.calls)) return [];
+  return args.calls
+    .filter((call): call is Record<string, unknown> =>
+      Boolean(call && typeof call === "object" && !Array.isArray(call)),
+    )
+    .filter((call) => typeof call.id === "string")
+    .map(parseContinuationCall);
+}
+
+function parseContinuationCall(input: Record<string, unknown>): ContinuationCall {
+  const args =
+    input.arguments && typeof input.arguments === "object" && !Array.isArray(input.arguments)
+      ? input.arguments as Record<string, unknown>
+      : {};
+  return {
+    id: String(input.id),
+    arguments: args,
+    ...(typeof input.callId === "string" ? { callId: input.callId } : {}),
+    ...(typeof input.idempotencyKey === "string"
+      ? { idempotencyKey: input.idempotencyKey }
+      : {}),
+    ...(Array.isArray(input.dependsOn)
+      ? {
+          dependsOn: input.dependsOn.filter(
+            (dependency): dependency is string => typeof dependency === "string",
+          ),
+        }
+      : {}),
+  };
+}
+
+function restoreContinuationCall(
+  call: ContinuationCall,
+  metadata: FlaryThreadMetadataStore,
+  binding: ThreadBinding,
+) {
+  const runId = `flue_${binding.thread.threadId}`;
+  const record = metadata.findToolApproval({
+    runId,
+    toolId: call.id,
+    arguments: call.arguments,
+    ...(call.callId ? { callId: call.callId } : {}),
+    ...(call.idempotencyKey ? { idempotencyKey: call.idempotencyKey } : {}),
+  });
+  return {
+    id: call.id,
+    arguments: call.arguments,
+    ...(call.dependsOn ? { dependsOn: call.dependsOn } : {}),
+    ...(record?.toolCall.callId ?? call.callId
+      ? { callId: record?.toolCall.callId ?? call.callId }
+      : {}),
+    ...(record?.toolCall.idempotencyKey ?? call.idempotencyKey
+      ? { idempotencyKey: record?.toolCall.idempotencyKey ?? call.idempotencyKey }
+      : {}),
+  };
 }
 
 export function threadReference(binding: ThreadBinding): ThreadRef {

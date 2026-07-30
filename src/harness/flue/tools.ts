@@ -2,6 +2,7 @@ import { defineTool, type ToolDefinition } from "@flue/runtime";
 import * as v from "valibot";
 
 import type { LazyToolRuntime } from "../tools/runtime";
+import { redactSecrets } from "../execution/redaction.js";
 import { waitForUserInput } from "../tools/user-input";
 import {
   UserInputQuestionSchema,
@@ -166,5 +167,5 @@ export function createFlueRequestUserInputTool(
 }
 
 function toJson(value: unknown): JsonValue {
-  return JSON.parse(JSON.stringify(value)) as JsonValue;
+  return JSON.parse(JSON.stringify(redactSecrets(value))) as JsonValue;
 }

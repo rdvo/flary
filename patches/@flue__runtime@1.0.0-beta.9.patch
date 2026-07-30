@@ -1,8 +1,49 @@
+diff --git a/dist/conversation-projections-XMug3C6A.mjs b/dist/conversation-projections-XMug3C6A.mjs
+index d05220033fe9d56662329e478c7ebc7db283f3ba..3d4d6f0403cb57bda9d80b676e46e61c961e23ea 100644
+--- a/dist/conversation-projections-XMug3C6A.mjs
++++ b/dist/conversation-projections-XMug3C6A.mjs
+@@ -99,7 +99,8 @@ const AgentProfileSchema = v.strictObject({
+ 	subagents: v.optional(v.array(v.unknown())),
+ 	thinkingLevel: v.optional(v.string()),
+ 	compaction: v.optional(v.union([v.literal(false), v.looseObject({})])),
+-	durability: v.optional(v.looseObject({}))
++	durability: v.optional(v.looseObject({})),
++	approvalContinuation: v.optional(v.unknown())
+ }, (issue) => issue.expected === "never" ? `received unknown agent profile field ${issue.received}` : issue.message);
+ const AGENT_RUNTIME_FIELDS = new Set([
+ 	...Object.keys(AgentProfileSchema.entries),
+@@ -163,7 +164,8 @@ function resolveAgentProfile(options) {
+ 		subagents: mergeArrays(profile?.subagents, options?.subagents),
+ 		thinkingLevel: hasOwn(options, "thinkingLevel") ? options?.thinkingLevel : profile?.thinkingLevel,
+ 		compaction: hasOwn(options, "compaction") ? options?.compaction : profile?.compaction,
+-		durability: hasOwn(options, "durability") ? options?.durability : profile?.durability
++		durability: hasOwn(options, "durability") ? options?.durability : profile?.durability,
++		approvalContinuation: hasOwn(options, "approvalContinuation") ? options?.approvalContinuation : profile?.approvalContinuation
+ 	};
+ }
+ function extendAgentProfile(profile, extensions) {
 diff --git a/dist/conversation-stream-store-Bitz7UoW.mjs b/dist/conversation-stream-store-Bitz7UoW.mjs
-index 94032552cc83d3596ae6e53bd46ec6c9c9749b01..25f029d609318614d664c6fe790cb576c1799bef 100644
+index 94032552cc83d3596ae6e53bd46ec6c9c9749b01..94471b358cdf8d05249ccafa52816fd69997fde7 100644
 --- a/dist/conversation-stream-store-Bitz7UoW.mjs
 +++ b/dist/conversation-stream-store-Bitz7UoW.mjs
-@@ -550,6 +550,7 @@ var Session = class {
+@@ -15,6 +15,16 @@ const DURABILITY_DEFAULT_MAX_ATTEMPTS = 10;
+ const DURABILITY_DEFAULT_TIMEOUT_MS = 36e5;
+ /** Default lease duration for submission ownership in milliseconds (30 seconds). */
+ const LEASE_DURATION_MS = 3e4;
++class ApprovalWaitingError extends Error {
++	code = "approval_pending";
++	constructor() {
++		super("The agent is waiting for an approval decision.");
++		this.name = "ApprovalWaitingError";
++	}
++}
++function isApprovalWaitingError(error) {
++	return error instanceof ApprovalWaitingError || Boolean(error && typeof error === "object" && error.code === "approval_pending");
++}
+ //#endregion
+ //#region src/context.ts
+ /**
+@@ -565,6 +575,7 @@ var Session = class {
  	activeTimeoutAt;
  	activeSubmissionId;
  	activeSubmissionAttemptId;
@@ -10,7 +51,7 @@ index 94032552cc83d3596ae6e53bd46ec6c9c9749b01..25f029d609318614d664c6fe790cb576
  	conversationWriter;
  	attachmentStore;
  	canonicalAssistant;
-@@ -565,7 +566,11 @@ var Session = class {
+@@ -577,7 +588,11 @@ var Session = class {
  		if (this.activeTurnId === void 0) this.activeTurnId = generateTurnId();
  		const turnId = this.activeTurnId;
  		const operationId = this.activeOperationId ?? generateOperationId();
@@ -23,7 +64,7 @@ index 94032552cc83d3596ae6e53bd46ec6c9c9749b01..25f029d609318614d664c6fe790cb576
  		const operation = {
  			type: "model",
  			turnId
-@@ -575,7 +580,7 @@ var Session = class {
+@@ -586,7 +601,7 @@ var Session = class {
  			operationId,
  			turnId
  		});
@@ -32,7 +73,81 @@ index 94032552cc83d3596ae6e53bd46ec6c9c9749b01..25f029d609318614d664c6fe790cb576
  	};
  	canonicalEnvelope(type, id = generateConversationRecordId()) {
  		return {
-@@ -1881,9 +1886,11 @@ var Session = class {
+@@ -1159,8 +1174,26 @@ var Session = class {
+ 		if (!following) return;
+ 		const partial = findTrailingPartialToolBatch(following.flatMap((entry) => entry.type === "message" ? [entry] : []));
+ 		if (!partial) return;
++		if (await this.hasWaitingApproval(conversation, partial, signal)) throw new ApprovalWaitingError();
+ 		const resolvedTaskOutcomes = await this.resumeUnresolvedTaskCalls(conversation, partial, signal);
+-		await this.appendRepairedToolResultBatch(partial.entryId, partial.toolCalls, conversation, resolvedTaskOutcomes);
++		const resolvedApprovalOutcomes = await this.resumeUnresolvedApprovalCalls(conversation, partial, signal);
++		const resolved = new Map([...resolvedTaskOutcomes, ...resolvedApprovalOutcomes]);
++		await this.appendRepairedToolResultBatch(partial.entryId, partial.toolCalls, conversation, resolved);
++	}
++	async hasWaitingApproval(conversation, partial, signal) {
++		if (!this.config.approvalContinuation) return false;
++		for (const toolCall of partial.toolCalls) {
++			if (conversation.toolOutcomes.get(toolOutcomeKey(partial.entryId, toolCall.id))) continue;
++			const argumentsValue = partial.assistant.content.find((block) => block.type === "toolCall" && block.id === toolCall.id)?.arguments ?? {};
++			const state = await this.config.approvalContinuation.inspect({
++				toolCallId: toolCall.id,
++				toolName: toolCall.name,
++				arguments: argumentsValue,
++				signal
++			});
++			if (state === "waiting") return true;
++		}
++		return false;
+ 	}
+ 	/**
+ 	* Resume each unresolved model-invoked `task` call in a trailing partial
+@@ -1183,6 +1216,45 @@ var Session = class {
+ 		}
+ 		return resolved;
+ 	}
++	async resumeUnresolvedApprovalCalls(conversation, partial, signal) {
++		const resolved = /* @__PURE__ */ new Map();
++		if (!this.config.approvalContinuation) return resolved;
++		for (const toolCall of partial.toolCalls) {
++			if (conversation.toolOutcomes.get(toolOutcomeKey(partial.entryId, toolCall.id))) continue;
++			const argumentsValue = partial.assistant.content.find((block) => block.type === "toolCall" && block.id === toolCall.id)?.arguments ?? {};
++			const state = await this.config.approvalContinuation.inspect({
++				toolCallId: toolCall.id,
++				toolName: toolCall.name,
++				arguments: argumentsValue,
++				signal
++			});
++			if (state === "waiting") throw new ApprovalWaitingError();
++			if (state !== "ready") continue;
++			const result = await this.config.approvalContinuation.resume({
++				toolCallId: toolCall.id,
++				toolName: toolCall.name,
++				arguments: argumentsValue,
++				signal
++			});
++			resolved.set(toolCall.id, this.approvalResumeOutcomeRecord(partial.entryId, toolCall, result));
++		}
++		return resolved;
++	}
++	approvalResumeOutcomeRecord(assistantEntryId, toolCall, result) {
++		const key = `${encodeCanonicalId(assistantEntryId)}_${encodeCanonicalId(toolCall.id)}`;
++		return {
++			...this.canonicalEnvelope("tool_outcome", `record_tool_approval_outcome_${key}`),
++			type: "tool_outcome",
++			assistantMessageId: assistantEntryId,
++			toolCallId: toolCall.id,
++			toolName: toolCall.name,
++			isError: Boolean(result.isError),
++			content: [{
++				type: "text",
++				text: result.content || "{}"
++			}]
++		};
++	}
+ 	/** Reattach to one in-flight child, resume it to completion, and build the
+ 	*  parent's real `tool_outcome` for the originating `task` call. */
+ 	async resumeChildTaskCall(assistantEntryId, assistant, toolCallId, ref, signal) {
+@@ -1881,9 +1953,11 @@ var Session = class {
  		const previousTools = this.agentLoop.state.tools;
  		const previousModel = this.agentLoop.state.model;
  		const previousThinkingLevel = this.agentLoop.state.thinkingLevel;
@@ -44,7 +159,7 @@ index 94032552cc83d3596ae6e53bd46ec6c9c9749b01..25f029d609318614d664c6fe790cb576
  		const builtinToolGroups = this.createBuiltinToolGroups(this.env, options.tools, options.model, options.thinkingLevel, options.activePackagedSkills);
  		this.agentLoop.state.tools = this.assembleModelTools(builtinToolGroups, [...this.agentTools, ...options.tools], options.extraTools ?? []);
  		try {
-@@ -1894,6 +1901,7 @@ var Session = class {
+@@ -1892,6 +1966,7 @@ var Session = class {
  			this.agentLoop.state.tools = previousTools;
  			this.agentLoop.state.model = previousModel;
  			this.agentLoop.state.thinkingLevel = previousThinkingLevel;
@@ -52,7 +167,22 @@ index 94032552cc83d3596ae6e53bd46ec6c9c9749b01..25f029d609318614d664c6fe790cb576
  		}
  	}
  	resolveDeclaredSubagent(name) {
-@@ -2775,6 +2775,9 @@ var Session = class {
+@@ -2619,6 +2694,14 @@ var Session = class {
+ 	canonicalInputEntryId(input) {
+ 		return input.kind === "dispatch" ? submissionEntryId("dispatch", input.dispatchId) : submissionEntryId("direct", input.submissionId);
+ 	}
++	async inspectPendingApproval(input, signal) {
++		if (!this.config.approvalContinuation) return false;
++		const conversation = await this.requireConversation();
++		const following = getActiveConversationPathSince(conversation, this.canonicalInputEntryId(input));
++		if (!following) return false;
++		const partial = findTrailingPartialToolBatch(following.flatMap((entry) => entry.type === "message" ? [entry] : []));
++		return partial ? this.hasWaitingApproval(conversation, partial, signal) : false;
++	}
+ 	inspectCanonicalState(state) {
+ 		switch (state.kind) {
+ 			case "absent": return "absent";
+@@ -2775,6 +2858,9 @@ var Session = class {
  			submissionAttempt: options?.submissionAttempt,
  			startedAt: options?.startedAt,
  			timeoutAt: options?.timeoutAt,
@@ -62,7 +192,7 @@ index 94032552cc83d3596ae6e53bd46ec6c9c9749b01..25f029d609318614d664c6fe790cb576
  			signal
  		});
  	}
-@@ -2787,8 +2789,9 @@ var Session = class {
+@@ -2787,8 +2873,9 @@ var Session = class {
  	async runPersistedContextInput(options) {
  		return this.withCallOverrides({
  			tools: [],
@@ -74,8 +204,48 @@ index 94032552cc83d3596ae6e53bd46ec6c9c9749b01..25f029d609318614d664c6fe790cb576
  		}, async ({ resolvedModel }) => {
  			this.activeSubmissionId = options.submissionAttempt?.submissionId;
  			this.activeSubmissionAttemptId = options.submissionAttempt?.attemptId;
+@@ -3126,7 +3213,8 @@ async function reconcileInterruptedSubmission(submissions, submission, agent, cr
+ 		const state = await s.inspectSubmissionInput(input);
+ 		return {
+ 			state,
+-			result: state === "completed" ? await s.reconstructSubmissionResult(input) : void 0
++			result: state === "completed" ? await s.reconstructSubmissionResult(input) : void 0,
++			waiting: state === "tool_use_unresolved" ? await s.inspectPendingApproval(input) : false
+ 		};
+ 	})(ctx);
+ 	const state = inspected.state;
+@@ -3138,6 +3226,7 @@ async function reconcileInterruptedSubmission(submissions, submission, agent, cr
+ 			result: inspected.result
+ 		};
+ 	}
++	if (inspected.waiting && submission.abortRequestedAt === void 0) return { disposition: "waiting" };
+ 	if (submission.abortRequestedAt !== void 0) {
+ 		const abortCtx = createContext(dispatchId);
+ 		if (submission.kind === "direct") abortCtx.setSubmissionId?.(submission.submissionId);
+@@ -3296,6 +3385,7 @@ async function processSubmission(opts) {
+ 			}, execute);
+ 			result = await run();
+ 		} catch (error) {
++			if (isApprovalWaitingError(error)) return;
+ 			if (opts.isShutdownAbort?.(error)) {
+ 				if (submission.kind === "direct") observers.fail(submission.submissionId, error);
+ 				throw error;
+diff --git a/dist/internal.mjs b/dist/internal.mjs
+index 1147b979db854e2c491a1ab802b4848a84e1dbd1..0661b4a7662fade4435fe0425508087fe3293f43 100644
+--- a/dist/internal.mjs
++++ b/dist/internal.mjs
+@@ -703,7 +703,8 @@ async function initializeRootHarness(agent, config, emitEvent) {
+ 		model: resolvedModel,
+ 		thinkingLevel: definition.thinkingLevel ?? config.agentConfig.thinkingLevel,
+ 		compaction: definition.compaction ?? config.agentConfig.compaction,
+-		durability: definition.durability
++		durability: definition.durability,
++		approvalContinuation: definition.approvalContinuation
+ 	};
+ 	if (!config.conversationWriter || !config.attachmentStore) throw new Error("[flue] Canonical conversation runtime is not configured.");
+ 	return new Harness(config.id, "default", agentConfig, env, emitEvent, definition.tools ?? [], toolFactory, config.conversationWriter, config.attachmentStore, definition.actions, config.runId === void 0 ? { instanceId: config.id } : { runId: config.runId });
 diff --git a/dist/run-store-CYeXjR-d.mjs b/dist/run-store-CYeXjR-d.mjs
-index 7aad15d8afe459fc75d990bde7bacc0992a62529..1c8b3a60f17f814ce29f4bf43fd828fcaa97fb4d 100644
+index 7aad15d8afe459fc75d990bde7bacc0992a62529..c3f38a85d46066cc974a2512a7b4c4288f97d458 100644
 --- a/dist/run-store-CYeXjR-d.mjs
 +++ b/dist/run-store-CYeXjR-d.mjs
 @@ -10,7 +10,10 @@ const DirectAgentImageSchema = v.object({
@@ -91,7 +261,7 @@ index 7aad15d8afe459fc75d990bde7bacc0992a62529..1c8b3a60f17f814ce29f4bf43fd828fc
  const WorkflowRouteParamSchema = v.object({ name: v.string() });
  /** Shared `?wait` query contract for agent and workflow invocation routes. */
 diff --git a/dist/types-USSZhfC6.d.mts b/dist/types-USSZhfC6.d.mts
-index e41ab79c03df8f1af64e73af81b76e545d17fa69..1b1a3c4142ba10cfcbe9b75eaebe6dcde7e981b0 100644
+index e41ab79c03df8f1af64e73af81b76e545d17fa69..cbe3b3cfe5036fda3ec0fbc0cac9542ff58956a7 100644
 --- a/dist/types-USSZhfC6.d.mts
 +++ b/dist/types-USSZhfC6.d.mts
 @@ -83,6 +83,12 @@ type DirectAgentImage = PromptImage & {
@@ -107,3 +277,56 @@ index e41ab79c03df8f1af64e73af81b76e545d17fa69..1b1a3c4142ba10cfcbe9b75eaebe6dcd
  }
  /** Context passed to a {@link defineAgent} initializer. */
  interface AgentInitializerContext<TEnv = Record<string, any>> {
+@@ -287,6 +293,25 @@ interface DurabilityConfig {
+    */
+   timeoutMs?: number;
+ }
++type ApprovalRecoveryState = 'none' | 'waiting' | 'ready';
++interface ApprovalContinuation {
++  inspect(input: {
++    toolCallId: string;
++    toolName: string;
++    arguments: Record<string, unknown>;
++    signal?: AbortSignal;
++  }): ApprovalRecoveryState | Promise<ApprovalRecoveryState>;
++  resume(input: {
++    toolCallId: string;
++    toolName: string;
++    arguments: Record<string, unknown>;
++    signal?: AbortSignal;
++  }): Promise<{
++    content: string;
++    isError?: boolean;
++    output?: unknown;
++  }>;
++}
+ interface AgentConfig {
+   /** Discovered at runtime from AGENTS.md + .agents/skills/ in the session's cwd. */
+   systemPrompt: string;
+@@ -316,6 +341,8 @@ interface AgentConfig {
+   compaction?: false | CompactionConfig;
+   /** Durability settings resolved from the agent profile. */
+   durability?: DurabilityConfig;
++  /** Durable approval pause and resume adapter. */
++  approvalContinuation?: ApprovalContinuation;
+ }
+ /** Reusable agent behavior accepted by {@link defineAgentProfile}. */
+ interface AgentProfile {
+@@ -350,6 +377,8 @@ interface AgentProfile {
+    * independent durability configuration of its own.
+    */
+   durability?: DurabilityConfig;
++  /** Durable approval pause and resume adapter. */
++  approvalContinuation?: ApprovalContinuation;
+ }
+ /** Configuration returned by a {@link defineAgent} initializer. */
+ interface AgentRuntimeConfig {
+@@ -381,6 +410,8 @@ interface AgentRuntimeConfig {
+    * recovery attempt limits and submission timeouts.
+    */
+   durability?: DurabilityConfig;
++  /** Durable approval pause and resume adapter. */
++  approvalContinuation?: ApprovalContinuation;
+   /** Working directory inside the initialized sandbox. */
+   cwd?: string;
+   /** Sandbox factory used to construct the initialized environment. */

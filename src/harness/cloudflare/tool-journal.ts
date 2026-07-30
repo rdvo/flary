@@ -63,6 +63,30 @@ export class SqliteToolExecutionJournal implements ToolExecutionJournal {
 
   async put(recordInput: ToolExecutionJournalRecord): Promise<void> {
     const record = ToolExecutionJournalRecordSchema.parse(recordInput);
+    if (record.state === "started") {
+      const claimed = this.#sql
+        .exec<{ call_id: string }>(
+          `INSERT INTO flary_tool_execution_journal
+            (run_id, call_id, state, record_json, updated_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(run_id, call_id) DO UPDATE SET
+             state = excluded.state,
+             record_json = excluded.record_json,
+             updated_at = excluded.updated_at
+           WHERE flary_tool_execution_journal.state = 'failed'
+           RETURNING call_id`,
+          record.runId,
+          record.callId,
+          record.state,
+          JSON.stringify(record),
+          record.completedAt ?? record.startedAt,
+        )
+        .toArray();
+      if (claimed.length === 0) {
+        throw new Error(`Tool call ${record.callId} is already claimed`);
+      }
+      return;
+    }
     const current = await this.get(record.runId, record.callId);
     if (
       current &&

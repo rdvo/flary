@@ -1,5 +1,6 @@
 export * from "./adapters.js";
 export * from "./approval.js";
+export * from "./approval-continuation.js";
 export * from "./idempotency.js";
 export * from "./limits.js";
 export * from "./mode-policy.js";
@@ -11,3 +12,4 @@ export * from "./results.js";
 export * from "./scheduler.js";
 export * from "./tool-journal.js";
 export * from "./types.js";
+export * from "./redaction.js";

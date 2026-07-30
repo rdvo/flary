@@ -19,6 +19,8 @@ import {
   modeRequiresApproval,
 } from "../execution/mode-policy";
 import { executeToolTasks } from "../execution/scheduler";
+import { idempotencyKeyForTask } from "../execution/idempotency";
+import { redactErrorMessage, redactSecrets } from "../execution/redaction";
 import type {
   ExecutionReport,
   ToolExecutionResult,
@@ -51,7 +53,18 @@ export interface LazyToolRuntimeOptions {
   approve?: (
     tool: ToolCatalogDefinition,
     input: unknown,
+    context: LazyToolApprovalContext,
   ) => Promise<void> | void;
+}
+
+export interface LazyToolApprovalContext {
+  readonly runId: string;
+  readonly callId: string;
+  readonly toolId: string;
+  readonly arguments: Record<string, unknown>;
+  readonly operation: "read" | "write";
+  readonly resourceKey: string;
+  readonly idempotencyKey?: string;
 }
 
 /**
@@ -166,7 +179,17 @@ export class LazyToolRuntime {
           throw new Error(`Approval is required for tool: ${call.id}`);
         }
         try {
-          await this.#options.approve(loaded.tool, call.arguments);
+          await this.#options.approve(loaded.tool, call.arguments, {
+            runId: this.#options.runId ?? "run_local",
+            callId: taskId,
+            toolId: call.id,
+            arguments: call.arguments,
+            operation: handle.operation,
+            resourceKey,
+            ...(this.writeIdempotencyKey(call, handle.operation, resourceKey)
+              ? { idempotencyKey: this.writeIdempotencyKey(call, handle.operation, resourceKey) }
+              : {}),
+          });
         } catch (error) {
           await this.emitPreflightFailure({
             taskId,
@@ -185,6 +208,7 @@ export class LazyToolRuntime {
       taskId,
       handle,
       resourceKey,
+      idempotencyKey: this.writeIdempotencyKey(call, handle.operation, resourceKey),
       lifecycleMetadata: loaded.tool.metadata,
     };
   }
@@ -195,18 +219,19 @@ export class LazyToolRuntime {
       taskId: string;
       handle: CapabilityHandle;
       resourceKey: string;
+      idempotencyKey?: string;
       lifecycleMetadata?: Record<string, unknown>;
     }>,
   ): Promise<ExecutionReport> {
     return executeToolTasks(
-      prepared.map(({ call, taskId, handle, resourceKey, lifecycleMetadata }) => ({
+      prepared.map(({ call, taskId, handle, resourceKey, idempotencyKey, lifecycleMetadata }) => ({
         id: taskId,
         name: call.id,
         input: call.arguments,
         operation: handle.operation,
         resourceKey,
         dependsOn: call.dependsOn,
-        idempotencyKey: call.idempotencyKey,
+        idempotencyKey,
         concurrencyKey: handle.concurrencyKey,
         lifecycleMetadata,
         execute: (value: unknown) =>
@@ -292,7 +317,7 @@ export class LazyToolRuntime {
     if (!this.#options.onToolEvent) return;
     const metadata =
       input.metadata && typeof input.metadata === "object"
-        ? input.metadata
+        ? (redactSecrets(input.metadata) as Record<string, unknown>)
         : undefined;
     await this.#options.onToolEvent(
       ToolLifecycleEventSchema.parse({
@@ -306,11 +331,30 @@ export class LazyToolRuntime {
         status: "denied",
         error: {
           code: input.code,
-          message: input.message,
+          message: redactErrorMessage(
+            input.message,
+            "The tool request was denied.",
+          ),
           retryable: false,
         },
         ...(metadata ? { metadata } : {}),
       }),
     );
+  }
+
+  private writeIdempotencyKey(
+    call: LazyToolCall,
+    operation: "read" | "write",
+    resourceKey?: string,
+  ): string | undefined {
+    if (call.idempotencyKey) return call.idempotencyKey;
+    return operation === "write"
+      ? idempotencyKeyForTask({
+          name: call.id,
+          input: call.arguments,
+          operation,
+          resourceKey,
+        })
+      : undefined;
   }
 }

@@ -1,7 +1,7 @@
-import {
+import type {
   DynamicWorkerExecutor,
-  type DynamicWorkerExecutorOptions,
-  type ResolvedProvider,
+  DynamicWorkerExecutorOptions,
+  ResolvedProvider,
 } from "@cloudflare/codemode";
 
 import {
@@ -29,17 +29,20 @@ export class CloudflareDynamicWorkerAdapter
   implements CodeExecutionAdapter
 {
   readonly engine = "dynamic-worker" as const;
-  private readonly executor: DynamicWorkerExecutor;
+  private readonly executor: Promise<DynamicWorkerExecutor>;
   private readonly operation: string;
 
   constructor(private readonly options: DynamicWorkerAdapterOptions) {
     this.operation = options.operation ?? "code.plan";
-    this.executor = new DynamicWorkerExecutor({
-      loader: options.loader,
-      timeout: options.timeoutMs ?? 60_000,
-      globalOutbound: options.globalOutbound ?? null,
-      modules: options.modules,
-    });
+    this.executor = import("@cloudflare/codemode").then(
+      ({ DynamicWorkerExecutor }) =>
+        new DynamicWorkerExecutor({
+          loader: options.loader,
+          timeout: options.timeoutMs ?? 60_000,
+          globalOutbound: options.globalOutbound ?? null,
+          modules: options.modules,
+        }),
+    );
   }
 
   supports(request: CodeExecutionRequest): boolean {
@@ -67,7 +70,7 @@ export class CloudflareDynamicWorkerAdapter
       },
     ];
 
-    const outcome = await this.executor.execute(input.code, providers);
+    const outcome = await (await this.executor).execute(input.code, providers);
     const completedAt = new Date().toISOString();
     const logs = (outcome.logs ?? []).map((line) =>
       clipText(line, request.limits.maxOutputBytes),

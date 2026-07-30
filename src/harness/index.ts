@@ -49,7 +49,9 @@ export {
 } from "./contracts/modes.js";
 export * from "./contracts/code-execution.js";
 export * from "./execution/adapters.js";
+export * from "./execution/approval-continuation.js";
 export * from "./execution/mode-policy.js";
+export * from "./execution/redaction.js";
 export * from "./recall/index.js";
 export * from "./providers/index.js";
 export * from "./tools/index.js";

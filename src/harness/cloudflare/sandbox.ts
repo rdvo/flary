@@ -1,7 +1,4 @@
-import {
-  getSandbox,
-  type Sandbox,
-} from "@cloudflare/sandbox";
+import type { Sandbox, getSandbox } from "@cloudflare/sandbox";
 
 import {
   SandboxInputSchema,
@@ -43,6 +40,7 @@ export class CloudflareSandboxAdapter implements CodeExecutionAdapter {
   ): Promise<CodeExecutionResult> {
     const input = SandboxInputSchema.parse(request.input);
     const startedAt = new Date().toISOString();
+    const { getSandbox } = await import("@cloudflare/sandbox");
     const sandbox = getSandbox(this.options.binding, input.sandboxId, {
       transport: "rpc",
       sleepAfter: this.options.sleepAfter ?? "10m",

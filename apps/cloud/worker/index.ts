@@ -477,6 +477,7 @@ function threadStub(env: Env, binding: ReturnType<typeof threadBindingFromRow>) 
     readOperational(): Promise<unknown>;
     patchOperational(patch: unknown): Promise<unknown>;
     listApprovals(): Promise<unknown[]>;
+    listEvents(runId?: string): Promise<unknown[]>;
     decideApproval(decision: unknown): Promise<{ ok: true }>;
     listUserInput(): Promise<unknown[]>;
     respondToUserInput(

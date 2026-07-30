@@ -13,6 +13,8 @@ import {
   UserInputRecordSchema,
   UserInputRequestSchema,
   UserInputResponseSchema,
+  ToolLifecycleEventSchema,
+  type ToolLifecycleEvent,
   type ApprovalDecision,
   type ApprovalRequest,
   type CapabilityLease,
@@ -29,6 +31,14 @@ import {
   type IdentityReference,
 } from "../contracts/index.js";
 import { SandboxJobSchema } from "../contracts/runtime.js";
+import {
+  ApprovalLifecycleEventSchema,
+  DurableApprovalRecordSchema,
+  DurableToolCallSnapshotSchema,
+  type DurableApprovalRecord,
+  type DurableToolCallSnapshot,
+} from "../execution/approval-continuation.js";
+import { redactSecrets } from "../execution/redaction.js";
 
 type ThreadSql = {
   exec<T = Record<string, unknown>>(
@@ -54,8 +64,15 @@ type BindingRow = { binding_json: string };
 type ApprovalRow = {
   approval_id: string;
   request_json: string;
+  tool_call_json: string | null;
   decision_json: string | null;
   updated_at: string;
+};
+type ThreadEventRow = {
+  event_id: string;
+  run_id: string;
+  event_json: string;
+  created_at: string;
 };
 type UserInputRow = {
   request_id: string;
@@ -74,6 +91,10 @@ type UserInputRow = {
 export class FlaryThreadMetadataStore {
   readonly #sql: ThreadSql;
   readonly #ref: ThreadRef;
+  readonly #approvalWaiters = new Map<
+    string,
+    Set<(decision: ApprovalDecision) => void>
+  >();
 
   constructor(sql: unknown, refInput: ThreadRef) {
     this.#sql = sql as ThreadSql;
@@ -156,7 +177,7 @@ export class FlaryThreadMetadataStore {
   listApprovals() {
     return this.#sql
       .exec<ApprovalRow>(
-        `SELECT approval_id, request_json, decision_json, updated_at
+        `SELECT approval_id, request_json, tool_call_json, decision_json, updated_at
          FROM flary_thread_approvals ORDER BY updated_at DESC`,
       )
       .toArray()
@@ -168,11 +189,11 @@ export class FlaryThreadMetadataStore {
       );
   }
 
-  decideApproval(decisionInput: ApprovalDecision): void {
+  decideApproval(decisionInput: ApprovalDecision): boolean {
     const decision = ApprovalDecisionSchema.parse(decisionInput);
     const row = this.#sql
       .exec<ApprovalRow>(
-        `SELECT approval_id, request_json, decision_json, updated_at
+        `SELECT approval_id, request_json, tool_call_json, decision_json, updated_at
          FROM flary_thread_approvals WHERE approval_id = ?`,
         decision.requestId,
       )
@@ -183,8 +204,9 @@ export class FlaryThreadMetadataStore {
       if (JSON.stringify(existing) !== JSON.stringify(decision)) {
         throw new Error("Approval request has already been decided");
       }
-      return;
+      return false;
     }
+    const request = ApprovalRequestSchema.parse(JSON.parse(row.request_json));
     this.#sql.exec(
       `UPDATE flary_thread_approvals SET decision_json = ?, updated_at = ?
        WHERE approval_id = ?`,
@@ -192,6 +214,159 @@ export class FlaryThreadMetadataStore {
       decision.decidedAt,
       decision.requestId,
     );
+    const nextStatus =
+      decision.status === "approved"
+        ? this.hasPendingApproval(request.runId)
+          ? "waiting"
+          : "running"
+        : "failed";
+    this.recordRun(request.runId, nextStatus);
+    this.patch({
+      status: nextStatus,
+      activeRunId: request.runId,
+    });
+    this.appendApprovalResolvedEvent(request, decision);
+    for (const resolve of this.#approvalWaiters.get(decision.requestId) ?? []) {
+      resolve(decision);
+    }
+    this.#approvalWaiters.delete(decision.requestId);
+    return true;
+  }
+
+  /** Read the private exact call bound to one approval request. */
+  getToolApproval(
+    toolCallInput: DurableToolCallSnapshot,
+  ): DurableApprovalRecord | undefined {
+    const toolCall = DurableToolCallSnapshotSchema.parse(toolCallInput);
+    return this.findToolApproval({
+      ...toolCall,
+      callId: toolCall.callId,
+    });
+  }
+
+  /** Find an approval by the model call when the original call omitted callId. */
+  findToolApproval(input: {
+    runId: string;
+    toolId: string;
+    arguments: Record<string, unknown>;
+    callId?: string;
+    idempotencyKey?: string;
+    operation?: "read" | "write";
+    resourceKey?: string;
+  }): DurableApprovalRecord | undefined {
+    const rows = this.#sql
+      .exec<ApprovalRow>(
+        `SELECT approval_id, request_json, tool_call_json, decision_json, updated_at
+         FROM flary_thread_approvals
+         ORDER BY updated_at DESC`,
+      )
+      .toArray();
+    for (const row of rows) {
+      if (!row.tool_call_json) continue;
+      const stored = DurableToolCallSnapshotSchema.parse(
+        JSON.parse(row.tool_call_json),
+      );
+      if (
+        stored.runId !== input.runId ||
+        stored.toolId !== input.toolId ||
+        (input.callId && stored.callId !== input.callId) ||
+        (input.idempotencyKey && stored.idempotencyKey !== input.idempotencyKey) ||
+        (input.operation && stored.operation !== input.operation) ||
+        (input.resourceKey && stored.resourceKey !== input.resourceKey) ||
+        stableJson(stored.arguments) !== stableJson(input.arguments)
+      ) continue;
+      return DurableApprovalRecordSchema.parse({
+        request: JSON.parse(row.request_json),
+        toolCall: stored,
+        decision: row.decision_json ? JSON.parse(row.decision_json) : null,
+      });
+    }
+    return undefined;
+  }
+
+  /** Wait in the current isolate, while retaining the durable decision in SQL. */
+  async waitForToolApproval(
+    requestIdInput: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ApprovalDecision> {
+    const requestId = String(requestIdInput);
+    const row = this.#sql
+      .exec<ApprovalRow>(
+        `SELECT approval_id, request_json, tool_call_json, decision_json, updated_at
+         FROM flary_thread_approvals WHERE approval_id = ?`,
+        requestId,
+      )
+      .toArray()[0];
+    if (!row) throw new Error("Approval request not found");
+    const request = ApprovalRequestSchema.parse(JSON.parse(row.request_json));
+    if (row.decision_json) {
+      return ApprovalDecisionSchema.parse(JSON.parse(row.decision_json));
+    }
+    if (request.expiresAt && Date.parse(request.expiresAt) <= Date.now()) {
+      this.decideApproval(expiredDecision(request.id));
+      return this.waitForToolApproval(request.id, options);
+    }
+    return new Promise<ApprovalDecision>((resolve, reject) => {
+      const waiters = this.#approvalWaiters.get(request.id) ?? new Set();
+      waiters.add(resolve);
+      this.#approvalWaiters.set(request.id, waiters);
+      const onAbort = () => {
+        waiters.delete(resolve);
+        if (waiters.size === 0) this.#approvalWaiters.delete(request.id);
+        reject(options.signal?.reason ?? new Error("Approval wait aborted"));
+      };
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+      if (request.expiresAt) {
+        const delay = Math.max(0, Date.parse(request.expiresAt) - Date.now());
+        setTimeout(() => {
+          if (!this.#approvalWaiters.get(request.id)?.has(resolve)) return;
+          try {
+            this.decideApproval(expiredDecision(request.id));
+          } catch {
+            // A host decision won the race. The persisted decision is authoritative.
+          }
+        }, delay);
+      }
+    });
+  }
+
+  hasApprovalWaiter(requestIdInput: string): boolean {
+    return (this.#approvalWaiters.get(String(requestIdInput))?.size ?? 0) > 0;
+  }
+
+  expireApproval(requestIdInput: string): void {
+    const requestId = String(requestIdInput);
+    const row = this.#sql
+      .exec<ApprovalRow>(
+        `SELECT approval_id, request_json, tool_call_json, decision_json, updated_at
+         FROM flary_thread_approvals WHERE approval_id = ?`,
+        requestId,
+      )
+      .toArray()[0];
+    if (!row || row.decision_json) return;
+    const request = ApprovalRequestSchema.parse(JSON.parse(row.request_json));
+    if (!request.expiresAt || Date.parse(request.expiresAt) > Date.now()) return;
+    this.decideApproval(expiredDecision(request.id));
+  }
+
+  /** Return safe, durable Flary and tool lifecycle events for one run. */
+  listEvents(runIdInput?: string): unknown[] {
+    const rows = this.#sql
+      .exec<ThreadEventRow>(
+        runIdInput
+          ? `SELECT event_id, run_id, event_json, created_at
+             FROM flary_thread_events WHERE run_id = ? ORDER BY created_at ASC, event_id ASC`
+          : `SELECT event_id, run_id, event_json, created_at
+             FROM flary_thread_events ORDER BY created_at ASC, event_id ASC`,
+        ...(runIdInput ? [runIdInput] : []),
+      )
+      .toArray();
+    return rows.map((row) => JSON.parse(row.event_json));
+  }
+
+  recordToolEvent(eventInput: ToolLifecycleEvent): void {
+    const event = ToolLifecycleEventSchema.parse(eventInput);
+    this.appendThreadEvent(`tool:${event.type}:${event.runId}:${event.callId}`, event);
   }
 
   listUserInputRequests(): UserInputRecord[] {
@@ -329,21 +504,42 @@ export class FlaryThreadMetadataStore {
     toolId: string;
     reason: string;
     requestedBy: ApprovalRequest["requestedBy"];
+    toolCall?: DurableToolCallSnapshot;
   }): ApprovalRequest {
+    const toolCall = DurableToolCallSnapshotSchema.parse(
+      input.toolCall ?? {
+        runId: input.runId,
+        callId: `legacy_${input.toolId}`,
+        toolId: input.toolId,
+        arguments: {},
+        operation: "write",
+      },
+    );
+    if (toolCall.runId !== input.runId) {
+      throw new Error("Approval tool call does not belong to the request run");
+    }
     const pending = this.#sql
       .exec<ApprovalRow>(
-        `SELECT approval_id, request_json, decision_json, updated_at
+        `SELECT approval_id, request_json, tool_call_json, decision_json, updated_at
          FROM flary_thread_approvals
          WHERE decision_json IS NULL ORDER BY updated_at DESC`,
       )
       .toArray()
-      .map((row) => JSON.parse(row.request_json) as ApprovalRequest)
-      .find((request) =>
-        request.toolCallId === input.toolId ||
-        request.resourceId === input.toolId ||
-        request.context?.toolId === input.toolId,
+      .map((row) => ({
+        request: ApprovalRequestSchema.parse(JSON.parse(row.request_json)),
+        toolCall: row.tool_call_json
+          ? DurableToolCallSnapshotSchema.parse(JSON.parse(row.tool_call_json))
+          : undefined,
+      }))
+      .find((candidate) =>
+        candidate.toolCall
+          ? sameToolCall(candidate.toolCall, toolCall)
+          : candidate.request.runId === input.runId &&
+            (candidate.request.toolCallId === input.toolId ||
+              candidate.request.resourceId === input.toolId ||
+              candidate.request.context?.toolId === input.toolId),
       );
-    if (pending) return ApprovalRequestSchema.parse(pending);
+    if (pending) return pending.request;
 
     const request = ApprovalRequestSchema.parse({
       id: `approval_${crypto.randomUUID().replaceAll("-", "")}`,
@@ -352,12 +548,26 @@ export class FlaryThreadMetadataStore {
       reason: input.reason,
       requestedBy: input.requestedBy,
       resourceId: input.toolId,
-      toolCallId: input.toolId,
+      toolCallId: toolCall.callId,
       requestedAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
-      context: { toolId: input.toolId },
+      context: {
+        toolId: input.toolId,
+        operation: toolCall.operation,
+        ...(toolCall.resourceKey ? { resourceKey: toolCall.resourceKey } : {}),
+      },
     });
-    this.recordApproval(request);
+    this.recordApproval(request, undefined, toolCall);
+    this.recordRun(request.runId, "waiting");
+    this.patch({ status: "waiting", activeRunId: request.runId });
+    this.appendApprovalRequestedEvent(request);
+    this.appendThreadEvent(`run.waiting:${request.runId}:${request.id}`, {
+      type: "run.waiting",
+      runId: request.runId,
+      approvalId: request.id,
+      reason: request.reason,
+      occurredAt: request.requestedAt,
+    });
     return request;
   }
 
@@ -536,8 +746,15 @@ export class FlaryThreadMetadataStore {
   recordApproval(
     requestInput: ApprovalRequest,
     decisionInput?: ApprovalDecision,
+    toolCallInput?: DurableToolCallSnapshot,
   ): void {
     const request = ApprovalRequestSchema.parse(requestInput);
+    const toolCall = toolCallInput
+      ? DurableToolCallSnapshotSchema.parse(toolCallInput)
+      : undefined;
+    if (toolCall && toolCall.runId !== request.runId) {
+      throw new Error("Approval tool call does not belong to the request run");
+    }
     const decision = decisionInput
       ? ApprovalDecisionSchema.parse(decisionInput)
       : undefined;
@@ -546,14 +763,16 @@ export class FlaryThreadMetadataStore {
     }
     this.#sql.exec(
       `INSERT INTO flary_thread_approvals
-        (approval_id, request_json, decision_json, updated_at)
-       VALUES (?, ?, ?, ?)
+        (approval_id, request_json, tool_call_json, decision_json, updated_at)
+       VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(approval_id) DO UPDATE SET
          request_json = excluded.request_json,
+         tool_call_json = COALESCE(excluded.tool_call_json, flary_thread_approvals.tool_call_json),
          decision_json = excluded.decision_json,
          updated_at = excluded.updated_at`,
       request.id,
       JSON.stringify(request),
+      toolCall ? JSON.stringify(toolCall) : null,
       decision ? JSON.stringify(decision) : null,
       new Date().toISOString(),
     );
@@ -596,9 +815,62 @@ export class FlaryThreadMetadataStore {
        VALUES (?, ?, ?, ?)`,
       runId,
       runStatus(status),
-      metadata ? JSON.stringify(metadata) : null,
+      metadata ? JSON.stringify(redactSecrets(metadata)) : null,
       new Date().toISOString(),
     );
+  }
+
+  private appendApprovalRequestedEvent(request: ApprovalRequest): void {
+    const event = ApprovalLifecycleEventSchema.parse({
+      type: "approval.requested",
+      runId: request.runId,
+      approvalId: request.id,
+      request,
+      occurredAt: request.requestedAt,
+    });
+    this.appendThreadEvent(`approval.requested:${request.id}`, event);
+  }
+
+  private appendApprovalResolvedEvent(
+    request: ApprovalRequest,
+    decision: ApprovalDecision,
+  ): void {
+    const event = ApprovalLifecycleEventSchema.parse({
+      type: "approval.resolved",
+      runId: request.runId,
+      approvalId: request.id,
+      decision,
+      occurredAt: decision.decidedAt,
+    });
+    this.appendThreadEvent(`approval.resolved:${request.id}`, event);
+  }
+
+  private appendThreadEvent(eventId: string, input: unknown): void {
+    const safe = redactSecrets(input);
+    this.#sql.exec(
+      `INSERT OR IGNORE INTO flary_thread_events
+        (event_id, run_id, event_json, created_at)
+       VALUES (?, ?, ?, ?)`,
+      eventId,
+      typeof safe === "object" && safe !== null && "runId" in safe
+        ? String((safe as { runId: unknown }).runId)
+        : this.#ref.threadId,
+      JSON.stringify(safe),
+      new Date().toISOString(),
+    );
+  }
+
+  private hasPendingApproval(runId: string): boolean {
+    return this.#sql
+      .exec<ApprovalRow>(
+        `SELECT approval_id, request_json, tool_call_json, decision_json, updated_at
+         FROM flary_thread_approvals`,
+      )
+      .toArray()
+      .some((row) => {
+        if (row.decision_json) return false;
+        return ApprovalRequestSchema.parse(JSON.parse(row.request_json)).runId === runId;
+      });
   }
 
   private ensureSchema(): void {
@@ -636,8 +908,15 @@ export class FlaryThreadMetadataStore {
       CREATE TABLE IF NOT EXISTS flary_thread_approvals (
         approval_id TEXT PRIMARY KEY,
         request_json TEXT NOT NULL,
+        tool_call_json TEXT,
         decision_json TEXT,
         updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS flary_thread_events (
+        event_id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        event_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS flary_thread_user_input (
         request_id TEXT PRIMARY KEY,
@@ -662,6 +941,13 @@ export class FlaryThreadMetadataStore {
         updated_at TEXT NOT NULL
       );
     `);
+    try {
+      this.#sql.exec(
+        "ALTER TABLE flary_thread_approvals ADD COLUMN tool_call_json TEXT",
+      );
+    } catch {
+      // Existing Durable Objects already have the column.
+    }
   }
 
   private ensureIdentity(): void {
@@ -691,4 +977,37 @@ function runStatus(value: string): string {
     throw new Error("Run status must be a safe identifier");
   }
   return value;
+}
+
+function sameToolCall(
+  left: DurableToolCallSnapshot,
+  right: DurableToolCallSnapshot,
+): boolean {
+  return (
+    left.runId === right.runId &&
+    left.callId === right.callId &&
+    left.toolId === right.toolId &&
+    left.operation === right.operation &&
+    left.resourceKey === right.resourceKey &&
+    left.idempotencyKey === right.idempotencyKey &&
+    stableJson(left.arguments) === stableJson(right.arguments)
+  );
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  return `{${Object.keys(value as Record<string, unknown>)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`)
+    .join(",")}}`;
+}
+
+function expiredDecision(requestId: string): ApprovalDecision {
+  return ApprovalDecisionSchema.parse({
+    requestId,
+    status: "expired",
+    decidedBy: { id: "flary", kind: "system", version: "1" },
+    decidedAt: new Date().toISOString(),
+  });
 }

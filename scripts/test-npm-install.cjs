@@ -59,24 +59,15 @@ run(
       'const mcp = await import("flary/mcp");',
       'if (typeof mcp.createMcpTools !== "function") throw new Error("Missing createMcpTools export");',
       'if (typeof mcp.createMcpToolset !== "function") throw new Error("Missing createMcpToolset export");',
+      'const cloudflare = await import("flary/cloudflare");',
+      'if (typeof cloudflare.SqliteToolExecutionJournal !== "function") throw new Error("Missing SqliteToolExecutionJournal export");',
     ].join("\n"),
   ],
   consumer,
 );
-const cloudflareIndex = fs.readFileSync(
-  path.join(
-    consumer,
-    "node_modules/flary/dist/harness/cloudflare/index.js",
-  ),
-  "utf8",
-);
-if (!cloudflareIndex.includes("./tool-journal.js")) {
-  throw new Error("Missing durable tool journal export");
-}
-if (!cloudflareIndex.includes("./mcp-descriptor-cache.js")) {
-  throw new Error("Missing MCP descriptor cache export");
-}
+
+run(path.join(consumer, "node_modules/.bin/flary"), ["help"], consumer);
 
 console.log(
-  "Clean npm install contains the pinned Flue/Pi patches and MCP runtime exports.",
+  "Clean npm install runs the CLI, exposes MCP and journal exports, and contains the pinned Flue/Pi patches.",
 );

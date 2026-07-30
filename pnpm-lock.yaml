@@ -9,7 +9,7 @@ patchedDependencies:
     hash: ztc4t3k3sfijkpe4vqtdeswqdq
     path: patches/@earendil-works__pi-ai@0.80.10.patch
   '@flue/runtime@1.0.0-beta.9':
-    hash: tfh7voirq7gypn3fnviruitf3e
+    hash: dfk3uld6ddjv6io42afx46vbby
     path: patches/@flue__runtime@1.0.0-beta.9.patch
 
 importers:
@@ -33,7 +33,7 @@ importers:
         version: 0.80.10(patch_hash=ztc4t3k3sfijkpe4vqtdeswqdq)(@modelcontextprotocol/sdk@1.30.0)(zod@4.4.3)
       '@flue/runtime':
         specifier: 1.0.0-beta.9
-        version: 1.0.0-beta.9(patch_hash=tfh7voirq7gypn3fnviruitf3e)(@cfworker/json-schema@4.1.1)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(typescript@5.9.3)(zod@4.4.3)
+        version: 1.0.0-beta.9(patch_hash=dfk3uld6ddjv6io42afx46vbby)(@cfworker/json-schema@4.1.1)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(typescript@5.9.3)(zod@4.4.3)
       '@flue/sdk':
         specifier: 1.0.0-beta.9
         version: 1.0.0-beta.9
@@ -100,7 +100,7 @@ importers:
         version: 0.4.3(@modelcontextprotocol/sdk@1.30.0)(zod@4.4.3)
       '@flue/runtime':
         specifier: 1.0.0-beta.9
-        version: 1.0.0-beta.9(patch_hash=tfh7voirq7gypn3fnviruitf3e)(@cfworker/json-schema@4.1.1)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(typescript@5.9.3)(zod@4.4.3)
+        version: 1.0.0-beta.9(patch_hash=dfk3uld6ddjv6io42afx46vbby)(@cfworker/json-schema@4.1.1)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(typescript@5.9.3)(zod@4.4.3)
       '@monaco-editor/react':
         specifier: 4.7.0
         version: 4.7.0(monaco-editor@0.56.0)(react-dom@19.2.8)(react@19.2.8)
@@ -2364,7 +2364,7 @@ packages:
     hasBin: true
     dependencies:
       '@cloudflare/vite-plugin': 1.48.0(vite@8.1.5)(wrangler@4.115.0)
-      '@flue/runtime': 1.0.0-beta.9(patch_hash=tfh7voirq7gypn3fnviruitf3e)(@cfworker/json-schema@4.1.1)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(typescript@5.9.3)(zod@4.4.3)
+      '@flue/runtime': 1.0.0-beta.9(patch_hash=dfk3uld6ddjv6io42afx46vbby)(@cfworker/json-schema@4.1.1)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(typescript@5.9.3)(zod@4.4.3)
       '@flue/sdk': 1.0.0-beta.9
       '@hono/node-server': 2.0.12(hono@4.12.32)
       '@vercel/detect-agent': 1.2.3
@@ -2407,7 +2407,7 @@ packages:
       - zod-to-json-schema
     dev: true
 
-  /@flue/runtime@1.0.0-beta.9(patch_hash=tfh7voirq7gypn3fnviruitf3e)(@cfworker/json-schema@4.1.1)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(typescript@5.9.3)(zod@4.4.3):
+  /@flue/runtime@1.0.0-beta.9(patch_hash=dfk3uld6ddjv6io42afx46vbby)(@cfworker/json-schema@4.1.1)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(typescript@5.9.3)(zod@4.4.3):
     resolution: {integrity: sha512-ksh0ZkTVyqQnGvU3OnbVX6luAJwe6tt8q7O0vn99b7Cx6XcPTXzY/YEkXrOtCHzV6ZwfSdO9ZfaWbhTD1tdQuQ==}
     engines: {node: '>=22.19.0'}
     dependencies:

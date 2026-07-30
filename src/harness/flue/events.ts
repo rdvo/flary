@@ -8,6 +8,11 @@ import {
   type RunEvent,
   type TraceContext,
 } from "../contracts/index.js";
+import {
+  redactErrorMessage,
+  redactSecrets,
+  redactText,
+} from "../execution/redaction.js";
 
 export interface NormalizeFlueEventOptions {
   readonly runId: string;
@@ -65,7 +70,7 @@ export function normalizeFlueEvent(
       return RunEventSchema.parse({
         ...base,
         type: "message.delta",
-        payload: { delta: event.text },
+        payload: { delta: redactText(event.text) },
       });
     case "thinking_delta":
       if (!event.delta) return undefined;
@@ -251,11 +256,11 @@ function normalizeUsage(value: unknown) {
 
 function messageText(value: unknown): string {
   const message = asRecord(value);
-  if (typeof message.content === "string") return message.content;
+  if (typeof message.content === "string") return redactText(message.content);
   if (!Array.isArray(message.content)) return "";
-  return message.content
+  return redactText(message.content
     .map((part) => stringValue(asRecord(part).text) ?? "")
-    .join("");
+    .join(""));
 }
 
 function messageRole(value: unknown): "user" | "assistant" | "system" | "tool" {
@@ -268,15 +273,17 @@ function messageRole(value: unknown): "user" | "assistant" | "system" | "tool" {
 function jsonObject(value: unknown): Record<string, unknown> {
   const object = asRecord(value);
   const parsed = JsonObjectSchema.safeParse(object);
-  return parsed.success ? parsed.data : { value: jsonValue(value) };
+  return parsed.success
+    ? (redactSecrets(parsed.data) as Record<string, unknown>)
+    : { value: redactSecrets(jsonValue(value)) };
 }
 
 function jsonValue(value: unknown): unknown {
   if (value === undefined) return null;
   try {
-    return JSON.parse(JSON.stringify(value)) as unknown;
+    return redactSecrets(JSON.parse(JSON.stringify(value)));
   } catch {
-    return String(value);
+    return redactText(String(value));
   }
 }
 
@@ -297,7 +304,7 @@ function numberValue(value: unknown): number | undefined {
 }
 
 function errorMessage(value: unknown, fallback: string): string {
-  if (value instanceof Error) return value.message;
+  if (value instanceof Error) return redactErrorMessage(value, fallback);
   const record = asRecord(value);
-  return stringValue(record.message) ?? fallback;
+  return redactErrorMessage(stringValue(record.message), fallback);
 }
