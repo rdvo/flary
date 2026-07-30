@@ -1,0 +1,53 @@
+---
+title: Package exports
+description: Find the right Flary module for prompts, durable runs, tools, providers, storage, and Cloudflare adapters.
+section: Reference
+order: 1
+---
+
+Import from a focused entry point. This keeps application bundles and type
+declarations small and makes the host boundary easy to audit.
+
+| Import | Use |
+| --- | --- |
+| flary | Common contracts, modes, execution helpers, and top-level exports |
+| flary/prompts | Prompt Markdown parsing, compilation, revisions, and rollouts |
+| flary/flue | Agent definitions, Flue services, lazy tools, and user input |
+| flary/host | Authenticated host routers and trusted context |
+| flary/client | Browser or server client for runs and threads |
+| flary/tools | Zod tools, catalogs, lazy runtime, and capability handles |
+| flary/mcp | Remote MCP discovery and safe tool adapters |
+| flary/providers | Normalized model requests, adapters, OAuth, and cache policy |
+| flary/contracts | Zod schemas and TypeScript types |
+| flary/cloudflare | D1, Durable Object, R2, Dynamic Worker, Sandbox, and queue adapters |
+| flary/storage | Workspace, blob, Artifacts, JSONL, and history contracts |
+| flary/history | Checkpoints, indexing queue, and history projection |
+| flary/recall | Exact, in-memory, and Turbopuffer recall indexes |
+| flary/subagents | Child execution contracts and coordinators |
+| flary/execution | Parallel scheduler, mode policy, approvals, and idempotency |
+| flary/telemetry | Usage, trace, and normalized model telemetry |
+| flary/vault | Encrypted secret references and capability-scoped access |
+
+## Common imports
+
+~~~ts
+import { AgentModeSchema, resolveAgentMode } from "flary/contracts";
+import { compilePrompt } from "flary/prompts";
+import { defineFlaryAgent } from "flary/flue";
+import { createFlaryRunRouter } from "flary/host";
+import { createFlaryRunClient } from "flary/client";
+import { defineFlaryTool, defineFlaryToolset } from "flary/tools";
+import { createMcpTools } from "flary/mcp";
+~~~
+
+## Versioning
+
+Use the exact release candidate in production:
+
+~~~bash
+npm install --save-exact flary@0.3.0-rc.5
+~~~
+
+Flary RC 0.3.0-rc.5 pins Flue runtime and SDK 1.0.0-beta.9 and Pi AI
+0.80.10. Run the clean npm installation test in CI so a host does not
+silently lose the checked-in dependency patches.

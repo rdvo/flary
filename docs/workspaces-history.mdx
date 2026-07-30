@@ -1,0 +1,102 @@
+---
+title: Workspaces, files, and history
+description: Give agents a tenant-safe branch workspace, store large files in R2, and project the canonical thread into searchable history.
+section: Advanced
+order: 2
+---
+
+Workspace state is separate from the conversation. A thread binds to one
+workspace or project branch. A fork or a new branch creates a new binding;
+the original thread cannot silently change its workspace.
+
+## File storage tiers
+
+Flary uses workspace SQLite for small files and R2 for large immutable blobs:
+
+| File size | Storage |
+| --- | --- |
+| 1,500,000 bytes or less | Workspace Durable Object SQLite |
+| More than 1,500,000 bytes | Private tenant-scoped R2 object |
+
+R2 keys are derived from opaque IDs:
+
+~~~text
+tenants/{tenantId}/applications/{applicationId}/projects/{projectId}/workspaces/{workspaceId}/blobs/{sha256}
+~~~
+
+Never use email addresses or user-provided names in object keys. A prefix is
+not authorization. Every read, write, delete, and signed transfer checks the
+authenticated tenant and workspace scope.
+
+## Use workspace tools
+
+~~~ts
+const tools = registerWorkspaceTools({
+  workspace: env.WORKSPACES.forBranch(trusted),
+  blobs: env.WORKSPACE_BLOBS,
+  git: env.GIT.forBranch(trusted),
+});
+~~~
+
+The concrete adapter is host-owned. Flary's tool contracts cover read, write,
+edit, delete, move, list, stat, glob, grep, diff, batch edit, and Git status.
+Large writes fail closed if production R2 is not available.
+
+## History is a projection
+
+Flue remains the only execution and transcript authority. History is a
+derived, immutable projection for audit, diffs, Recall, and restore:
+
+~~~text
+Flue stream
+  → semantic checkpoint
+  → Artifacts repository when available
+  → R2 immutable commit fallback
+  → exact and hybrid Recall index
+~~~
+
+Checkpoints are created after a dirty turn, explicit commit, mode change,
+restore, or approved Sandbox import. Repeated edits from one operation are
+coalesced. A checkpoint stores files, JSONL events, scope, parent, branch,
+reason, and metadata.
+
+## Recall
+
+Search returns short scoped results first:
+
+~~~ts
+const results = await recall.search({
+  query: "the authentication decision from last week",
+  scope: {
+    kind: "project",
+    organizationId: trusted.tenantId,
+    appId: trusted.applicationId,
+    projectId: trusted.projectId,
+  },
+  mode: "hybrid",
+  kinds: ["decision", "plan", "message", "file"],
+  limit: 10,
+});
+~~~
+
+Exact search uses an isolated history checkout and rg. Hybrid search can use
+Turbopuffer BM25 and vector retrieval. Turbopuffer is derived; it is not the
+source of truth.
+
+Every result keeps its organization, application, project, workspace, session,
+commit, path, line or JSONL offset, score, and stable open reference. Enforce
+scope filters during indexing, search, open, deletion, and signed transfers.
+
+## Restore and fork
+
+Restore copies an old checkpoint into a new head. It never erases a newer
+checkpoint. A fork creates a new workspace or thread branch and preserves the
+parent commit ID. Use the history contract for compare, diff, checkpoint, fork,
+merge, and tombstone operations.
+
+## Retention
+
+The host decides retention and deletion rules. When a tenant or project is
+deleted, remove or tombstone the source checkpoint, R2 blobs, and derived
+index records together. Do not leave a searchable index record that points to
+deleted tenant data.

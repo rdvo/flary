@@ -1,0 +1,107 @@
+---
+title: Approvals and user input
+description: Pause a durable agent for a human decision, persist the request, and resume without keeping the original request open.
+section: Tools
+order: 2
+---
+
+Flary separates two kinds of pause:
+
+- Approval: the host decides whether a specific state-changing tool call may
+  run.
+- User input: the agent needs information such as a choice, text value, or
+  missing configuration.
+
+Both are durable. The host UI can be a chat panel, support console, terminal,
+or custom workflow.
+
+## Require approval for a tool
+
+Mark a tool as a write and require approval:
+
+~~~ts
+import { z } from "zod";
+import { defineFlaryTool } from "flary/tools";
+
+export const refund = defineFlaryTool({
+  id: "billing.refund",
+  description: "Issue a refund for one order.",
+  input: z.object({
+    orderId: z.string(),
+    amountCents: z.number().int().positive(),
+  }),
+  operation: "write",
+  capabilities: ["billing.refund"],
+  resourceKey: (input) => "order:" + input.orderId,
+  requiresApproval: true,
+  async execute(input) {
+    return billingProvider.refund(input);
+  },
+});
+~~~
+
+The active mode can add another approval rule for a capability or tool. The
+runtime binds an approval to the exact run, tool, arguments, resource, mode,
+and credential generation.
+
+## Request user input
+
+Expose the Flue helper in the agent tool set:
+
+~~~ts
+import { createFlueRequestUserInputTool } from "flary/flue";
+
+const requestUserInput = createFlueRequestUserInputTool({
+  threadKey: trusted.threadId,
+  createRequest: ({ questions }) =>
+    threadMetadata.createUserInputRequest({
+      questions,
+      requestedBy: trusted.identity,
+    }),
+});
+~~~
+
+The tool returns waiting state. The host lists pending questions and submits
+the answer through the thread or run API:
+
+~~~ts
+await thread.respondToUserInput("input_123", {
+  values: {
+    environment: "staging",
+  },
+});
+~~~
+
+The answer is stored in the thread runtime before Flue resumes. If the Worker
+restarts, Flary submits a bounded continuation with the persisted answer
+instead of asking the provider to repeat the previous tool call.
+
+## Approval flow
+
+~~~text
+tool call admitted
+  → mode check
+  → approval.requested event
+  → thread status: waiting
+  → host displays exact action and arguments
+  → approve or reject with the actor identity
+  → capability lease issued for one call
+  → tool resumes or fails closed
+~~~
+
+Use a short-lived capability lease. A later mode change, argument change,
+credential rotation, or run cancellation invalidates the old decision.
+
+## Host API responsibilities
+
+Flary stores the request, decision, lease, and continuation metadata in thread
+SQLite. The host is responsible for:
+
+- Authenticating the person who approves.
+- Showing safe, redacted arguments.
+- Applying organization roles and approval rules.
+- Returning the decision through an authenticated endpoint.
+- Handling an expired or rejected request in the product UI.
+
+Never approve based on a model-generated summary alone. Render the tool ID,
+resource, affected values, and the exact irreversible action.

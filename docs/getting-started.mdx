@@ -1,16 +1,20 @@
 ---
-title: Getting started
-description: Install Flary, compile a prompt file, and add a durable thread when your product needs one.
+title: Choose your path
+description: Start with a one-off prompt, self-host a durable thread, or embed Flary in an existing product.
 section: Start
 order: 1
 ---
 
-Flary has two usable layers:
+Flary has three entry points:
 
-1. Prompt files and typed contracts can run in any TypeScript application.
-2. Durable agent threads run in a Cloudflare Worker with Durable Objects.
+1. One-off agent: compile a prompt and call a provider from any TypeScript
+   application.
+2. Self-hosted runtime: run durable threads in your Cloudflare Worker.
+3. Product integration: keep your authentication, UI, billing, and connections
+   while Flary supplies the agent runtime.
 
-Start with the smallest layer that your application needs.
+Start with the smallest layer that matches the job. You can move from a
+one-off call to a durable thread without changing your prompt files.
 
 ## Install
 
@@ -36,8 +40,8 @@ npm run dev
 ```
 
 The starter proves the prompt-file path first. It does not create production
-Cloudflare resources. Follow the [support bot](/docs/examples/support-bot/) or
-[coding agent](/docs/examples/coding-agent/) guide when you add durable threads.
+Cloudflare resources. Use [One-off agent](/docs/one-off-agent/) for a small
+call or [Self-hosting](/docs/self-hosting/) for a durable deployment.
 
 ## Use a prompt file without Cloudflare
 
@@ -98,7 +102,8 @@ Your host application supplies authentication, tenant mapping, provider
 credentials, and product policy. Flary supplies the typed run API, durable
 execution adapter, tool runtime, modes, approvals, and event stream.
 
-Read [Cloudflare resources](/docs/cloudflare-resources/) before deployment.
+Read [Self-hosting](/docs/self-hosting/) and
+[Cloudflare resources](/docs/cloudflare-resources/) before deployment.
 
 ## Call the stable run API
 
@@ -124,3 +129,17 @@ for await (const event of runs.observe(run.runId)) {
 
 If the client disconnects, call `observe()` again with the last event
 sequence. Flary replays stored normalized events before it streams new events.
+
+## What the host application owns
+
+Flary is infrastructure, not a product UI. The host application owns:
+
+- Authentication and organization membership.
+- Agent and prompt revision selection.
+- Provider connections, subscription ownership, and billing.
+- The chat, support inbox, coding UI, or background job.
+- Product-specific limits and approval presentation.
+
+Flary owns the durable thread, trusted context checks, provider adapter,
+stream replay, tool policy, approvals, workspace boundary, and normalized
+events.

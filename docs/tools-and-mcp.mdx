@@ -1,0 +1,179 @@
+---
+title: Tools and MCP
+description: Define Zod tools, discover them lazily, execute independent reads in parallel, and connect authorized remote MCP servers.
+section: Tools
+order: 1
+---
+
+Flary separates tool description from tool execution. The model first sees a
+small gateway. It searches or describes a tool, then Flary validates the
+arguments, checks the active mode, resolves secrets, and executes the tool in
+trusted host code.
+
+## Define a native tool
+
+~~~ts
+import { z } from "zod";
+import { defineFlaryTool } from "flary/tools";
+
+export const getOrder = defineFlaryTool({
+  id: "orders.get",
+  name: "Get order",
+  description: "Read one order from the product database.",
+  input: z.object({
+    orderId: z.string().min(1),
+  }),
+  output: z.object({
+    id: z.string(),
+    status: z.string(),
+  }),
+  capabilities: ["orders.read"],
+  tags: ["orders", "read"],
+  secretRefs: ["ORDERS_TOKEN"],
+  async execute({ orderId }, context) {
+    return context.useSecret(
+      "ORDERS_TOKEN",
+      (token) => readOrder(orderId, token),
+    );
+  },
+});
+~~~
+
+The input and output schemas run in trusted code. The model receives JSON
+schema metadata, not the executable closure or secret value.
+
+## Group and register tools
+
+~~~ts
+import { defineFlaryToolset, InMemoryToolCatalog } from "flary/tools";
+
+const supportTools = defineFlaryToolset([
+  getOrder,
+  updateTicket,
+]);
+
+export function resolveTools(mode: AgentMode) {
+  const catalog = new InMemoryToolCatalog({
+    secretProvider: productSecrets,
+  });
+  supportTools.register(catalog);
+  return new LazyToolRuntime({
+    catalog,
+    mode,
+    approve: approvals.require,
+  });
+}
+~~~
+
+For a Durable Object, replace the in-memory journal and secret provider with
+the Cloudflare adapters. The catalog definition can remain the same.
+
+## Lazy discovery
+
+The Flary gateway exposes four stable operations:
+
+| Gateway tool | Purpose |
+| --- | --- |
+| tool_search | Find short redacted summaries by name, tag, or capability |
+| tool_describe | Load one selected input schema |
+| tool_call | Execute one validated call |
+| tool_batch | Execute a dependency-aware batch |
+
+This keeps a large tool library out of every model request. Load only the
+schema that the current task needs.
+
+~~~ts
+import { createFlueLazyTools } from "flary/flue";
+
+const lazyTools = createFlueLazyTools(
+  resolveTools(mode),
+);
+~~~
+
+## Parallel calls
+
+Flary can run independent read calls concurrently. It serializes writes by
+resource key and uses the tool journal for idempotency:
+
+~~~ts
+const report = await runtime.batch({
+  calls: [
+    {
+      id: "orders.get",
+      callId: "read_order",
+      arguments: { orderId: "order_1" },
+    },
+    {
+      id: "orders.get",
+      callId: "read_order_2",
+      arguments: { orderId: "order_2" },
+    },
+  ],
+});
+~~~
+
+Use a resourceKey for writes that must be serialized:
+
+~~~ts
+defineFlaryTool({
+  id: "orders.update",
+  input: z.object({ orderId: z.string(), status: z.string() }),
+  operation: "write",
+  capabilities: ["orders.write"],
+  resourceKey: (input) => "order:" + input.orderId,
+  async execute(input) {
+    return updateOrder(input);
+  },
+});
+~~~
+
+Only operations marked independent can run in parallel. Do not parallelize
+two calls that can mutate the same resource or connection.
+
+## Connect remote MCP
+
+The host product owns connection records, OAuth or API-key setup, encrypted
+credentials, organization grants, and the endpoints enabled for a thread.
+Flary owns the safe MCP adapter:
+
+~~~ts
+import { SqliteMcpDescriptorCache, SqliteToolExecutionJournal } from "flary/cloudflare";
+import { createMcpTools } from "flary/mcp";
+
+const tools = await createMcpTools({
+  scope: trusted,
+  endpoints: await productConnections.mcpEndpoints(trusted),
+  credentials: ({ endpoint }) =>
+    productConnections.resolveCredential(endpoint.connectionId),
+  permissions: ({ endpoint, tool }) =>
+    productConnections.canUseTool(
+      trusted,
+      endpoint.connectionId,
+      tool.name,
+    ),
+  mode,
+  runId,
+  descriptorCache: new SqliteMcpDescriptorCache(threadSql),
+  journal: new SqliteToolExecutionJournal(threadSql),
+  approve: approvals.require,
+  onEvent: (event) => threadEvents.append(event),
+});
+~~~
+
+Credential callbacks run only in trusted host code. Credential values do not
+enter tool descriptions, model input, logs, or normalized events.
+
+Remote HTTP and SSE endpoints must use HTTPS. The adapter validates redirects,
+blocks private-network destinations, caps descriptor and schema sizes, and
+isolates endpoint failures. Stdio is for self-hosted deployments only.
+
+## Tool safety rules
+
+- Give every tool a stable ID and capability.
+- Use read for reads and write for mutations.
+- Give writes a resource key and idempotency key.
+- Require approval for deletes, external messages, secrets, commits, merges,
+  deploys, and other irreversible effects.
+- Resolve credentials only for the duration of a protected callback.
+- Keep MCP connections scoped to the authenticated tenant and thread.
+- Treat outcome_unknown as a reconciliation task. Never blindly retry it.

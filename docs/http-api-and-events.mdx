@@ -1,0 +1,80 @@
+---
+title: HTTP API and events
+description: Mount the stable run routes, validate requests, and consume normalized SSE events.
+section: Reference
+order: 2
+---
+
+Mount createFlaryRunRouter below a route that already authenticates the
+request. Flary resolves trusted context through the host callback.
+
+## Routes
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| POST | /runs | Admit one agent or workflow run |
+| GET | /runs/:runId | Read current status and result |
+| GET | /runs/:runId/events | Replay and stream normalized SSE |
+| POST | /runs/:runId/input | Resume a waiting run |
+| POST | /runs/:runId/cancel | Request cancellation |
+
+The create body includes requestId, channelId, input, optional execution,
+profileId, idempotencyKey, requestedAt, traceContext, and metadata. It does
+not include tenantId, agentId, roles, scopes, or credentials.
+
+## SSE cursor
+
+Send either afterSequence as a query value or Last-Event-ID as a header:
+
+~~~text
+GET /v1/agents/support/runs/run_123/events?afterSequence=41
+Last-Event-ID: 41
+Accept: text/event-stream
+~~~
+
+The server sends a numeric event ID, an event type, and a JSON payload:
+
+~~~text
+id: 42
+event: message.delta
+data: {"sequence":42,"type":"message.delta","payload":{"delta":"Hello"}}
+~~~
+
+Heartbeat events keep an active connection visible. The client must ignore
+heartbeats when rendering message content.
+
+## Event families
+
+Normalized events include run admission and settlement, model and reasoning
+deltas, tool start and completion, approval requests and decisions, waiting and
+resumed state, user input, usage, checkpoint, completion, failure, and
+cancellation.
+
+Validate every event with RunEventSchema before rendering or storing it:
+
+~~~ts
+import { RunEventSchema } from "flary/contracts";
+
+const event = RunEventSchema.parse(incomingEvent);
+if (event.type === "tool.started") {
+  showToolActivity(event.payload);
+}
+~~~
+
+## Errors
+
+The host router returns a stable error envelope:
+
+~~~json
+{
+  "error": {
+    "type": "invalid_request",
+    "message": "The Flary run request is invalid",
+    "details": []
+  }
+}
+~~~
+
+Provider failures, missing credentials, approval denial, invalid mode access,
+and uncertain tool outcomes use typed error codes. Do not expose provider
+tokens, authorization codes, or raw upstream responses to the client.

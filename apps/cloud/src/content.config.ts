@@ -10,7 +10,14 @@ const docs = defineCollection({
   schema: z.object({
     title: z.string(),
     description: z.string(),
-    section: z.enum(["Start", "Core", "Examples"]),
+    section: z.enum([
+      "Start",
+      "Core",
+      "Tools",
+      "Advanced",
+      "Examples",
+      "Reference",
+    ]),
     order: z.number().int().positive(),
   }),
 });

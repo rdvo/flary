@@ -2,7 +2,14 @@ import type { CollectionEntry } from "astro:content";
 
 export type DocEntry = CollectionEntry<"docs">;
 
-export const DOC_SECTION_ORDER = ["Start", "Core", "Examples"] as const;
+export const DOC_SECTION_ORDER = [
+  "Start",
+  "Core",
+  "Tools",
+  "Advanced",
+  "Examples",
+  "Reference",
+] as const;
 
 export function docPath(id: string): string {
   return `/docs/${id}/`;

@@ -1,0 +1,203 @@
+---
+title: Self-host Flary
+description: Run the durable agent runtime in your own Cloudflare Worker with your own authentication and product policy.
+section: Start
+order: 3
+---
+
+Flary OSS is self-hosted. It does not require Flary Cloud or Better Auth. Your
+Worker is the public host. Flary runs the durable agent thread and validates
+the trusted context that your host supplies.
+
+## Minimal architecture
+
+~~~text
+Your Worker
+  ├─ authenticate request
+  ├─ resolve tenant, user, agent, and grants
+  ├─ mount createFlaryRunRouter()
+  └─ provide model, tool, and storage adapters
+
+Flary
+  ├─ Flue Durable Object: canonical transcript and execution stream
+  ├─ D1: run admission, replay projection, idempotency, and results
+  ├─ R2: large files and optional immutable history fallback
+  └─ optional Dynamic Workers, Sandbox, Artifacts, and Turbopuffer
+~~~
+
+Use one thread Durable Object per conversation or coding thread. Do not route
+all tenant traffic through one object. Use a separate workspace object for a
+project branch when the agent edits files.
+
+## Create the Worker
+
+The CLI creates a small prompt starter:
+
+~~~bash
+npx flary@0.3.0-rc.5 create my-agent
+cd my-agent
+npm install
+npm run dev
+~~~
+
+For an existing Worker:
+
+~~~bash
+npm install --save-exact flary@0.3.0-rc.5
+npx flary init
+~~~
+
+The generated starter is intentionally small. Add the durable bindings and
+Flue build to the host's existing Wrangler configuration.
+
+## Bind resources
+
+Add a D1 database and the Flue-generated Durable Object binding to the host
+Worker. The exact Durable Object class and binding name come from the pinned
+Flue build.
+
+~~~jsonc
+{
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "my-agent",
+      "database_id": "replace-with-your-database-id"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "WORKSPACE_BLOBS",
+      "bucket_name": "my-agent-blobs"
+    }
+  ]
+}
+~~~
+
+Apply Flary's run projection migration through your normal D1 migration
+process:
+
+~~~ts
+import { FLARY_RUNS_D1_MIGRATION } from "flary/cloudflare";
+
+// Write this SQL to your migration directory and apply it with Wrangler.
+console.log(FLARY_RUNS_D1_MIGRATION);
+~~~
+
+R2 is optional for a basic chat thread. Production needs it for workspace
+files larger than 1,500,000 bytes or for the immutable history fallback.
+
+## Define the agent
+
+The host resolves trusted context, the agent revision, the model credential,
+and the allowed tool set in server code:
+
+~~~ts
+import { defineFlaryAgent } from "flary/flue";
+import { resolveAgentMode } from "flary/contracts";
+
+export default defineFlaryAgent<Env>({
+  resolveContext: ({ env, id }) => env.RUN_BINDINGS.read(id),
+
+  resolveAgent: async ({ env, trusted }) => {
+    const revision = await env.AGENTS.get(
+      trusted.tenantId,
+      trusted.agentId,
+      trusted.revisionId,
+    );
+    const mode = resolveAgentMode(revision.mode, revision.customModes);
+
+    return {
+      agentId: trusted.agentId,
+      revisionId: revision.id,
+      instructions: revision.instructions,
+      model: revision.model,
+      thinkingLevel: revision.thinkingLevel,
+      mode: mode.id,
+      limits: mode.limits,
+    };
+  },
+
+  resolveModel: ({ env, agent, trusted }) =>
+    env.MODELS.resolve(trusted, agent.model),
+
+  resolveTools: ({ env, trusted, agent }) =>
+    env.TOOLS.forThread(trusted, agent.mode),
+});
+~~~
+
+The public request does not supply tenant, agent, roles, scopes, or provider
+credentials. The host resolves them after authentication.
+
+## Mount the run API
+
+~~~ts
+import { Hono } from "hono";
+import { D1FlaryRunRepository } from "flary/cloudflare";
+import {
+  createFlueAgentGateway,
+  createFlueRunService,
+} from "flary/flue";
+import { createFlaryRunRouter } from "flary/host";
+
+const app = new Hono<{ Bindings: Env }>();
+
+app.route(
+  "/v1/agents/support",
+  createFlaryRunRouter<Env>({
+    resolveContext: async ({ request, env }) => {
+      const caller = await authenticateProductRequest(request, env);
+      return {
+        tenantId: caller.tenantId,
+        applicationId: "my-product",
+        projectId: caller.projectId,
+        agentId: "support",
+        identity: { id: caller.userId, kind: "user", version: "1" },
+        roles: caller.roles,
+        scopes: caller.scopes,
+      };
+    },
+    service: (env, execution) =>
+      createFlueRunService({
+        repository: new D1FlaryRunRepository(env.DB),
+        gateway: createFlueAgentGateway({
+          baseUrl: "https://internal.flue",
+          fetch: env.SELF.fetch.bind(env.SELF),
+          headers: { "x-internal-token": env.FLUE_INTERNAL_TOKEN },
+        }),
+        schedule: (work) => execution.waitUntil(work),
+      }),
+  }),
+);
+
+export default app;
+~~~
+
+The internal Flue gateway URL and binding depend on your Flue build output.
+Keep it private. Only the authenticated product route should be public.
+
+## Run migrations and deploy
+
+~~~bash
+wrangler d1 create my-agent
+wrangler d1 migrations apply my-agent --local
+wrangler d1 migrations apply my-agent --remote
+npm run build
+wrangler deploy
+~~~
+
+Use the host's own migration directory in a real application. Do not apply
+production migrations from a developer laptop without the deployment review
+used by the rest of your application.
+
+## Self-hosting checklist
+
+- Pin Flary, Flue, Pi, and Cloudflare package versions.
+- Run Flary's clean npm installation test in CI.
+- Authenticate every public route before resolving trusted context.
+- Store provider credentials in an encrypted vault or the host's secret
+  system. Never place them in prompts or model-visible tool arguments.
+- Use tenant-scoped R2 keys and authorize every object operation.
+- Set a mode and tool allowlist for every agent revision.
+- Give writes idempotency keys and require approval for risky operations.
+- Test disconnect, replay, restart, cancellation, and credential rotation.

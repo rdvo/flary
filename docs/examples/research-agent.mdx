@@ -1,0 +1,101 @@
+---
+title: Research agent
+description: Build a scoped research worker that searches sources, delegates independent work, and returns a cited result.
+section: Examples
+order: 3
+---
+
+Research is a good first durable agent because it can run after the caller
+disconnects and can use bounded read-only tools in parallel.
+
+## Agent definition
+
+~~~ts
+import { defineFlaryAgent } from "flary/flue";
+
+export default defineFlaryAgent<Env>({
+  resolveContext: ({ env, id }) => env.RUN_BINDINGS.read(id),
+
+  resolveAgent: ({ trusted }) => ({
+    agentId: "research",
+    revisionId: trusted.revisionId,
+    instructions: [
+      "Research only from approved sources.",
+      "Cite every material claim.",
+      "Ask for clarification when the scope is not clear.",
+    ].join("\n"),
+    model: {
+      provider: "openai",
+      model: "gpt-5.6",
+      cacheRetention: "short",
+    },
+    thinkingLevel: "high",
+    mode: "ask",
+    limits: {
+      maxSteps: 20,
+      maxToolCalls: 40,
+      maxDurationMs: 600_000,
+    },
+  }),
+
+  resolveModel: ({ env, agent, trusted }) =>
+    env.MODELS.resolve(trusted, agent.model),
+
+  resolveTools: ({ env, trusted }) =>
+    env.RESEARCH_TOOLS.forThread(trusted),
+});
+~~~
+
+The research tool set should expose source search, source open, and Recall.
+Keep it read-only. If the agent must save a report, grant only
+artifact.plan.write or a dedicated report artifact capability.
+
+## Prompt
+
+~~~md
+---
+model: inherit
+thinking: high
+tools:
+  - sources.search
+  - sources.open
+  - recall.search
+  - recall.open
+input:
+  question: string
+  scope: string
+limits:
+  steps: 20
+  tools: 40
+---
+
+Research {{question}} within this scope:
+{{scope}}
+
+Return:
+1. A short answer.
+2. Evidence with source titles and links.
+3. Any uncertainty or missing evidence.
+~~~
+
+## Run it from a product
+
+~~~ts
+const run = await runs.create({
+  requestId: crypto.randomUUID(),
+  channelId: "research:customer-42",
+  input: {
+    question: "Which vendors support SCIM provisioning?",
+    scope: "Only the approved security and vendor documentation.",
+  },
+  idempotencyKey: "research:customer-42:scim:v1",
+});
+
+for await (const event of runs.observe(run.runId)) {
+  researchPanel.append(event);
+}
+~~~
+
+For a large question, spawn bounded ask-mode subagents for independent source
+groups. The parent should validate and cite their results before returning the
+final answer.

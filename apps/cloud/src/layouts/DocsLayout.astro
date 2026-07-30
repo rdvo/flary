@@ -1,6 +1,11 @@
 ---
 import { getCollection } from "astro:content";
-import { ArrowLeft, ArrowRight, ArrowUpRight } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  ArrowUpRight,
+  Search,
+} from "lucide-react";
 import {
   DOC_SECTION_ORDER,
   docPath,
@@ -71,6 +76,7 @@ function navigationGroups(): Array<{
         </a>
         <span class="docs-divider" aria-hidden="true"></span>
         <a class="docs-wordmark" href="/docs/">Docs</a>
+        <span class="docs-version">0.3 RC</span>
         <nav aria-label="Documentation links">
           <a href="/docs/getting-started/">Quickstart</a>
           <a
@@ -87,17 +93,27 @@ function navigationGroups(): Array<{
     <details class="docs-mobile-nav">
       <summary>Browse documentation</summary>
       <nav aria-label="Mobile documentation navigation">
+        <label class="docs-search">
+          <Search size={13} strokeWidth={1.8} aria-hidden="true" />
+          <input
+            type="search"
+            placeholder="Search pages"
+            aria-label="Search documentation pages"
+          />
+        </label>
         <a class:list={["docs-nav-home", { active: !activeId }]} href="/docs/">
           Overview
         </a>
         {
           navigationGroups().map((group) => (
-            <section>
+            <section data-doc-section>
               <p>{group.name}</p>
               {group.entries.map((entry) => (
                 <a
                   class:list={{ active: activeId === entry.id }}
                   href={docPath(entry.id)}
+                  data-doc-link
+                  data-search={`${entry.data.title} ${entry.data.description}`}
                 >
                   {entry.data.title}
                 </a>
@@ -111,17 +127,28 @@ function navigationGroups(): Array<{
     <div class="docs-grid">
       <aside class="docs-sidebar">
         <nav aria-label="Documentation navigation">
+          <label class="docs-search">
+            <Search size={13} strokeWidth={1.8} aria-hidden="true" />
+            <input
+              type="search"
+              placeholder="Search pages"
+              aria-label="Search documentation pages"
+            />
+            <kbd>/</kbd>
+          </label>
           <a class:list={["docs-nav-home", { active: !activeId }]} href="/docs/">
             Overview
           </a>
           {
             navigationGroups().map((group) => (
-              <section>
+              <section data-doc-section>
                 <p>{group.name}</p>
                 {group.entries.map((entry) => (
                   <a
                     class:list={{ active: activeId === entry.id }}
                     href={docPath(entry.id)}
+                    data-doc-link
+                    data-search={`${entry.data.title} ${entry.data.description}`}
                   >
                     {entry.data.title}
                   </a>
@@ -206,4 +233,53 @@ function navigationGroups(): Array<{
       </a>
     </footer>
   </div>
+
+  <script>
+    const normalize = (value: string) => value.trim().toLowerCase();
+
+    for (const search of document.querySelectorAll<HTMLInputElement>(
+      ".docs-search input",
+    )) {
+      search.addEventListener("input", () => {
+        const root = search.closest("nav");
+        if (!root) return;
+        const query = normalize(search.value);
+        for (const link of root.querySelectorAll<HTMLElement>("[data-doc-link]")) {
+          link.hidden =
+            query.length > 0 &&
+            !normalize(link.dataset.search ?? link.textContent ?? "").includes(
+              query,
+            );
+        }
+        for (const section of root.querySelectorAll<HTMLElement>(
+          "[data-doc-section]",
+        )) {
+          const visible = [...section.querySelectorAll("[data-doc-link]")].some(
+            (link) => !(link as HTMLElement).hidden,
+          );
+          section.hidden = !visible;
+        }
+      });
+    }
+
+    document.addEventListener("keydown", (event) => {
+      if (
+        event.key !== "/" ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+      const search = document.querySelector<HTMLInputElement>(
+        ".docs-sidebar .docs-search input",
+      );
+      if (search) {
+        event.preventDefault();
+        search.focus();
+      }
+    });
+  </script>
 </SiteLayout>

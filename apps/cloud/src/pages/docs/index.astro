@@ -1,6 +1,12 @@
 ---
 import { getCollection } from "astro:content";
-import { ArrowRight, Cloud, FileCode2, MessagesSquare } from "lucide-react";
+import {
+  ArrowRight,
+  Cloud,
+  FileCode2,
+  MessagesSquare,
+  PlugZap,
+} from "lucide-react";
 import { docPath, sortDocs } from "../../docs";
 import DocsLayout from "../../layouts/DocsLayout.astro";
 
@@ -10,22 +16,29 @@ const examples = entries.filter((entry) => entry.data.section === "Examples");
 
 <DocsLayout
   title="Build with Flary"
-  description="Use typed prompt files on their own, or add durable threads, tools, approvals, and workspaces to a Cloudflare Worker."
+  description="Start with a typed one-off call, self-host a durable agent, or embed the runtime in an existing product."
 >
   <section class="docs-start-grid">
-    <a href="/docs/getting-started/">
+    <a href="/docs/one-off-agent/">
       <FileCode2 size={18} strokeWidth={1.6} />
-      <span>Start here</span>
-      <h2>Install and run</h2>
-      <p>Compile your first prompt, then add a durable runtime only if you need it.</p>
-      <strong>Getting started <ArrowRight size={14} strokeWidth={1.7} /></strong>
+      <span>Run once</span>
+      <h2>One-off agent call</h2>
+      <p>Compile a Git-tracked prompt and call a provider with one normalized contract.</p>
+      <strong>Open guide <ArrowRight size={14} strokeWidth={1.7} /></strong>
     </a>
-    <a href="/docs/cloudflare-resources/">
+    <a href="/docs/self-hosting/">
       <Cloud size={18} strokeWidth={1.6} />
-      <span>Deploy</span>
-      <h2>Choose resources</h2>
-      <p>See when your app needs Workers, Durable Objects, D1, R2, or Sandbox.</p>
-      <strong>Resource guide <ArrowRight size={14} strokeWidth={1.7} /></strong>
+      <span>Keep going</span>
+      <h2>Self-host on Cloudflare</h2>
+      <p>Mount durable threads, resumable events, tools, approvals, and tenant policy.</p>
+      <strong>Self-host Flary <ArrowRight size={14} strokeWidth={1.7} /></strong>
+    </a>
+    <a href="/docs/durable-threads/">
+      <PlugZap size={18} strokeWidth={1.6} />
+      <span>Embed</span>
+      <h2>Add Flary to a product</h2>
+      <p>Keep your own auth, billing, and UI. Use Flary as the agent backend.</p>
+      <strong>Integration guide <ArrowRight size={14} strokeWidth={1.7} /></strong>
     </a>
   </section>
 

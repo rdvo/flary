@@ -1,0 +1,248 @@
+---
+title: Modes and permissions
+description: Define what an agent may read, write, ask, and approve, then persist the active profile with the thread.
+section: Core
+order: 3
+---
+
+Modes are policy profiles. They do not create separate agents or runtimes. The
+same Flue thread, tools, event stream, and provider session continue when the
+active mode changes.
+
+Flary checks a mode twice:
+
+1. The agent definition resolves the profile before Flue starts or recovers a
+   turn.
+2. The tool runtime checks the profile again immediately before a tool call.
+
+The second check is important. A model cannot give itself a stronger mode by
+writing a different value into a tool argument.
+
+## Built-in profiles
+
+~~~ts
+import {
+  BUILT_IN_AGENT_MODES,
+  listBuiltInAgentModes,
+  resolveAgentMode,
+} from "flary";
+
+const ask = resolveAgentMode("ask");
+const plan = resolveAgentMode("plan");
+const build = resolveAgentMode("build");
+const review = resolveAgentMode("review");
+
+console.log(listBuiltInAgentModes().map((mode) => mode.id));
+// ["ask", "plan", "build", "review"]
+~~~
+
+| Mode | Allowed work | Writes | Default approval rule |
+| --- | --- | --- | --- |
+| ask | Answer, search, read files, and read approved MCP tools | None | No writes are allowed |
+| plan | Inspect the workspace and history | plans/* artifacts only | No external side effects |
+| build | Use the tools granted by the host | * by default | Every write requires approval |
+| review | Inspect files, diffs, checkpoints, and history | None | No writes are allowed |
+
+These are conservative defaults. A host can remove capabilities from build or
+define a narrower custom profile.
+
+## The profile shape
+
+AgentModeSchema is the public Zod contract. The important fields are:
+
+~~~ts
+import { AgentModeSchema } from "flary/contracts";
+
+const supportReadOnly = AgentModeSchema.parse({
+  id: "support-read-only",
+  name: "Support read-only",
+  prompt:
+    "Answer from approved sources. Never change customer or billing data.",
+  allowedCapabilities: [
+    "interaction.user_input",
+    "knowledge.search",
+    "tickets.read",
+    "recall.search",
+    "recall.open",
+  ],
+  deniedCapabilities: ["tickets.write", "billing.write"],
+  writableScopes: [],
+  approvalPolicy: {
+    requireForWrites: true,
+    requiredCapabilities: [],
+    requiredTools: [],
+  },
+  limits: {
+    maxSteps: 12,
+    maxToolCalls: 24,
+    maxDurationMs: 120_000,
+  },
+});
+~~~
+
+allowedCapabilities controls which capability names can run.
+deniedCapabilities always wins. A trailing star is a prefix pattern, so
+tickets.* matches tickets.read and tickets.write. writableScopes applies only
+to writes; for example, plans/* permits a plan artifact but not an application
+file.
+
+approvalPolicy adds a second gate. Use it for all writes in a mode, or for a
+specific capability or tool:
+
+~~~ts
+const deployReview = AgentModeSchema.parse({
+  id: "deploy-review",
+  name: "Deploy review",
+  prompt: "Review the release and request approval before deployment.",
+  allowedCapabilities: ["file.read", "diff.read", "deploy.run"],
+  writableScopes: [],
+  approvalPolicy: {
+    requiredCapabilities: ["deploy.*"],
+    requiredTools: ["release.publish"],
+  },
+});
+~~~
+
+Check access in host code or in a custom tool:
+
+~~~ts
+import { checkModeAccess, resolveAgentMode } from "flary";
+
+const decision = checkModeAccess(resolveAgentMode("plan"), {
+  capability: "workspace.file.write",
+  operation: "write",
+  resource: "src/App.tsx",
+  toolId: "workspace.apply_patch",
+});
+
+// { allowed: false, reason: "Capability is not allowed in mode plan" }
+~~~
+
+Use assertModeAccess when a failed check must stop the operation. The tool
+runtime and scheduler use the same checks, so a host does not need to rely on
+the prompt as a security boundary.
+
+## Resolve a custom mode
+
+Keep custom profiles in the host application. The host can load them from a
+database, a versioned configuration file, or a tenant's agent revision. Parse
+the value with Zod before returning it:
+
+~~~ts
+import { AgentModeSchema, resolveAgentMode } from "flary/contracts";
+
+const customModes = {
+  "support-agent": AgentModeSchema.parse({
+    id: "support-agent",
+    name: "Support agent",
+    prompt:
+      "Resolve routine requests. Ask for approval before refunds, deletes, or outbound messages.",
+    allowedCapabilities: [
+      "interaction.user_input",
+      "knowledge.search",
+      "tickets.read",
+      "tickets.write",
+      "refunds.request",
+    ],
+    writableScopes: ["tickets/*"],
+    approvalPolicy: {
+      requiredCapabilities: ["refunds.*"],
+      requiredTools: ["email.send"],
+    },
+  }),
+} as const;
+
+const mode = resolveAgentMode("support-agent", customModes);
+~~~
+
+For a tenant product, do not accept a mode object from the public request.
+Resolve the mode from the authenticated tenant, agent revision, or thread
+binding. If the client can choose a mode, send only its ID and check that the
+ID is enabled for that tenant.
+
+## Where profiles are stored and loaded
+
+The mode has two related forms:
+
+| Data | Owner | Storage and lifetime |
+| --- | --- | --- |
+| Profile definition | Host application | Versioned agent configuration, prompt revision, or code |
+| Active mode ID | Flary thread runtime | Thread Durable Object SQLite, in flary_thread_operational |
+| Mode change reason and actor | Host history projection | Flary event and checkpoint history |
+| Approval request and decision | Flary thread runtime | Thread Durable Object SQLite, then normalized events/history |
+
+The thread stores the ID, not a copy of an untrusted client profile. On every
+start or recovery, the host resolves that ID and validates the result with
+AgentModeSchema. This keeps a mode change durable while keeping the policy
+definition under application control.
+
+~~~ts
+export default defineFlaryAgent<Env>({
+  resolveContext: ({ env, id }) => env.RUN_BINDINGS.read(id),
+
+  resolveAgent: async ({ env, trusted }) => {
+    const revision = await env.AGENTS.get(
+      trusted.tenantId,
+      trusted.agentId,
+      trusted.revisionId,
+    );
+    const mode = resolveAgentMode(revision.mode, revision.customModes);
+
+    return {
+      agentId: trusted.agentId,
+      revisionId: revision.id,
+      instructions: revision.instructions,
+      model: revision.model,
+      thinkingLevel: revision.thinkingLevel,
+      mode: mode.id,
+      limits: mode.limits,
+    };
+  },
+
+  resolveMode: async ({ env, trusted, agent }) => {
+    const thread = await env.THREAD_METADATA.read(trusted.threadId);
+    const revision = await env.AGENTS.get(
+      trusted.tenantId,
+      trusted.agentId,
+      agent.revisionId,
+    );
+    return resolveAgentMode(thread.mode, revision.customModes);
+  },
+
+  resolveModel: ({ env, agent, trusted }) =>
+    env.MODELS.resolve(trusted, agent.model),
+});
+~~~
+
+The example uses host adapters for the agent revision and thread metadata. The
+important rule is that resolveMode returns a parsed profile during recovery,
+not a profile supplied inside model input. A mode_change is also a semantic
+history checkpoint, so operators can see who changed it and why.
+
+## Changing mode safely
+
+Use the authenticated thread API or FlaryThreadClient.setMode:
+
+~~~ts
+await thread.setMode(
+  { organizationId: "org_1", appId: "support", threadId: "thread_42" },
+  "plan",
+  "Prepare a refund investigation before any write.",
+);
+~~~
+
+The runtime validates the transition, stores the new mode ID, records the
+requesting identity and reason, and applies the new policy to the next tool
+call. An in-flight state-changing call is not changed halfway through. An
+approval is bound to the exact tool, arguments, mode, and run that requested
+it; changing mode does not reuse an old approval.
+
+## Design rules
+
+- Treat modes as authorization policy, not as a prompt-only feature.
+- Keep profile definitions versioned with the agent or tenant configuration.
+- Store the active mode ID and transition metadata in the thread runtime.
+- Use narrow capabilities and writable scopes. Do not give every agent star.
+- Require approval for external writes, deletes, secrets, commits, merges, and
+  deploys.
+- Test the mode at the tool boundary and again after a Durable Object restart.
