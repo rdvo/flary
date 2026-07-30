@@ -14,6 +14,10 @@ import {
   type WorkspaceToolTarget,
 } from "flary";
 import {
+  SqliteMcpDescriptorCache,
+  SqliteToolExecutionJournal,
+} from "flary/cloudflare";
+import {
   createFlueLazyTools,
   createFlueRequestUserInputTool,
 } from "flary/flue";
@@ -30,10 +34,10 @@ import {
   decryptToken,
 } from "../worker/security/tokens";
 import {
-  McpEndpointSchema,
-  McpToolCache,
-  type McpCredentialProvider,
-  type McpEndpoint,
+  ScopedMcpEndpointSchema,
+  createMcpToolset,
+  type ScopedMcpCredentialResolver,
+  type ScopedMcpEndpoint,
 } from "flary/mcp";
 import {
   openThreadRecall,
@@ -134,8 +138,11 @@ async function loadMcpEndpoints(
   );
 }
 
-function endpointFor(row: McpConnectionRow): McpEndpoint {
-  return McpEndpointSchema.parse({
+function endpointFor(row: McpConnectionRow): ScopedMcpEndpoint {
+  return ScopedMcpEndpointSchema.parse({
+    organizationId: row.organizationId,
+    appId: row.appId,
+    credentialVersion: String(row.updatedAt.getTime()),
     connectionId: row.id,
     name: row.name,
     url: row.baseUrl,
@@ -146,32 +153,41 @@ function endpointFor(row: McpConnectionRow): McpEndpoint {
 function credentialProvider(
   env: Env,
   rows: readonly McpConnectionRow[],
-): McpCredentialProvider {
+): ScopedMcpCredentialResolver {
   const byId = new Map(rows.map((row) => [row.id, row]));
-  return {
-    async get(connectionId) {
-      const connection = byId.get(connectionId);
-      if (!connection || connection.authType === "none") return undefined;
-      if (!env.FLARY_TOKEN_ENCRYPTION_KEY_B64) return undefined;
-      const secret = await createDb(env.DB)
-        .select()
-        .from(secretEnvelope)
-        .where(eq(secretEnvelope.connectionId, connectionId))
-        .limit(1);
-      const row = secret[0];
-      if (!row) return undefined;
-      const value = await decryptToken(
-        { ciphertext: row.ciphertext, iv: row.iv },
-        env.FLARY_TOKEN_ENCRYPTION_KEY_B64,
-        connectionSecretAssociatedData(connection.organizationId, connectionId, row.name),
-      );
-      if (connection.authType === "bearer") return { kind: "bearer", value };
-      return {
-        kind: "api_key",
-        value,
-        ...(connection.authHeader ? { header: connection.authHeader } : {}),
-      };
-    },
+  return async ({ scope, endpoint }) => {
+    const connection = byId.get(endpoint.connectionId);
+    if (
+      !connection ||
+      connection.organizationId !== scope.organizationId ||
+      connection.appId !== scope.appId
+    ) {
+      throw new Error("MCP connection is not authorized for this tenant");
+    }
+    if (connection.authType === "none") return undefined;
+    if (!env.FLARY_TOKEN_ENCRYPTION_KEY_B64) return undefined;
+    const secret = await createDb(env.DB)
+      .select()
+      .from(secretEnvelope)
+      .where(eq(secretEnvelope.connectionId, endpoint.connectionId))
+      .limit(1);
+    const row = secret[0];
+    if (!row) return undefined;
+    const value = await decryptToken(
+      { ciphertext: row.ciphertext, iv: row.iv },
+      env.FLARY_TOKEN_ENCRYPTION_KEY_B64,
+      connectionSecretAssociatedData(
+        connection.organizationId,
+        endpoint.connectionId,
+        row.name,
+      ),
+    );
+    if (connection.authType === "bearer") return { kind: "bearer", value };
+    return {
+      kind: "api_key",
+      value,
+      ...(connection.authHeader ? { header: connection.authHeader } : {}),
+    };
   };
 }
 
@@ -193,86 +209,40 @@ export async function createThreadTools(
   });
 
   let metadata: FlaryThreadMetadataStore | undefined;
+  let toolJournal: SqliteToolExecutionJournal | undefined;
+  let mcpDescriptorCache: SqliteMcpDescriptorCache | undefined;
   try {
     const context = getCloudflareContext();
     metadata = new FlaryThreadMetadataStore(
       context.storage.sql,
       binding.thread,
     );
+    toolJournal = new SqliteToolExecutionJournal(context.storage.sql);
+    mcpDescriptorCache = new SqliteMcpDescriptorCache(context.storage.sql);
   } catch {
     // Tests can create a catalog without a Durable Object context.
   }
 
   const mcpRows = await loadMcpEndpoints(env, binding);
-  const mcpEndpoints = new Map(mcpRows.map((row) => [row.id, endpointFor(row)]));
-  const mcpCache = new McpToolCache({
-    allowInsecureHttp: env.APP_ENV !== "production",
-  });
-  const mcpCredentials = credentialProvider(env, mcpRows);
-  catalog.register({
-    definition: {
-      id: "mcp.discover",
-      name: "Discover MCP tools",
-      description: "Discover tools from an approved remote MCP connection without exposing its credential.",
-      kind: "mcp",
-      operation: "read",
-      capabilities: ["connection.mcp.read"],
-      tags: ["mcp", "connection", "search"],
-      inputSchema: {
-        type: "object",
-        properties: { connectionId: { type: "string" } },
-        required: ["connectionId"],
-        additionalProperties: false,
-      },
+  const mcpTools = await createMcpToolset({
+    scope: {
+      organizationId: binding.thread.organizationId,
+      appId: binding.thread.appId,
+      userId: binding.createdBy.id,
     },
-    async execute(raw) {
-      const input = v.parse(v.object({ connectionId: v.string() }), raw);
-      const endpoint = mcpEndpoints.get(input.connectionId);
-      if (!endpoint) throw new Error("MCP connection is not authorized for this thread");
-      return JSON.parse(JSON.stringify(await mcpCache.discover(endpoint)));
-    },
-  });
-  catalog.register({
-    definition: {
-      id: "mcp.call",
-      name: "Call MCP tool",
-      description: "Call one tool from an approved remote MCP connection.",
-      kind: "mcp",
+    endpoints: mcpRows.map(endpointFor),
+    credentials: credentialProvider(env, mcpRows),
+    permissions: () => ({
       operation: "write",
       capabilities: ["connection.mcp.call"],
-      tags: ["mcp", "connection"],
       requiresApproval: true,
-      inputSchema: {
-        type: "object",
-        properties: {
-          connectionId: { type: "string" },
-          toolName: { type: "string" },
-          arguments: { type: "object" },
-        },
-        required: ["connectionId", "toolName"],
-        additionalProperties: false,
-      },
+    }),
+    clientOptions: {
+      allowInsecureHttp: env.APP_ENV !== "production",
     },
-    resourceKey: (raw) =>
-      typeof raw === "object" && raw && "connectionId" in raw
-        ? `mcp:${String(raw.connectionId)}`
-        : "mcp",
-    async execute(raw) {
-      const input = v.parse(v.object({
-        connectionId: v.string(),
-        toolName: v.string(),
-        arguments: v.optional(v.record(v.string(), v.unknown())),
-      }), raw);
-      const endpoint = mcpEndpoints.get(input.connectionId);
-      if (!endpoint) throw new Error("MCP connection is not authorized for this thread");
-      const result = await mcpCache.client(endpoint).call(
-        input.toolName,
-        input.arguments ?? {},
-        mcpCredentials,
-      );
-      return JSON.parse(JSON.stringify(result));
-    },
+    descriptorCache: mcpDescriptorCache,
   });
+  mcpTools.register(catalog);
 
   catalog.register({
     definition: {
@@ -376,6 +346,7 @@ export async function createThreadTools(
     maxConcurrency: 8,
     readParallelism: 8,
     runId: `flue_${binding.thread.threadId}`,
+    toolJournal,
     async approve(tool) {
       if (!metadata) throw new Error(`Approval required for ${tool.id}`);
       if (metadata.hasApprovedTool(tool.id)) {

@@ -38,6 +38,33 @@ export interface McpCredential {
   readonly header?: string;
 }
 
+export const McpCredentialSchema = z
+  .object({
+    kind: z.enum(["api_key", "bearer"]),
+    value: z.string().min(1).max(16_384),
+    header: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .regex(/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/)
+      .optional(),
+  })
+  .strict()
+  .superRefine((credential, context) => {
+    const header = credential.header?.toLowerCase();
+    if (
+      header &&
+      ["cookie", "host", "content-length", "connection"].includes(header)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["header"],
+        message: "The credential header is not allowed",
+      });
+    }
+  });
+
 export interface McpCredentialProvider {
   get(connectionId: string): Promise<McpCredential | undefined>;
 }
@@ -71,8 +98,9 @@ interface JsonRpcResponse {
 }
 
 /**
- * A small provider-neutral MCP client. It discovers schemas without loading
- * credentials. Credentials are requested only for a tool invocation.
+ * A small provider-neutral MCP client. Public descriptors are always
+ * redacted. Protected servers can receive a credential from trusted host code
+ * during discovery and invocation.
  */
 export class McpConnectionClient {
   readonly #endpoint: McpEndpoint;
@@ -98,9 +126,16 @@ export class McpConnectionClient {
     return this.#endpoint;
   }
 
-  async listTools(): Promise<McpToolDescriptor[]> {
-    await this.initialize();
-    const response = await this.request("tools/list", {});
+  async listTools(
+    credentials?: McpCredentialProvider,
+  ): Promise<McpToolDescriptor[]> {
+    const credential = await resolveCredential(
+      credentials,
+      this.#endpoint.connectionId,
+    );
+    const headers = credential ? credentialHeaders(credential) : undefined;
+    await this.initialize(headers);
+    const response = await this.request("tools/list", {}, headers);
     const result = asRecord(response.result);
     const tools = Array.isArray(result.tools) ? result.tools : [];
     if (tools.length > 256) {
@@ -140,7 +175,10 @@ export class McpConnectionClient {
     if (serialized.length > 512 * 1024) {
       throw new McpSecurityError("MCP tool arguments exceed the 512 KiB limit");
     }
-    const credential = await credentials?.get(this.#endpoint.connectionId);
+    const credential = await resolveCredential(
+      credentials,
+      this.#endpoint.connectionId,
+    );
     const headers = credential ? credentialHeaders(credential) : undefined;
     await this.initialize(headers);
     const response = await this.request(
@@ -159,7 +197,7 @@ export class McpConnectionClient {
     const response = await this.request("initialize", {
       protocolVersion: "2025-03-26",
       capabilities: {},
-      clientInfo: { name: "flary", version: "0.2.12" },
+      clientInfo: { name: "flary", version: "0.3.0" },
     }, extraHeaders);
     const result = asRecord(response.result);
     if (!result.protocolVersion) {
@@ -216,21 +254,27 @@ export class McpToolCache {
 
   constructor(private readonly options: McpClientOptions = {}) {}
 
-  async discover(endpoint: McpEndpoint): Promise<readonly McpToolDescriptor[]> {
+  async discover(
+    endpoint: McpEndpoint,
+    options: {
+      namespace?: string;
+      credentials?: McpCredentialProvider;
+    } = {},
+  ): Promise<readonly McpToolDescriptor[]> {
     const parsed = McpEndpointSchema.parse(endpoint);
-    const key = `${parsed.connectionId}:${parsed.url}:${parsed.transport}`;
+    const key = cacheKey(parsed, options.namespace);
     const cached = this.#tools.get(key);
     if (cached?.[0] && Date.parse(cached[0].expiresAt) > Date.now()) return cached;
     const client = this.#clients.get(key) ?? new McpConnectionClient(parsed, this.options);
     this.#clients.set(key, client);
-    const tools = await client.listTools();
+    const tools = await client.listTools(options.credentials);
     this.#tools.set(key, tools);
     return tools;
   }
 
-  client(endpoint: McpEndpoint): McpConnectionClient {
+  client(endpoint: McpEndpoint, namespace?: string): McpConnectionClient {
     const parsed = McpEndpointSchema.parse(endpoint);
-    const key = `${parsed.connectionId}:${parsed.url}:${parsed.transport}`;
+    const key = cacheKey(parsed, namespace);
     const client = this.#clients.get(key) ?? new McpConnectionClient(parsed, this.options);
     this.#clients.set(key, client);
     return client;
@@ -242,8 +286,12 @@ export class McpToolCache {
       this.#clients.clear();
       return;
     }
-    for (const key of this.#tools.keys()) if (key.startsWith(`${connectionId}:`)) this.#tools.delete(key);
-    for (const key of this.#clients.keys()) if (key.startsWith(`${connectionId}:`)) this.#clients.delete(key);
+    for (const key of this.#tools.keys()) {
+      if (key.includes(`:${connectionId}:`)) this.#tools.delete(key);
+    }
+    for (const key of this.#clients.keys()) {
+      if (key.includes(`:${connectionId}:`)) this.#clients.delete(key);
+    }
   }
 }
 
@@ -274,14 +322,31 @@ function isPrivateHostname(hostname: string): boolean {
 }
 
 function credentialHeaders(credential: McpCredential): Headers {
-  const value = z.string().min(1).max(16_384).parse(credential.value);
+  const parsed = McpCredentialSchema.parse(credential);
   const headers = new Headers();
-  if (credential.kind === "bearer") {
-    headers.set("authorization", `Bearer ${value}`);
+  if (parsed.kind === "bearer") {
+    headers.set("authorization", `Bearer ${parsed.value}`);
   } else {
-    headers.set(credential.header ?? "x-api-key", value);
+    headers.set(parsed.header ?? "x-api-key", parsed.value);
   }
   return headers;
+}
+
+async function resolveCredential(
+  provider: McpCredentialProvider | undefined,
+  connectionId: string,
+): Promise<McpCredential | undefined> {
+  if (!provider) return undefined;
+  try {
+    const credential = await provider.get(connectionId);
+    return credential ? McpCredentialSchema.parse(credential) : undefined;
+  } catch {
+    throw new McpSecurityError("MCP credential resolution failed");
+  }
+}
+
+function cacheKey(endpoint: McpEndpoint, namespace = "default"): string {
+  return `${namespace}:${endpoint.connectionId}:${endpoint.url}:${endpoint.transport}`;
 }
 
 async function fetchWithSafeRedirects(

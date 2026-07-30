@@ -299,3 +299,50 @@ export const ToolExecutionJournalRecordSchema = z
 export type ToolExecutionJournalRecord = z.infer<
   typeof ToolExecutionJournalRecordSchema
 >;
+
+export const ToolLifecycleFailureStatusSchema = z.enum([
+  "rejected",
+  "blocked",
+  "denied",
+  "skipped",
+  "cancelled",
+  "outcome_unknown",
+]);
+export type ToolLifecycleFailureStatus = z.infer<
+  typeof ToolLifecycleFailureStatusSchema
+>;
+
+const ToolLifecycleEventBaseSchema = z
+  .object({
+    runId: IdentifierSchema,
+    callId: IdentifierSchema,
+    toolId: IdentifierSchema,
+    operation: ToolOperationSchema,
+    occurredAt: TimestampSchema,
+    metadata: MetadataSchema.optional(),
+  })
+  .strict();
+
+export const ToolStartedEventSchema = ToolLifecycleEventBaseSchema.extend({
+  type: z.literal("tool.started"),
+}).strict();
+
+export const ToolCompletedEventSchema = ToolLifecycleEventBaseSchema.extend({
+  type: z.literal("tool.completed"),
+  durationMs: TelemetryIntegerSchema,
+  deduplicated: z.boolean().default(false),
+}).strict();
+
+export const ToolFailedEventSchema = ToolLifecycleEventBaseSchema.extend({
+  type: z.literal("tool.failed"),
+  durationMs: TelemetryIntegerSchema,
+  status: ToolLifecycleFailureStatusSchema,
+  error: ErrorInfoSchema,
+}).strict();
+
+export const ToolLifecycleEventSchema = z.discriminatedUnion("type", [
+  ToolStartedEventSchema,
+  ToolCompletedEventSchema,
+  ToolFailedEventSchema,
+]);
+export type ToolLifecycleEvent = z.infer<typeof ToolLifecycleEventSchema>;

@@ -116,3 +116,44 @@ test("an unknown write outcome is persisted and is not repeated", async () => {
     "outcome_unknown",
   );
 });
+
+test("a recovered started write becomes unknown and never runs again", async () => {
+  const journal = new InMemoryToolExecutionJournal();
+  await journal.put({
+    runId: "run-recovered",
+    callId: "write-recovered",
+    toolId: "write",
+    operation: "write",
+    state: "started",
+    idempotencyKey: "write-recovered-key",
+    input: { value: "one" },
+    startedAt: new Date().toISOString(),
+  });
+  let calls = 0;
+  const report = await executeToolTasks(
+    [
+      {
+        id: "write-recovered",
+        name: "write",
+        operation: "write",
+        idempotencyKey: "write-recovered-key",
+      },
+    ],
+    {
+      runId: "run-recovered",
+      toolJournal: journal,
+      handlers: {
+        write: async () => {
+          calls += 1;
+        },
+      },
+    },
+  );
+
+  assert.equal(calls, 0);
+  assert.equal(report.results[0]?.status, "outcome_unknown");
+  assert.equal(
+    (await journal.get("run-recovered", "write-recovered"))?.state,
+    "outcome_unknown",
+  );
+});

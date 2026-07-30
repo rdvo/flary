@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { AgentMode } from "../contracts/modes.js";
+import type { ToolLifecycleEvent } from "../contracts/tools.js";
 import type { ToolExecutionJournal } from "./tool-journal.js";
 
 export const nonEmptyStringSchema = z.string().trim().min(1);
@@ -302,6 +303,9 @@ export interface SchedulerOptions {
   readonly requireWriteIdempotency?: boolean;
   readonly runId?: string;
   readonly toolJournal?: ToolExecutionJournal;
+  readonly onToolEvent?: (
+    event: ToolLifecycleEvent,
+  ) => void | Promise<void>;
   readonly isUnknownToolOutcome?: (error: unknown, task: ToolTask) => boolean;
   readonly onBatch?: (batch: readonly ToolExecutionResult[]) => void | Promise<void>;
   readonly model?: string;

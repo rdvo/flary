@@ -2,6 +2,7 @@ import {
   LazyToolBatchSchema,
   LazyToolCallSchema,
   ToolCatalogLoadResponseSchema,
+  ToolLifecycleEventSchema,
   type AgentMode,
   type LazyToolBatchInput,
   type LazyToolCall,
@@ -9,7 +10,9 @@ import {
   type ToolCatalogDefinition,
   type ToolCatalogLoadResponse,
   type ToolCatalogSearchRequestInput,
+  type ToolLifecycleEvent,
 } from "../contracts/index";
+import type { ExecutionLimitsInput } from "../execution/types";
 import {
   modeAllowsCapability,
   modeAllowsWrite,
@@ -38,8 +41,13 @@ export interface LazyToolRuntimeOptions {
   mode: AgentMode;
   maxConcurrency?: number;
   readParallelism?: number;
+  limits?: ExecutionLimitsInput;
+  concurrencyCaps?: Readonly<Record<string, number>>;
   toolJournal?: ToolExecutionJournal;
   runId?: string;
+  onToolEvent?: (
+    event: ToolLifecycleEvent,
+  ) => void | Promise<void>;
   approve?: (
     tool: ToolCatalogDefinition,
     input: unknown,
@@ -101,11 +109,23 @@ export class LazyToolRuntime {
   }
 
   private async prepare(call: LazyToolCall) {
+    const taskId =
+      call.callId ??
+      call.idempotencyKey ??
+      `call_${crypto.randomUUID().replaceAll("-", "")}`;
     const loaded = await this.#options.catalog.load({ id: call.id });
     const handle = await this.#options.catalog.loadHandle({
       id: call.id,
     });
     if (!loaded || !handle || !this.isVisible(loaded.tool)) {
+      await this.emitPreflightFailure({
+        taskId,
+        toolId: call.id,
+        operation: loaded?.tool.operation ?? "read",
+        metadata: loaded?.tool.metadata,
+        code: "tool_not_available",
+        message: "The tool is not available in this mode",
+      });
       throw new Error(`Tool is not available in this mode: ${call.id}`);
     }
     const resourceKey = handle.resourceKey(call.arguments) ?? call.id;
@@ -118,30 +138,69 @@ export class LazyToolRuntime {
         toolId: call.id,
       })
     ) {
+      await this.emitPreflightFailure({
+        taskId,
+        toolId: call.id,
+        operation: "write",
+        metadata: loaded.tool.metadata,
+        code: "tool_write_denied",
+        message: "The tool cannot write this resource in the current mode",
+      });
       throw new Error(`Tool cannot write this resource in ${this.#options.mode.id} mode`);
     }
     if (
       loaded.tool.requiresApproval ||
       this.requiresApproval(loaded.tool, resourceKey)
     ) {
-      if (!this.#options.approve) {
-        throw new Error(`Approval is required for tool: ${call.id}`);
+      const prior = await this.priorTerminalCall(taskId);
+      if (!prior) {
+        if (!this.#options.approve) {
+          await this.emitPreflightFailure({
+            taskId,
+            toolId: call.id,
+            operation: handle.operation,
+            metadata: loaded.tool.metadata,
+            code: "tool_approval_required",
+            message: "The tool needs approval before it can run",
+          });
+          throw new Error(`Approval is required for tool: ${call.id}`);
+        }
+        try {
+          await this.#options.approve(loaded.tool, call.arguments);
+        } catch (error) {
+          await this.emitPreflightFailure({
+            taskId,
+            toolId: call.id,
+            operation: handle.operation,
+            metadata: loaded.tool.metadata,
+            code: "tool_approval_denied",
+            message: "The tool approval was not granted",
+          });
+          throw error;
+        }
       }
-      await this.#options.approve(loaded.tool, call.arguments);
     }
-    return { call, handle, resourceKey };
+    return {
+      call,
+      taskId,
+      handle,
+      resourceKey,
+      lifecycleMetadata: loaded.tool.metadata,
+    };
   }
 
   private executePrepared(
     prepared: Array<{
       call: LazyToolCall;
+      taskId: string;
       handle: CapabilityHandle;
       resourceKey: string;
+      lifecycleMetadata?: Record<string, unknown>;
     }>,
   ): Promise<ExecutionReport> {
     return executeToolTasks(
-      prepared.map(({ call, handle, resourceKey }) => ({
-        id: call.callId ?? `call_${crypto.randomUUID().replaceAll("-", "")}`,
+      prepared.map(({ call, taskId, handle, resourceKey, lifecycleMetadata }) => ({
+        id: taskId,
         name: call.id,
         input: call.arguments,
         operation: handle.operation,
@@ -149,6 +208,7 @@ export class LazyToolRuntime {
         dependsOn: call.dependsOn,
         idempotencyKey: call.idempotencyKey,
         concurrencyKey: handle.concurrencyKey,
+        lifecycleMetadata,
         execute: (value: unknown) =>
           handle.operation === "write"
             ? this.queueWrite(resourceKey, () => handle.invoke(value))
@@ -157,9 +217,12 @@ export class LazyToolRuntime {
       {
         maxConcurrency: this.#options.maxConcurrency ?? 8,
         readParallelism: this.#options.readParallelism ?? 8,
+        limits: this.#options.limits,
+        concurrencyCaps: this.#options.concurrencyCaps,
         requireWriteIdempotency: true,
         toolJournal: this.#options.toolJournal,
         runId: this.#options.runId,
+        onToolEvent: this.#options.onToolEvent,
       },
     );
   }
@@ -204,5 +267,50 @@ export class LazyToolRuntime {
         this.#writeTails.delete(resourceKey);
       }
     }
+  }
+
+  private async priorTerminalCall(callId: string): Promise<boolean> {
+    if (!this.#options.toolJournal || !this.#options.runId) return false;
+    const record = await this.#options.toolJournal.get(
+      this.#options.runId,
+      callId,
+    );
+    return (
+      record?.state === "completed" ||
+      record?.state === "outcome_unknown"
+    );
+  }
+
+  private async emitPreflightFailure(input: {
+    taskId: string;
+    toolId: string;
+    operation: "read" | "write";
+    metadata?: Record<string, unknown>;
+    code: string;
+    message: string;
+  }): Promise<void> {
+    if (!this.#options.onToolEvent) return;
+    const metadata =
+      input.metadata && typeof input.metadata === "object"
+        ? input.metadata
+        : undefined;
+    await this.#options.onToolEvent(
+      ToolLifecycleEventSchema.parse({
+        type: "tool.failed",
+        runId: this.#options.runId ?? "run_local",
+        callId: input.taskId,
+        toolId: input.toolId,
+        operation: input.operation,
+        occurredAt: new Date().toISOString(),
+        durationMs: 0,
+        status: "denied",
+        error: {
+          code: input.code,
+          message: input.message,
+          retryable: false,
+        },
+        ...(metadata ? { metadata } : {}),
+      }),
+    );
   }
 }

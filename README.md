@@ -48,7 +48,7 @@ system on the host application.
 ## Install the release candidate
 
 ```bash
-npm install --save-exact flary@0.3.0-rc.3
+npm install --save-exact flary@0.3.0-rc.4
 ```
 
 The `next` npm tag points to the current release candidate. Pin the exact
@@ -200,7 +200,7 @@ credential without returning a raw token through Flary. Hosted OpenAI login uses
 authorization by default. Local self-hosted clients can select
 `browser_callback`. Claude uses authorization-code completion.
 
-Flary `0.3.0-rc.3` pins `@flue/runtime` and `@flue/sdk` to
+Flary `0.3.0-rc.4` pins `@flue/runtime` and `@flue/sdk` to
 `1.0.0-beta.9`, and pins `@earendil-works/pi-ai` to `0.80.10`. Until the
 required changes are available in upstream releases, the npm package applies
 the checked-in patches during installation. Run `npm run test:npm-install`
@@ -416,6 +416,59 @@ without input schemas. Describe loads one selected schema. Batch runs
 independent reads in parallel and keeps writes to the same resource in order.
 Write calls require an idempotency key. Approval-required tools fail closed
 when the host does not provide an approval handler.
+
+### Remote MCP connections
+
+The host product owns connection records, OAuth, encrypted credentials,
+organization access, billing, and the list of connections granted to a
+thread. Flary owns MCP discovery, schema validation, lazy loading, durable
+execution, limits, approvals, and normalized tool events.
+
+```ts
+import { SqliteToolExecutionJournal } from "flary/cloudflare";
+import { createMcpTools } from "flary/mcp";
+
+const tools = await createMcpTools({
+  scope: trusted,
+  endpoints: await productConnections.mcpEndpoints(trusted),
+
+  // This callback runs only in trusted host code.
+  credentials: ({ scope, endpoint }) =>
+    productConnections.resolveCredential(scope, endpoint.connectionId),
+
+  // Return false to keep a discovered tool out of this thread.
+  permissions: ({ scope, endpoint, tool }) =>
+    productConnections.resolveGrant(
+      scope,
+      endpoint.connectionId,
+      tool.name,
+    ),
+
+  mode,
+  runId,
+  journal: new SqliteToolExecutionJournal(durableObjectStorage.sql),
+  approve: ({ id }) => approvals.require(runId, id),
+  onEvent: (event) => threadEvents.append(event),
+});
+```
+
+`createMcpTools()` returns Flue's four lazy gateway tools. MCP input schemas
+enter model context only after `tool_describe`. The credential resolver runs
+only during protected discovery or invocation. Credential values are not
+stored in descriptors, tool events, logs, or model-visible state.
+Set the endpoint's opaque `credentialVersion` when a credential rotates so
+Flary starts a new authenticated MCP session.
+
+Every state-changing call needs a stable `idempotencyKey`. The journal
+deduplicates completed calls. If a Worker stops after a write starts but
+before its result is recorded, Flary reports `outcome_unknown` and does not
+repeat the write. Independent reads run in parallel. Calls to the same
+connection use a bounded concurrency key.
+
+Use `createMcpToolset()` when MCP tools must share one private catalog with
+native tools created by `defineFlaryTool()`. Flary also exports
+`SqliteMcpDescriptorCache` for redacted descriptor caching across Durable
+Object eviction.
 
 Code Mode is optional. It is useful when the model must filter, join, or
 transform several read results without putting all intermediate data in the

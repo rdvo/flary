@@ -1,5 +1,7 @@
 export * from "./dynamic-worker.js";
+export * from "./mcp-descriptor-cache.js";
 export * from "./thread-metadata.js";
+export * from "./tool-journal.js";
 export * from "./run-repository.js";
 export * from "./sandbox.js";
 export * from "./scheduler.js";

@@ -50,4 +50,33 @@ if (!pi.includes("effectiveSessionId")) {
   throw new Error("The clean npm install did not apply the Pi cache patch");
 }
 
-console.log("Clean npm install contains the pinned Flue and Pi patches.");
+run(
+  "node",
+  [
+    "--input-type=module",
+    "--eval",
+    [
+      'const mcp = await import("flary/mcp");',
+      'if (typeof mcp.createMcpTools !== "function") throw new Error("Missing createMcpTools export");',
+      'if (typeof mcp.createMcpToolset !== "function") throw new Error("Missing createMcpToolset export");',
+    ].join("\n"),
+  ],
+  consumer,
+);
+const cloudflareIndex = fs.readFileSync(
+  path.join(
+    consumer,
+    "node_modules/flary/dist/harness/cloudflare/index.js",
+  ),
+  "utf8",
+);
+if (!cloudflareIndex.includes("./tool-journal.js")) {
+  throw new Error("Missing durable tool journal export");
+}
+if (!cloudflareIndex.includes("./mcp-descriptor-cache.js")) {
+  throw new Error("Missing MCP descriptor cache export");
+}
+
+console.log(
+  "Clean npm install contains the pinned Flue/Pi patches and MCP runtime exports.",
+);

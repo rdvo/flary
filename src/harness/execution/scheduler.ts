@@ -3,6 +3,8 @@ import {
   JsonObjectSchema,
   JsonValueSchema,
   ToolExecutionJournalRecordSchema,
+  ToolLifecycleEventSchema,
+  type ToolLifecycleEvent,
 } from "../contracts/index.js";
 import { ApprovalGate } from "./approval.js";
 import { checkModeAccess } from "./mode-policy.js";
@@ -63,6 +65,7 @@ export class ToolScheduler {
     const startedAt = Date.now();
     const pending = new Map(tasks.map((task) => [task.id, task]));
     const results = new Map<string, ToolExecutionResult>();
+    const lifecycleStarts = new Map<string, number>();
     let toolCalls = 0;
 
     while (pending.size > 0) {
@@ -99,7 +102,7 @@ export class ToolScheduler {
 
       const settled = await Promise.allSettled(
         executable.map((task) =>
-          this.executeOne(task, approval, idempotency),
+          this.executeOne(task, approval, idempotency, lifecycleStarts),
         ),
       );
       toolCalls += executable.length;
@@ -119,6 +122,13 @@ export class ToolScheduler {
     const ordered = tasks.map((task) =>
       results.get(task.id) ?? blockedResult(task, "Task did not run."),
     );
+    for (const [index, result] of ordered.entries()) {
+      await this.emitTerminalEvent(
+        tasks[index],
+        result,
+        lifecycleStarts.get(result.id),
+      );
+    }
     const batchSize = limits.batchSize ?? Math.max(1, ordered.length);
     const batches = this.#options.onBatch
       ? await deliverBatchedResults(ordered, batchSize, this.#options.onBatch)
@@ -190,6 +200,7 @@ export class ToolScheduler {
     task: ToolTask,
     approval: ApprovalGate,
     idempotency: IdempotencyStore<unknown>,
+    lifecycleStarts: Map<string, number>,
   ): Promise<ToolExecutionResult> {
     if (this.#options.signal?.aborted) {
       return baseResult(task, "cancelled", {
@@ -268,6 +279,31 @@ export class ToolScheduler {
         idempotencyKey: previous.idempotencyKey,
       });
     }
+    if (previous?.state === "started" && task.operation === "write") {
+      const completedAt = new Date().toISOString();
+      await journal?.put(
+        ToolExecutionJournalRecordSchema.parse({
+          ...previous,
+          state: "outcome_unknown",
+          error: {
+            code: "tool_outcome_unknown",
+            message:
+              "The prior write started but did not record a result. It cannot be repeated safely.",
+            retryable: false,
+          },
+          completedAt,
+        }),
+      );
+      return baseResult(task, "outcome_unknown", {
+        error: {
+          name: "UnknownToolOutcomeError",
+          message:
+            "The prior write started but did not record a result. It cannot be repeated safely.",
+          code: "tool_outcome_unknown",
+        },
+        idempotencyKey: previous.idempotencyKey,
+      });
+    }
     if (previous?.state === "completed") {
       return baseResult(task, "fulfilled", {
         value: previous.output,
@@ -275,6 +311,18 @@ export class ToolScheduler {
         deduplicated: true,
       });
     }
+    const lifecycleStartedAt = Date.now();
+    lifecycleStarts.set(task.id, lifecycleStartedAt);
+    const metadata = lifecycleMetadata(task);
+    await this.emitToolEvent({
+      type: "tool.started",
+      runId,
+      callId: task.id,
+      toolId: task.name,
+      operation: task.operation,
+      occurredAt: new Date(lifecycleStartedAt).toISOString(),
+      ...(metadata ? { metadata } : {}),
+    });
     const startedAt = new Date().toISOString();
     if (journal) {
       await journal.put(
@@ -360,6 +408,57 @@ export class ToolScheduler {
       }
       return rejectedResult(task, error, key);
     }
+  }
+
+  private async emitTerminalEvent(
+    task: ToolTask,
+    result: ToolExecutionResult,
+    startedAt: number | undefined,
+  ): Promise<void> {
+    if (!this.#options.onToolEvent) return;
+    const occurredAt = new Date().toISOString();
+    const durationMs = Math.max(
+      0,
+      startedAt === undefined ? 0 : Date.now() - startedAt,
+    );
+    const metadata = lifecycleMetadata(task);
+    if (result.status === "fulfilled") {
+      await this.emitToolEvent({
+        type: "tool.completed",
+        runId: this.#options.runId ?? "run_local",
+        callId: task.id,
+        toolId: task.name,
+        operation: task.operation,
+        occurredAt,
+        durationMs,
+        deduplicated: result.deduplicated ?? false,
+        ...(metadata ? { metadata } : {}),
+      });
+      return;
+    }
+    await this.emitToolEvent({
+      type: "tool.failed",
+      runId: this.#options.runId ?? "run_local",
+      callId: task.id,
+      toolId: task.name,
+      operation: task.operation,
+      occurredAt,
+      durationMs,
+      status: result.status,
+      error: {
+        code: result.error?.code ?? `tool_${result.status}`,
+        message:
+          result.error?.message ??
+          result.reason ??
+          `Tool ${result.name} did not complete`,
+      },
+      ...(metadata ? { metadata } : {}),
+    });
+  }
+
+  private async emitToolEvent(event: ToolLifecycleEvent): Promise<void> {
+    if (!this.#options.onToolEvent) return;
+    await this.#options.onToolEvent(ToolLifecycleEventSchema.parse(event));
   }
 
   private skipFailedDependants(
@@ -489,6 +588,11 @@ function jsonObject(value: unknown) {
   if (object.success) return object.data;
   const json = JsonValueSchema.safeParse(value);
   return { value: json.success ? json.data : String(value) };
+}
+
+function lifecycleMetadata(task: ToolTask) {
+  const metadata = JsonObjectSchema.safeParse(task.lifecycleMetadata);
+  return metadata.success ? metadata.data : undefined;
 }
 
 function isExplicitlySafeToRetry(error: unknown): boolean {
