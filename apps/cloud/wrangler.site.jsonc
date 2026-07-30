@@ -26,6 +26,10 @@
         {
           "pattern": "flary.dev",
           "custom_domain": true
+        },
+        {
+          "pattern": "docs.flary.dev",
+          "custom_domain": true
         }
       ],
       "vars": {
