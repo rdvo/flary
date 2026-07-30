@@ -43,6 +43,8 @@ function removeDir(dirPath: string) {
 
 const entryPoints = glob.sync("./src/**/*.ts", {
   ignore: [
+    "./src/cli.ts",
+    "./src/cli-api.ts",
     "./src/**/*.test.ts",
     "./src/mod.ts",
     "./src/middleware.ts",
@@ -104,6 +106,27 @@ const esmBuild = async () => {
   }
 };
 
+const cliBuild = async () => {
+  const buildOptions: BuildOptions = {
+    entryPoints: ["./src/cli.ts", "./src/cli-api.ts"],
+    outbase: "./src",
+    outdir: "./dist",
+    format: "esm",
+    platform: "node",
+    bundle: false,
+    banner: {
+      js: "#!/usr/bin/env node",
+    },
+  };
+
+  if (isWatch) {
+    const ctx = await context(buildOptions);
+    await ctx.watch();
+  } else {
+    await build(buildOptions);
+  }
+};
+
 removeDir("./dist");
 
 async function main() {
@@ -111,12 +134,12 @@ async function main() {
     const typecheck = execFile("tsc", ["-w", "--project", "tsconfig.build.json"]);
     typecheck.stdout?.pipe(process.stdout);
     typecheck.stderr?.pipe(process.stderr);
-    await esmBuild();
+    await Promise.all([esmBuild(), cliBuild()]);
     return;
   }
 
   await execFileAsync("tsc", ["--project", "tsconfig.build.json"]);
-  await esmBuild();
+  await Promise.all([esmBuild(), cliBuild()]);
 }
 
 main().catch((error: unknown) => {

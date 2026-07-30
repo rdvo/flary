@@ -1,0 +1,113 @@
+# Support bot
+
+This example mounts one durable support agent behind a product-owned API.
+The product still owns login, organization roles, billing, and the chat UI.
+
+## Define the agent
+
+```ts
+// src/agents/support.ts
+import { defineFlaryAgent } from "flary/flue";
+
+export default defineFlaryAgent<Env>({
+  resolveContext: ({ env, id }) => env.RUN_BINDINGS.read(id),
+
+  resolveAgent: ({ trusted }) => ({
+    agentId: "support",
+    revisionId: trusted.revisionId,
+    instructions:
+      "Resolve the support request with approved tools. " +
+      "Ask before changing customer data.",
+    model: {
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+      cacheRetention: "short",
+    },
+    thinkingLevel: "medium",
+    mode: "build",
+  }),
+
+  resolveModel: ({ env, agent, trusted }) =>
+    env.MODELS.resolve(trusted, agent.model),
+
+  resolveTools: ({ env, trusted }) =>
+    env.TOOLS.forThread(trusted),
+});
+```
+
+`RUN_BINDINGS`, `MODELS`, and `TOOLS` are host adapters. They read trusted
+context, register a provider credential, and return only the tools allowed for
+the current tenant and user.
+
+## Mount the run API
+
+```ts
+import { Hono } from "hono";
+import { D1FlaryRunRepository } from "flary/cloudflare";
+import {
+  createFlueAgentGateway,
+  createFlueRunService,
+} from "flary/flue";
+import { createFlaryRunRouter } from "flary/host";
+
+const app = new Hono<{ Bindings: Env }>();
+
+app.route(
+  "/v1/agents/support",
+  createFlaryRunRouter<Env>({
+    resolveContext: async ({ request, env }) => {
+      const user = await authenticateProductRequest(request, env);
+      return {
+        tenantId: user.organizationId,
+        applicationId: "support-console",
+        agentId: "support",
+        identity: { id: user.id, kind: "user" },
+        roles: user.roles,
+        scopes: user.scopes,
+      };
+    },
+    service: (env, execution) =>
+      createFlueRunService({
+        repository: new D1FlaryRunRepository(env.DB),
+        gateway: createFlueAgentGateway({
+          baseUrl: "https://internal.flue",
+          fetch: env.SELF.fetch.bind(env.SELF),
+        }),
+        schedule: (work) => execution.waitUntil(work),
+      }),
+  }),
+);
+
+export default app;
+```
+
+The host must apply `FLARY_RUNS_D1_MIGRATION`. The Flue build creates the
+thread Durable Object class and internal route used by the gateway.
+
+## Connect the product UI
+
+```ts
+import { createFlaryRunClient } from "flary/client";
+
+const runs = createFlaryRunClient({
+  baseUrl: "/v1/agents/support",
+});
+
+const run = await runs.create({
+  requestId: crypto.randomUUID(),
+  channelId: "ticket_42",
+  input: {
+    customer: { name: "Ada" },
+    question: "How do I change my plan?",
+  },
+  idempotencyKey: crypto.randomUUID(),
+});
+
+for await (const event of runs.observe(run.runId)) {
+  renderSupportEvent(event);
+}
+```
+
+The UI can leave and reconnect with `afterSequence`. It does not keep the
+model request alive.
+

@@ -1,0 +1,73 @@
+# Prompt files
+
+Flary prompt files are Markdown files with YAML front matter. Store them in
+Git and review them like source code.
+
+## File and slug
+
+```text
+prompts/support/answer.prompt.md
+```
+
+The path becomes the slug `support/answer`.
+
+## Complete example
+
+```md
+---
+model: inherit
+thinking: medium
+tools:
+  - docs.search
+  - account.read
+
+input:
+  customer.name: string
+  customer.plan: string
+  question: string
+
+limits:
+  steps: 12
+  tools: 20
+---
+
+You are a product support agent.
+
+Answer {{customer.name}} about the {{customer.plan}} plan.
+Use a tool for product facts. Do not invent policy.
+
+Question:
+{{question}}
+```
+
+`model: inherit` uses the model selected by the application. A prompt can also
+pin a provider and model:
+
+```yaml
+model: anthropic/claude-sonnet-4-5
+```
+
+## Compile
+
+```ts
+import { compilePrompt } from "flary/prompts";
+
+const compiled = await compilePrompt(
+  {
+    path: "prompts/support/answer.prompt.md",
+    content: promptSource,
+  },
+  {
+    callerModel: "openai/gpt-5.6",
+    values: {
+      customer: { name: "Ada", plan: "Pro" },
+      question: "Can I add another workspace?",
+    },
+  },
+);
+```
+
+Templates support strict `{{value.path}}` interpolation. Compilation fails on
+missing values, unknown values, or secret-like paths. Provider credentials do
+not enter the prompt.
+

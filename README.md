@@ -48,11 +48,41 @@ system on the host application.
 ## Install the release candidate
 
 ```bash
-npm install --save-exact flary@0.3.0-rc.4
+npm install --save-exact flary@0.3.0-rc.5
+npx flary init
 ```
 
 The `next` npm tag points to the current release candidate. Pin the exact
 version in production until the live provider gates pass.
+
+Use `flary init` to add prompt and agent examples to an existing project. It
+does not replace the application's current framework or deployment setup.
+Create a new Cloudflare Worker starter with:
+
+```bash
+npx flary create my-agent
+```
+
+The generated project starts with a real `*.prompt.md` file and a local
+prompt-preview route. It does not create production Cloudflare resources.
+Add durable threads with the focused guides:
+
+- [Getting started](https://github.com/rdvo/flary/blob/main/docs/getting-started.md)
+- [Cloudflare resources](https://github.com/rdvo/flary/blob/main/docs/cloudflare-resources.md)
+- [Prompt files](https://github.com/rdvo/flary/blob/main/docs/prompts.md)
+- [Support bot](https://github.com/rdvo/flary/blob/main/docs/examples/support-bot.md)
+- [Coding agent](https://github.com/rdvo/flary/blob/main/docs/examples/coding-agent.md)
+
+### Runtime requirements
+
+| Use | Cloudflare account | Durable Objects | D1 | R2 |
+| --- | --- | --- | --- | --- |
+| Compile prompt files | No | No | No | No |
+| Develop a Worker locally | No production account | Local if used | Local if used | No |
+| Run durable threads in production | Yes | Yes | Yes | Optional |
+
+R2 is required for files larger than `1,500,000` bytes and for the R2 history
+fallback. Sandbox, Dynamic Workers, and Artifacts are optional.
 
 ## Package entry points
 
@@ -200,7 +230,7 @@ credential without returning a raw token through Flary. Hosted OpenAI login uses
 authorization by default. Local self-hosted clients can select
 `browser_callback`. Claude uses authorization-code completion.
 
-Flary `0.3.0-rc.4` pins `@flue/runtime` and `@flue/sdk` to
+Flary `0.3.0-rc.5` pins `@flue/runtime` and `@flue/sdk` to
 `1.0.0-beta.9`, and pins `@earendil-works/pi-ai` to `0.80.10`. Until the
 required changes are available in upstream releases, the npm package applies
 the checked-in patches during installation. Run `npm run test:npm-install`
@@ -818,17 +848,14 @@ pnpm --dir apps/cloud typecheck
 pnpm --dir apps/cloud build
 ```
 
-The starter wizard in `packages/create-flary` copies the reference app,
-creates local secrets, and prints the Cloudflare setup steps. Hosted Flary
-users do not connect Cloudflare. A self-hosted operator signs in to Cloudflare
-once to deploy and own the complete stack. Run it with:
+The main `flary` command creates the open-source starter. It is separate from
+the hosted Flary website and managed runtime. Run it with:
 
 ```bash
-pnpm dlx create-flary --yes ./my-flary-app
+npx flary create ./my-flary-app
 ```
 
-Add `--provision` after `wrangler login` to create the D1 database and R2
-bucket, write production secrets, apply migrations, and deploy the Worker.
+The old `create-flary` package remains as a compatibility alias.
 
 ## License
 

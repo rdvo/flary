@@ -9,6 +9,9 @@
   "scripts": {
     "build": "tsc --project tsconfig.json"
   },
+  "dependencies": {
+    "flary": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "^20.17.24",
     "typescript": "^5.4.5"

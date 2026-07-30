@@ -7,33 +7,33 @@ import SiteLayout from "../layouts/SiteLayout.astro";
 const capabilities = [
   {
     title: "Persistent threads",
-    body: "Runs continue through disconnects and resume from an exact event cursor.",
+    body: "Runs survive disconnects and resume from an exact event cursor.",
   },
   {
-    title: "Provider neutral",
-    body: "Use OpenAI, Anthropic, Google, Moonshot, or Cloudflare behind one contract.",
+    title: "Modes and approvals",
+    body: "Use Ask, Plan, Build, Review, or a custom Zod permission profile.",
   },
   {
-    title: "Tools and MCP",
-    body: "Discover tools when needed. Keep secrets behind scoped capabilities.",
+    title: "Lazy tools and MCP",
+    body: "Search and load tools only when needed. Keep credentials out of model context.",
   },
   {
-    title: "Workspaces",
-    body: "Give each agent an isolated branch with files, diffs, and checkpoints.",
+    title: "Parallel execution",
+    body: "Run independent reads together and serialize writes by resource.",
   },
   {
-    title: "History and recall",
-    body: "Store canonical JSONL history and retrieve prior work with source references.",
+    title: "Provider sessions",
+    body: "Switch providers while Flary preserves the visible thread and cache lineage.",
   },
   {
-    title: "Typed boundaries",
-    body: "Validate events, tools, approvals, credentials, and usage with Zod.",
+    title: "Workspaces and recall",
+    body: "Give agents branch-scoped files, diffs, checkpoints, and exact history lookup.",
   },
 ];
 
 const title = "Flary — Open-source agent infrastructure";
 const description =
-  "Add persistent threads, tools, MCP, workspaces, history, and provider-neutral sessions to products on Cloudflare Workers.";
+  "Build durable coding agents, support bots, and product copilots on Cloudflare Workers.";
 ---
 
 <SiteLayout title={title} description={description}>
@@ -45,7 +45,14 @@ const description =
       </a>
       <nav aria-label="Main navigation">
         <a href="#examples">Examples</a>
-        <a href="#details">What it does</a>
+        <a href="#setup">Setup</a>
+        <a
+          href="https://github.com/rdvo/flary/tree/main/docs"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Docs
+        </a>
         <a
           href="https://github.com/rdvo/flary"
           target="_blank"
@@ -61,10 +68,10 @@ const description =
         <p class="eyebrow">Open-source agent infrastructure</p>
       </div>
       <div class="hero-copy">
-        <h1>Build agents that<br />keep their place.</h1>
+        <h1>Durable agents,<br />inside your app.</h1>
         <p class="lede">
-          Flary is a TypeScript runtime for adding stateful agents to products
-          on Cloudflare Workers.
+          Build coding agents, support bots, and product copilots with
+          persistent threads, tools, and provider-neutral sessions.
         </p>
         <div class="actions">
           <a
@@ -84,10 +91,63 @@ const description =
 
     <section class="examples" id="examples">
       <div class="section-intro">
-        <p class="eyebrow">Start where you are</p>
-        <h2>Create a Worker.<br />Or add Flary to yours.</h2>
+        <p class="eyebrow">Real project code</p>
+        <h2>One runtime.<br />Different products.</h2>
       </div>
-      <CodeExamples client:load />
+      <CodeExamples client:visible />
+      <p class="editor-note">
+        These are editable Monaco files. The examples use Flary’s public
+        package APIs, not a landing-page-only SDK.
+      </p>
+    </section>
+
+    <section class="setup" id="setup">
+      <div class="section-intro">
+        <p class="eyebrow">Start local, deploy durable</p>
+        <h2>Use only the layer<br />your app needs.</h2>
+      </div>
+      <div class="setup-grid">
+        <article>
+          <span>01</span>
+          <p class="setup-kicker">Prompt files</p>
+          <h3>Any TypeScript app</h3>
+          <p>
+            Compile tracked <code>*.prompt.md</code> files with no Cloudflare
+            resources.
+          </p>
+          <code>npm install flary@next</code>
+        </article>
+        <article>
+          <span>02</span>
+          <p class="setup-kicker">Local runtime</p>
+          <h3>Cloudflare emulation</h3>
+          <p>
+            Start with the generated prompt Worker. Add locally emulated
+            Durable Objects and D1 when you add threads.
+          </p>
+          <code>npx flary create my-agent</code>
+        </article>
+        <article>
+          <span>03</span>
+          <p class="setup-kicker">Production runtime</p>
+          <h3>Your Cloudflare account</h3>
+          <p>
+            Durable Objects run threads. D1 indexes runs. Add R2 only for
+            large files or history fallback.
+          </p>
+          <code>wrangler deploy</code>
+        </article>
+      </div>
+      <div class="resource-line" aria-label="Cloudflare resource requirements">
+        <div>
+          <span>Required for durable production</span>
+          <strong>Worker · Durable Objects · D1</strong>
+        </div>
+        <div>
+          <span>Optional by feature</span>
+          <strong>R2 · Sandbox · Dynamic Workers · Artifacts</strong>
+        </div>
+      </div>
     </section>
 
     <section class="details" id="details">
@@ -111,13 +171,15 @@ const description =
     <section class="flow">
       <div>
         <p class="eyebrow">One clean boundary</p>
-        <h2>Bring your app.<br />Mount Flary behind it.</h2>
+        <h2>Your UI and auth.<br />Flary underneath.</h2>
       </div>
       <pre aria-label="Flary application architecture"><code>your product
   ↓
 flary
   ↓
-agents · d1 · r2
+threads · tools · workspaces
+  ↓
+durable objects · d1 · optional r2
   ↓
 openai · anthropic · google · kimi</code></pre>
     </section>

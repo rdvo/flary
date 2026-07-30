@@ -1,10 +1,13 @@
 {
   "name": "flary",
-  "version": "0.3.0-rc.4",
+  "version": "0.3.0-rc.5",
   "description": "Durable, provider-neutral AI agent harness for Cloudflare Workers",
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/types/index.d.ts",
+  "bin": {
+    "flary": "dist/cli.js"
+  },
   "scripts": {
     "build": "rimraf dist && tsx build.ts",
     "build:watch": "rimraf dist && tsx build.ts --watch",
@@ -69,6 +72,7 @@
   },
   "files": [
     "dist/**/*",
+    "templates/starter/**/*",
     "npm-patches/*.patch",
     "scripts/apply-dependency-patches.cjs"
   ],
@@ -140,6 +144,10 @@
     "./host": {
       "types": "./dist/types/harness/host/index.d.ts",
       "import": "./dist/harness/host/index.js"
+    },
+    "./cli": {
+      "types": "./dist/types/cli-api.d.ts",
+      "import": "./dist/cli-api.js"
     },
     "./vault": {
       "types": "./dist/types/harness/vault/index.d.ts",
