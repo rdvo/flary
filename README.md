@@ -45,15 +45,15 @@ Your product
 Flary does not force a chat UI, editor, authentication provider, or billing
 system on the host application.
 
-## Install the release candidate
+## Install 0.3.1
 
 ```bash
-npm install --save-exact flary@0.3.0-rc.5
+npm install --save-exact flary@0.3.1
 npx flary init
 ```
 
-The `next` npm tag points to the current release candidate. Pin the exact
-version in production until the live provider gates pass.
+The `next` npm tag points to 0.3.1. Pin the exact version in production until
+the live provider gates pass.
 
 Use `flary init` to add prompt and agent examples to an existing project. It
 does not replace the application's current framework or deployment setup.
@@ -230,17 +230,16 @@ credential without returning a raw token through Flary. Hosted OpenAI login uses
 authorization by default. Local self-hosted clients can select
 `browser_callback`. Claude uses authorization-code completion.
 
-Flary `0.3.0-rc.5` pins `@flue/runtime` and `@flue/sdk` to
+Flary `0.3.1` pins `@flue/runtime` and `@flue/sdk` to
 `1.0.0-beta.9`, and pins `@earendil-works/pi-ai` to `0.80.10`. Until the
 required changes are available in upstream releases, the npm package applies
 the checked-in patches during installation. Run `npm run test:npm-install`
 before publishing. This test installs the packed Flary package in an empty
 npm project and verifies both patched runtimes.
 
-The three opt-in live provider tests are the stable-release gate. The release
-candidate can be installed with `npm install flary@next`. Do not promote it to
-the `latest` tag until those live tests pass with real subscription
-connections.
+The three opt-in live provider tests are the stable-release gate. Install the
+pending release with `npm install flary@next`. Do not promote it to the
+`latest` tag until those live tests pass with real subscription connections.
 
 The host must store private login state and credentials with authenticated
 encryption. Public Flary schemas do not include PKCE verifiers, device

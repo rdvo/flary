@@ -1,7 +1,7 @@
 import { Check, Copy } from "lucide-react";
 import { useState } from "react";
 
-const command = "npm install --save-exact flary@0.3.0-rc.5";
+const command = "npm install --save-exact flary@0.3.1";
 
 function copyWithSelection(value: string): boolean {
   const input = document.createElement("textarea");
