@@ -177,47 +177,37 @@ AgentModeSchema. This keeps a mode change durable while keeping the policy
 definition under application control.
 
 ~~~ts
-export default defineFlaryAgent<Env>({
-  resolveContext: ({ env, id }) => env.RUN_BINDINGS.read(id),
+import { flary, z, resolveAgentMode } from "flary";
 
-  resolveAgent: async ({ env, trusted }) => {
-    const revision = await env.AGENTS.get(
-      trusted.tenantId,
-      trusted.agentId,
-      trusted.revisionId,
-    );
-    const mode = resolveAgentMode(revision.mode, revision.customModes);
-
-    return {
-      agentId: trusted.agentId,
-      revisionId: revision.id,
-      instructions: revision.instructions,
-      model: revision.model,
-      thinkingLevel: revision.thinkingLevel,
-      mode: mode.id,
-      limits: mode.limits,
-    };
-  },
-
-  resolveMode: async ({ env, trusted, agent }) => {
-    const thread = await env.THREAD_METADATA.read(trusted.threadId);
-    const revision = await env.AGENTS.get(
-      trusted.tenantId,
-      trusted.agentId,
-      agent.revisionId,
-    );
-    return resolveAgentMode(thread.mode, revision.customModes);
-  },
-
-  resolveModel: ({ env, agent, trusted }) =>
-    env.MODELS.resolve(trusted, agent.model),
+const app = flary<Env>({
+  name: "support",
+  bindings: z.object({
+    AGENTS: z.any(),
+    THREAD_METADATA: z.any(),
+  }),
 });
+
+export const support = app.fn({
+  name: "support",
+  input: z.object({ message: z.string().min(1) }),
+  output: z.object({ answer: z.string() }),
+  mode: "support-agent",
+  prompt: async ({ message }, { bindings }) => {
+    const thread = await bindings.THREAD_METADATA.read();
+    const revision = await bindings.AGENTS.get(thread.agentId, thread.revisionId);
+    const mode = resolveAgentMode(thread.mode, revision.customModes);
+    return `${mode.prompt}\n\nUser message: ${message}`;
+  },
+});
+
+export default app.serve({ support });
 ~~~
 
 The example uses host adapters for the agent revision and thread metadata. The
-important rule is that resolveMode returns a parsed profile during recovery,
-not a profile supplied inside model input. A mode_change is also a semantic
-history checkpoint, so operators can see who changed it and why.
+important rule is that the host resolves the mode during admission and
+recovery, not from model input. The `mode` option records the operational mode
+ID with the function revision. A mode change is also a semantic history
+checkpoint, so operators can see who changed it and why.
 
 ## Changing mode safely
 

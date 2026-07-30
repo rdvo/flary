@@ -55,7 +55,7 @@ npx flary init
 The `next` npm tag points to 0.3.1. Pin the exact version in production until
 the live provider gates pass.
 
-Use `flary init` to add prompt and agent examples to an existing project. It
+Use `flary init` to add function-first examples to an existing project. It
 does not replace the application's current framework or deployment setup.
 Create a new Cloudflare Worker starter with:
 
@@ -63,8 +63,8 @@ Create a new Cloudflare Worker starter with:
 npx flary create my-agent
 ```
 
-The generated project starts with a real `*.prompt.md` file and a local
-prompt-preview route. It does not create production Cloudflare resources.
+The generated project starts with Zod-backed functions and a local HTTP route.
+It does not create production Cloudflare resources.
 Add durable threads with the focused guides:
 
 - [Getting started](https://flary.dev/docs/getting-started/)
@@ -87,16 +87,105 @@ fallback. Sandbox, Dynamic Workers, and Artifacts are optional.
 ## Package entry points
 
 ```ts
-import { createFlaryHostRouter } from "flary/host";
-import { FlaryClient } from "flary/client";
-import { defineFlaryAgent } from "flary/flue";
+import { flary, z } from "flary";
+import { flary as flaryClient } from "flary/client";
+import { createFlaryCodemodeExecutor } from "flary/functions";
 import { compilePrompt } from "flary/prompts";
-import { ToolCatalog } from "flary/tools";
+import { createFlaryRunRouter } from "flary/host";
 ```
 
 Flary also exports focused modules for contracts, providers, execution,
 storage, history, recall, telemetry, vaults, subagents, MCP, and Cloudflare
 adapters.
+
+## Function-first API
+
+Use `flary()` for a small, typed application. Zod owns input and output
+validation, and a function is callable from TypeScript or from the generated
+HTTP client.
+
+```ts
+// src/flary.ts
+import { flary } from "flary";
+
+export const app = flary({
+  model: "openai/gpt-5",
+  auth: async ({ request }) => authenticate(request),
+});
+```
+
+```ts
+// src/tools.ts
+import { z } from "flary";
+import { app } from "./flary";
+
+export const searchDocs = app.fn({
+  description: "Search product documentation",
+  input: z.object({ query: z.string().min(1) }),
+  output: z.array(z.object({
+    title: z.string(),
+    url: z.string().url(),
+    excerpt: z.string(),
+  })),
+  policy: { operation: "read", capabilities: ["docs.read"] },
+  run: ({ query }) => docs.search(query),
+});
+
+const github = app.mcp("github");
+const billing = app.openapi({
+  namespace: "billing",
+  spec: "./openapi/billing.yaml",
+  connection: "billing-api",
+});
+
+export const tools = app.tools({ searchDocs, github, billing });
+```
+
+Prompt functions expose one model-visible `execute` tool. The Dynamic Worker
+code searches and describes the private catalog before it calls a selected
+tool; credentials stay in trusted host closures. On Cloudflare, add a Worker
+Loader binding named `LOADER` and Flary detects it from the request bindings.
+For an explicit host setup, create the Flary-owned executor with
+`createFlaryCodemodeExecutor({ loader, ctx })` and pass it as `code`.
+
+```ts
+export const support = app.fn({
+  input: z.object({ question: z.string().min(1) }),
+  output: z.object({ answer: z.string(), sources: z.array(z.string().url()) }),
+  tools,
+  prompt: ({ question }) => `Answer this question and include sources: ${question}`,
+});
+
+const result = await support({ question: "How do I upgrade?" });
+```
+
+Native functions can orchestrate other functions with named, replayable
+steps:
+
+```ts
+export const ship = app.fn({
+  input: FeatureRequestSchema,
+  output: PullRequestSchema,
+  durable: { timeout: "8h", maxAttempts: 10 },
+  async run(input, { step }) {
+    const plan = await step("plan", planner, input);
+    const changes = await step("implement", coder, { ...input, plan });
+    return step("publish", openPullRequest, { changes });
+  },
+});
+```
+
+For a Durable Object host, pass its storage to `runStorage` and
+`DurableObjectFlaryStepStore`; the callable and client APIs stay unchanged.
+
+Serve functions with one line:
+
+```ts
+export default app.serve({ support, ship });
+```
+
+The existing low-level Flue, tool catalog, MCP, and host APIs remain available
+for applications that need a custom runtime.
 
 ## Prompt files
 

@@ -5,7 +5,34 @@ section: Reference
 order: 2
 ---
 
-Mount createFlaryRunRouter below a route that already authenticates the
+`app.serve()` is the normal HTTP surface for function-first applications. It
+creates function routes and validates inputs and outputs. Mount
+`createFlaryRunRouter` only when you need the lower-level generic run API or a
+custom Flue integration.
+
+## Function routes
+
+For a function named `support`, `app.serve({ support })` creates:
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| POST | /functions/support | Validate input and return output |
+| POST | /functions/support/runs | Admit a durable function run |
+| GET | /functions/support/runs/:runId | Read status and output |
+| POST | /functions/support/runs/:runId/cancel | Request cancellation |
+| GET | /functions/support/runs/:runId/approvals | List pending approvals |
+| POST | /functions/support/runs/:runId/approvals/:approvalId | Decide approval |
+| GET | /functions/support/runs/:runId/user-input | List pending questions |
+| POST | /functions/support/runs/:runId/user-input/:requestId | Resume with input |
+
+The function client calls these routes through `client.support()` and
+`client.support.start()`. The client currently polls durable status for a
+remote function run. Use the low-level event route when the host requires an
+SSE cursor.
+
+## Low-level run routes
+
+Mount `createFlaryRunRouter` below a route that already authenticates the
 request. Flary resolves trusted context through the host callback.
 
 ## Routes

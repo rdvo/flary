@@ -5,72 +5,77 @@ section: Tools
 order: 1
 ---
 
-Flary separates tool description from tool execution. The model first sees a
-small gateway. It searches or describes a tool, then Flary validates the
-arguments, checks the active mode, resolves secrets, and executes the tool in
-trusted host code.
+Flary separates tool description from tool execution. The model sees a small
+gateway. It searches or describes a tool, then Flary validates the arguments,
+checks the active mode, resolves secrets, and executes the tool in trusted
+host code.
 
 ## Define a native tool
 
-~~~ts
-import { z } from "zod";
-import { defineFlaryTool } from "flary/tools";
+Use `app.fn()` for application tools. Give the function a stable name, Zod
+input and output schemas, and a policy.
 
-export const getOrder = defineFlaryTool({
-  id: "orders.get",
-  name: "Get order",
+```ts
+import { flary, z } from "flary";
+
+const app = flary({ name: "support" });
+
+export const getOrder = app.fn({
+  name: "orders.get",
   description: "Read one order from the product database.",
-  input: z.object({
-    orderId: z.string().min(1),
-  }),
-  output: z.object({
-    id: z.string(),
-    status: z.string(),
-  }),
-  capabilities: ["orders.read"],
-  tags: ["orders", "read"],
-  secretRefs: ["ORDERS_TOKEN"],
-  async execute({ orderId }, context) {
-    return context.useSecret(
-      "ORDERS_TOKEN",
-      (token) => readOrder(orderId, token),
-    );
+  input: z.object({ orderId: z.string().min(1) }),
+  output: z.object({ id: z.string(), status: z.string() }),
+  policy: {
+    operation: "read",
+    capabilities: ["orders.read"],
   },
+  run: ({ orderId }, { bindings }) =>
+    bindings.orders.read(orderId),
 });
-~~~
+```
 
-The input and output schemas run in trusted code. The model receives JSON
-schema metadata, not the executable closure or secret value.
+The input and output schemas run in trusted code. The model receives schema
+metadata, not the executable closure or secret value.
 
-## Group and register tools
+## Require approval for writes
 
-~~~ts
-import { defineFlaryToolset, InMemoryToolCatalog } from "flary/tools";
+```ts
+export const refund = app.fn({
+  name: "billing.refund",
+  description: "Issue a refund for one order.",
+  input: z.object({
+    orderId: z.string(),
+    amountCents: z.number().int().positive(),
+  }),
+  output: z.object({ refundId: z.string() }),
+  policy: {
+    operation: "write",
+    capabilities: ["billing.refund"],
+    requiresApproval: true,
+  },
+  run: ({ orderId, amountCents }, { bindings }) =>
+    bindings.billing.refund(orderId, amountCents),
+});
+```
 
-const supportTools = defineFlaryToolset([
-  getOrder,
-  updateTicket,
-]);
+Writes require an idempotency key. A mode or approval policy can add another
+gate. An approval is bound to the exact run, tool, arguments, resource, mode,
+and credential generation.
 
-export function resolveTools(mode: AgentMode) {
-  const catalog = new InMemoryToolCatalog({
-    secretProvider: productSecrets,
-  });
-  supportTools.register(catalog);
-  return new LazyToolRuntime({
-    catalog,
-    mode,
-    approve: approvals.require,
-  });
-}
-~~~
+## Build a lazy registry
 
-For a Durable Object, replace the in-memory journal and secret provider with
-the Cloudflare adapters. The catalog definition can remain the same.
+```ts
+const tools = app.tools({ getOrder, refund });
 
-## Lazy discovery
+export const support = app.fn({
+  input: z.object({ question: z.string().min(1) }),
+  output: z.object({ answer: z.string() }),
+  tools,
+  prompt: ({ question }) => question,
+});
+```
 
-The Flary gateway exposes four stable operations:
+The gateway exposes four operations:
 
 | Gateway tool | Purpose |
 | --- | --- |
@@ -79,65 +84,54 @@ The Flary gateway exposes four stable operations:
 | tool_call | Execute one validated call |
 | tool_batch | Execute a dependency-aware batch |
 
-This keeps a large tool library out of every model request. Load only the
-schema that the current task needs.
-
-~~~ts
-import { createFlueLazyTools } from "flary/flue";
-
-const lazyTools = createFlueLazyTools(
-  resolveTools(mode),
-);
-~~~
+Tool schemas load only after search or describe. This keeps a large tool
+library out of every model request.
 
 ## Parallel calls
 
 Flary can run independent read calls concurrently. It serializes writes by
-resource key and uses the tool journal for idempotency:
+resource key and uses the tool journal for idempotency. Code Mode may use
+`Promise.all` only for operations marked independent.
 
-~~~ts
+```ts
 const report = await runtime.batch({
   calls: [
-    {
-      id: "orders.get",
-      callId: "read_order",
-      arguments: { orderId: "order_1" },
-    },
-    {
-      id: "orders.get",
-      callId: "read_order_2",
-      arguments: { orderId: "order_2" },
-    },
+    { id: "orders.get", arguments: { orderId: "order_1" } },
+    { id: "orders.get", arguments: { orderId: "order_2" } },
   ],
 });
-~~~
+```
 
-Use a resourceKey for writes that must be serialized:
-
-~~~ts
-defineFlaryTool({
-  id: "orders.update",
-  input: z.object({ orderId: z.string(), status: z.string() }),
-  operation: "write",
-  capabilities: ["orders.write"],
-  resourceKey: (input) => "order:" + input.orderId,
-  async execute(input) {
-    return updateOrder(input);
-  },
-});
-~~~
-
-Only operations marked independent can run in parallel. Do not parallelize
-two calls that can mutate the same resource or connection.
+Do not parallelize two calls that can mutate the same resource or connection.
 
 ## Connect remote MCP
 
 The host product owns connection records, OAuth or API-key setup, encrypted
 credentials, organization grants, and the endpoints enabled for a thread.
-Flary owns the safe MCP adapter:
+Register the source in the function definition:
 
-~~~ts
-import { SqliteMcpDescriptorCache, SqliteToolExecutionJournal } from "flary/cloudflare";
+```ts
+const external = app.tools({
+  github: app.mcp({
+    namespace: "github",
+    connection: "github-production",
+  }),
+  billing: app.openapi({
+    namespace: "billing",
+    spec: "./openapi/billing.yaml",
+    connection: "billing-api",
+  }),
+});
+```
+
+Resolve the sources in trusted host code. Flary's low-level adapter is
+available when the host needs explicit storage, caching, and event hooks:
+
+```ts
+import {
+  SqliteMcpDescriptorCache,
+  SqliteToolExecutionJournal,
+} from "flary/cloudflare";
 import { createMcpTools } from "flary/mcp";
 
 const tools = await createMcpTools({
@@ -146,11 +140,7 @@ const tools = await createMcpTools({
   credentials: ({ endpoint }) =>
     productConnections.resolveCredential(endpoint.connectionId),
   permissions: ({ endpoint, tool }) =>
-    productConnections.canUseTool(
-      trusted,
-      endpoint.connectionId,
-      tool.name,
-    ),
+    productConnections.canUseTool(trusted, endpoint.connectionId, tool.name),
   mode,
   runId,
   descriptorCache: new SqliteMcpDescriptorCache(threadSql),
@@ -158,7 +148,7 @@ const tools = await createMcpTools({
   approve: approvals.require,
   onEvent: (event) => threadEvents.append(event),
 });
-~~~
+```
 
 Credential callbacks run only in trusted host code. Credential values do not
 enter tool descriptions, model input, logs, or normalized events.
@@ -169,11 +159,11 @@ isolates endpoint failures. Stdio is for self-hosted deployments only.
 
 ## Tool safety rules
 
-- Give every tool a stable ID and capability.
-- Use read for reads and write for mutations.
+- Give every tool a stable name and capability.
+- Use `read` for reads and `write` for mutations.
 - Give writes a resource key and idempotency key.
 - Require approval for deletes, external messages, secrets, commits, merges,
   deploys, and other irreversible effects.
 - Resolve credentials only for the duration of a protected callback.
 - Keep MCP connections scoped to the authenticated tenant and thread.
-- Treat outcome_unknown as a reconciliation task. Never blindly retry it.
+- Treat `outcome_unknown` as a reconciliation task. Never blindly retry it.

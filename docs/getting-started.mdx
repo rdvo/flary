@@ -7,14 +7,15 @@ order: 1
 
 Flary has three entry points:
 
-1. One-off agent: compile a prompt and call a provider from any TypeScript
-   application.
+1. One-off function: define a typed function and call a provider from any
+   TypeScript application.
 2. Self-hosted runtime: run durable threads in your Cloudflare Worker.
 3. Product integration: keep your authentication, UI, billing, and connections
    while Flary supplies the agent runtime.
 
-Start with the smallest layer that matches the job. You can move from a
-one-off call to a durable thread without changing your prompt files.
+Start with the smallest layer that matches the job. The function API is the
+default authoring surface. You can call a function directly, start it as a
+durable run, or expose the same function through HTTP.
 
 ## Install
 
@@ -40,11 +41,68 @@ npm install
 npm run dev
 ```
 
-The starter proves the prompt-file path first. It does not create production
-Cloudflare resources. Use [One-off agent](/docs/one-off-agent/) for a small
-call or [Self-hosting](/docs/self-hosting/) for a durable deployment.
+The starter uses the function API. It does not create production Cloudflare
+resources. Use [One-off agent](/docs/one-off-agent/) for a small call or
+[Self-hosting](/docs/self-hosting/) for a durable deployment.
 
-## Use a prompt file without Cloudflare
+## Define a function
+
+Create one typed function. A `run` function is deterministic application code.
+A `prompt` function sends the generated prompt to the configured model and
+validates the result with its output schema.
+
+```ts
+// src/flary.ts
+import { flary, z } from "flary";
+
+export const app = flary({
+  name: "support",
+  model: "openai/gpt-5",
+  bindings: z.object({
+    OPENAI_API_KEY: z.string().min(1),
+  }),
+});
+```
+
+```ts
+// src/support.ts
+import { z } from "flary";
+import { app } from "./flary";
+
+export const support = app.fn({
+  input: z.object({ question: z.string().min(1) }),
+  output: z.object({ answer: z.string() }),
+  prompt: ({ question }) =>
+    `Answer this support question clearly and briefly:\n\n${question}`,
+});
+```
+
+Call it from server code:
+
+```ts
+const result = await support({ question: "How do I change my plan?" });
+console.log(result.answer);
+```
+
+## Expose functions over HTTP
+
+Register functions once. Flary creates the health, direct-call, durable-run,
+status, cancellation, approval, and user-input routes.
+
+```ts
+// src/index.ts
+import { app } from "./flary";
+import { support } from "./support";
+
+export default app.serve({ support });
+```
+
+The direct route is `POST /functions/support`. A durable invocation starts at
+`POST /functions/support/runs`; the returned run ID can be polled after a
+disconnect. The function client exposes this as `run.stream()`. See
+[Durable threads](/docs/durable-threads/) for the low-level SSE route.
+
+## Keep prompts in Git when you need Markdown
 
 Create `prompts/support/answer.prompt.md`:
 
@@ -65,7 +123,7 @@ Answer {{customer.name}} with a concise, sourced response:
 {{question}}
 ```
 
-Compile it in your application:
+Compile a prompt file with the low-level compiler:
 
 ```ts
 import { readFile } from "node:fs/promises";
@@ -87,7 +145,9 @@ const prompt = await compilePrompt(
 );
 ```
 
-This path needs no Durable Object, D1 database, or R2 bucket.
+This path needs no Durable Object, D1 database, or R2 bucket. For new
+functions, prefer a `prompt` function so its input and output schemas, tools,
+HTTP route, and durable run behavior stay in one TypeScript definition.
 
 ## Add the durable runtime
 
@@ -106,30 +166,38 @@ execution adapter, tool runtime, modes, approvals, and event stream.
 Read [Self-hosting](/docs/self-hosting/) and
 [Cloudflare resources](/docs/cloudflare-resources/) before deployment.
 
-## Call the stable run API
+## Call a remote function
 
 ```ts
-import { createFlaryRunClient } from "flary/client";
+import { flary } from "flary/client";
+import type { support } from "./support";
 
-const runs = createFlaryRunClient({
-  baseUrl: "https://api.example.com/v1/agents/support",
+const client = flary<{ support: typeof support }>({
+  baseUrl: "https://api.example.com",
   token: process.env.PRODUCT_API_TOKEN,
 });
 
-const run = await runs.create({
-  requestId: crypto.randomUUID(),
-  channelId: "ticket_42",
-  input: { message: "How do I change my plan?" },
-  idempotencyKey: crypto.randomUUID(),
+const answer = await client.support({
+  question: "How do I change my plan?",
 });
+```
 
-for await (const event of runs.observe(run.runId)) {
+Start the same function as a durable run when you need reconnectable work:
+
+```ts
+const run = await client.support.start(
+  { question: "How do I change my plan?" },
+  { idempotencyKey: "ticket_42:turn:7" },
+);
+
+for await (const event of run.stream()) {
   console.log(event);
 }
 ```
 
-If the client disconnects, call `observe()` again with the last event
-sequence. Flary replays stored normalized events before it streams new events.
+The function client polls the durable run status. A host that needs exact SSE
+cursor control can use `createFlaryRunClient` from `flary/client` and the
+lower-level [HTTP API](/docs/http-api-and-events/).
 
 ## What the host application owns
 

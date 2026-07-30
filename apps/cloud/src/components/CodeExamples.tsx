@@ -21,124 +21,95 @@ const groups: ExampleGroup[] = [
   {
     id: "support",
     label: "Support bot",
-    description: "A durable support thread with a prompt file and a stable client API.",
+    description: "A typed support function with tools and a stable durable client API.",
     examples: [
       {
-        id: "support-prompt",
-        label: "Prompt",
-        filename: "prompts/support/answer.prompt.md",
-        language: "markdown",
-        code: `---
-model: inherit
-thinking: medium
-tools:
-  - docs.search
-
-input:
-  customer.name: string
-  question: string
-
-limits:
-  steps: 12
-  tools: 20
----
-
-Answer {{customer.name}} with a concise response.
-Use docs.search for product facts and include the source.
-
-Question:
-{{question}}`,
-      },
-      {
-        id: "support-agent",
-        label: "Agent",
-        filename: "src/agents/support.ts",
+        id: "support-app",
+        label: "App",
+        filename: "src/flary.ts",
         language: "typescript",
-        code: `import { defineFlaryAgent } from "flary/flue";
+        code: `import { flary, z } from "flary";
 
-export default defineFlaryAgent<Env>({
-  resolveContext: ({ env, id }) =>
-    env.RUN_BINDINGS.read(id),
-
-  resolveAgent: ({ trusted }) => ({
-    agentId: "support",
-    revisionId: trusted.revisionId,
-    instructions:
-      "Resolve the request with approved support tools. " +
-      "Ask before changing customer data.",
-    model: { provider: "anthropic", model: "claude-sonnet-4-5" },
-    thinkingLevel: "medium",
-    mode: "build",
+export const app = flary<Env>({
+  name: "support",
+  model: "anthropic/claude-sonnet-4-5",
+  bindings: z.object({
+    ANTHROPIC_API_KEY: z.string().min(1),
+    LOADER: z.unknown(),
   }),
-
-  resolveModel: ({ env, agent, trusted }) =>
-    env.MODELS.resolve(trusted, agent.model),
-
-  resolveTools: ({ env, trusted }) =>
-    env.TOOLS.forThread(trusted),
+  auth: ({ request, bindings }) =>
+    authenticateProductRequest(request, bindings),
 });`,
       },
       {
+        id: "support-function",
+        label: "Function",
+        filename: "src/support.ts",
+        language: "typescript",
+        code: `import { z } from "flary";
+import { app } from "./flary";
+import { tools } from "./tools";
+
+export const support = app.fn({
+  input: z.object({ question: z.string().min(1) }),
+  output: z.object({ answer: z.string() }),
+  tools,
+  mode: "ask",
+  thinking: "medium",
+  prompt: ({ question }) =>
+    \`Answer with approved product facts:\\n\\n\${question}\`,
+});`,
+      },
+      {
+        id: "support-tools",
+        label: "Tools",
+        filename: "src/tools.ts",
+        language: "typescript",
+        code: `import { z } from "flary";
+import { app } from "./flary";
+
+const searchDocs = app.fn({
+  name: "docs.search",
+  input: z.object({ query: z.string() }),
+  output: z.array(z.object({
+    title: z.string(),
+    url: z.string().url(),
+  })),
+  policy: { operation: "read", capabilities: ["docs.read"] },
+  run: ({ query }, { bindings }) =>
+    bindings.DOCS.search(query),
+});
+
+export const tools = app.tools({ searchDocs });`,
+      },
+      {
         id: "support-worker",
-        label: "Worker",
+        label: "Serve",
         filename: "src/index.ts",
         language: "typescript",
-        code: `import { Hono } from "hono";
-import { D1FlaryRunRepository } from "flary/cloudflare";
-import {
-  createFlueAgentGateway,
-  createFlueRunService,
-} from "flary/flue";
-import { createFlaryRunRouter } from "flary/host";
+        code: `import { app } from "./flary";
+import { support } from "./support";
 
-const app = new Hono<{ Bindings: Env }>();
-
-app.route("/v1/agents/support", createFlaryRunRouter<Env>({
-  resolveContext: async ({ request, env }) => {
-    const user = await authenticateProductRequest(request, env);
-    return {
-      tenantId: user.organizationId,
-      applicationId: "support-console",
-      agentId: "support",
-      identity: { id: user.id, kind: "user" },
-      roles: user.roles,
-      scopes: user.scopes,
-    };
-  },
-  service: (env, execution) => createFlueRunService({
-    repository: new D1FlaryRunRepository(env.DB),
-    gateway: createFlueAgentGateway({
-      baseUrl: "https://internal.flue",
-      fetch: env.SELF.fetch.bind(env.SELF),
-    }),
-    schedule: (work) => execution.waitUntil(work),
-  }),
-}));
-
-export default app;`,
+export default app.serve({ support });`,
       },
       {
         id: "support-client",
         label: "Client",
         filename: "src/lib/support.ts",
         language: "typescript",
-        code: `import { createFlaryRunClient } from "flary/client";
+        code: `import { flary } from "flary/client";
+import type { support } from "./support";
 
-const runs = createFlaryRunClient({
-  baseUrl: "/v1/agents/support",
+const client = flary<{ support: typeof support }>({
+  baseUrl: "https://support.example.com",
 });
 
-const run = await runs.create({
-  requestId: crypto.randomUUID(),
-  channelId: "ticket_42",
-  input: {
-    customer: { name: "Ada" },
-    question: "How do I change my plan?",
-  },
-  idempotencyKey: crypto.randomUUID(),
-});
+const run = await client.support.start(
+  { question: "How do I change my plan?" },
+  { idempotencyKey: "ticket_42:turn:7" },
+);
 
-for await (const event of runs.observe(run.runId)) {
+for await (const event of run.stream()) {
   renderEvent(event);
 }`,
       },
@@ -147,43 +118,33 @@ for await (const event of runs.observe(run.runId)) {
   {
     id: "coding",
     label: "Coding agent",
-    description: "A branch-scoped agent with lazy tools, modes, and structured user input.",
+    description: "A branch-scoped coding function with lazy tools and approvals.",
     examples: [
       {
         id: "coding-agent",
         label: "Agent",
         filename: "src/agents/coding.ts",
         language: "typescript",
-        code: `import {
-  createFlueLazyTools,
-  createFlueRequestUserInputTool,
-  defineFlaryAgent,
-} from "flary/flue";
+        code: `import { flary, z } from "flary";
+import { tools } from "./tools";
 
-export default defineFlaryAgent<Env>({
-  resolveContext: ({ env, id }) =>
-    env.RUN_BINDINGS.read(id),
-
-  resolveAgent: ({ trusted }) => ({
-    agentId: "coding",
-    revisionId: trusted.revisionId,
-    instructions:
-      "Inspect the bound workspace. Make small changes, " +
-      "run checks, and report the exact files changed.",
-    model: { provider: "openai", model: "gpt-5.6-codex" },
-    thinkingLevel: "high",
-    mode: "build",
+const app = flary<Env>({
+  name: "coding-agent",
+  model: "openai/gpt-5.6-codex",
+  bindings: z.object({
+    OPENAI_API_KEY: z.string().min(1),
+    LOADER: z.unknown(),
   }),
+});
 
-  resolveModel: ({ env, agent, trusted }) =>
-    env.MODELS.resolve(trusted, agent.model),
-
-  resolveTools: ({ env, trusted }) => [
-    ...createFlueLazyTools(env.TOOLS.lazyRuntime(trusted)),
-    createFlueRequestUserInputTool(
-      env.INPUT.forThread(trusted),
-    ),
-  ],
+export const coding = app.fn({
+  input: z.object({ request: z.string() }),
+  output: z.object({ summary: z.string() }),
+  mode: "build",
+  thinking: "high",
+  tools,
+  prompt: ({ request }) =>
+    \`Inspect the workspace and make this change:\\n\\n\${request}\`,
 });`,
       },
       {
@@ -191,59 +152,39 @@ export default defineFlaryAgent<Env>({
         label: "Tools",
         filename: "src/tools/catalog.ts",
         language: "typescript",
-        code: `import { InMemoryToolCatalog } from "flary/tools";
+        code: `import { z } from "flary";
+import { app } from "./flary";
 
-export function createWorkspaceTools(workspace: Workspace) {
-  const tools = new InMemoryToolCatalog();
+const readFile = app.fn({
+  name: "workspace.read_file",
+  input: z.object({ path: z.string() }),
+  output: z.object({ content: z.string() }),
+  policy: { operation: "read", capabilities: ["file.read"] },
+  run: ({ path }, { bindings }) =>
+    bindings.WORKSPACE.read(path),
+});
 
-  tools.register({
-    definition: {
-      id: "workspace.read_file",
-      name: "Read file",
-      description: "Read one file from the bound workspace.",
-      kind: "native",
-      operation: "read",
-      capabilities: ["file.read"],
-      tags: ["files", "read"],
-      inputSchema: {
-      type: "object",
-      properties: { path: { type: "string" } },
-        required: ["path"],
-        additionalProperties: false,
-      },
-    },
-    execute: ({ path }: { path: string }) =>
-      workspace.read(path),
-  });
+const applyPatch = app.fn({
+  name: "workspace.apply_patch",
+  input: z.object({ patch: z.string() }),
+  output: z.object({ changedFiles: z.array(z.string()) }),
+  policy: {
+    operation: "write",
+    capabilities: ["file.write"],
+    requiresApproval: true,
+  },
+  run: ({ patch }, { bindings }) =>
+    bindings.WORKSPACE.applyPatch(patch),
+});
 
-  tools.register({
-    definition: {
-      id: "workspace.apply_patch",
-      name: "Apply patch",
-      description: "Apply one checked patch to the bound branch.",
-      kind: "native",
-      operation: "write",
-      capabilities: ["file.write"],
-      tags: ["files", "write"],
-      requiresApproval: true,
-    },
-    resourceKey: "workspace",
-    execute: (input: PatchInput) =>
-      workspace.applyPatch(input),
-  });
-
-  return tools;
-}`,
+const tools = app.tools({ readFile, applyPatch });`,
       },
       {
         id: "coding-modes",
         label: "Modes",
         filename: "src/agents/modes.ts",
         language: "typescript",
-        code: `import {
-  AgentModeSchema,
-  resolveAgentMode,
-} from "flary";
+        code: `import { AgentModeSchema, resolveAgentMode } from "flary";
 
 export const ask = resolveAgentMode("ask");
 export const plan = resolveAgentMode("plan");
@@ -276,29 +217,21 @@ export const diagnose = AgentModeSchema.parse({
         label: "Client",
         filename: "src/lib/coding-agent.ts",
         language: "typescript",
-        code: `import { createFlaryRunClient } from "flary/client";
+        code: `import { flary } from "flary/client";
+import type { coding } from "./coding";
 
-const runs = createFlaryRunClient({
-  baseUrl: "/v1/agents/coding",
+const client = flary<{ coding: typeof coding }>({
+  baseUrl: "https://coding.example.com",
   headers: () => ({
     authorization: \`Bearer \${sessionToken()}\`,
   }),
 });
 
-const run = await runs.create({
-  requestId: crypto.randomUUID(),
-  channelId: "project_main",
-  input: {
-    message: "Find and fix the failing authentication test.",
-  },
-  idempotencyKey: crypto.randomUUID(),
-});
+const run = await client.coding.start({
+  request: "Find and fix the failing authentication test.",
+}, { idempotencyKey: "project_main:turn:7" });
 
-let sequence = 0;
-for await (const event of runs.observe(run.runId, {
-  afterSequence: sequence,
-})) {
-  sequence = event.sequence;
+for await (const event of run.stream()) {
   renderAgentEvent(event);
 }`,
       },
@@ -326,7 +259,7 @@ export function CodeExamples() {
   const [groupId, setGroupId] = useState<ExampleGroup["id"]>("support");
   const group = groups.find((item) => item.id === groupId) ?? groups[0];
   const [activeByGroup, setActiveByGroup] = useState<Record<string, string>>({
-    support: "support-prompt",
+    support: "support-app",
     coding: "coding-agent",
   });
   const activeId = activeByGroup[group.id] ?? group.examples[0].id;

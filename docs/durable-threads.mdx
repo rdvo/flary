@@ -5,9 +5,10 @@ section: Core
 order: 1
 ---
 
-A durable thread is the unit of conversation and execution. It has a stable
-identity, a tenant binding, a workspace or project scope, an active mode, a
-provider lineage, and a resumable event cursor.
+A durable run is the function API's reconnectable execution unit. A durable
+thread behind that run has a stable identity, a tenant binding, a workspace or
+project scope, an active mode, a provider lineage, and a resumable event
+cursor.
 
 Flue owns the canonical transcript and execution stream in the thread Durable
 Object. Flary adds trusted context, run admission, normalized events, tool
@@ -34,7 +35,36 @@ browser disconnects
 The client must treat the returned run ID and sequence as durable state. It
 must not create a second run only because an event stream disconnected.
 
-## Create and observe a run
+## Create and observe a function run
+
+The function-first API keeps the call shape small:
+
+~~~ts
+import { flary } from "flary/client";
+import type { support } from "./support";
+
+const client = flary<{ support: typeof support }>({
+  baseUrl: "https://support.example.com",
+});
+
+const run = await client.support.start(
+  { question: "How do I change my plan?" },
+  { idempotencyKey: "ticket_42:turn:7" },
+);
+
+for await (const event of run.stream()) {
+  renderEvent(event);
+}
+~~~
+
+The same function can be called directly with `await client.support(input)`.
+Use `.start()` when the caller can disconnect or the work can wait for input
+or approval.
+
+## Low-level run client
+
+Use the low-level client when the host needs explicit channel IDs, event
+sequence cursors, or the generic `/runs` routes:
 
 ~~~ts
 import { createFlaryRunClient } from "flary/client";

@@ -1,51 +1,110 @@
 ---
 title: Coding agent
-description: Build a durable coding thread with lazy tools, workspace policy, and explicit modes.
+description: Build a durable coding function with lazy tools, workspace policy, and explicit modes.
 section: Examples
 order: 2
 ---
 
-A coding agent uses the same thread runtime as a support bot. The difference
+A coding agent uses the same function runtime as a support bot. The difference
 is its workspace, mode, and tool policy.
 
-## Define lazy tools
+## Define the app
 
 ```ts
-import {
-  createFlueLazyTools,
-  createFlueRequestUserInputTool,
-  defineFlaryAgent,
-} from "flary/flue";
+// src/flary.ts
+import { flary, z } from "flary";
 
-export default defineFlaryAgent<Env>({
-  resolveContext: ({ env, id }) => env.RUN_BINDINGS.read(id),
-
-  resolveAgent: ({ trusted }) => ({
-    agentId: "coding",
-    revisionId: trusted.revisionId,
-    instructions:
-      "Inspect the bound workspace. Make small changes, run checks, " +
-      "and report the exact files changed.",
-    model: {
-      provider: "openai",
-      model: "gpt-5.6-codex",
-      cacheRetention: "short",
-    },
-    thinkingLevel: "high",
-    mode: "build",
+export const app = flary<Env>({
+  name: "coding-agent",
+  model: "openai/gpt-5.6-codex",
+  bindings: z.object({
+    OPENAI_API_KEY: z.string().min(1),
+    LOADER: z.unknown().optional(),
+    WORKSPACE: z.any(),
   }),
-
-  resolveModel: ({ env, agent, trusted }) =>
-    env.MODELS.resolve(trusted, agent.model),
-
-  resolveTools: ({ env, trusted }) => [
-    ...createFlueLazyTools(env.TOOLS.lazyRuntime(trusted)),
-    createFlueRequestUserInputTool(env.INPUT.forThread(trusted)),
-  ],
+  auth: ({ request, bindings }) => authenticateDeveloper(request, bindings),
 });
 ```
 
-The model sees a small fixed surface:
+## Define workspace tools
+
+```ts
+// src/tools.ts
+import { z } from "flary";
+import { app } from "./flary";
+
+const readFile = app.fn({
+  name: "workspace.read_file",
+  description: "Read one file from the bound workspace.",
+  input: z.object({ path: z.string().min(1) }),
+  output: z.object({ path: z.string(), content: z.string() }),
+  policy: { operation: "read", capabilities: ["file.read"] },
+  run: ({ path }, { bindings }) => bindings.WORKSPACE.read(path),
+});
+
+const applyPatch = app.fn({
+  name: "workspace.apply_patch",
+  description: "Apply one checked patch to the bound branch.",
+  input: z.object({ patch: z.string().min(1) }),
+  output: z.object({ changedFiles: z.array(z.string()) }),
+  policy: {
+    operation: "write",
+    capabilities: ["file.write"],
+    requiresApproval: true,
+  },
+  run: ({ patch }, { bindings }) => bindings.WORKSPACE.applyPatch(patch),
+});
+
+export const tools = app.tools({ readFile, applyPatch });
+```
+
+The `run` functions are trusted application code. Their Zod schemas become
+lazy tool descriptors. Code Mode exposes a small search/describe/call surface
+instead of loading every tool schema into every model request.
+
+## Define the coding function
+
+```ts
+// src/coding.ts
+import { z } from "flary";
+import { app } from "./flary";
+import { tools } from "./tools";
+
+export const coding = app.fn({
+  input: z.object({ request: z.string().min(1) }),
+  output: z.object({
+    summary: z.string(),
+    changedFiles: z.array(z.string()),
+  }),
+  mode: "build",
+  thinking: "high",
+  tools,
+  prompt: ({ request }) => [
+    "Inspect the bound workspace.",
+    "Make small changes, run checks, and report exact files changed.",
+    `Task: ${request}`,
+  ].join("\n"),
+});
+```
+
+Build mode can write the bound workspace. The `requiresApproval` policy on
+`applyPatch` still pauses the run before the mutation.
+
+## Serve and call it
+
+```ts
+// src/index.ts
+import { app } from "./flary";
+import { coding } from "./coding";
+
+export default app.serve({ coding });
+```
+
+Start a durable coding run from the product client with
+`client.coding.start({ request })`. The run can pause for approval or user
+input and can resume after a disconnect.
+
+The low-level gateway exposes these internal tool operations to Code Mode:
 
 - `tool_search`
 - `tool_describe`
@@ -53,72 +112,11 @@ The model sees a small fixed surface:
 - `tool_batch`
 - `request_user_input`
 
-Tool schemas load only after search or describe. `tool_batch` runs independent
-reads in parallel. Writes to the same resource run in order.
+Independent reads can run in parallel. Writes to the same resource are
+serialized and use idempotency keys.
 
-## Register application tools
+## Add modes
 
-```ts
-import { InMemoryToolCatalog } from "flary/tools";
-
-export function createWorkspaceTools(workspace: Workspace) {
-  const catalog = new InMemoryToolCatalog();
-
-  catalog.register({
-    definition: {
-      id: "workspace.read_file",
-      name: "Read file",
-      description: "Read one file from the bound workspace.",
-      kind: "native",
-      operation: "read",
-      capabilities: ["file.read"],
-      tags: ["files", "read"],
-      inputSchema: {
-        type: "object",
-        properties: { path: { type: "string" } },
-        required: ["path"],
-        additionalProperties: false,
-      },
-    },
-    execute: ({ path }: { path: string }) => workspace.read(path),
-  });
-
-  catalog.register({
-    definition: {
-      id: "workspace.apply_patch",
-      name: "Apply patch",
-      description: "Apply one checked patch to the bound branch.",
-      kind: "native",
-      operation: "write",
-      capabilities: ["file.write"],
-      tags: ["files", "write"],
-      requiresApproval: true,
-    },
-    resourceKey: "workspace",
-    execute: (input: PatchInput) => workspace.applyPatch(input),
-  });
-
-  return catalog;
-}
-```
-
-The host can register native tools and use `createMcpTools()` for authorized
-remote MCP servers. Raw credentials stay in trusted host code.
-
-## Modes
-
-Flary includes `ask`, `plan`, `build`, and `review` modes. Modes are Zod-backed
-permission profiles, not separate runtimes.
-
-```ts
-import { resolveAgentMode } from "flary";
-
-const plan = resolveAgentMode("plan");
-const build = resolveAgentMode("build");
-```
-
-Plan Mode can write only plan artifacts. Build Mode can write the bound
-workspace, but risky operations can still require approval. A model cannot
-grant itself a stronger mode. See [Modes and permissions](/docs/modes-permissions/)
-for the complete profile shape, custom modes, thread storage, and recovery
-rules.
+Use `mode: "ask"` or `mode: "plan"` for read-only variants. Use a custom
+Zod-backed profile when the coding product needs a narrower capability set.
+See [Modes and permissions](/docs/modes-permissions/).

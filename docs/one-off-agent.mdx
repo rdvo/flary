@@ -1,20 +1,52 @@
 ---
 title: One-off agent
-description: Compile a Git-tracked prompt and run one provider call without Durable Objects or a Cloudflare account.
+description: Define a typed function and run one provider call without Durable Objects or a Cloudflare account.
 section: Start
 order: 2
 ---
 
 Use this path for a request that does not need a conversation to survive a
 disconnect. It is useful for a CLI command, a form submission, a build step,
-or a small background task.
+or a small background task. Define a function once, then call it directly or
+start it as a durable run later.
 
 The one-off path still gives you typed prompt inputs, model selection,
 thinking level, tool declarations, limits, provider normalization, and Zod
 validation. Add a durable thread when the caller needs reconnectable streaming
 or multi-turn state.
 
-## Create the prompt
+## Create a one-off function
+
+```ts
+import { flary, z } from "flary";
+
+const app = flary({
+  model: "openai/gpt-5",
+});
+
+export const answer = app.fn({
+  input: z.object({
+    customer: z.object({ name: z.string().min(1) }),
+    question: z.string().min(1),
+  }),
+  output: z.object({
+    message: z.string(),
+    citations: z.array(z.string().url()),
+  }),
+  prompt: ({ customer, question }) =>
+    `Answer ${customer.name} using approved product facts.\n\n${question}`,
+});
+
+const result = await answer({
+  customer: { name: "Ada" },
+  question: "How do I change my plan?",
+});
+```
+
+Flary validates the input before the model call and validates the parsed model
+output before returning it.
+
+## Use a Markdown prompt file
 
 ~~~md
 ---
@@ -50,7 +82,7 @@ prompts/support/answer.prompt.md → support/answer
 Keep this file in Git. A changed prompt creates a new source hash when you
 compile it or publish it through a host control plane.
 
-## Compile and call an adapter
+## Compile and call an adapter directly
 
 Flary's provider adapters use one normalized request shape. The adapter can
 complete a request or return normalized stream events.

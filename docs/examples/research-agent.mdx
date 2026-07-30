@@ -1,101 +1,85 @@
 ---
 title: Research agent
-description: Build a scoped research worker that searches sources, delegates independent work, and returns a cited result.
+description: Build a scoped research function that searches approved sources and returns cited results.
 section: Examples
 order: 3
 ---
 
-Research is a good first durable agent because it can run after the caller
+Research is a good first durable function because it can run after the caller
 disconnects and can use bounded read-only tools in parallel.
 
-## Agent definition
+## Define the function
 
-~~~ts
-import { defineFlaryAgent } from "flary/flue";
+```ts
+import { flary, z } from "flary";
 
-export default defineFlaryAgent<Env>({
-  resolveContext: ({ env, id }) => env.RUN_BINDINGS.read(id),
-
-  resolveAgent: ({ trusted }) => ({
-    agentId: "research",
-    revisionId: trusted.revisionId,
-    instructions: [
-      "Research only from approved sources.",
-      "Cite every material claim.",
-      "Ask for clarification when the scope is not clear.",
-    ].join("\n"),
-    model: {
-      provider: "openai",
-      model: "gpt-5.6",
-      cacheRetention: "short",
-    },
-    thinkingLevel: "high",
-    mode: "ask",
-    limits: {
-      maxSteps: 20,
-      maxToolCalls: 40,
-      maxDurationMs: 600_000,
-    },
+const app = flary<Env>({
+  name: "research",
+  model: "openai/gpt-5.6",
+  bindings: z.object({
+    OPENAI_API_KEY: z.string().min(1),
   }),
-
-  resolveModel: ({ env, agent, trusted }) =>
-    env.MODELS.resolve(trusted, agent.model),
-
-  resolveTools: ({ env, trusted }) =>
-    env.RESEARCH_TOOLS.forThread(trusted),
-});
-~~~
-
-The research tool set should expose source search, source open, and Recall.
-Keep it read-only. If the agent must save a report, grant only
-artifact.plan.write or a dedicated report artifact capability.
-
-## Prompt
-
-~~~md
----
-model: inherit
-thinking: high
-tools:
-  - sources.search
-  - sources.open
-  - recall.search
-  - recall.open
-input:
-  question: string
-  scope: string
-limits:
-  steps: 20
-  tools: 40
----
-
-Research {{question}} within this scope:
-{{scope}}
-
-Return:
-1. A short answer.
-2. Evidence with source titles and links.
-3. Any uncertainty or missing evidence.
-~~~
-
-## Run it from a product
-
-~~~ts
-const run = await runs.create({
-  requestId: crypto.randomUUID(),
-  channelId: "research:customer-42",
-  input: {
-    question: "Which vendors support SCIM provisioning?",
-    scope: "Only the approved security and vendor documentation.",
-  },
-  idempotencyKey: "research:customer-42:scim:v1",
+  auth: ({ request, bindings }) => authenticateResearcher(request, bindings),
 });
 
-for await (const event of runs.observe(run.runId)) {
+const sources = app.tools({
+  search: app.mcp({
+    namespace: "sources",
+    connection: "approved-sources",
+  }),
+});
+
+export const research = app.fn({
+  input: z.object({
+    question: z.string().min(1),
+    scope: z.string().min(1),
+  }),
+  output: z.object({
+    answer: z.string(),
+    citations: z.array(z.string().url()),
+    uncertainty: z.string(),
+  }),
+  tools: sources,
+  mode: "ask",
+  thinking: "high",
+  limits: { steps: 20, toolCalls: 40, timeoutMs: 600_000 },
+  prompt: ({ question, scope }) => [
+    "Research only from approved sources.",
+    "Cite every material claim.",
+    `Scope: ${scope}`,
+    `Question: ${question}`,
+  ].join("\n"),
+});
+```
+
+Resolve the `approved-sources` connection in trusted host code with
+`resolveMcp`. Keep it read-only. If the function must save a report, grant
+only a plan-artifact capability.
+
+## Serve and run it from a product
+
+```ts
+export default app.serve({ research });
+```
+
+```ts
+import { flary } from "flary/client";
+import type { research } from "./research";
+
+const client = flary<{ research: typeof research }>({
+  baseUrl: "https://research.example.com",
+});
+
+const run = await client.research.start({
+  question: "Which vendors support SCIM provisioning?",
+  scope: "Only approved security and vendor documentation.",
+}, { idempotencyKey: "research:customer-42:scim:v1" });
+
+for await (const event of run.stream()) {
   researchPanel.append(event);
 }
-~~~
+```
 
-For a large question, spawn bounded ask-mode subagents for independent source
-groups. The parent should validate and cite their results before returning the
-final answer.
+For a large question, use bounded ask-mode child functions for independent
+source groups. The parent must validate and cite child results before it
+returns the final answer. See [Subagents and automation](/docs/subagents-and-automation/).

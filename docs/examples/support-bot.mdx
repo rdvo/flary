@@ -1,117 +1,137 @@
 ---
 title: Support bot
-description: Mount a durable support agent behind your product-owned API and user interface.
+description: Define a typed support function, connect approved tools, and expose durable runs to a product UI.
 section: Examples
 order: 1
 ---
 
-This example mounts one durable support agent behind a product-owned API.
-The product still owns login, organization roles, billing, and the chat UI.
+This example defines one typed support function and exposes it behind a
+product-owned API. The product still owns login, organization roles, billing,
+connections, and the chat UI.
 
-## Define the agent
+## Define the app and tool
 
 ```ts
-// src/agents/support.ts
-import { defineFlaryAgent } from "flary/flue";
+// src/flary.ts
+import { flary, z } from "flary";
 
-export default defineFlaryAgent<Env>({
-  resolveContext: ({ env, id }) => env.RUN_BINDINGS.read(id),
-
-  resolveAgent: ({ trusted }) => ({
-    agentId: "support",
-    revisionId: trusted.revisionId,
-    instructions:
-      "Resolve the support request with approved tools. " +
-      "Ask before changing customer data.",
-    model: {
-      provider: "anthropic",
-      model: "claude-sonnet-4-5",
-      cacheRetention: "short",
-    },
-    thinkingLevel: "medium",
-    mode: "build",
+export const app = flary<Env>({
+  name: "support",
+  model: "anthropic/claude-sonnet-4-5",
+  bindings: z.object({
+    ANTHROPIC_API_KEY: z.string().min(1),
+    APP_ENV: z.string(),
   }),
-
-  resolveModel: ({ env, agent, trusted }) =>
-    env.MODELS.resolve(trusted, agent.model),
-
-  resolveTools: ({ env, trusted }) =>
-    env.TOOLS.forThread(trusted),
+  auth: async ({ request, bindings }) => {
+    const caller = await authenticateProductRequest(request, bindings);
+    return {
+      tenantId: caller.tenantId,
+      userId: caller.userId,
+      applicationId: "support-console",
+      roles: caller.roles,
+      scopes: caller.scopes,
+    };
+  },
 });
 ```
 
-`RUN_BINDINGS`, `MODELS`, and `TOOLS` are host adapters. They read trusted
-context, register a provider credential, and return only the tools allowed for
-the current tenant and user.
-
-## Mount the run API
-
 ```ts
-import { Hono } from "hono";
-import { D1FlaryRunRepository } from "flary/cloudflare";
-import {
-  createFlueAgentGateway,
-  createFlueRunService,
-} from "flary/flue";
-import { createFlaryRunRouter } from "flary/host";
+// src/tools.ts
+import { z } from "flary";
+import { app } from "./flary";
 
-const app = new Hono<{ Bindings: Env }>();
+const searchDocs = app.fn({
+  name: "docs.search",
+  description: "Search approved product documentation.",
+  input: z.object({ query: z.string().min(1) }),
+  output: z.array(z.object({
+    title: z.string(),
+    excerpt: z.string(),
+    url: z.string().url(),
+  })),
+  policy: { operation: "read", capabilities: ["docs.read"] },
+  run: async ({ query }) => docs.search(query),
+});
 
-app.route(
-  "/v1/agents/support",
-  createFlaryRunRouter<Env>({
-    resolveContext: async ({ request, env }) => {
-      const user = await authenticateProductRequest(request, env);
-      return {
-        tenantId: user.organizationId,
-        applicationId: "support-console",
-        agentId: "support",
-        identity: { id: user.id, kind: "user" },
-        roles: user.roles,
-        scopes: user.scopes,
-      };
-    },
-    service: (env, execution) =>
-      createFlueRunService({
-        repository: new D1FlaryRunRepository(env.DB),
-        gateway: createFlueAgentGateway({
-          baseUrl: "https://internal.flue",
-          fetch: env.SELF.fetch.bind(env.SELF),
-        }),
-        schedule: (work) => execution.waitUntil(work),
-      }),
-  }),
-);
-
-export default app;
+export const tools = app.tools({ searchDocs });
 ```
 
-The host must apply `FLARY_RUNS_D1_MIGRATION`. The Flue build creates the
-thread Durable Object class and internal route used by the gateway.
+## Define the function
+
+```ts
+// src/support.ts
+import { z } from "flary";
+import { app } from "./flary";
+import { tools } from "./tools";
+
+export const support = app.fn({
+  input: z.object({
+    customer: z.object({ name: z.string().min(1) }),
+    question: z.string().min(1),
+  }),
+  output: z.object({
+    answer: z.string(),
+    sources: z.array(z.string().url()),
+  }),
+  tools,
+  mode: "build",
+  thinking: "medium",
+  prompt: ({ customer, question }) => [
+    "Resolve the support request with approved tools.",
+    "Ask before changing customer data.",
+    `Customer: ${customer.name}`,
+    `Question: ${question}`,
+  ].join("\n"),
+});
+```
+
+The model sees one `execute` tool. Code Mode searches the private tool catalog,
+loads only the selected schema, and calls the native tool in trusted host code.
+The tool policy and active mode are checked before execution.
+
+## Serve the function
+
+```ts
+import { app } from "./flary";
+import { support } from "./support";
+
+export default app.serve({ support });
+```
+
+This exposes:
+
+- `POST /functions/support` for a direct call.
+- `POST /functions/support/runs` for a durable run.
+- `GET /functions/support/runs/:runId` for status and output.
+- Approval, user-input, and cancellation routes under the same run.
+
+For Cloudflare bindings and a Flue-backed run service, see
+[Self-hosting](/docs/self-hosting/). The function definition does not change.
 
 ## Connect the product UI
 
 ```ts
-import { createFlaryRunClient } from "flary/client";
+import { flary } from "flary/client";
+import type { support } from "./support";
 
-const runs = createFlaryRunClient({
-  baseUrl: "/v1/agents/support",
+const client = flary<{ support: typeof support }>({
+  baseUrl: "https://support.example.com",
+  headers: () => ({ authorization: `Bearer ${sessionToken()}` }),
 });
 
-const run = await runs.create({
-  requestId: crypto.randomUUID(),
-  channelId: "ticket_42",
-  input: {
+const run = await client.support.start(
+  {
     customer: { name: "Ada" },
     question: "How do I change my plan?",
   },
-  idempotencyKey: crypto.randomUUID(),
-});
+  { idempotencyKey: "ticket_42:turn:7" },
+);
 
-for await (const event of runs.observe(run.runId)) {
+for await (const event of run.stream()) {
   renderSupportEvent(event);
 }
 ```
 
-The UI can leave and reconnect with `afterSequence`. It does not keep the
-model request alive.
+The run ID is stable across a browser disconnect. The client can reconnect to
+the same run. For exact event cursors and low-level route control, use the
+reference API in [Durable threads](/docs/durable-threads/).

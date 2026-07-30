@@ -10,11 +10,13 @@ declarations small and makes the host boundary easy to audit.
 
 | Import | Use |
 | --- | --- |
-| flary | Common contracts, modes, execution helpers, and top-level exports |
+| flary | Function authoring, Zod, contracts, modes, and top-level exports |
+| flary/functions | Function authoring, Dynamic Worker Code Mode, and function types |
 | flary/prompts | Prompt Markdown parsing, compilation, revisions, and rollouts |
-| flary/flue | Agent definitions, Flue services, lazy tools, and user input |
+| flary/flue | Low-level Flue services, lazy tools, and user input |
 | flary/host | Authenticated host routers and trusted context |
-| flary/client | Browser or server client for runs and threads |
+| flary/client | Function and low-level run/thread clients |
+| flary/vite | Vite manifest generation for registered functions and tools |
 | flary/tools | Zod tools, catalogs, lazy runtime, and capability handles |
 | flary/mcp | Remote MCP discovery and safe tool adapters |
 | flary/providers | Normalized model requests, adapters, OAuth, and cache policy |
@@ -31,12 +33,11 @@ declarations small and makes the host boundary easy to audit.
 ## Common imports
 
 ~~~ts
-import { AgentModeSchema, resolveAgentMode } from "flary/contracts";
+import { flary, z, AgentModeSchema, resolveAgentMode } from "flary";
+import { flary as createFunctionClient } from "flary/client";
+import { createFlaryCodemodeExecutor } from "flary/functions";
 import { compilePrompt } from "flary/prompts";
-import { defineFlaryAgent } from "flary/flue";
 import { createFlaryRunRouter } from "flary/host";
-import { createFlaryRunClient } from "flary/client";
-import { defineFlaryTool, defineFlaryToolset } from "flary/tools";
 import { createMcpTools } from "flary/mcp";
 ~~~
 

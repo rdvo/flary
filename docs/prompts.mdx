@@ -5,6 +5,20 @@ section: Core
 order: 1
 ---
 
+The recommended function-first syntax keeps a prompt beside its Zod schemas:
+
+~~~ts
+const answer = app.fn({
+  input: AnswerInput,
+  output: AnswerOutput,
+  prompt: ({ question }) => `Answer this question:\n${question}`,
+});
+~~~
+
+Use a prompt file when you want the prompt body, inputs, model, and tool
+declarations to be reviewed as Markdown in Git. The compiler is a lower-level
+API; it can be used without a Durable Object or a Cloudflare account.
+
 Flary prompt files are Markdown files with YAML front matter. Store them in
 Git and review them like source code.
 
