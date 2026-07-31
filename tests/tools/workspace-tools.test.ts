@@ -162,3 +162,17 @@ test("workspace tool prefixes isolate multiple branches in one catalog", async (
     undefined,
   );
 });
+
+test("workspace tools reject an invalid host target response", async () => {
+  const catalog = new InMemoryToolCatalog();
+  const invalid = target();
+  invalid.read = async () => ({ content: "missing file metadata" }) as never;
+  registerWorkspaceTools(catalog, invalid);
+  const read = await catalog.loadHandle({ id: "workspace.file.read" });
+  assert.ok(read);
+
+  await assert.rejects(
+    () => read.invoke({ path: "src/index.ts", encoding: "utf8" }),
+    /file/i,
+  );
+});

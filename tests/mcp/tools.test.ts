@@ -177,10 +177,13 @@ test("MCP descriptors stay lazy and durable calls do not expose credentials", as
   assert.equal(JSON.stringify(events).includes("Login is unavailable"), false);
   assert.equal(
     events.every(
-      (event) => event.metadata?.connectionId === "connection_1",
+      (event) =>
+        typeof event.metadata?.connectionRef === "string" &&
+        event.metadata.connectionRef.length === 24,
     ),
     true,
   );
+  assert.equal(JSON.stringify(events).includes("connection_1"), false);
 });
 
 test("MCP validates the discovered JSON schema before a remote call", async () => {

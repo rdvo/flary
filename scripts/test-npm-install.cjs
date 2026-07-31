@@ -68,7 +68,85 @@ run(
       'if (typeof vite.flaryVite !== "function") throw new Error("Missing flaryVite export");',
       'const client = await import("flary/client");',
       'if (typeof client.createFlaryFunctionClient !== "function") throw new Error("Missing typed client export");',
+      'const flueTools = await import("flary/flue");',
+      'if (typeof flueTools.createFlaryToolset !== "function") throw new Error("Missing createFlaryToolset export");',
+      'if (typeof cloudflare.createCloudflareWorkspaceTarget !== "function") throw new Error("Missing Cloudflare workspace target export");',
+      'if (typeof cloudflare.createCloudflareCodeMode !== "function") throw new Error("Missing Cloudflare Code Mode export");',
+      'if (typeof cloudflare.createCloudflareSandboxToolset !== "function") throw new Error("Missing Cloudflare Sandbox toolset export");',
     ].join("\n"),
+  ],
+  consumer,
+);
+
+const typeConsumer = path.join(consumer, "toolset-consumer.ts");
+fs.writeFileSync(
+  typeConsumer,
+  [
+    'import { createFlaryToolset, defineFlaryAgent } from "flary/flue";',
+    'import { createCloudflareWorkspaceTarget } from "flary/cloudflare";',
+    "",
+    "interface Env {",
+    "  PROJECT_WORKSPACES: {",
+    "    idFromName(name: string): { toString(): string };",
+    "    get(id: { toString(): string }): { fetch(request: Request): Promise<Response> };",
+    "  };",
+    "  WORKSPACE_BLOBS: unknown;",
+    "}",
+    "",
+    "export default defineFlaryAgent<Env>({",
+    "  resolveContext: () => ({",
+    '    tenantId: "org_1",',
+    '    applicationId: "app_1",',
+    '    projectId: "project_1",',
+    '    agentId: "agent_1",',
+    '    revisionId: "revision_1",',
+    '    identity: { id: "user_1", kind: "user" },',
+    "    roles: [],",
+    "    scopes: [],",
+    "  }),",
+    "  resolveAgent: () => ({",
+    '    agentId: "agent_1",',
+    '    revisionId: "revision_1",',
+    '    instructions: "Work on the project.",',
+    '    model: { provider: "openai", model: "gpt-5" },',
+    '    capabilities: ["workspace.read"],',
+    "  }),",
+    '  resolveModel: () => "openai:gpt-5",',
+    "  resolveTools: ({ env, trusted, agent, id }) =>",
+    "    createFlaryToolset({",
+    "      scope: {",
+    "        tenantId: trusted.tenantId,",
+    "        appId: trusted.applicationId,",
+    '        projectId: trusted.projectId ?? "default",',
+    "        workspaceId: id,",
+    '        branch: "main",',
+    "        userId: trusted.identity.id,",
+    "        runId: id,",
+    "      },",
+    "      capabilities: agent.capabilities,",
+    "      workspace: createCloudflareWorkspaceTarget({",
+    "        binding: env.PROJECT_WORKSPACES,",
+    "        blobs: env.WORKSPACE_BLOBS,",
+    "      }),",
+    "      sandbox: { enabled: false },",
+    "    }).then((result) => result.tools),",
+    "});",
+    "",
+  ].join("\n"),
+);
+run(
+  path.join(repository, "node_modules/.bin/tsc"),
+  [
+    "--noEmit",
+    "--strict",
+    "--skipLibCheck",
+    "--target",
+    "ES2022",
+    "--module",
+    "ESNext",
+    "--moduleResolution",
+    "bundler",
+    typeConsumer,
   ],
   consumer,
 );
@@ -85,6 +163,19 @@ fs.writeFileSync(
   starterManifestPath,
   `${JSON.stringify(starterManifest, null, 2)}\n`,
 );
+const starterAuth = fs.readFileSync(
+  path.join(starter, "src", "flary.ts"),
+  "utf8",
+);
+if (starterAuth.includes("tenantId: bindings.APP_ENV")) {
+  throw new Error("The generated starter still trusts APP_ENV as a tenant");
+}
+if (
+  !starterAuth.includes('const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"])') ||
+  !starterAuth.includes("return undefined")
+) {
+  throw new Error("The generated starter does not fail closed outside loopback");
+}
 run("npm", ["install", "--loglevel", "error"], starter);
 run("npm", ["run", "build"], starter);
 

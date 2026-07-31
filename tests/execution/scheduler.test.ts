@@ -135,6 +135,7 @@ test("a recovered started write becomes unknown and never runs again", async () 
       {
         id: "write-recovered",
         name: "write",
+        input: { value: "one" },
         operation: "write",
         idempotencyKey: "write-recovered-key",
       },
@@ -155,5 +156,81 @@ test("a recovered started write becomes unknown and never runs again", async () 
   assert.equal(
     (await journal.get("run-recovered", "write-recovered"))?.state,
     "outcome_unknown",
+  );
+});
+
+test("a recovered call with changed input fails closed", async () => {
+  const journal = new InMemoryToolExecutionJournal();
+  await journal.put({
+    runId: "run-mismatch",
+    callId: "ordinal-1",
+    toolId: "write",
+    operation: "write",
+    state: "completed",
+    idempotencyKey: "stable-key",
+    input: { value: "original" },
+    output: { ok: true },
+    startedAt: new Date().toISOString(),
+    completedAt: new Date().toISOString(),
+  });
+  let calls = 0;
+  const report = await executeToolTasks(
+    [{
+      id: "ordinal-1",
+      name: "write",
+      input: { value: "changed" },
+      operation: "write",
+      idempotencyKey: "stable-key",
+    }],
+    {
+      runId: "run-mismatch",
+      toolJournal: journal,
+      handlers: {
+        write: async () => {
+          calls += 1;
+        },
+      },
+    },
+  );
+
+  assert.equal(calls, 0);
+  assert.equal(report.results[0]?.status, "rejected");
+  assert.equal(
+    report.results[0]?.error?.code,
+    "tool_replay_mismatch",
+  );
+});
+
+test("tool results are redacted before result and journal storage", async () => {
+  const journal = new InMemoryToolExecutionJournal();
+  const report = await executeToolTasks(
+    [{
+      id: "read-secret",
+      name: "read-secret",
+      input: {},
+      operation: "read",
+    }],
+    {
+      runId: "run-redaction",
+      toolJournal: journal,
+      handlers: {
+        "read-secret": async () => ({
+          accessToken: "private-value",
+          status: "ok",
+        }),
+      },
+    },
+  );
+
+  assert.deepEqual(report.results[0]?.value, {
+    accessToken: "<redacted>",
+    status: "ok",
+  });
+  assert.deepEqual(
+    (await journal.get("run-redaction", "read-secret"))?.output,
+    {
+      accessToken: "<redacted>",
+      status: "ok",
+    },
   );
 });

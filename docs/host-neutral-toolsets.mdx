@@ -1,0 +1,240 @@
+---
+title: Host-neutral toolsets
+description: Attach Flary workspace, MCP, API, recall, Code Mode, and approval tools to a durable Flue agent.
+section: Tools
+order: 2
+---
+
+Use `createFlaryToolset()` when an application uses `defineFlaryAgent()`
+directly. The host supplies trusted identity, policy, bindings, and private
+credential resolvers. Flary builds and runs the tools.
+
+```ts
+import {
+  createFlaryToolset,
+  defineFlaryAgent,
+} from "flary/flue";
+import {
+  createCloudflareCodeMode,
+  createCloudflareWorkspaceTarget,
+} from "flary/cloudflare";
+
+export default defineFlaryAgent<Env>({
+  resolveContext,
+  resolveAgent,
+  resolveModel,
+
+  resolveTools: async ({ env, trusted, agent, id }) => {
+    const policy = await loadPublishedToolPolicy(
+      trusted.tenantId,
+      agent.agentId,
+      agent.revisionId,
+    );
+
+    const toolset = await createFlaryToolset({
+      scope: {
+        tenantId: trusted.tenantId,
+        appId: trusted.applicationId,
+        projectId: trusted.projectId ?? "default",
+        workspaceId: id,
+        branch: "main",
+        userId: trusted.identity.id,
+        runId: id,
+        threadId: id,
+      },
+
+      capabilities: policy.capabilities,
+
+      workspace: createCloudflareWorkspaceTarget({
+        binding: env.PROJECT_WORKSPACES,
+        blobs: env.WORKSPACE_BLOBS,
+      }),
+
+      connections: {
+        ids: policy.connectionIds,
+        revisions: policy.connectionRevisions,
+        resolve: ({ id, scope }) =>
+          resolveAuthorizedConnection(env, scope, id),
+      },
+
+      codeMode: policy.codeMode
+        ? createCloudflareCodeMode({ loader: env.LOADER })
+        : { enabled: false },
+
+      sandbox: { enabled: false },
+      approvals: createApprovalPolicy(env, trusted, id),
+    });
+
+    return toolset.tools;
+  },
+});
+```
+
+The model sees one `execute` tool when Code Mode is on. Generated code can
+use only these private host bridges:
+
+```ts
+const matches = await tools.search("read a workspace file");
+const selected = await tools.describe(matches[0].id);
+
+return tools.call(selected.tool.id, {
+  path: "src/index.ts",
+  encoding: "utf8",
+});
+```
+
+Flary does not give generated code `fetch`, Worker bindings, environment
+values, or credentials. The default Dynamic Worker has no outbound network
+access. External access occurs only through an admitted tool.
+
+## Complete MCP connection resolver
+
+The host must authorize the connection ID before it returns an endpoint.
+The credential callback runs during MCP discovery and each MCP call.
+
+```ts
+import type {
+  FlaryConnectionResolverOptions,
+  FlaryResolvedConnection,
+} from "flary/flue";
+
+function connectionResolver(
+  env: Env,
+  policy: PublishedToolPolicy,
+): FlaryConnectionResolverOptions {
+  return {
+    ids: policy.connectionIds,
+    revisions: policy.connectionRevisions,
+
+    async resolve({ id, scope }): Promise<FlaryResolvedConnection | undefined> {
+      if (!policy.connectionIds.includes(id)) return undefined;
+
+      const record = await env.CONNECTIONS.get(
+        scope.tenantId,
+        scope.appId,
+        id,
+      );
+      if (!record || record.kind !== "mcp") return undefined;
+
+      return {
+        kind: "mcp",
+        id: record.id,
+        revision: record.credentialVersion,
+        endpoint: {
+          name: record.name,
+          url: record.url,
+          transport: "streamable-http",
+        },
+        credentials: async ({ scope: credentialScope, endpoint }) => {
+          if (
+            credentialScope.organizationId !== scope.tenantId ||
+            credentialScope.appId !== scope.appId ||
+            endpoint.connectionId !== record.id
+          ) {
+            return undefined;
+          }
+
+          const token = await env.CONNECTION_VAULT.read(
+            record.credentialReference,
+            record.credentialVersion,
+          );
+          return token
+            ? { kind: "bearer", value: token }
+            : undefined;
+        },
+      };
+    },
+  };
+}
+```
+
+Flary pins the supplied connection revision. It stops if the connection,
+revision, or credential is not available during recovery. Descriptors,
+events, and telemetry contain a hashed connection reference, not the host
+connection ID or token.
+
+## Add an application tool
+
+An application can add a tool without making a second runtime:
+
+```ts
+const toolset = await createFlaryToolset({
+  scope,
+  capabilities,
+
+  extend(catalog) {
+    catalog.register({
+      definition: {
+        id: "orders.lookup",
+        name: "Look up order",
+        description: "Read one order from the host product.",
+        kind: "function",
+        inputSchema: {
+          type: "object",
+          properties: { orderId: { type: "string" } },
+          required: ["orderId"],
+          additionalProperties: false,
+        },
+        operation: "read",
+        capabilities: ["api.call"],
+        tags: ["orders"],
+      },
+      execute: ({ orderId }) => orders.read(String(orderId)),
+    });
+  },
+});
+```
+
+The extension uses the same capability checks, lazy catalog, journal,
+redaction, telemetry, and recovery rules as Flary tools.
+
+## Cloudflare workspace object
+
+Export Flary's workspace Durable Object from the host Worker:
+
+```ts
+export {
+  FlaryWorkspaceDurableObject,
+} from "flary/cloudflare";
+```
+
+Add the binding and R2 bucket:
+
+```json
+{
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "PROJECT_WORKSPACES",
+        "class_name": "FlaryWorkspaceDurableObject"
+      }
+    ]
+  },
+  "exports": {
+    "FlaryWorkspaceDurableObject": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  },
+  "r2_buckets": [
+    {
+      "binding": "WORKSPACE_BLOBS",
+      "bucket_name": "product-workspaces"
+    }
+  ]
+}
+```
+
+Use one Durable Object lifecycle system. New Workers use Wrangler exports.
+Existing Workers can keep migrations. Do not configure both systems.
+
+## Safety rules
+
+- Load capabilities and connection IDs from a trusted published revision.
+- Do not accept tool policy from the public run request.
+- Require approval for workspace writes. This is the default.
+- Give each write a stable call ID or idempotency key.
+- Keep Sandbox off unless the host supplies its capability and binding.
+- Use a durable SQLite tool journal in production.
+- Return the exact `toolset.tools` array. Flary keeps its approval
+  continuation with that array for `defineFlaryAgent()`.

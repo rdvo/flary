@@ -344,7 +344,7 @@ export function CodeExamples() {
           </div>
           <div>
             <span>New Worker</span>
-            <code>npx flary create my-agent</code>
+            <code>npx flary@next create my-agent</code>
           </div>
         </div>
       </aside>

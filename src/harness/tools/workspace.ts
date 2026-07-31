@@ -49,13 +49,19 @@ import {
   type WorkspaceGrepRequestInput,
   type WorkspaceGrepResponse,
 } from "../contracts";
-import type {
-  ProjectFileEditResponse,
-  ProjectFileEntry,
-  ProjectFileListResponse,
-  ProjectFileMutationResponse,
-  ProjectFileDeleteResponse,
-  ProjectFileMoveRequestInput,
+import {
+  ProjectFileDeleteResponseSchema,
+  ProjectFileEditResponseSchema,
+  ProjectFileEntrySchema,
+  ProjectFileListResponseSchema,
+  ProjectFileMutationResponseSchema,
+  ProjectFileReadResponseSchema,
+  type ProjectFileEditResponse,
+  type ProjectFileEntry,
+  type ProjectFileListResponse,
+  type ProjectFileMutationResponse,
+  type ProjectFileDeleteResponse,
+  type ProjectFileMoveRequestInput,
 } from "../contracts/filesystem";
 import type { JsonObject } from "../contracts/common";
 import type {
@@ -113,6 +119,7 @@ function definition(
   description: string,
   capabilities: string[],
   inputSchema: JsonObject = OBJECT_SCHEMA,
+  outputSchema?: JsonObject,
   requiresApproval = false,
 ): ToolCatalogDefinitionInput {
   const operation = capabilities.some(
@@ -130,6 +137,7 @@ function definition(
     description,
     kind: "function",
     inputSchema,
+    ...(outputSchema ? { outputSchema } : {}),
     operation,
     concurrencyKey: operation === "write" ? "workspace.write" : "workspace.read",
     capabilities,
@@ -183,6 +191,7 @@ export function registerWorkspaceTools(
     capabilities: string[],
     execute: (input: TInput) => TOutput | Promise<TOutput>,
     inputSchema: z.ZodType,
+    outputSchema: z.ZodType,
     requiresApproval = false,
   ) => {
     const write = capabilities.some(
@@ -200,9 +209,11 @@ export function registerWorkspaceTools(
           description,
           capabilities,
           z.toJSONSchema(inputSchema) as JsonObject,
+          z.toJSONSchema(outputSchema) as JsonObject,
           requiresApproval,
         ),
-        execute: async (input) => execute(input as TInput),
+        execute: async (input) =>
+          outputSchema.parse(await execute(input as TInput)),
         ...(write
           ? {
               resourceKey: (input: unknown) =>
@@ -220,6 +231,7 @@ export function registerWorkspaceTools(
     ["workspace.read"],
     (input) => target.read(ProjectFileReadRequestSchema.parse(input)),
     ProjectFileReadRequestSchema,
+    ProjectFileReadResponseSchema,
   );
   register(
     "workspace.file.write",
@@ -228,6 +240,7 @@ export function registerWorkspaceTools(
     ["workspace.write"],
     (input) => target.write(ProjectFileWriteRequestSchema.parse(input)),
     ProjectFileWriteRequestSchema,
+    ProjectFileMutationResponseSchema,
     approval,
   );
   register(
@@ -237,6 +250,7 @@ export function registerWorkspaceTools(
     ["workspace.write"],
     (input) => target.edit(ProjectFileEditRequestSchema.parse(input)),
     ProjectFileEditRequestSchema,
+    ProjectFileEditResponseSchema,
     approval,
   );
   register(
@@ -246,6 +260,7 @@ export function registerWorkspaceTools(
     ["workspace.delete"],
     (input) => target.delete(ProjectFileDeleteRequestSchema.parse(input)),
     ProjectFileDeleteRequestSchema,
+    ProjectFileDeleteResponseSchema,
     approval,
   );
   register(
@@ -255,6 +270,7 @@ export function registerWorkspaceTools(
     ["workspace.write"],
     (input) => target.move(ProjectFileMoveRequestSchema.parse(input)),
     ProjectFileMoveRequestSchema,
+    ProjectFileMutationResponseSchema,
     approval,
   );
   register(
@@ -264,6 +280,7 @@ export function registerWorkspaceTools(
     ["workspace.read"],
     (input) => target.list(ProjectFileListRequestSchema.parse(input)),
     ProjectFileListRequestSchema,
+    ProjectFileListResponseSchema,
   );
   register(
     "workspace.file.stat",
@@ -275,6 +292,7 @@ export function registerWorkspaceTools(
       return { file: await target.stat(request.path) };
     },
     ProjectFileReadRequestSchema,
+    z.object({ file: ProjectFileEntrySchema }).strict(),
   );
   register(
     "workspace.file.glob",
@@ -283,6 +301,7 @@ export function registerWorkspaceTools(
     ["workspace.read"],
     (input) => target.glob(WorkspaceGlobRequestSchema.parse(input)),
     WorkspaceGlobRequestSchema,
+    WorkspaceGlobResponseSchema,
   );
   register(
     "workspace.file.grep",
@@ -291,6 +310,7 @@ export function registerWorkspaceTools(
     ["workspace.read"],
     (input) => target.grep(WorkspaceGrepRequestSchema.parse(input)),
     WorkspaceGrepRequestSchema,
+    WorkspaceGrepResponseSchema,
   );
   register(
     "workspace.file.diff",
@@ -299,6 +319,7 @@ export function registerWorkspaceTools(
     ["workspace.read"],
     (input) => target.diff(WorkspaceDiffRequestSchema.parse(input)),
     WorkspaceDiffRequestSchema,
+    WorkspaceDiffResponseSchema,
   );
   register(
     "workspace.file.batch-edit",
@@ -307,6 +328,7 @@ export function registerWorkspaceTools(
     ["workspace.write"],
     (input) => target.batchEdit(WorkspaceBatchEditRequestSchema.parse(input)),
     WorkspaceBatchEditRequestSchema,
+    WorkspaceBatchEditResponseSchema,
     approval,
   );
 
@@ -318,6 +340,7 @@ export function registerWorkspaceTools(
       ["workspace.git", "workspace.read"],
       (input) => requireGit(target).status(GitStatusRequestSchema.parse(input)),
       GitStatusRequestSchema,
+      GitStatusResponseSchema,
     );
     register(
       "workspace.git.diff",
@@ -326,6 +349,7 @@ export function registerWorkspaceTools(
       ["workspace.git", "workspace.read"],
       (input) => requireGit(target).diff(GitDiffRequestSchema.parse(input)),
       GitDiffRequestSchema,
+      GitDiffResponseSchema,
     );
     register(
       "workspace.git.branch",
@@ -334,6 +358,7 @@ export function registerWorkspaceTools(
       ["workspace.git", "workspace.write"],
       (input) => requireGit(target).branch(GitBranchRequestSchema.parse(input)),
       GitBranchRequestSchema,
+      GitBranchResponseSchema,
       approval,
     );
     register(
@@ -343,6 +368,7 @@ export function registerWorkspaceTools(
       ["workspace.git", "workspace.write"],
       (input) => requireGit(target).commit(GitCommitRequestSchema.parse(input)),
       GitCommitRequestSchema,
+      GitCommitResponseSchema,
       approval,
     );
     register(
@@ -352,6 +378,7 @@ export function registerWorkspaceTools(
       ["workspace.git", "workspace.write"],
       (input) => requireGit(target).merge(GitMergeRequestSchema.parse(input)),
       GitMergeRequestSchema,
+      GitMergeResponseSchema,
       approval,
     );
   }

@@ -8,3 +8,4 @@ export * from "./function-host.js";
 export * from "./sandbox.js";
 export * from "./scheduler.js";
 export * from "./webhooks.js";
+export * from "./workspace.js";

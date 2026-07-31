@@ -6,7 +6,7 @@ const args = process.argv.slice(2);
 const target = args.find((value) => !value.startsWith("--"));
 
 console.warn(
-  '"create-flary" is now an alias. Use "npx flary create" for new projects.',
+  '"create-flary" is now an alias. Use "npx flary@next create" for new projects until Flary 0.5 is latest.',
 );
 
 const run = args.includes("--provision")

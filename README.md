@@ -60,7 +60,7 @@ does not replace the application's current framework or deployment setup.
 Create a new Cloudflare Worker starter with:
 
 ```bash
-npx flary create my-agent
+npx flary@next create my-agent
 ```
 
 The generated project starts with Zod-backed functions and a local HTTP route.
@@ -100,6 +100,34 @@ import { createFlaryRunRouter } from "flary/host";
 Flary also exports focused modules for contracts, providers, execution,
 storage, history, recall, telemetry, vaults, subagents, MCP, and Cloudflare
 adapters.
+
+Low-level durable agents can use one host-neutral toolset:
+
+```ts
+import { createFlaryToolset, defineFlaryAgent } from "flary/flue";
+import { createCloudflareWorkspaceTarget } from "flary/cloudflare";
+
+export default defineFlaryAgent<Env>({
+  resolveContext,
+  resolveAgent,
+  resolveModel,
+  resolveTools: ({ env, trusted, agent }) =>
+    createFlaryToolset({
+      scope: toFlaryToolScope(trusted),
+      capabilities: agent.capabilities,
+      workspace: createCloudflareWorkspaceTarget({
+        binding: env.PROJECT_WORKSPACES,
+        blobs: env.WORKSPACE_BLOBS,
+      }),
+      connections: hostConnections(env, trusted),
+      sandbox: { enabled: false },
+    }).then((toolset) => toolset.tools),
+});
+```
+
+The host owns authentication, policy, connection grants, and bindings. Flary
+owns tool schemas, MCP and API execution, approvals, capability checks,
+journaling, lazy loading, redaction, and recovery.
 
 ## Function-first API
 
@@ -944,7 +972,7 @@ The main `flary` command creates the open-source starter. It is separate from
 the hosted Flary website and managed runtime. Run it with:
 
 ```bash
-npx flary create ./my-flary-app
+npx flary@next create ./my-flary-app
 ```
 
 The old `create-flary` package remains as a compatibility alias.

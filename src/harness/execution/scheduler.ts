@@ -268,6 +268,24 @@ export class ToolScheduler {
     const journal = this.#options.toolJournal;
     const runId = this.#options.runId ?? "run_local";
     const previous = journal ? await journal.get(runId, task.id) : undefined;
+    if (
+      previous &&
+      (
+        previous.toolId !== task.name ||
+        previous.operation !== task.operation ||
+        stableJson(previous.input ?? {}) !== stableJson(jsonObject(task.input)) ||
+        previous.idempotencyKey !== key
+      )
+    ) {
+      return baseResult(task, "rejected", {
+        error: {
+          name: "ToolReplayMismatchError",
+          message:
+            "The recovered tool call does not match its admitted journal record.",
+          code: "tool_replay_mismatch",
+        },
+      });
+    }
     if (previous?.state === "outcome_unknown") {
       return baseResult(task, "outcome_unknown", {
         error: {
@@ -342,16 +360,17 @@ export class ToolScheduler {
 
     try {
       const run = async () =>
-        handler(task.input, {
+        redactSecrets(await handler(task.input, {
           task,
           signal: this.#options.signal ?? { aborted: false },
           attempt: 1,
-        });
+        }));
       const executed = key
         ? await idempotency.execute(key, run)
         : { value: await run(), reused: false };
+      const safeValue = executed.value;
       const result = baseResult(task, "fulfilled", {
-        value: executed.value,
+        value: safeValue,
         idempotencyKey: key,
         deduplicated: executed.reused || undefined,
       });
@@ -366,7 +385,7 @@ export class ToolScheduler {
             state: "completed",
             idempotencyKey: key,
             input: jsonObject(task.input),
-            output: jsonObject(executed.value),
+            output: jsonObject(safeValue),
             startedAt,
             completedAt: new Date().toISOString(),
           }),
@@ -611,5 +630,17 @@ function isExplicitlySafeToRetry(error: unknown): boolean {
     error !== null &&
     "safeToRetry" in error &&
     error.safeToRetry === true
+  );
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) =>
+    typeof item === "object" && item !== null && !Array.isArray(item)
+      ? Object.fromEntries(
+          Object.entries(item).sort(([left], [right]) =>
+            left.localeCompare(right),
+          ),
+        )
+      : item,
   );
 }

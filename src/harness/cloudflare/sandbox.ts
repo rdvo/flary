@@ -10,11 +10,25 @@ import {
   type CodeExecutionAdapter,
   type CodeExecutionContext,
 } from "../execution/adapters";
+import type { FlarySandboxToolsetOptions } from "../flue/toolset.js";
 
 export interface SandboxAdapterOptions {
   binding: Parameters<typeof getSandbox<Sandbox>>[0];
   operation?: string;
   sleepAfter?: string | number;
+}
+
+/** Configure an explicit Cloudflare Sandbox adapter for a Flary toolset. */
+export function createCloudflareSandboxToolset(
+  options: SandboxAdapterOptions,
+): FlarySandboxToolsetOptions {
+  return {
+    enabled: true,
+    adapter: new CloudflareSandboxAdapter({
+      ...options,
+      operation: "sandbox.execute",
+    }),
+  };
 }
 
 // Run commands in a full Linux environment. The bound Sandbox class controls

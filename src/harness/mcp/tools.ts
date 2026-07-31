@@ -247,6 +247,10 @@ export async function createMcpToolset(
       });
       if (!grant) continue;
       const toolId = await mcpToolId(scope, endpoint, descriptor);
+      const connectionRef = await mcpConnectionReference(
+        scope,
+        endpoint,
+      );
       tools.push({
         id: toolId,
         registration: createRegistration({
@@ -255,6 +259,7 @@ export async function createMcpToolset(
           descriptor,
           grant,
           namespace,
+          connectionRef,
           cache,
           credentials: credentialProvider,
         }),
@@ -335,6 +340,7 @@ function createRegistration(input: {
   descriptor: McpToolDescriptor;
   grant: McpToolGrant;
   namespace: string;
+  connectionRef: string;
   cache: McpToolCache;
   credentials: McpCredentialProvider;
 }): ToolCatalogRegistration {
@@ -344,6 +350,7 @@ function createRegistration(input: {
     descriptor,
     grant,
     namespace,
+    connectionRef,
     cache,
     credentials,
   } = input;
@@ -375,8 +382,11 @@ function createRegistration(input: {
         grant.requiresApproval ?? operation === "write",
       concurrencyKey: connectionConcurrencyKey(endpoint),
       metadata: {
-        connectionId: endpoint.connectionId,
+        connectionRef,
         server: endpoint.name,
+        ...(endpoint.credentialVersion
+          ? { sourceRevision: endpoint.credentialVersion }
+          : {}),
       },
     },
     resourceKey,
@@ -533,6 +543,9 @@ async function mcpToolId(
     scope.organizationId,
     scope.appId,
     endpoint.connectionId,
+    "credentialVersion" in endpoint
+      ? endpoint.credentialVersion ?? "current"
+      : "current",
     descriptor.name,
   ].join("\u0000");
   const digest = await crypto.subtle.digest(
@@ -543,9 +556,28 @@ async function mcpToolId(
     .slice(0, 8)
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-  const connection = safeId(endpoint.connectionId).slice(0, 48);
   const name = safeId(descriptor.name).slice(0, 96);
-  return IdentifierSchema.parse(`mcp.${connection}.${name}.${hash}`);
+  return IdentifierSchema.parse(`mcp.${name}.${hash}`);
+}
+
+async function mcpConnectionReference(
+  scope: TenantContext,
+  endpoint: ScopedMcpEndpoint,
+): Promise<string> {
+  const value = [
+    scope.organizationId,
+    scope.appId,
+    endpoint.connectionId,
+    endpoint.credentialVersion ?? "current",
+  ].join("\u0000");
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return [...new Uint8Array(digest)]
+    .slice(0, 12)
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function connectionConcurrencyKey(endpoint: McpEndpoint): string {

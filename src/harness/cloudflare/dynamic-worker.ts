@@ -15,6 +15,7 @@ import {
   type CodeExecutionAdapter,
   type CodeExecutionContext,
 } from "../execution/adapters";
+import type { FlaryExecutionToolOptions } from "../flue/toolset.js";
 
 export interface DynamicWorkerAdapterOptions {
   loader: DynamicWorkerExecutorOptions["loader"];
@@ -22,6 +23,24 @@ export interface DynamicWorkerAdapterOptions {
   globalOutbound?: DynamicWorkerExecutorOptions["globalOutbound"];
   modules?: Record<string, string>;
   operation?: string;
+}
+
+/**
+ * Configure the host-neutral toolset to use Cloudflare Dynamic Workers.
+ *
+ * Network access stays disabled unless the host sets `globalOutbound`.
+ */
+export function createCloudflareCodeMode(
+  options: DynamicWorkerAdapterOptions,
+): FlaryExecutionToolOptions {
+  return {
+    enabled: true,
+    adapter: new CloudflareDynamicWorkerAdapter({
+      ...options,
+      operation: "code.execute",
+    }),
+    ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+  };
 }
 
 // Run short model-written JavaScript with network access blocked by default.

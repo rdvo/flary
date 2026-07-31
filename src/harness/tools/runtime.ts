@@ -255,7 +255,7 @@ export class LazyToolRuntime {
   private isVisible(tool: ToolCatalogDefinition): boolean {
     return tool.capabilities.length === 0
       ? true
-      : tool.capabilities.some((capability) =>
+      : tool.capabilities.every((capability) =>
           modeAllowsCapability(this.#options.mode, capability),
         );
   }

@@ -4,9 +4,6 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-07-29",
   "compatibility_flags": ["nodejs_compat"],
-  "vars": {
-    "APP_ENV": "development"
-  },
   "worker_loaders": [
     {
       "binding": "LOADER"

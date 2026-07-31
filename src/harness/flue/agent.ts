@@ -23,7 +23,15 @@ import {
   TrustedRunContextSchema,
   type TrustedRunContext,
 } from "../host/runs.js";
+import type {
+  ApprovalContinuation,
+  ApprovalRecoveryCall,
+} from "../execution/approval-continuation.js";
 import { FLARY_LAZY_TOOL_INSTRUCTIONS } from "./tools.js";
+import {
+  FlaryToolCapabilitySchema,
+  approvalContinuationForFlaryTools,
+} from "./toolset.js";
 
 export const ResolvedFlaryAgentSchema = z
   .object({
@@ -33,12 +41,16 @@ export const ResolvedFlaryAgentSchema = z
     model: ModelSelectionSchema,
     thinkingLevel: ReasoningEffortSchema.default("medium"),
     mode: AgentModeIdSchema.default("build"),
+    capabilities: z.array(FlaryToolCapabilitySchema).max(128).default([]),
     limits: ExecutionLimitsSchema.optional(),
     outputSchema: JsonObjectSchema.optional(),
     metadata: JsonObjectSchema.optional(),
   })
   .strict();
 export type ResolvedFlaryAgent = z.infer<
+  typeof ResolvedFlaryAgentSchema
+>;
+export type ResolvedFlaryAgentInput = z.input<
   typeof ResolvedFlaryAgentSchema
 >;
 
@@ -63,7 +75,7 @@ export interface DefineFlaryAgentOptions<TEnv> {
   ) => Promise<TrustedRunContext> | TrustedRunContext;
   readonly resolveAgent: (
     input: FlaryAgentResolutionInput<TEnv>,
-  ) => Promise<ResolvedFlaryAgent> | ResolvedFlaryAgent;
+  ) => Promise<ResolvedFlaryAgentInput> | ResolvedFlaryAgentInput;
   /**
    * Register credentials in trusted code and return the Flue model handle.
    * Raw credentials must not be returned in the agent definition.
@@ -136,6 +148,10 @@ export function defineFlaryAgent<TEnv = Record<string, unknown>>(
           ? await options.resolveMode(resolved)
           : resolveAgentMode(agent.mode),
       );
+      const approvalContinuation = combineApprovalContinuations(
+        configured.approvalContinuation as ApprovalContinuation | undefined,
+        approvalContinuationForFlaryTools(tools),
+      );
 
       return {
         ...configured,
@@ -150,6 +166,7 @@ export function defineFlaryAgent<TEnv = Record<string, unknown>>(
         ].join("\n\n"),
         thinkingLevel: toFlueThinkingLevel(agent.thinkingLevel),
         tools,
+        ...(approvalContinuation ? { approvalContinuation } : {}),
         durability: {
           maxAttempts: options.durability?.maxAttempts ?? 10,
           timeoutMs: options.durability?.timeoutMs ?? 3_600_000,
@@ -158,6 +175,33 @@ export function defineFlaryAgent<TEnv = Record<string, unknown>>(
       };
     },
   );
+}
+
+function combineApprovalContinuations(
+  ...values: Array<ApprovalContinuation | undefined>
+): ApprovalContinuation | undefined {
+  const continuations = values.filter(
+    (value): value is ApprovalContinuation => Boolean(value),
+  );
+  if (continuations.length === 0) return undefined;
+  return {
+    async inspect(input) {
+      const states = await Promise.all(
+        continuations.map((continuation) => continuation.inspect(input)),
+      );
+      if (states.includes("ready")) return "ready";
+      if (states.includes("waiting")) return "waiting";
+      return "none";
+    },
+    async resume(input: ApprovalRecoveryCall) {
+      for (const continuation of continuations) {
+        if ((await continuation.inspect(input)) === "ready") {
+          return continuation.resume(input);
+        }
+      }
+      throw new Error("No approval continuation is ready");
+    },
+  };
 }
 
 export function toFlueThinkingLevel(

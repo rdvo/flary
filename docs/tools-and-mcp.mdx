@@ -124,6 +124,59 @@ const external = app.tools({
 });
 ```
 
+For example, connect
+[GitHub's read-only remote MCP server](https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md)
+with a fine-grained personal access token. Store the token as a Worker secret:
+
+```bash
+npx wrangler secret put GITHUB_MCP_PAT
+```
+
+Add the secret binding and credential resolver to the application:
+
+```ts
+import { createMcpConnection, flary, z } from "flary";
+
+export const app = flary({
+  model: "openai/gpt-5",
+  bindings: z.object({
+    OPENAI_API_KEY: z.string().min(1),
+    GITHUB_MCP_PAT: z.string().min(1),
+  }),
+  auth: authenticateProductRequest,
+  resolveMcp: (source, { bindings }) => {
+    if (source.connection !== "github") {
+      throw new Error("The MCP connection is not approved");
+    }
+    return createMcpConnection(source, {
+      credentials: {
+        get: async () => ({
+          kind: "bearer",
+          value: bindings.GITHUB_MCP_PAT,
+        }),
+      },
+    });
+  },
+});
+```
+
+Register the endpoint in the tool registry:
+
+```ts
+const github = app.mcp({
+  namespace: "github",
+  connection: "github",
+  url: "https://api.githubcopilot.com/mcp/readonly",
+});
+
+export const tools = app.tools({ github });
+```
+
+The endpoint is GitHub's hosted read-only MCP route. Give the PAT only the
+repository access that the function needs. The credential callback runs in
+trusted host code during discovery and invocation; the PAT does not enter the
+model prompt or public tool metadata.
+
 Resolve the sources in trusted host code. Flary's low-level adapter is
 available when the host needs explicit storage, caching, and event hooks:
 

@@ -36,7 +36,7 @@ npx flary init
 Create a small Cloudflare Worker starter:
 
 ```bash
-npx flary create my-agent
+npx flary@next create my-agent
 cd my-agent
 npm install
 npm run dev
@@ -47,6 +47,19 @@ the Flary run Durable Object, bindings, and SQLite migrations. Apply the
 generated Wrangler configuration before a production deploy. Use [One-off
 agent](/docs/one-off-agent/) for a small call or
 [Self-hosting](/docs/self-hosting/) for a durable deployment.
+
+Before a production deploy, replace the starter's loopback-only placeholder
+authentication. It rejects all deployed requests until the application
+returns a trusted tenant identity. Then set the provider and internal runtime
+secrets:
+
+```bash
+npx wrangler secret put OPENAI_API_KEY
+openssl rand -hex 32 | npx wrangler secret put FLARY_INTERNAL_TOKEN
+```
+
+Wrangler prompts for `OPENAI_API_KEY`. The second command generates a random
+64-character value and sends it directly to Wrangler.
 
 ## Define a function
 
