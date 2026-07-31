@@ -17,16 +17,34 @@ import {
 import {
   ThreadBindingSchema,
   ThreadCreateRequestSchema,
+  ThreadCompactRequestSchema,
   ThreadForkRequestSchema,
+  ThreadGoalRequestSchema,
   ThreadHistoryDiffResponseSchema,
   ThreadHistoryListResponseSchema,
+  ThreadPinRequestSchema,
+  ThreadReadRequestSchema,
+  ThreadRecordListRequestSchema,
+  ThreadRenameRequestSchema,
+  ThreadRollbackRequestSchema,
+  ThreadRestoreRequestSchema,
   ThreadMessageRequestSchema,
+  ThreadModelSetRequestSchema,
   type ThreadBinding,
   type ThreadCreateRequest,
   type ThreadForkRequest,
   type ThreadHistoryDiffResponse,
   type ThreadHistoryListResponse,
+  type ThreadCompactRequest,
+  type ThreadGoalRequest,
+  type ThreadPinRequest,
+  type ThreadReadRequest,
+  type ThreadRecordListRequest,
+  type ThreadRenameRequest,
+  type ThreadRollbackRequest,
   type ThreadMessageRequest,
+  type ThreadModelSetRequest,
+  type ThreadRestoreRequest,
 } from "../contracts/threads.js";
 import {
   UserInputAnswerRequestSchema,
@@ -166,6 +184,20 @@ export interface FlaryThreadHostService {
   ): Promise<ThreadBinding>;
   inspect(target: FlaryThreadTarget): Promise<ThreadBinding>;
   archive(target: FlaryThreadTarget): Promise<ThreadBinding>;
+  unarchive?(target: FlaryThreadTarget): Promise<ThreadBinding>;
+  rename?(
+    target: FlaryThreadTarget,
+    input: ThreadRenameRequest,
+  ): Promise<ThreadBinding>;
+  pin?(
+    target: FlaryThreadTarget,
+    input: ThreadPinRequest,
+  ): Promise<ThreadBinding>;
+  markRead?(
+    target: FlaryThreadTarget,
+    input: ThreadReadRequest,
+  ): Promise<ThreadBinding>;
+  delete?(target: FlaryThreadTarget): Promise<void>;
   fork(
     target: FlaryThreadTarget,
     input: ThreadForkRequest,
@@ -179,10 +211,54 @@ export interface FlaryThreadHostService {
     target: FlaryThreadTarget,
     connectionIds: string[],
   ): Promise<ThreadBinding>;
+  modelGet?(target: FlaryThreadTarget): Promise<unknown>;
+  modelList?(target: FlaryThreadTarget): Promise<readonly unknown[]>;
+  modelSet?(
+    target: FlaryThreadTarget,
+    input: ThreadModelSetRequest,
+  ): Promise<unknown>;
+  modelHistory?(target: FlaryThreadTarget): Promise<readonly unknown[]>;
   submit(
     target: FlaryThreadTarget,
     input: ThreadMessageRequest,
   ): Promise<FlaryThreadAdmission>;
+  interrupt?(target: FlaryThreadTarget): Promise<void>;
+  compact?(
+    target: FlaryThreadTarget,
+    input: ThreadCompactRequest,
+  ): Promise<unknown>;
+  rollback?(
+    target: FlaryThreadTarget,
+    input: ThreadRollbackRequest,
+  ): Promise<unknown>;
+  restore?(
+    target: FlaryThreadTarget,
+    input: ThreadRestoreRequest,
+  ): Promise<unknown>;
+  setGoal?(
+    target: FlaryThreadTarget,
+    input: ThreadGoalRequest,
+  ): Promise<unknown>;
+  clearGoal?(target: FlaryThreadTarget): Promise<unknown>;
+  turns?(
+    target: FlaryThreadTarget,
+    input: ThreadRecordListRequest,
+  ): Promise<readonly unknown[]>;
+  auditList?(
+    target: FlaryThreadTarget,
+    input: ThreadRecordListRequest,
+  ): Promise<readonly unknown[]>;
+  auditExport?(target: FlaryThreadTarget): Promise<ReadableStream<Uint8Array> | string>;
+  subagentAction?(
+    target: FlaryThreadTarget,
+    action: string,
+    input: Readonly<Record<string, unknown>>,
+  ): Promise<unknown>;
+  scheduleAction?(
+    target: FlaryThreadTarget,
+    action: string,
+    input: Readonly<Record<string, unknown>>,
+  ): Promise<unknown>;
   listApprovals(target: FlaryThreadTarget): Promise<unknown[]>;
   decideApproval(
     target: FlaryThreadTarget,
@@ -244,9 +320,16 @@ export type {
   RecallSearchResponse,
   ThreadBinding,
   ThreadCreateRequest,
+  ThreadCompactRequest,
   ThreadForkRequest,
+  ThreadGoalRequest,
   ThreadHistoryDiffResponse,
   ThreadHistoryListResponse,
   ThreadMessageRequest,
+  ThreadPinRequest,
+  ThreadReadRequest,
+  ThreadRecordListRequest,
+  ThreadRenameRequest,
+  ThreadRollbackRequest,
   ThreadRef,
 };

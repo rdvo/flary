@@ -1,6 +1,7 @@
 import type {
   FlaryApprovalDecisionOptions,
   FlaryEvent,
+  FlaryAgent,
   FlaryFunction,
   FlaryInput,
   FlaryOutput,
@@ -8,10 +9,21 @@ import type {
   FlarySendInputOptions,
 } from "../functions/types.js";
 import type {
+  ThreadBinding,
+  ThreadCreateRequest,
+  ThreadForkRequest,
+  ThreadRef,
+} from "../contracts/index.js";
+import {
+  createFlaryThreadClient,
+  type FlaryThreadClient,
+} from "./flue.js";
+import type {
   ApprovalRequest,
   UserInputAnswerRequest,
   UserInputRecord,
 } from "../contracts/index.js";
+import type { ModelInput, ReasoningEffort } from "../contracts/provider.js";
 
 export interface FlaryFunctionClientOptions {
   readonly baseUrl: string;
@@ -58,6 +70,82 @@ type FunctionClient<F> = F extends FlaryFunction<infer Input, infer Output, any>
     }
   : never;
 
+export interface FlaryAgentThreadHandle {
+  readonly ref: ThreadRef;
+  readonly binding: ThreadBinding;
+  history(options?: Record<string, unknown>): unknown;
+  turns(options?: { after?: number; limit?: number; types?: readonly string[] }): Promise<readonly unknown[]>;
+  stream(options?: { after?: string; signal?: AbortSignal }): unknown;
+  send(input: {
+    message: string;
+    mode?: "queue" | "steer";
+    model?: ModelInput;
+    thinkingLevel?: ReasoningEffort;
+    cacheRetention?: "none" | "short" | "long";
+    images?: readonly { type: "image"; data: string; mimeType: string; filename?: string }[];
+    idempotencyKey?: string;
+  }): Promise<unknown>;
+  interrupt(): Promise<void>;
+  cancel(): Promise<unknown>;
+  fork(input?: ThreadForkRequest): Promise<FlaryAgentThreadHandle>;
+  rollback(input: { turnId: string; reason?: string }): Promise<unknown>;
+  restore(input: { jsonl: string; replace?: boolean }): Promise<unknown>;
+  compact(input?: { reason?: string }): Promise<unknown>;
+  rename(title: string): Promise<ThreadBinding>;
+  archive(): Promise<void>;
+  unarchive(): Promise<ThreadBinding>;
+  pin(pinned?: boolean): Promise<ThreadBinding>;
+  markRead(throughSequence?: number): Promise<ThreadBinding>;
+  delete(): Promise<void>;
+  approvals(): Promise<unknown[]>;
+  userInput(): Promise<readonly unknown[]>;
+  setGoal(input: {
+    objective: string;
+    tokenBudget?: number;
+    costBudgetUsd?: number;
+  }): Promise<unknown>;
+  clearGoal(): Promise<unknown>;
+  readonly model: {
+    get(): Promise<unknown>;
+    list(): Promise<readonly unknown[]>;
+    set(model: ModelInput): Promise<unknown>;
+    history(): Promise<readonly unknown[]>;
+  };
+  readonly subagents: {
+    list(input?: Readonly<Record<string, unknown>>): Promise<unknown>;
+    spawn(input: Readonly<Record<string, unknown>>): Promise<unknown>;
+    send(input: Readonly<Record<string, unknown>>): Promise<unknown>;
+    wait(input?: Readonly<Record<string, unknown>>): Promise<unknown>;
+    interrupt(input: Readonly<Record<string, unknown>>): Promise<unknown>;
+    resume(input: Readonly<Record<string, unknown>>): Promise<unknown>;
+    close(input: Readonly<Record<string, unknown>>): Promise<unknown>;
+  };
+  readonly audit: {
+    list(options?: { after?: number; limit?: number; types?: readonly string[] }): Promise<readonly unknown[]>;
+    export(): Promise<string>;
+  };
+  readonly schedules: {
+    register(input: Readonly<Record<string, unknown>>): Promise<unknown>;
+    list(): Promise<unknown>;
+    history(input?: Readonly<Record<string, unknown>>): Promise<unknown>;
+    pause(scheduleId: string): Promise<unknown>;
+    resume(scheduleId: string): Promise<unknown>;
+    delete(scheduleId: string): Promise<unknown>;
+  };
+}
+
+type AgentClient<A> = A extends FlaryAgent<any>
+  ? {
+      readonly threads: {
+        create(
+          input: Omit<ThreadCreateRequest, "agentId">,
+        ): Promise<FlaryAgentThreadHandle>;
+        list(): Promise<ThreadBinding[]>;
+        open(ref: Omit<ThreadRef, "appId" | "agentId">): Promise<FlaryAgentThreadHandle>;
+      };
+    }
+  : never;
+
 type RuntimeFunction = ((input: unknown) => Promise<unknown>) & {
   start(
     input: unknown,
@@ -74,7 +162,9 @@ type RuntimeFunction = ((input: unknown) => Promise<unknown>) & {
 };
 
 export type FlaryClientFunctions<TFunctions extends Record<string, unknown>> = {
-  [K in keyof TFunctions]: FunctionClient<TFunctions[K]>;
+  [K in keyof TFunctions]: TFunctions[K] extends FlaryAgent<any>
+    ? AgentClient<TFunctions[K]>
+    : FunctionClient<TFunctions[K]>;
 };
 
 /** Typed client for functions served by `app.serve()`. */
@@ -83,6 +173,24 @@ export function flary<TFunctions extends Record<string, unknown>>(
 ): FlaryClientFunctions<TFunctions> {
   const baseUrl = options.baseUrl.replace(/\/+$/, "");
   const request = options.fetch ?? globalThis.fetch;
+  const threadClient = createFlaryThreadClient({
+    baseUrl,
+    apiPath: "",
+    mountPath: "/flue",
+    fetch: options.fetch,
+    ...(options.headers
+      ? {
+          headers: async () => {
+            const value =
+              typeof options.headers === "function"
+                ? await options.headers()
+                : options.headers;
+            return Object.fromEntries(new Headers(value).entries());
+          },
+        }
+      : {}),
+    token: options.token,
+  });
   const make = (name: string) => {
     const call = (async (input: unknown) => {
       const response = await requestJson(request, `${baseUrl}/functions/${encodeURIComponent(name)}`, {
@@ -127,13 +235,119 @@ export function flary<TFunctions extends Record<string, unknown>>(
   return new Proxy(
     {},
     {
-      get: (_target, property: string | symbol) =>
-        typeof property === "string" ? make(property) : undefined,
+      get: (_target, property: string | symbol) => {
+        if (typeof property !== "string") return undefined;
+        const callable = make(property) as RuntimeFunction & {
+          threads?: unknown;
+        };
+        callable.threads = makeAgentThreads(threadClient, property);
+        return callable;
+      },
     },
   ) as FlaryClientFunctions<TFunctions>;
 }
 
 export const createFlaryFunctionClient = flary;
+
+function makeAgentThreads(client: FlaryThreadClient, agentName: string) {
+  return {
+    async create(
+      input: Omit<ThreadCreateRequest, "agentId">,
+    ): Promise<FlaryAgentThreadHandle> {
+      const binding = await client.create({ ...input, agentId: agentName });
+      return makeAgentThreadHandle(client, binding, agentName);
+    },
+    list(): Promise<ThreadBinding[]> {
+      return client.list(agentName);
+    },
+    async open(
+      ref: Omit<ThreadRef, "appId" | "agentId">,
+    ): Promise<FlaryAgentThreadHandle> {
+      const complete = { ...ref, appId: agentName, agentId: agentName };
+      const binding = await client.inspect(complete);
+      return makeAgentThreadHandle(client, binding, agentName);
+    },
+  };
+}
+
+function makeAgentThreadHandle(
+  client: FlaryThreadClient,
+  binding: ThreadBinding,
+  agentName = binding.agentId,
+): FlaryAgentThreadHandle {
+  const ref = binding.thread;
+  const subagent = (
+    action: "list" | "spawn" | "send" | "wait" | "interrupt" | "resume" | "close",
+    input: Readonly<Record<string, unknown>> = {},
+  ) => client.subagent(ref, action, input);
+  return {
+    ref,
+    binding,
+    history: (options) => client.history(ref, options as never, agentName),
+    turns: (options) => client.turns(ref, options),
+    stream: (options) =>
+      client.observe(ref, {
+        ...(options?.after ? { offset: options.after } : {}),
+        ...(options?.signal ? { signal: options.signal } : {}),
+      } as never, agentName),
+    send: (input) =>
+      client.submit(ref, {
+        message: input.message,
+        mode: input.mode,
+        ...(input.model !== undefined ? { model: input.model } : {}),
+        ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
+        ...(input.cacheRetention ? { cacheRetention: input.cacheRetention } : {}),
+        ...(input.images ? { images: [...input.images] } : {}),
+        idempotencyKey: input.idempotencyKey ?? crypto.randomUUID(),
+      }),
+    interrupt: () => client.interrupt(ref),
+    cancel: () => client.abort(ref, undefined, agentName),
+    async fork(input = {}) {
+      const child = await client.fork(ref, input);
+      return makeAgentThreadHandle(client, child, agentName);
+    },
+    rollback: (input) => client.rollback(ref, input),
+    restore: (input) => client.restore(ref, input),
+    compact: (input = {}) => client.compact(ref, input),
+    rename: (title) => client.rename(ref, title),
+    archive: () => client.archive(ref),
+    unarchive: () => client.unarchive(ref),
+    pin: (pinned = true) => client.pin(ref, pinned),
+    markRead: (throughSequence) => client.markRead(ref, throughSequence),
+    delete: () => client.delete(ref),
+    approvals: () => client.approvals(ref),
+    userInput: () => client.userInput(ref),
+    setGoal: (input) => client.setGoal(ref, input),
+    clearGoal: () => client.clearGoal(ref),
+    model: {
+      get: () => client.modelGet(ref),
+      list: () => client.modelList(ref),
+      set: (model) => client.modelSet(ref, { model }),
+      history: () => client.modelHistory(ref),
+    },
+    subagents: {
+      list: (input) => subagent("list", input),
+      spawn: (input) => subagent("spawn", input),
+      send: (input) => subagent("send", input),
+      wait: (input) => subagent("wait", input),
+      interrupt: (input) => subagent("interrupt", input),
+      resume: (input) => subagent("resume", input),
+      close: (input) => subagent("close", input),
+    },
+    audit: {
+      list: (options) => client.audit(ref, options),
+      export: () => client.auditExport(ref),
+    },
+    schedules: {
+      register: (input) => client.schedule(ref, "register", input),
+      list: () => client.schedule(ref, "list"),
+      history: (input) => client.schedule(ref, "history", input),
+      pause: (scheduleId) => client.schedule(ref, "pause", { scheduleId }),
+      resume: (scheduleId) => client.schedule(ref, "resume", { scheduleId }),
+      delete: (scheduleId) => client.schedule(ref, "delete", { scheduleId }),
+    },
+  };
+}
 
 function remoteRun<Output>(
   request: typeof fetch,

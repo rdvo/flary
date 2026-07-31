@@ -80,7 +80,11 @@ export interface FlaryCodemodeExecutorOptions<TBindings = unknown> {
   ) => FlaryToolConnection | Promise<FlaryToolConnection>;
   readonly resolveSandbox?: (
     source: FlarySandboxSource,
-    input: { readonly bindings: TBindings; readonly context: FlaryStepContext<TBindings> },
+    input: {
+      readonly bindings: TBindings;
+      readonly context: FlaryStepContext<TBindings>;
+      readonly storage?: unknown;
+    },
   ) => FlaryToolConnection | Promise<FlaryToolConnection>;
 }
 
@@ -711,6 +715,9 @@ async function createSourceConnectors<TBindings>(
       const sandbox = await options.resolveSandbox(source, {
         bindings: input.bindings,
         context: input.context,
+        storage: (
+          ctx.storage as { readonly sql?: unknown }
+        ).sql,
       });
       connectors.push(createHostToolConnector(
         codemode,

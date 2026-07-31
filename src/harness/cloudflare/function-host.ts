@@ -7,6 +7,7 @@ import {
 import {
   createFlueAgentGateway,
   createFlueRunService,
+  FlueAdmissionSchema,
   type FlueAgentGateway,
   type FlaryRunRecord,
 } from "../flue/service.js";
@@ -303,8 +304,51 @@ export function createCloudflareFlueGateway<TEnv extends Record<string, unknown>
     }),
   });
   const gateway = createFlueAgentGateway(client);
+  const directFetch = options.fetch ?? createCloudflareFlueFetch(env, {
+    resolveWorkflowName: () => workflowForRun,
+  });
   return {
     ...gateway,
+    // @flue/sdk@1.0.0-beta.9 only forwards `message` and `images`. Provider
+    // switching needs the patched direct-submission fields as well, so send
+    // the request to the Flue Durable Object without the lossy SDK helper.
+    async send(agentName, instanceId, message, sendOptions = {}) {
+      const headers = new Headers({ "content-type": "application/json" });
+      if (options.token) headers.set("authorization", `Bearer ${options.token}`);
+      const response = await directFetch(
+        `https://flue.internal/agents/${encodeURIComponent(agentName)}/${encodeURIComponent(instanceId)}`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            message,
+            ...(sendOptions.images ? { images: sendOptions.images } : {}),
+            ...(sendOptions.idempotencyKey
+              ? { idempotencyKey: sendOptions.idempotencyKey }
+              : {}),
+            ...(sendOptions.model ? { model: sendOptions.model } : {}),
+            ...(sendOptions.thinkingLevel
+              ? { thinkingLevel: sendOptions.thinkingLevel }
+              : {}),
+            ...(sendOptions.cacheRetention
+              ? { cacheRetention: sendOptions.cacheRetention }
+              : {}),
+          }),
+        },
+      );
+      const value = await response.json().catch(() => undefined);
+      if (!response.ok) {
+        const detail = isRecord(value) && isRecord(value.error)
+          ? value.error.message
+          : undefined;
+        throw new Error(
+          typeof detail === "string"
+            ? detail
+            : `Flue direct submission failed (${response.status})`,
+        );
+      }
+      return FlueAdmissionSchema.parse(value);
+    },
     async waitWorkflow(admission, onEvent, workflowName) {
       workflowForRun = workflowName;
       try {

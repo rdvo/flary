@@ -50,11 +50,26 @@ export interface LazyToolRuntimeOptions {
   onToolEvent?: (
     event: ToolLifecycleEvent,
   ) => void | Promise<void>;
+  /** Redacted, queryable catalog and execution audit sink. */
+  onAudit?: (event: LazyToolAuditEvent) => void | Promise<void>;
   approve?: (
     tool: ToolCatalogDefinition,
     input: unknown,
     context: LazyToolApprovalContext,
   ) => Promise<void> | void;
+}
+
+export interface LazyToolAuditEvent {
+  readonly action: "search" | "describe" | "call" | "batch";
+  readonly runId: string;
+  readonly occurredAt: string;
+  readonly durationMs: number;
+  readonly state: "completed" | "failed";
+  readonly toolId?: string;
+  readonly callId?: string;
+  readonly inputHash?: string;
+  readonly resultCount?: number;
+  readonly errorCode?: string;
 }
 
 export interface LazyToolApprovalContext {
@@ -85,40 +100,130 @@ export class LazyToolRuntime {
   async search(
     request: ToolCatalogSearchRequestInput = {},
   ): Promise<LazyToolSearchResult[]> {
-    const response = await this.#options.catalog.search(request);
-    return response.results
-      .filter(({ tool }) => this.isVisible(tool))
-      .map(({ tool, score }) => ({
-        id: tool.id,
-        name: tool.name,
-        ...(tool.description ? { description: tool.description } : {}),
-        capabilities: tool.capabilities,
-        operation: tool.operation,
-        requiresApproval:
-          Boolean(tool.requiresApproval) ||
-          this.requiresApproval(tool, tool.id),
-        score,
-      }));
+    const started = Date.now();
+    try {
+      const response = await this.#options.catalog.search(request);
+      const results = response.results
+        .filter(({ tool }) => this.isVisible(tool))
+        .map(({ tool, score }) => ({
+          id: tool.id,
+          name: tool.name,
+          ...(tool.description ? { description: tool.description } : {}),
+          capabilities: tool.capabilities,
+          operation: tool.operation,
+          requiresApproval:
+            Boolean(tool.requiresApproval) ||
+            this.requiresApproval(tool, tool.id),
+          score,
+        }));
+      await this.audit("search", started, {
+        inputHash: await auditHash(request),
+        resultCount: results.length,
+      });
+      return results;
+    } catch (error) {
+      await this.auditFailure("search", started, error, {
+        inputHash: await auditHash(request),
+      });
+      throw error;
+    }
   }
 
   async describe(id: string): Promise<ToolCatalogLoadResponse | undefined> {
-    const loaded = await this.#options.catalog.load({ id });
-    if (!loaded || !this.isVisible(loaded.tool)) return undefined;
-    return ToolCatalogLoadResponseSchema.parse(loaded);
+    const started = Date.now();
+    try {
+      const loaded = await this.#options.catalog.load({ id });
+      const result =
+        !loaded || !this.isVisible(loaded.tool)
+          ? undefined
+          : ToolCatalogLoadResponseSchema.parse(loaded);
+      await this.audit("describe", started, {
+        toolId: id,
+        resultCount: result ? 1 : 0,
+      });
+      return result;
+    } catch (error) {
+      await this.auditFailure("describe", started, error, { toolId: id });
+      throw error;
+    }
   }
 
   async call(input: LazyToolCallInput): Promise<ToolExecutionResult> {
-    const call = LazyToolCallSchema.parse(input);
-    const prepared = await this.prepare(call);
-    return (await this.executePrepared([prepared])).results[0]!;
+    const started = Date.now();
+    let call: LazyToolCall | undefined;
+    try {
+      call = LazyToolCallSchema.parse(input);
+      const prepared = await this.prepare(call);
+      const result = (await this.executePrepared([prepared])).results[0]!;
+      await this.audit("call", started, {
+        toolId: call.id,
+        callId: prepared.taskId,
+        inputHash: await auditHash(call.arguments),
+      });
+      return result;
+    } catch (error) {
+      await this.auditFailure("call", started, error, {
+        ...(call ? { toolId: call.id, callId: call.callId } : {}),
+        inputHash: await auditHash(input),
+      });
+      throw error;
+    }
   }
 
   async batch(input: LazyToolBatchInput): Promise<ExecutionReport> {
-    const batch = LazyToolBatchSchema.parse(input);
-    const prepared = await Promise.all(
-      batch.calls.map((call) => this.prepare(call)),
-    );
-    return this.executePrepared(prepared);
+    const started = Date.now();
+    try {
+      const batch = LazyToolBatchSchema.parse(input);
+      const prepared = await Promise.all(
+        batch.calls.map((call) => this.prepare(call)),
+      );
+      const report = await this.executePrepared(prepared);
+      await this.audit("batch", started, {
+        inputHash: await auditHash(batch),
+        resultCount: report.results.length,
+      });
+      return report;
+    } catch (error) {
+      await this.auditFailure("batch", started, error, {
+        inputHash: await auditHash(input),
+      });
+      throw error;
+    }
+  }
+
+  private async audit(
+    action: LazyToolAuditEvent["action"],
+    started: number,
+    detail: Partial<LazyToolAuditEvent>,
+  ): Promise<void> {
+    await this.#options.onAudit?.({
+      action,
+      runId: this.#options.runId ?? "run_local",
+      occurredAt: new Date().toISOString(),
+      durationMs: Math.max(0, Date.now() - started),
+      state: "completed",
+      ...detail,
+    });
+  }
+
+  private async auditFailure(
+    action: LazyToolAuditEvent["action"],
+    started: number,
+    error: unknown,
+    detail: Partial<LazyToolAuditEvent>,
+  ): Promise<void> {
+    await this.#options.onAudit?.({
+      action,
+      runId: this.#options.runId ?? "run_local",
+      occurredAt: new Date().toISOString(),
+      durationMs: Math.max(0, Date.now() - started),
+      state: "failed",
+      errorCode:
+        error instanceof Error && error.name
+          ? error.name
+          : "tool_runtime_error",
+      ...detail,
+    });
   }
 
   private async prepare(call: LazyToolCall) {
@@ -357,4 +462,25 @@ export class LazyToolRuntime {
         })
       : undefined;
   }
+}
+
+async function auditHash(value: unknown): Promise<string> {
+  const bytes = new TextEncoder().encode(stableAuditJson(value));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)]
+    .map((item) => item.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function stableAuditJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableAuditJson).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableAuditJson(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
 }

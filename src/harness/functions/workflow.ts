@@ -8,12 +8,18 @@ import {
   type AgentRuntimeConfig,
   type WorkflowDefinition,
 } from "@flue/runtime";
+import {
+  buildPackagedSkill,
+  createSkillReference,
+} from "@flue/runtime/internal";
 import * as v from "valibot";
 import { z } from "zod";
 
 import { toFlueThinkingLevel } from "../flue/agent.js";
-import { getFunctionState } from "./app.js";
-import type { FlaryFunction } from "./types.js";
+import { normalizeModelInput } from "../contracts/provider.js";
+import { toFlueModelSpecifier } from "../providers/resolver.js";
+import { getAgentState, getFunctionState } from "./app.js";
+import type { FlaryAgent, FlaryFunction } from "./types.js";
 import {
   ApprovalDecisionSchema,
   type ApprovalDecision,
@@ -204,13 +210,159 @@ export function defineFlaryFunctionAgent(
   });
 }
 
+/** Compile a persistent `app.agent()` definition into the canonical Flue agent. */
+export function defineFlaryInteractiveAgent(
+  value: FlaryAgent<any>,
+): AgentDefinition {
+  const state = getAgentState(value);
+  if (!state) throw new Error("The value is not a Flary interactive agent");
+  const definition = state.definition;
+  const model = definition.model ??
+    (definition.models?.allow[0]
+      ? toFlueModelSpecifier(normalizeModelInput(definition.models.allow[0]))
+      : state.app.options.model ?? "openai/gpt-5");
+  return defineAgent(async ({ env, id }): Promise<AgentRuntimeConfig> => {
+    const approvalContinuation = definition.tools
+      ? await state.app.agentApprovalContinuation(value, {
+          bindings: env,
+          runId: id,
+        })
+      : undefined;
+    const profiles: AgentProfile[] = [];
+    for (const [name, candidate] of Object.entries(definition.subagents ?? {})) {
+      const child = getAgentState(candidate);
+      if (!child) throw new Error(`Subagent '${name}' must use app.agent()`);
+      const childDefinition = child.definition;
+      profiles.push(defineAgentProfile({
+        name,
+        ...(childDefinition.description
+          ? { description: childDefinition.description }
+          : {}),
+        ...(childDefinition.model ?? child.app.options.model
+          ? { model: childDefinition.model ?? child.app.options.model }
+          : {}),
+        instructions: interactiveAgentInstructions(candidate),
+        ...(childDefinition.skills?.length
+          ? { skills: childDefinition.skills.map(toFlueSkillReference) }
+          : {}),
+        ...(childDefinition.thinking
+          ? {
+              thinkingLevel: toFlueThinkingLevel(
+                childDefinition.thinking as never,
+              ),
+            }
+          : {}),
+      }));
+    }
+    return {
+      model,
+      instructions: interactiveAgentInstructions(value),
+      ...(definition.skills?.length
+        ? { skills: definition.skills.map(toFlueSkillReference) }
+        : {}),
+      ...(definition.description ? { description: definition.description } : {}),
+      ...(definition.thinking
+        ? { thinkingLevel: toFlueThinkingLevel(definition.thinking as never) }
+        : {}),
+      compaction:
+        definition.compaction?.mode === "auto" ||
+        definition.compaction?.mode === undefined
+          ? {
+              ...(definition.models?.compactionModel
+                ? {
+                    model: toFlueModelSpecifier(
+                      normalizeModelInput(definition.models.compactionModel),
+                    ),
+                  }
+                : {}),
+              ...(definition.compaction?.reserveTokens
+                ? { reserveTokens: definition.compaction.reserveTokens }
+                : {}),
+            }
+          : false,
+      durability: {
+        maxAttempts: 10,
+        timeoutMs: definition.limits?.timeoutMs ?? 6 * 60 * 60 * 1_000,
+      },
+      ...(definition.tools
+        ? {
+            tools: [defineTool({
+              name: "execute",
+              description:
+                "Run bounded TypeScript in Flary's isolated tool runtime. Search and describe tools before calling them.",
+              input: v.object({ code: v.string() }),
+              async run({ input, signal }) {
+                return toJson(await state.app.executeAgentCode(value, {
+                  code: input.code,
+                  bindings: env,
+                  runId: id,
+                  signal,
+                }));
+              },
+            })],
+          }
+        : {}),
+      ...(profiles.length > 0 ? { subagents: profiles } : {}),
+      ...(approvalContinuation ? { approvalContinuation } : {}),
+    };
+  });
+}
+
+function interactiveAgentInstructions(value: FlaryAgent<any>): string {
+  const state = getAgentState(value)!;
+  const definition = state.definition;
+  return [
+    definition.instructions ??
+      definition.description ??
+      `Act as the ${definition.name} agent.`,
+    definition.mode ? `Operating mode: ${definition.mode}.` : "",
+    definition.tools
+      ? "You have one execute tool. Its code can search, describe, and call the private tool catalog."
+      : "",
+  ].filter(Boolean).join("\n\n");
+}
+
+function toFlueSkillReference(skill: {
+  readonly name: string;
+  readonly description?: string;
+  readonly revision: string;
+  readonly instructions: string;
+}) {
+  const description =
+    skill.description ?? `Instructions for ${skill.name}`;
+  const markdown = [
+    "---",
+    `name: ${JSON.stringify(skill.name)}`,
+    `description: ${JSON.stringify(description)}`,
+    `metadata:`,
+    `  revision: ${JSON.stringify(skill.revision)}`,
+    "---",
+    "",
+    skill.instructions,
+    "",
+  ].join("\n");
+  return createSkillReference(
+    buildPackagedSkill({
+      name: skill.name,
+      description,
+      files: [{
+        path: "SKILL.md",
+        content: new TextEncoder().encode(markdown),
+      }],
+    }),
+  );
+}
+
 /**
  * Protect generated Flue agent and workflow routes with a host-only token.
  *
  * The public function API performs tenant checks before it uses these routes.
  */
 export function flaryInternalRoute(
-  valueOrBinding: FlaryFunction<any, any, any> | string = "FLARY_INTERNAL_TOKEN",
+  valueOrBinding:
+    | FlaryFunction<any, any, any>
+    | FlaryAgent<any>
+    | string = "FLARY_INTERNAL_TOKEN",
 ): (
   context: {
     readonly env: Record<string, unknown>;
@@ -223,7 +375,8 @@ export function flaryInternalRoute(
   },
   next: () => Promise<void>,
 ) => Promise<Response | void> {
-  const functionValue = typeof valueOrBinding === "function" ? valueOrBinding : undefined;
+  const authoredValue =
+    typeof valueOrBinding === "string" ? undefined : valueOrBinding;
   const binding = typeof valueOrBinding === "string"
     ? valueOrBinding
     : "FLARY_INTERNAL_TOKEN";
@@ -239,7 +392,7 @@ export function flaryInternalRoute(
     }
     const request = context.req.raw;
     const rpc = request ? new URL(request.url).searchParams.get("flary") : null;
-    if (!rpc || !functionValue) {
+    if (!rpc || !authoredValue) {
       await next();
       return;
     }
@@ -249,17 +402,24 @@ export function flaryInternalRoute(
       await next();
       return;
     }
-    const state = getFunctionState(functionValue);
-    if (!state) return context.notFound();
+    const functionState = getFunctionState(authoredValue);
+    const agentState = getAgentState(authoredValue);
+    if (!functionState && !agentState) return context.notFound();
     const pathParts = request
       ? new URL(request.url).pathname.split("/").filter(Boolean)
       : [];
     const runId = pathParts.at(-1) ?? "flary";
-    const bridge = await state.app.approvalBridgeFor(functionValue, {
-      bindings: context.env,
-      runId,
-      signal: request?.signal,
-    });
+    const bridge = functionState
+      ? await functionState.app.approvalBridgeFor(authoredValue, {
+          bindings: context.env,
+          runId,
+          signal: request?.signal,
+        })
+      : await agentState!.app.agentApprovalBridge(authoredValue as FlaryAgent<any>, {
+          bindings: context.env,
+          runId,
+          signal: request?.signal,
+        });
     if (!bridge) return context.notFound();
     if (rpc === "approvals" && request?.method === "GET") {
       return jsonResponse(context, { approvals: await bridge.list() });
@@ -281,7 +441,7 @@ export function flaryInternalRoute(
  * small equivalent before Flue receives the request.
  */
 export async function flaryInternalRequest(
-  functionValue: FlaryFunction<any, any, any>,
+  authoredValue: FlaryFunction<any, any, any> | FlaryAgent<any>,
   request: Request,
   env: Record<string, unknown>,
 ): Promise<Response | undefined> {
@@ -296,14 +456,21 @@ export async function flaryInternalRequest(
   ) {
     return new Response(null, { status: 404 });
   }
-  const state = getFunctionState(functionValue);
-  if (!state) return new Response(null, { status: 404 });
+  const functionState = getFunctionState(authoredValue);
+  const agentState = getAgentState(authoredValue);
+  if (!functionState && !agentState) return new Response(null, { status: 404 });
   const runId = url.pathname.split("/").filter(Boolean).at(-1) ?? "flary";
-  const bridge = await state.app.approvalBridgeFor(functionValue, {
-    bindings: env,
-    runId,
-    signal: request.signal,
-  });
+  const bridge = functionState
+    ? await functionState.app.approvalBridgeFor(authoredValue, {
+        bindings: env,
+        runId,
+        signal: request.signal,
+      })
+    : await agentState!.app.agentApprovalBridge(authoredValue as FlaryAgent<any>, {
+        bindings: env,
+        runId,
+        signal: request.signal,
+      });
   if (!bridge) return new Response(null, { status: 404 });
   if (rpc === "approvals" && request.method === "GET") {
     return new Response(JSON.stringify({ approvals: await bridge.list() }), {

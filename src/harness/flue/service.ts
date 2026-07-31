@@ -240,10 +240,29 @@ export interface FlueAgentGateway {
     agentName: string,
     instanceId: string,
     message: string,
+    options?: {
+      readonly images?: readonly {
+        readonly type: "image";
+        readonly data: string;
+        readonly mimeType: string;
+        readonly filename?: string;
+      }[];
+      /** Flue's direct submission override. */
+      /** Stable admission key used to make retries idempotent. */
+      readonly idempotencyKey?: string;
+      readonly model?: string;
+      readonly thinkingLevel?: string;
+      readonly cacheRetention?: "none" | "short" | "long";
+    },
   ): Promise<FlueAdmission>;
   wait(
     admission: FlueAdmission,
     onEvent: (event: ConversationStreamChunk) => Promise<void> | void,
+  ): Promise<unknown>;
+  /** Read the provider-neutral Flue conversation projection for archiving. */
+  history?(
+    agentName: string,
+    instanceId: string,
   ): Promise<unknown>;
   abort(agentName: string, instanceId: string): Promise<{ aborted: boolean }>;
   /** Start a generated Flue workflow for a native function. */
@@ -706,13 +725,33 @@ export function createFlueAgentGateway(
       ? "https://flue.invalid"
       : options.baseUrl.replace(/\/+$/, "");
   return {
-    async send(agentName, instanceId, message) {
+    async send(agentName, instanceId, message, options = {}) {
       return FlueAdmissionSchema.parse(
-        await client.agents.send(agentName, instanceId, { message }),
+        await (client.agents.send as unknown as (
+          name: string,
+          id: string,
+          input: Record<string, unknown>,
+        ) => Promise<unknown>)(agentName, instanceId, {
+          message,
+          ...(options.images ? { images: options.images } : {}),
+          ...(options.idempotencyKey
+            ? { idempotencyKey: options.idempotencyKey }
+            : {}),
+          ...(options.model ? { model: options.model } : {}),
+          ...(options.thinkingLevel
+            ? { thinkingLevel: options.thinkingLevel }
+            : {}),
+          ...(options.cacheRetention
+            ? { cacheRetention: options.cacheRetention }
+            : {}),
+        }),
       );
     },
     async wait(admission, onEvent) {
       return client.agents.wait(admission as AgentSendResult, { onEvent });
+    },
+    async history(agentName, instanceId) {
+      return client.agents.history(agentName, instanceId);
     },
     abort(agentName, instanceId) {
       return client.agents.abort(agentName, instanceId);

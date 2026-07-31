@@ -66,6 +66,11 @@ run(
       'if (typeof functions.flary !== "function") throw new Error("Missing functions flary export");',
       'const vite = await import("flary/vite");',
       'if (typeof vite.flaryVite !== "function") throw new Error("Missing flaryVite export");',
+      'const evaluations = await import("flary/evaluations");',
+      'if (typeof evaluations.runEvaluation !== "function") throw new Error("Missing evaluation export");',
+      'const providers = await import("flary/providers");',
+      'if (typeof providers.DeterministicModelRouter !== "function") throw new Error("Missing routing export");',
+      'if (typeof providers.createModelOperations !== "function") throw new Error("Missing model operations export");',
       'const client = await import("flary/client");',
       'if (typeof client.createFlaryFunctionClient !== "function") throw new Error("Missing typed client export");',
       'const flueTools = await import("flary/flue");',
@@ -187,6 +192,23 @@ if (!generatedWrangler.exports?.FlaryRuntime) {
 }
 if ("migrations" in generatedWrangler) {
   throw new Error("The generated starter mixed exports with legacy migrations");
+}
+
+function findFiles(directory, name) {
+  const found = [];
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const file = path.join(directory, entry.name);
+    if (entry.isDirectory()) found.push(...findFiles(file, name));
+    else if (entry.name === name) found.push(file);
+  }
+  return found;
+}
+
+for (const file of findFiles(path.join(starter, "dist"), "wrangler.json")) {
+  const output = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (output.exports && Object.keys(output.exports).length > 0 && "migrations" in output) {
+    throw new Error(`The built starter mixed exports with legacy migrations: ${file}`);
+  }
 }
 
 console.log(

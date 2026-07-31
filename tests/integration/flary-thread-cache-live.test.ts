@@ -85,10 +85,7 @@ async function waitForSettlement(
 ) {
   const deadline = Date.now() + 180_000;
   while (Date.now() < deadline) {
-    const snapshot = await client.flue.agents.history(
-      "flary-thread",
-      client.id(ref),
-    );
+    const snapshot = await client.history(ref);
     const settlement = snapshot.settlements.find(
       (candidate) => candidate.submissionId === submissionId,
     );

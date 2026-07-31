@@ -9,6 +9,32 @@ Subagents are child executions, not a second storage system. A parent thread
 creates a child with an explicit role, model, tool allowlist, seed history,
 limits, and mailbox. The child reports events and a final result to the parent.
 
+For the function-first API, declare children on `app.agent()`:
+
+~~~ts
+const reviewer = app.agent({
+  name: "reviewer",
+  instructions: "Review the diff and report concrete defects.",
+});
+
+export const coder = app.agent({
+  name: "coder",
+  instructions: "Implement the requested repository change.",
+  subagents: { reviewer },
+  delegation: {
+    mode: "auto",
+    maxConcurrent: 4,
+    maxTotal: 16,
+    maxDepth: 2,
+  },
+});
+~~~
+
+The generated Thread Control Durable Object stores child lineage, admission
+limits, mailbox messages, and control results in SQLite. Each child uses a
+separate Flue agent instance and canonical stream. A Worker restart does not
+remove child state.
+
 ## Define a bounded child task
 
 ~~~ts

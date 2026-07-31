@@ -6,9 +6,11 @@ import {
 } from "./modes";
 import {
   ModelSelectionSchema,
+  ModelInputSchema,
   PromptCacheRetentionSchema,
   ReasoningEffortSchema,
   type ModelSelection,
+  type ModelInput,
   type PromptCacheRetention,
   type ReasoningEffort,
 } from "./provider";
@@ -104,6 +106,8 @@ export type ThreadCreateRequest = z.input<typeof ThreadCreateRequestSchema>;
 export const ThreadForkRequestSchema = z
   .object({
     threadId: IdentifierSchema.optional(),
+    /** Optional canonical turn boundary used as the fork point. */
+    turnId: IdentifierSchema.optional(),
     mode: AgentModeIdSchema.optional(),
     model: ModelSelectionSchema.optional(),
     thinkingLevel: ReasoningEffortSchema.optional(),
@@ -130,6 +134,24 @@ export type ThreadConnectionsRequest = z.infer<
   typeof ThreadConnectionsRequestSchema
 >;
 
+export const ThreadModelSetRequestSchema = z
+  .object({ model: ModelInputSchema })
+  .strict();
+export type ThreadModelSetRequest = z.input<typeof ThreadModelSetRequestSchema>;
+
+export const ThreadModelHistoryRecordSchema = z
+  .object({
+    sequence: z.number().int().positive(),
+    model: ModelSelectionSchema,
+    changedAt: TimestampSchema,
+    actor: IdentityReferenceSchema,
+    reason: z.string().max(4_096).optional(),
+  })
+  .strict();
+export type ThreadModelHistoryRecord = z.infer<
+  typeof ThreadModelHistoryRecordSchema
+>;
+
 export const ThreadMessageImageSchema = z
   .object({
     type: z.literal("image"),
@@ -142,14 +164,73 @@ export const ThreadMessageImageSchema = z
 export const ThreadMessageRequestSchema = z
   .object({
     message: NonEmptyStringSchema.max(1_000_000),
+    /** Queue waits for the current turn. Steer interrupts it at a safe boundary. */
+    mode: z.enum(["queue", "steer"]).optional(),
     images: z.array(ThreadMessageImageSchema).max(16).optional(),
-    model: ModelSelectionSchema.optional(),
+    model: ModelInputSchema.optional(),
     thinkingLevel: ReasoningEffortSchema.optional(),
     cacheRetention: PromptCacheRetentionSchema.default("short"),
     idempotencyKey: IdentifierSchema.optional(),
   })
   .strict();
 export type ThreadMessageRequest = z.input<typeof ThreadMessageRequestSchema>;
+
+export const ThreadRenameRequestSchema = z
+  .object({ title: NonEmptyStringSchema.max(500) })
+  .strict();
+export type ThreadRenameRequest = z.infer<typeof ThreadRenameRequestSchema>;
+
+export const ThreadPinRequestSchema = z
+  .object({ pinned: z.boolean().default(true) })
+  .strict();
+export type ThreadPinRequest = z.input<typeof ThreadPinRequestSchema>;
+
+export const ThreadReadRequestSchema = z
+  .object({ throughSequence: z.number().int().nonnegative().optional() })
+  .strict();
+export type ThreadReadRequest = z.infer<typeof ThreadReadRequestSchema>;
+
+export const ThreadCompactRequestSchema = z
+  .object({ reason: z.string().trim().max(4_096).optional() })
+  .strict();
+export type ThreadCompactRequest = z.infer<typeof ThreadCompactRequestSchema>;
+
+export const ThreadRollbackRequestSchema = z
+  .object({
+    turnId: IdentifierSchema,
+    reason: z.string().trim().max(4_096).optional(),
+  })
+  .strict();
+export type ThreadRollbackRequest = z.infer<typeof ThreadRollbackRequestSchema>;
+
+/** Verified flary-jsonl archive used to rebuild a thread projection. */
+export const ThreadRestoreRequestSchema = z
+  .object({
+    jsonl: z.string().min(1).max(50_000_000),
+    replace: z.boolean().default(true),
+  })
+  .strict();
+export type ThreadRestoreRequest = z.input<typeof ThreadRestoreRequestSchema>;
+
+export const ThreadGoalRequestSchema = z
+  .object({
+    objective: NonEmptyStringSchema.max(100_000),
+    tokenBudget: z.number().int().positive().optional(),
+    costBudgetUsd: z.number().finite().positive().optional(),
+  })
+  .strict();
+export type ThreadGoalRequest = z.infer<typeof ThreadGoalRequestSchema>;
+
+export const ThreadRecordListRequestSchema = z
+  .object({
+    after: z.coerce.number().int().nonnegative().default(0),
+    limit: z.coerce.number().int().positive().max(1_000).default(100),
+    types: z.array(NonEmptyStringSchema.max(200)).max(100).optional(),
+  })
+  .strict();
+export type ThreadRecordListRequest = z.input<
+  typeof ThreadRecordListRequestSchema
+>;
 
 export const ThreadApprovalRecordSchema = z
   .object({

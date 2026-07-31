@@ -10,9 +10,16 @@ import type {
   FlaryRunService,
   TrustedRunContext,
 } from "../host/runs.js";
+import type { FlaryThreadHostService } from "../host/types.js";
 import type { ModelAdapter, ProviderAdapterRegistry } from "../providers/index.js";
 import type { ApprovalContinuation } from "../execution/approval-continuation.js";
 import type { FlaryCodemodeApprovalBridge } from "./codemode.js";
+import type {
+  ModelInput,
+  ModelSelection,
+  ResolvedModelPin,
+} from "../contracts/provider.js";
+import type { ModelOperationHandlers } from "../providers/operations.js";
 
 export type FlarySchema = z.ZodType;
 
@@ -39,6 +46,18 @@ export interface FlaryAuthContext<TBindings = unknown> {
 export type FlaryAuthResolver<TBindings = unknown> = (
   input: FlaryAuthContext<TBindings>,
 ) => FlaryIdentity | undefined | Promise<FlaryIdentity | undefined>;
+
+/** Resolve a tenant-scoped model grant without returning a credential value. */
+export type FlaryModelGrantResolver = (input: {
+  readonly tenantId: string;
+  readonly userId: string;
+  readonly applicationId: string;
+  readonly connectionIds: readonly string[];
+  readonly selection: ModelSelection;
+}) =>
+  | Partial<ResolvedModelPin>
+  | void
+  | Promise<Partial<ResolvedModelPin> | void>;
 
 export interface FlaryStepContext<TBindings = unknown> {
   readonly bindings: TBindings;
@@ -239,6 +258,62 @@ export interface FlaryFunction<
   ): AsyncIterable<FlaryEvent<FlaryOutput<TOutput>>>;
 }
 
+export interface FlarySkill {
+  readonly kind: "skill";
+  readonly name: string;
+  readonly description?: string;
+  /** Immutable revision used by admission records and lazy discovery. */
+  readonly revision: string;
+  readonly instructions: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+export interface FlaryCompactionPolicy {
+  readonly mode?: "auto" | "manual" | "disabled";
+  readonly reserveTokens?: number;
+  readonly thresholdTokens?: number;
+}
+
+/** Provider switching policy for one persistent agent. */
+export interface FlaryModelPolicy {
+  /** Exact allow-list. A selected model must match provider and model. */
+  readonly allow: readonly ModelInput[];
+  readonly switching?: "user" | "disabled";
+  readonly fallback?: "none";
+  readonly compactionModel?: ModelInput;
+}
+
+export interface FlaryAgentOptions<TBindings = unknown> {
+  readonly name: string;
+  readonly description?: string;
+  readonly instructions?: string;
+  readonly model?: string;
+  readonly models?: FlaryModelPolicy;
+  readonly thinking?: string;
+  readonly mode?: string;
+  readonly tools?: FlaryToolRegistry;
+  readonly skills?: readonly FlarySkill[];
+  readonly subagents?: Readonly<Record<string, FlaryAgent<any>>>;
+  readonly delegation?: FlaryDelegationPolicy;
+  readonly compaction?: FlaryCompactionPolicy;
+  readonly limits?: FlaryLimits;
+  readonly _bindings?: TBindings;
+}
+
+/** Persistent interactive agent definition. Flue owns each thread transcript. */
+export interface FlaryAgent<TBindings = unknown> {
+  readonly kind: "agent";
+  readonly name: string;
+  readonly definition: FlaryAgentOptions<TBindings>;
+  readonly revision: string;
+}
+
+export type FlaryModelSelection = ModelSelection;
+
+export type FlaryApplicationExport =
+  | FlaryFunction<any, any, any>
+  | FlaryAgent<any>;
+
 export interface FlaryMcpSource {
   readonly kind: "mcp";
   readonly namespace: string;
@@ -427,6 +502,8 @@ export interface FlaryAppOptions<TBindings = unknown> {
   /** Bindings used by direct server-side calls (HTTP calls use the request env). */
   readonly defaultBindings?: TBindings;
   readonly auth?: FlaryAuthResolver<TBindings>;
+  /** Resolve an authenticated provider connection for interactive turns. */
+  readonly resolveModel?: FlaryModelGrantResolver;
   /** Identity used only for trusted server-side calls with no HTTP request. */
   readonly defaultIdentity?: FlaryIdentity;
   /**
@@ -441,10 +518,19 @@ export interface FlaryAppOptions<TBindings = unknown> {
   readonly runtime?: "durable" | "local";
   /** Existing Flue-backed run service. Production function runs use this. */
   readonly runService?: FlaryRunServiceResolver<TBindings>;
+  /**
+   * Durable thread service used by `app.agent()` HTTP routes.
+   * Production hosts normally attach this through generated Cloudflare code.
+   */
+  readonly threadService?:
+    | FlaryThreadHostService
+    | ((input: FlaryRunServiceResolverInput<TBindings>) => FlaryThreadHostService);
   /** Optional host override for the trusted context stored at admission. */
   readonly resolveRunContext?: ResolveFlaryFunctionRunContext<TBindings>;
   readonly provider?: ModelAdapter;
   readonly providers?: ProviderAdapterRegistry;
+  /** Host-owned handlers for text, media, embedding, ranking, and moderation. */
+  readonly operations?: ModelOperationHandlers<TBindings>;
   readonly prompt?: (
     request: FlaryPromptRequest,
   ) => Promise<unknown>;
@@ -463,7 +549,12 @@ export interface FlaryAppOptions<TBindings = unknown> {
   ) => FlaryToolConnection | Promise<FlaryToolConnection>;
   readonly resolveSandbox?: (
     source: FlarySandboxSource,
-    input: { readonly bindings: TBindings; readonly context: FlaryStepContext<TBindings> },
+    input: {
+      readonly bindings: TBindings;
+      readonly context: FlaryStepContext<TBindings>;
+      /** Durable Object SQLite used for process replay and controls. */
+      readonly storage?: unknown;
+    },
   ) => FlaryToolConnection | Promise<FlaryToolConnection>;
   readonly runStore?: FlaryRunStore;
   /** Durable Object storage used by the default high-level run store. */

@@ -11,7 +11,8 @@ Use this checklist before the first production release.
 
 - Pin Flary, Flue, Pi, and Cloudflare adapter versions.
 - Run typecheck, unit tests, Worker integration tests, and the clean npm
-  installation test.
+  installation test. Run `npm run test:live` with OpenAI, Anthropic, and
+  deployed Flary credentials before a stable release.
 - Apply the generated Durable Object SQLite migration and verify all Flue
   function bindings.
 - Set an explicit default mode, model, cache policy, and run limits.

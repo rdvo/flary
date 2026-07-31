@@ -1,6 +1,6 @@
 {
   "name": "flary",
-  "version": "0.5.0",
+  "version": "0.6.0-rc.1",
   "description": "Durable, provider-neutral AI agent harness for Cloudflare Workers",
   "main": "dist/index.js",
   "module": "dist/index.js",
@@ -13,6 +13,7 @@
     "build:watch": "rimraf dist && tsx build.ts --watch",
     "check": "tsc --project tsconfig.build.json --noEmit",
     "test": "tsx --test \"tests/**/*.test.ts\"",
+    "test:live": "node scripts/test-live.cjs",
     "test:npm-install": "node scripts/test-npm-install.cjs",
     "postinstall": "node scripts/apply-dependency-patches.cjs",
     "lint": "eslint . --ext .ts,.js",
@@ -118,6 +119,10 @@
       "types": "./dist/types/harness/providers/index.d.ts",
       "import": "./dist/harness/providers/index.js"
     },
+    "./evaluations": {
+      "types": "./dist/types/harness/evaluations/index.d.ts",
+      "import": "./dist/harness/evaluations/index.js"
+    },
     "./recall": {
       "types": "./dist/types/harness/recall/index.d.ts",
       "import": "./dist/harness/recall/index.js"
@@ -125,6 +130,10 @@
     "./storage": {
       "types": "./dist/types/harness/storage/index.d.ts",
       "import": "./dist/harness/storage/index.js"
+    },
+    "./session": {
+      "types": "./dist/types/harness/session/index.d.ts",
+      "import": "./dist/harness/session/index.js"
     },
     "./subagents": {
       "types": "./dist/types/harness/subagents/index.d.ts",

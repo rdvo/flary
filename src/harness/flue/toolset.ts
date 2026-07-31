@@ -232,6 +232,7 @@ export interface CreateFlaryToolsetOptions {
   readonly onEvent?: (
     event: ToolLifecycleEvent,
   ) => void | Promise<void>;
+  readonly onAudit?: LazyToolRuntimeOptions["onAudit"];
   readonly extend?: (catalog: ToolCatalog) => void | Promise<void>;
 }
 
@@ -318,6 +319,7 @@ export async function createFlaryToolset(
     readParallelism: options.readParallelism ?? 8,
     approve: options.approvals?.approve,
     onToolEvent: options.onEvent,
+    onAudit: options.onAudit,
   });
 
   const codeMode = await resolveCodeMode(options.codeMode);

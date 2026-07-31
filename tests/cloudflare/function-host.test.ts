@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   createFlaryCodemodeApprovalHooks,
   createFlaryDurableRunService,
+  createCloudflareFlueGateway,
   handleFlaryDurableRunObjectRequest,
   type FlaryDurableObjectNamespace,
   type FlaryDurableObjectState,
@@ -214,4 +215,39 @@ test("Runtime Durable Object approval hooks use the owning agent route", async (
     decidedAt: new Date().toISOString(),
   });
   assert.equal(receivedDecision?.status, "approved");
+});
+
+test("Cloudflare Flue gateway preserves the pinned direct model payload", async () => {
+  const token = "t".repeat(32);
+  let received: Record<string, unknown> | undefined;
+  const namespace: FlaryDurableObjectNamespace = {
+    idFromName: (name) => ({ toString: () => name }),
+    get: () => ({
+      async fetch(request) {
+        received = await request.json() as Record<string, unknown>;
+        return Response.json({
+          streamUrl: "https://example.com/stream",
+          offset: "0",
+          submissionId: "submission_pinned",
+        });
+      },
+    }),
+  };
+  const gateway = createCloudflareFlueGateway({
+    FLUE_SUPPORT_AGENT: namespace,
+  }, { token });
+  const admission = await gateway.send("support", "thread_1", "continue", {
+    idempotencyKey: "admission_1",
+    model: "anthropic/claude-sonnet",
+    thinkingLevel: "high",
+    cacheRetention: "none",
+  });
+  assert.equal(admission.submissionId, "submission_pinned");
+  assert.deepEqual(received, {
+    message: "continue",
+    idempotencyKey: "admission_1",
+    model: "anthropic/claude-sonnet",
+    thinkingLevel: "high",
+    cacheRetention: "none",
+  });
 });

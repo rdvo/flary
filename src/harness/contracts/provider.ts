@@ -100,6 +100,67 @@ export const ModelSelectionSchema = z
   .strict();
 export type ModelSelection = z.infer<typeof ModelSelectionSchema>;
 
+/** A model selected by a caller. Strings use the `provider/model` form. */
+export const ModelInputSchema = z.union([
+  ModelSelectionSchema,
+  z.string().trim().min(3).max(400).regex(/^[^/\s]+\/.+$/, {
+    message: "A model string must use the provider/model form",
+  }),
+]);
+export type ModelInput = z.infer<typeof ModelInputSchema>;
+
+/** Convert the compact model form into the canonical selection object. */
+export function normalizeModelInput(input: ModelInput): ModelSelection {
+  if (typeof input !== "string") return ModelSelectionSchema.parse(input);
+  const separator = input.indexOf("/");
+  return ModelSelectionSchema.parse({
+    provider: input.slice(0, separator),
+    model: input.slice(separator + 1),
+  });
+}
+
+/** Immutable, secret-free model and credential identity stored with a turn. */
+export const ResolvedModelPinSchema = z
+  .object({
+    selection: ModelSelectionSchema,
+    provider: IdentifierSchema,
+    model: IdentifierSchema,
+    deployment: IdentifierSchema.optional(),
+    variant: IdentifierSchema.optional(),
+    reasoning: ReasoningEffortSchema.optional(),
+    capabilitySnapshot: z.array(ModelCapabilitySchema).max(32).default([]),
+    modelCatalogRevision: IdentifierSchema.optional(),
+    adapterRevision: IdentifierSchema.optional(),
+    connectionReference: IdentifierSchema.optional(),
+    credentialGeneration: IdentifierSchema.optional(),
+    billingMode: z.enum(["managed", "subscription", "byok"]).optional(),
+    cachePolicy: PromptCacheRetentionSchema.default("short"),
+  })
+  .strict();
+export type ResolvedModelPin = z.infer<typeof ResolvedModelPinSchema>;
+
+/** One consecutive provider/credential run in a portable thread. */
+export const ProviderSegmentSchema = z
+  .object({
+    segmentId: IdentifierSchema,
+    threadSequenceStart: z.number().int().positive(),
+    threadSequenceEnd: z.number().int().positive().optional(),
+    pin: ResolvedModelPinSchema,
+    nativeSessionReference: IdentifierSchema.optional(),
+    startedAt: z.string().datetime({ offset: true }),
+    completedAt: z.string().datetime({ offset: true }).optional(),
+    completionReason: z.enum([
+      "active",
+      "completed",
+      "switched",
+      "aborted",
+      "failed",
+      "compacted",
+    ]).default("active"),
+  })
+  .strict();
+export type ProviderSegment = z.infer<typeof ProviderSegmentSchema>;
+
 // Keep provider and model selection names easy to discover.
 export const ProviderSelectionSchema = ModelSelectionSchema;
 export type ProviderSelection = ModelSelection;

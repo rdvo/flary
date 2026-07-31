@@ -19,12 +19,11 @@ durable run, or expose the same function through HTTP.
 
 ## Install
 
-The current Flary release candidate is available under the `next` tag while
-the live provider and Cloudflare durability gates are pending. Pin the exact
-version in production only after those gates pass.
+Flary 0.6 is the stable function-first release. Pin the exact version in
+production so a runtime change does not alter an admitted function revision.
 
 ```bash
-npm install --save-exact flary@next
+npm install --save-exact flary@0.6.0
 ```
 
 Add a prompt example to an existing project:
@@ -36,15 +35,15 @@ npx flary init
 Create a small Cloudflare Worker starter:
 
 ```bash
-npx flary@next create my-agent
+npx flary create my-agent
 cd my-agent
 npm install
 npm run dev
 ```
 
 The starter uses the function API. Its Vite build generates the Flue runtime,
-the Flary run Durable Object, bindings, and SQLite migrations. Apply the
-generated Wrangler configuration before a production deploy. Use [One-off
+the Flary run and Thread Control Durable Objects, bindings, and SQLite
+lifecycle configuration. Apply the generated Wrangler configuration before a production deploy. Use [One-off
 agent](/docs/one-off-agent/) for a small call or
 [Self-hosting](/docs/self-hosting/) for a durable deployment.
 

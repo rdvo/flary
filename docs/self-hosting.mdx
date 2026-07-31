@@ -32,7 +32,7 @@ project branch when the agent edits files.
 ## Create the Worker
 
 ```bash
-npx flary@next create my-agent
+npx flary create my-agent
 cd my-agent
 npm install
 npm run dev
@@ -41,14 +41,15 @@ npm run dev
 For an existing Worker:
 
 ```bash
-npm install --save-exact flary@next
+npm install --save-exact flary@0.6.0
 npx flary init
 ```
 
 The generated starter uses `flary()`, `app.fn()`, `app.tools()`, and
 `app.serve()`. The Vite build generates the Flue agent/workflow entry, the
-Flary run Durable Object, bindings, and SQLite migrations. Apply the generated
-Wrangler configuration before a production deploy.
+Flary run and Thread Control Durable Objects, bindings, and SQLite lifecycle
+configuration. Apply the generated Wrangler configuration before a production
+deploy.
 
 ## Bind resources
 

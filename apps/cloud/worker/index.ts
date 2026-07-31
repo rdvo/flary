@@ -22,6 +22,7 @@ import {
   ThreadModeRequestSchema,
   ThreadOperationalStateSchema,
   ProviderKindSchema,
+  normalizeModelInput,
   StorageIdentifierSchema,
   TraceContextSchema,
   WorkspaceDownloadTicketRequestSchema,
@@ -1009,7 +1010,7 @@ app.post("/api/apps/:appId/threads/:threadId/messages", async (context) => {
       message: "This submission is still being admitted",
     });
   }
-  const selectedModel =
+  const selectedModelInput =
     input.model ??
     loaded.binding.defaultModel ??
     ((context.env.FLARY_DEFAULT_MODEL
@@ -1018,6 +1019,7 @@ app.post("/api/apps/:appId/threads/:threadId/messages", async (context) => {
       provider: "cloudflare",
       model: "@cf/meta/llama-3.1-8b-instruct",
     });
+  const selectedModel = normalizeModelInput(selectedModelInput);
   const selectedThinkingLevel =
     input.thinkingLevel ?? loaded.binding.defaultThinkingLevel;
   const provider = ProviderKindSchema.safeParse(selectedModel.provider);

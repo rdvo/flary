@@ -10,14 +10,23 @@ import {
 } from "../contracts/connections.js";
 import {
   ThreadConnectionsRequestSchema,
+  ThreadCompactRequestSchema,
   ThreadCreateRequestSchema,
   ThreadForkRequestSchema,
+  ThreadGoalRequestSchema,
   ThreadHistoryDiffRequestSchema,
   ThreadHistoryDiffResponseSchema,
   ThreadHistoryListRequestSchema,
   ThreadHistoryListResponseSchema,
   ThreadMessageRequestSchema,
+  ThreadModelSetRequestSchema,
   ThreadModeRequestSchema,
+  ThreadPinRequestSchema,
+  ThreadReadRequestSchema,
+  ThreadRecordListRequestSchema,
+  ThreadRenameRequestSchema,
+  ThreadRollbackRequestSchema,
+  ThreadRestoreRequestSchema,
 } from "../contracts/threads.js";
 import { ThreadOperationalStateSchema } from "../contracts/runtime.js";
 import { ApprovalDecisionSchema } from "../contracts/approvals.js";
@@ -344,6 +353,55 @@ export function createFlaryHostRouter<TBindings extends object>(
     });
   });
 
+  router.post("/apps/:appId/threads/:threadId/unarchive", async (context) => {
+    const target = await targetFor(
+      context.req.raw, context.env, context.req.param("appId"), context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.unarchive) throw featureUnavailable("Thread unarchive");
+    return context.json({ ok: true, binding: await service.unarchive(target) });
+  });
+
+  router.post("/apps/:appId/threads/:threadId/rename", async (context) => {
+    const target = await targetFor(
+      context.req.raw, context.env, context.req.param("appId"), context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.rename) throw featureUnavailable("Thread rename");
+    const input = ThreadRenameRequestSchema.parse(await context.req.json());
+    return context.json({ ok: true, binding: await service.rename(target, input) });
+  });
+
+  router.post("/apps/:appId/threads/:threadId/pin", async (context) => {
+    const target = await targetFor(
+      context.req.raw, context.env, context.req.param("appId"), context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.pin) throw featureUnavailable("Thread pin");
+    const input = ThreadPinRequestSchema.parse(await context.req.json());
+    return context.json({ ok: true, binding: await service.pin(target, input) });
+  });
+
+  router.post("/apps/:appId/threads/:threadId/read", async (context) => {
+    const target = await targetFor(
+      context.req.raw, context.env, context.req.param("appId"), context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.markRead) throw featureUnavailable("Thread unread state");
+    const input = ThreadReadRequestSchema.parse(await context.req.json());
+    return context.json({ ok: true, binding: await service.markRead(target, input) });
+  });
+
+  router.delete("/apps/:appId/threads/:threadId", async (context) => {
+    const target = await targetFor(
+      context.req.raw, context.env, context.req.param("appId"), context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.delete) throw featureUnavailable("Thread deletion");
+    await service.delete(target);
+    return context.json({ ok: true });
+  });
+
   router.post("/apps/:appId/threads/:threadId/fork", async (context) => {
     const target = await targetFor(
       context.req.raw,
@@ -394,6 +452,55 @@ export function createFlaryHostRouter<TBindings extends object>(
     },
   );
 
+  router.get("/apps/:appId/threads/:threadId/model", async (context) => {
+    const target = await targetFor(
+      context.req.raw,
+      context.env,
+      context.req.param("appId"),
+      context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.modelGet) throw featureUnavailable("Thread model selection");
+    return context.json({ model: await service.modelGet(target) });
+  });
+
+  router.get("/apps/:appId/threads/:threadId/models", async (context) => {
+    const target = await targetFor(
+      context.req.raw,
+      context.env,
+      context.req.param("appId"),
+      context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.modelList) throw featureUnavailable("Thread model catalog");
+    return context.json({ models: await service.modelList(target) });
+  });
+
+  router.get("/apps/:appId/threads/:threadId/model/history", async (context) => {
+    const target = await targetFor(
+      context.req.raw,
+      context.env,
+      context.req.param("appId"),
+      context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.modelHistory) throw featureUnavailable("Thread model history");
+    return context.json({ history: await service.modelHistory(target) });
+  });
+
+  router.post("/apps/:appId/threads/:threadId/model", async (context) => {
+    const target = await targetFor(
+      context.req.raw,
+      context.env,
+      context.req.param("appId"),
+      context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.modelSet) throw featureUnavailable("Thread model selection");
+    const input = ThreadModelSetRequestSchema.parse(await context.req.json());
+    return context.json({ model: await service.modelSet(target, input) });
+  });
+
   router.post("/apps/:appId/threads/:threadId/messages", async (context) => {
     const target = await targetFor(
       context.req.raw,
@@ -406,6 +513,130 @@ export function createFlaryHostRouter<TBindings extends object>(
       await serviceFor(context.env).submit(target, input),
     );
     return context.json(admission, 202);
+  });
+
+  router.post("/apps/:appId/threads/:threadId/interrupt", async (context) => {
+    const target = await targetFor(
+      context.req.raw, context.env, context.req.param("appId"), context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.interrupt) throw featureUnavailable("Thread interruption");
+    await service.interrupt(target);
+    return context.json({ ok: true }, 202);
+  });
+
+  router.post("/apps/:appId/threads/:threadId/compact", async (context) => {
+    const target = await targetFor(
+      context.req.raw, context.env, context.req.param("appId"), context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.compact) throw featureUnavailable("Thread compaction");
+    const input = ThreadCompactRequestSchema.parse(
+      await context.req.json().catch(() => ({})),
+    );
+    return context.json({ result: await service.compact(target, input) }, 202);
+  });
+
+  router.post("/apps/:appId/threads/:threadId/rollback", async (context) => {
+    const target = await targetFor(
+      context.req.raw, context.env, context.req.param("appId"), context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.rollback) throw featureUnavailable("Thread rollback");
+    const input = ThreadRollbackRequestSchema.parse(await context.req.json());
+    return context.json({ result: await service.rollback(target, input) }, 202);
+  });
+
+  router.post("/apps/:appId/threads/:threadId/restore", async (context) => {
+    const target = await targetFor(
+      context.req.raw, context.env, context.req.param("appId"), context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.restore) throw featureUnavailable("Thread restore");
+    const input = ThreadRestoreRequestSchema.parse(await context.req.json());
+    return context.json({ result: await service.restore(target, input) }, 202);
+  });
+
+  router.post("/apps/:appId/threads/:threadId/goal", async (context) => {
+    const target = await targetFor(
+      context.req.raw, context.env, context.req.param("appId"), context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.setGoal) throw featureUnavailable("Thread goals");
+    const input = ThreadGoalRequestSchema.parse(await context.req.json());
+    return context.json({ goal: await service.setGoal(target, input) }, 201);
+  });
+
+  router.delete("/apps/:appId/threads/:threadId/goal", async (context) => {
+    const target = await targetFor(
+      context.req.raw, context.env, context.req.param("appId"), context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.clearGoal) throw featureUnavailable("Thread goals");
+    return context.json({ goal: await service.clearGoal(target) });
+  });
+
+  router.get("/apps/:appId/threads/:threadId/turns", async (context) => {
+    const target = await targetFor(
+      context.req.raw, context.env, context.req.param("appId"), context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.turns) throw featureUnavailable("Thread turn reads");
+    const input = ThreadRecordListRequestSchema.parse({
+      after: context.req.query("after"),
+      limit: context.req.query("limit"),
+      types: context.req.query("types")?.split(",").filter(Boolean),
+    });
+    return context.json({ turns: await service.turns(target, input) });
+  });
+
+  router.get("/apps/:appId/threads/:threadId/audit", async (context) => {
+    const target = await targetFor(
+      context.req.raw, context.env, context.req.param("appId"), context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.auditList) throw featureUnavailable("Thread audit");
+    const input = ThreadRecordListRequestSchema.parse({
+      after: context.req.query("after"),
+      limit: context.req.query("limit"),
+      types: context.req.query("types")?.split(",").filter(Boolean),
+    });
+    return context.json({ records: await service.auditList(target, input) });
+  });
+
+  router.get("/apps/:appId/threads/:threadId/audit/export", async (context) => {
+    const target = await targetFor(
+      context.req.raw, context.env, context.req.param("appId"), context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.auditExport) throw featureUnavailable("Thread audit export");
+    const result = await service.auditExport(target);
+    return new Response(result, {
+      headers: { "content-type": "application/x-ndjson; charset=utf-8" },
+    });
+  });
+
+  router.post("/apps/:appId/threads/:threadId/subagents/:action", async (context) => {
+    const target = await targetFor(
+      context.req.raw, context.env, context.req.param("appId"), context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.subagentAction) throw featureUnavailable("Durable subagents");
+    const action = context.req.param("action");
+    if (!["list", "spawn", "send", "wait", "interrupt", "resume", "close"].includes(action)) {
+      throw new FlaryHostError(404, "subagent_action_not_found", "The subagent action was not found");
+    }
+    const input = await context.req.json().catch(() => ({}));
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw new FlaryHostError(400, "invalid_request", "The subagent input must be an object");
+    }
+    return context.json({
+      result: await service.subagentAction(
+        target,
+        action,
+        input as Record<string, unknown>,
+      ),
+    });
   });
 
   router.get("/apps/:appId/threads/:threadId/approvals", async (context) => {
@@ -545,6 +776,28 @@ export function createFlaryHostRouter<TBindings extends object>(
         );
       }
       return context.json({ document: RecallDocumentSchema.parse(document) });
+    },
+  );
+
+  router.post(
+    "/apps/:appId/threads/:threadId/schedules/:action",
+    async (context) => {
+      const target = await targetFor(
+        context.req.raw,
+        context.env,
+        context.req.param("appId"),
+        context.req.param("threadId"),
+      );
+      const service = serviceFor(context.env);
+      if (!service.scheduleAction) {
+        throw featureUnavailable("Durable schedules");
+      }
+      const result = await service.scheduleAction(
+        target,
+        context.req.param("action"),
+        await context.req.json().catch(() => ({})),
+      );
+      return context.json({ result });
     },
   );
 

@@ -20,9 +20,11 @@ declarations small and makes the host boundary easy to audit.
 | flary/tools | Zod tools, catalogs, lazy runtime, and capability handles |
 | flary/mcp | Remote MCP discovery and safe tool adapters |
 | flary/providers | Normalized model requests, adapters, OAuth, and cache policy |
+| flary/evaluations | Versioned datasets, graders, judges, and reports |
 | flary/contracts | Zod schemas and TypeScript types |
 | flary/cloudflare | D1, Durable Object, R2, Dynamic Worker, Sandbox, and queue adapters |
 | flary/storage | Workspace, blob, Artifacts, JSONL, and history contracts |
+| flary/session | Session ledger, integrity chain, JSONL, Codex import, and SQLite projector |
 | flary/history | Checkpoints, indexing queue, and history projection |
 | flary/recall | Exact, in-memory, and Turbopuffer recall indexes |
 | flary/subagents | Child execution contracts and coordinators |
@@ -46,10 +48,8 @@ import { createMcpTools } from "flary/mcp";
 Use the exact release in production:
 
 ~~~bash
-npm install --save-exact flary@next
+npm install --save-exact flary@0.6.0
 ~~~
 
-The current release candidate pins Flue runtime and SDK 1.0.0-beta.9 and Pi
-AI 0.80.10. Run the clean npm installation test in CI so a host does not
-silently lose the checked-in dependency patches. Stable 0.5.0 must use an
-upstream stable Flue release.
+Run the clean npm installation test in CI so a host does not silently lose
+checked-in dependency patches.

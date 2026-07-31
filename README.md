@@ -45,15 +45,12 @@ Your product
 Flary does not force a chat UI, editor, authentication provider, or billing
 system on the host application.
 
-## Install the current release candidate
+## Install
 
 ```bash
-npm install --save-exact flary@next
-npx flary init
+npm install flary@next
+npx flary@next init
 ```
-
-The `next` tag is the release-candidate channel. Pin the exact version in
-production only after the Cloudflare Durable Object and provider gates pass.
 
 Use `flary init` to add function-first examples to an existing project. It
 does not replace the application's current framework or deployment setup.
@@ -64,9 +61,9 @@ npx flary@next create my-agent
 ```
 
 The generated project starts with Zod-backed functions and a local HTTP route.
-The Vite build also generates the Flue agent/workflow entry, the Flary run
-Durable Object, bindings, and SQLite migrations. Apply the generated Wrangler
-configuration before a production deploy.
+The Vite build also generates the Flue agent/workflow entry, the Flary run and
+Thread Control Durable Objects, bindings, and SQLite lifecycle configuration.
+Apply the generated Wrangler configuration before a production deploy.
 Add durable threads with the focused guides:
 
 - [Getting started](https://flary.dev/docs/getting-started/)
@@ -218,6 +215,134 @@ export default app.serve({ support, ship });
 The existing low-level Flue, tool catalog, MCP, and host APIs remain available
 for applications that need a custom runtime.
 
+## Persistent agent API
+
+Use `app.fn()` for finite typed work. Use `app.agent()` for a persistent
+Codex-style thread. Flue keeps the canonical transcript. Flary keeps the
+tenant-bound control and audit view.
+
+```ts
+export const reviewer = app.agent({
+  name: "reviewer",
+  instructions: "Review changes and report concrete defects.",
+});
+
+export const coder = app.agent({
+  name: "coder",
+  instructions: "Inspect the repository, implement the task, and run checks.",
+  model: "openai/gpt-5",
+  models: {
+    allow: ["openai/gpt-5", "anthropic/claude-sonnet"],
+    switching: "user",
+    fallback: "none",
+  },
+  thinking: "high",
+  mode: "build",
+  tools,
+  subagents: { reviewer },
+  delegation: {
+    mode: "auto",
+    maxConcurrent: 4,
+    maxTotal: 16,
+    maxDepth: 2,
+  },
+  compaction: { mode: "auto" },
+  limits: { steps: 200, toolCalls: 500, costUsd: 20 },
+});
+
+export const functions = { support, coder };
+export default app.serve(functions);
+```
+
+The typed client returns one thread handle:
+
+```ts
+const thread = await api.coder.threads.create({
+  workspace: {
+    organizationId: "acme",
+    appId: "coder",
+    projectId: "api",
+    workspaceId: "main",
+    branch: "main",
+  },
+  mode: "build",
+  thinkingLevel: "high",
+});
+
+await thread.send({
+  message: "Add rate limits to the public API.",
+  mode: "queue",
+});
+
+// Change the session default for future turns.
+await thread.model.set("anthropic/claude-sonnet");
+await thread.send({ message: "Continue the implementation." });
+
+// A one-turn override does not change the session default.
+await thread.send({
+  message: "Review this with the OpenAI model.",
+  model: "openai/gpt-5",
+});
+
+for await (const event of thread.stream()) {
+  render(event);
+}
+```
+
+Thread handles support history and turn reads, queue or steer messages,
+interrupt, fork, append-only rollback, manual compaction, rename, archive,
+pin, unread state, goals, approvals, user input, durable subagents, and
+redacted audit export. `thread.schedules` registers durable interval, one-time,
+or UTC cron messages and reads their admission history.
+
+## Provider operations, routing, and evaluations
+
+Use the same app for provider-neutral operations beyond chat. The host keeps
+credentials and provider transports in `operations` handlers:
+
+```ts
+const app = flary({
+  model: "openai/gpt-5",
+  operations: {
+    embed: async ({ input }) => embeddingGateway.embed(input),
+    moderate: async ({ input }) => moderationGateway.check(input),
+    generateImage: async (request) => imageGateway.generate(request),
+  },
+});
+
+const vectors = await app.embed({ input: ["first", "second"] });
+const object = await app.generateObject({
+  prompt: "Return a support answer.",
+  schema: z.object({ answer: z.string() }),
+});
+```
+
+`generateText()` and `generateObject()` use Flary's built-in adapter path.
+Embedding, image, audio, video, transcription, reranking, and moderation are
+validated public contracts, but they require a host handler in
+`operations`. They do not call a provider automatically and fail with
+`operation_unavailable` when no handler is configured.
+
+`DeterministicModelRouter` applies an exact allow-list, capability and cost
+limits, health, latency, and an explicit fallback chain. It stores each route
+decision by operation ID, and never falls back after a state-changing or
+unknown-outcome operation. `defineEvaluationDataset()` and `runEvaluation()`
+provide versioned datasets, deterministic graders, schema checks, and host
+LLM judges. The product UI and billing system can own the resulting reports.
+
+`app.skill()` instructions are packaged as immutable Flue skills. The model
+sees the skill name and description first. Flue loads the full instructions
+only when the model selects the skill.
+
+The default Sandbox source also exposes durable process start, attach, stdin,
+signal, sleep, and wake operations. Process output and control requests replay
+from Durable Object SQLite after a Worker restart.
+
+Use `flary/session` for deterministic `flary-jsonl` import and export,
+integrity verification, the Codex rollout importer, and the SQLite session
+projector. Full replay content can use encrypted external references; public
+records stay redacted.
+
 ## Prompt files
 
 Store prompts in Git as `*.prompt.md` files. The path becomes the slug.
@@ -350,14 +475,15 @@ credential without returning a raw token through Flary. Hosted OpenAI login uses
 authorization by default. Local self-hosted clients can select
 `browser_callback`. Claude uses authorization-code completion.
 
-The current release candidate pins `@flue/runtime` and `@flue/sdk` to
-`1.0.0-beta.9`, and pins `@earendil-works/pi-ai` to `0.80.10`. The package
-applies checked-in patches during installation. Run
-`npm run test:npm-install` before publishing. Stable `0.5.0` must use an
-upstream stable Flue release; it must not depend on a patched beta runtime.
+Flary 0.6 pins `@flue/runtime` and `@flue/sdk` to `1.0.0-beta.9`, and pins
+`@earendil-works/pi-ai` to `0.80.10`. The package applies checked-in patches
+during installation. This is an intentional 0.6 release decision: the Flue
+pin is immutable, the patch is checked into the package, and the generated
+host records the exact runtime revision. Move to an upstream stable Flue
+release only in a later Flary release after the same recovery tests pass.
 
-Install the pending release with `npm install flary@next`. Do not promote it
-to the `latest` tag until the live provider, Durable Object eviction/restart,
+Run `npm run test:npm-install` and `npm run test:live` before publishing.
+Promote 0.6 to the `latest` tag only after the live provider, Durable Object eviction/restart,
 tenant-isolation, approval/input, and clean-starter deployment tests pass.
 
 The host must store private login state and credentials with authenticated

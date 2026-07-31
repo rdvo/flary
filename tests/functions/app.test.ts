@@ -16,6 +16,21 @@ test("app.fn validates input and output and returns a callable", async () => {
   await assert.rejects(() => add({ left: "2", right: 3 } as never));
 });
 
+test("app exposes host-owned non-chat model operations", async () => {
+  const app = flary({
+    operations: {
+      embed: async (request) => ({
+        embeddings: Array.isArray(request.input)
+          ? request.input.map(() => [0.1, 0.2])
+          : [[0.1, 0.2]],
+        model: "test-embed",
+      }),
+    },
+  });
+  const result = await app.embed({ input: "hello", model: "test/embed" });
+  assert.deepEqual(result.embeddings, [[0.1, 0.2]]);
+});
+
 test("start validates input before admitting a run", async () => {
   const app = flary();
   const fn = app.fn({

@@ -16,6 +16,8 @@ import {
   type TrustedRunContext,
 } from "../host/runs.js";
 import { FlaryHostError } from "../host/errors.js";
+import { createFlaryHostRouter } from "../host/router.js";
+import type { FlaryThreadHostService } from "../host/types.js";
 import {
   OpenAICompatibleAdapter,
   AnthropicMessagesAdapter,
@@ -26,7 +28,34 @@ import type {
   NormalizedModelRequest,
   ProviderMessage,
 } from "../providers/contracts.js";
-import { ReasoningEffortSchema } from "../contracts/provider.js";
+import {
+  ModelSelectionSchema,
+  normalizeModelInput,
+  ReasoningEffortSchema,
+} from "../contracts/provider.js";
+import {
+  createAdapterOperationHandlers,
+  createModelOperations,
+  type AudioResult,
+  type EmbedRequest,
+  type EmbedResult,
+  type GenerateAudioRequest,
+  type GenerateImageRequest,
+  type GenerateObjectRequest,
+  type GenerateTextRequest,
+  type GenerateTextResult,
+  type GenerateVideoRequest,
+  type ImageResult,
+  type ModelOperationContext,
+  type ModelOperations,
+  type ModerateRequest,
+  type ModerationResult,
+  type RerankRequest,
+  type RerankResult,
+  type TranscribeRequest,
+  type TranscriptionResult,
+  type VideoResult,
+} from "../providers/operations.js";
 import { JsonObjectSchema } from "../contracts/common.js";
 import {
   createFlueBackedFlaryRun,
@@ -38,6 +67,9 @@ import {
 } from "./runs.js";
 import type {
   FlaryAppOptions,
+  FlaryAgent,
+  FlaryAgentOptions,
+  FlaryApplicationExport,
   FlaryCallableLike,
   FlaryEvent,
   FlaryFunction,
@@ -60,6 +92,7 @@ import type {
   FlaryToolSource,
   FlaryWorkspaceSource,
   FlaryIdentity,
+  FlarySkill,
 } from "./types.js";
 import {
   createFlaryCodemodeExecutor,
@@ -72,10 +105,19 @@ import {
 } from "./openapi.js";
 import { createMcpConnection } from "./mcp.js";
 import type { ApprovalContinuation } from "../execution/approval-continuation.js";
+import {
+  DurableSandboxProcessRuntime,
+} from "../cloudflare/sandbox-process-runtime.js";
+import {
+  SqliteSandboxProcessRegistry,
+  hashSandboxEnvironment,
+} from "../cloudflare/sandbox-process-registry.js";
 
 const FUNCTION_STATE = Symbol("flary.function.state");
+const AGENT_STATE = Symbol("flary.agent.state");
 
 type AnyFunction = FlaryFunction<any, any, any>;
+type AnyAgent = FlaryAgent<any>;
 
 interface Invocation<TBindings> {
   readonly bindings: TBindings;
@@ -95,6 +137,11 @@ interface FunctionState {
   readonly mode: FlaryFunctionMode;
   functionId?: string;
   invoke(input: unknown, invocation?: Partial<Invocation<any>>): Promise<unknown>;
+}
+
+interface AgentState {
+  readonly app: FlaryApplication<any>;
+  readonly definition: FlaryAgentOptions<any>;
 }
 
 export interface FlaryWorkflowInvocation {
@@ -134,15 +181,105 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
   readonly runStore;
   readonly stepStore;
   #runServiceOverride: FlaryAppOptions<TBindings>["runService"];
+  #threadServiceOverride: FlaryAppOptions<TBindings>["threadService"];
 
   constructor(options: FlaryAppOptions<TBindings> = {}) {
     this.options = options;
     this.#runServiceOverride = options.runService;
+    this.#threadServiceOverride = options.threadService;
     this.runStore = options.runStore ??
       (options.runStorage
         ? new DurableObjectFlaryFunctionRunStore(options.runStorage)
         : new InMemoryFlaryFunctionRunStore());
     this.stepStore = options.stepStore;
+  }
+
+  /**
+   * Run a provider-neutral text operation. A host handler may replace the
+   * built-in chat adapter path when it needs a managed provider gateway.
+   */
+  generateText(
+    request: GenerateTextRequest,
+    context?: Partial<ModelOperationContext<TBindings>>,
+  ): Promise<GenerateTextResult> {
+    return this.modelOperations().generateText(request, context);
+  }
+
+  /** Generate and validate one structured object with a Zod schema. */
+  generateObject<TSchema extends FlarySchema>(
+    request: GenerateObjectRequest<TSchema>,
+    context?: Partial<ModelOperationContext<TBindings>>,
+  ): Promise<z.output<TSchema>> {
+    return this.modelOperations().generateObject(request, context);
+  }
+
+  /** Generate embeddings through a host-owned provider operation. */
+  embed(
+    request: EmbedRequest,
+    context?: Partial<ModelOperationContext<TBindings>>,
+  ): Promise<EmbedResult> {
+    return this.modelOperations().embed(request, context);
+  }
+
+  generateImage(
+    request: GenerateImageRequest,
+    context?: Partial<ModelOperationContext<TBindings>>,
+  ): Promise<ImageResult> {
+    return this.modelOperations().generateImage(request, context);
+  }
+
+  transcribe(
+    request: TranscribeRequest,
+    context?: Partial<ModelOperationContext<TBindings>>,
+  ): Promise<TranscriptionResult> {
+    return this.modelOperations().transcribe(request, context);
+  }
+
+  generateAudio(
+    request: GenerateAudioRequest,
+    context?: Partial<ModelOperationContext<TBindings>>,
+  ): Promise<AudioResult> {
+    return this.modelOperations().generateAudio(request, context);
+  }
+
+  generateVideo(
+    request: GenerateVideoRequest,
+    context?: Partial<ModelOperationContext<TBindings>>,
+  ): Promise<VideoResult> {
+    return this.modelOperations().generateVideo(request, context);
+  }
+
+  rerank(
+    request: RerankRequest,
+    context?: Partial<ModelOperationContext<TBindings>>,
+  ): Promise<RerankResult> {
+    return this.modelOperations().rerank(request, context);
+  }
+
+  moderate(
+    request: ModerateRequest,
+    context?: Partial<ModelOperationContext<TBindings>>,
+  ): Promise<ModerationResult> {
+    return this.modelOperations().moderate(request, context);
+  }
+
+  private modelOperations(): ModelOperations<TBindings> {
+    const fallback = createAdapterOperationHandlers<TBindings>({
+      defaultModel: this.options.model,
+      resolveAdapter: (selection, bindings) =>
+        this.resolveAdapter(selection.provider, bindings),
+    });
+    return createModelOperations<TBindings>({
+      handlers: {
+        ...fallback,
+        ...(this.options.operations ?? {}),
+      },
+      defaults: this.options.model ? { model: this.options.model } : undefined,
+      // Do not parse an empty binding object here. Hosts often require a
+      // secret-bearing binding schema; the request-scoped context supplies it.
+      bindings: this.options.defaultBindings,
+      identity: this.options.defaultIdentity,
+    });
   }
 
   /**
@@ -156,6 +293,14 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     runService: NonNullable<FlaryAppOptions<TBindings>["runService"]>,
   ): this {
     this.#runServiceOverride = runService;
+    return this;
+  }
+
+  /** Attach the generated durable thread control service. */
+  attachThreadService(
+    threadService: NonNullable<FlaryAppOptions<TBindings>["threadService"]>,
+  ): this {
+    this.#threadServiceOverride = threadService;
     return this;
   }
 
@@ -236,6 +381,59 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
       options: FlaryRunOptions = {},
     ) => this.streamState(state, input, options) as AsyncIterable<FlaryEvent<z.output<TOutput>>>;
     return callable;
+  }
+
+  /** Define a persistent interactive agent. Flue remains its transcript owner. */
+  agent(definition: FlaryAgentOptions<TBindings>): FlaryAgent<TBindings> {
+    assertNamespace(definition.name);
+    validateAgentDefinition(definition);
+    const value = {
+      kind: "agent" as const,
+      name: definition.name,
+      definition: Object.freeze({ ...definition }),
+      revision: stableRevision({
+        name: definition.name,
+        model: definition.model ?? this.options.model,
+        models: definition.models,
+        thinking: definition.thinking,
+        mode: definition.mode,
+        tools: definition.tools?.descriptors ?? [],
+        skills: definition.skills?.map((skill) => ({
+          name: skill.name,
+          revision: skill.revision,
+        })),
+        subagents: Object.keys(definition.subagents ?? {}).sort(),
+        delegation: definition.delegation,
+        compaction: definition.compaction,
+        limits: definition.limits,
+      }),
+    } as FlaryAgent<TBindings> & { [AGENT_STATE]?: AgentState };
+    Object.defineProperty(value, AGENT_STATE, {
+      value: { app: this, definition },
+    });
+    return Object.freeze(value);
+  }
+
+  /** Define one immutable, lazily discoverable skill revision. */
+  skill(input: {
+    readonly name: string;
+    readonly description?: string;
+    readonly instructions: string;
+    readonly metadata?: Readonly<Record<string, unknown>>;
+  }): FlarySkill {
+    assertNamespace(input.name);
+    if (!input.instructions.trim()) {
+      throw new FlaryFunctionError(
+        "skill_instructions_missing",
+        "A skill needs instructions.",
+        400,
+      );
+    }
+    return Object.freeze({
+      kind: "skill" as const,
+      ...input,
+      revision: stableRevision(input),
+    });
   }
 
   /** Build and validate one lazy tool registry. */
@@ -340,21 +538,34 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     });
   }
 
-  /** Serve a map of functions from a Hono Worker. */
-  serve<TFunctions extends Readonly<Record<string, AnyFunction>>>(
-    functions: TFunctions,
+  /** Serve a map of finite functions and persistent agents from one Worker. */
+  serve<TExports extends Readonly<Record<string, FlaryApplicationExport>>>(
+    exports: TExports,
     options: FlaryServeOptions = {},
   ): Hono<{ Bindings: TBindings }> {
     const router = new Hono<{ Bindings: TBindings }>();
     const prefix = normalizePrefix(options.prefix ?? "");
+    const functions: Record<string, AnyFunction> = {};
+    const agents: Record<string, AnyAgent> = {};
     const functionIds = new Set<string>();
-    for (const [exportName, value] of Object.entries(functions)) {
+    for (const [exportName, value] of Object.entries(exports)) {
       if (!isSafeName(exportName)) {
         throw new FlaryFunctionError(
-          "unsafe_function_name",
-          `Function name '${exportName}' is not safe.`,
+          "unsafe_export_name",
+          `Export name '${exportName}' is not safe.`,
           400,
         );
+      }
+      if (isFlaryAgent(value)) {
+        if (agents[value.name]) {
+          throw new FlaryFunctionError(
+            "duplicate_agent_id",
+            `Agent id '${value.name}' is already registered.`,
+            400,
+          );
+        }
+        agents[value.name] = value;
+        continue;
       }
       const state = this.functionState(value, exportName);
       state.functionId ??= exportName;
@@ -366,6 +577,7 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
         );
       }
       functionIds.add(state.functionId);
+      functions[exportName] = value;
     }
 
     router.get(`${prefix}/health`, (context) =>
@@ -373,6 +585,15 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     );
     router.get(`${prefix}/functions`, (context) =>
       context.json({ functions: Object.keys(functions) }),
+    );
+    router.get(`${prefix}/agents`, (context) =>
+      context.json({
+        agents: Object.values(agents).map((agent) => ({
+          name: agent.name,
+          description: agent.definition.description,
+          revision: agent.revision,
+        })),
+      }),
     );
 
     router.post(`${prefix}/functions/:name`, async (context) => {
@@ -620,6 +841,53 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
       return context.json({ runId: run.runId, status: run.status });
     });
 
+    if (Object.keys(agents).length > 0) {
+      router.route(
+        prefix || "/",
+        createFlaryHostRouter<TBindings>({
+          authorize: async ({ request, env, appId }) => {
+            if (!agents[appId]) {
+              throw new FlaryHostError(404, "agent_not_found", "The agent was not found.");
+            }
+            const identity = await this.authorize(request, this.parseBindings(env));
+            if (!identity) {
+              throw new FlaryHostError(
+                401,
+                "authentication_required",
+                "This agent requires an authenticated identity.",
+              );
+            }
+            return {
+              organizationId: identity.tenantId,
+              actor: {
+                id: identity.userId ?? identity.tenantId,
+                kind: identity.userId ? "user" : "service",
+              },
+            };
+          },
+          service: (env) => {
+            // Resolve this at request time. A generated Cloudflare host calls
+            // app.serve() once while it imports the authored module, then
+            // attaches the Durable Object service before the first request.
+            const threadService = this.#threadServiceOverride;
+            if (!threadService) {
+              throw new FlaryFunctionError(
+                "thread_service_missing",
+                "Persistent agents need the generated durable thread service.",
+                500,
+              );
+            }
+            return agentAwareThreadService(
+              resolveThreadService(threadService, {
+                bindings: this.parseBindings(env),
+              }),
+              agents,
+            );
+          },
+        }),
+      );
+    }
+
     router.onError((error, context) => {
       if (error instanceof FlaryHostError) {
         return context.json(
@@ -736,6 +1004,98 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     });
   }
 
+  /** Execute the same isolated lazy tool runtime for an interactive agent. */
+  async executeAgentCode(
+    value: FlaryAgent<TBindings>,
+    input: {
+      readonly code: string;
+      readonly runId: string;
+      readonly bindings: TBindings;
+      readonly signal?: AbortSignal;
+    },
+  ): Promise<unknown> {
+    const state = getAgentState(value);
+    if (!state || state.app !== this || !state.definition.tools) {
+      throw new FlaryFunctionError(
+        "agent_tools_missing",
+        "This agent has no tool registry.",
+        500,
+      );
+    }
+    const context = this.contextFor({
+      bindings: input.bindings,
+      signal: input.signal ?? new AbortController().signal,
+      runId: input.runId,
+      stepCache: new Map(),
+    });
+    const executor =
+      this.options.code ?? await this.defaultCodeExecutor(input.bindings);
+    if (!executor) {
+      throw new FlaryFunctionError(
+        "code_executor_missing",
+        "This agent needs the Flary Dynamic Worker executor.",
+        500,
+      );
+    }
+    return executor.execute({
+      code: input.code,
+      bindings: input.bindings,
+      tools: state.definition.tools,
+      context,
+      limits: state.definition.limits,
+    });
+  }
+
+  async agentApprovalContinuation(
+    value: FlaryAgent<TBindings>,
+    input: {
+      readonly bindings: TBindings;
+      readonly runId: string;
+      readonly signal?: AbortSignal;
+    },
+  ): Promise<ApprovalContinuation | undefined> {
+    const state = getAgentState(value);
+    if (!state?.definition.tools) return undefined;
+    const executor =
+      this.options.code ?? await this.defaultCodeExecutor(input.bindings);
+    if (!executor?.approvalContinuation) return undefined;
+    return executor.approvalContinuation({
+      bindings: input.bindings,
+      tools: state.definition.tools,
+      context: this.contextFor({
+        bindings: input.bindings,
+        signal: input.signal ?? new AbortController().signal,
+        runId: input.runId,
+        stepCache: new Map(),
+      }),
+    });
+  }
+
+  async agentApprovalBridge(
+    value: FlaryAgent<TBindings>,
+    input: {
+      readonly bindings: TBindings;
+      readonly runId: string;
+      readonly signal?: AbortSignal;
+    },
+  ): Promise<FlaryCodemodeApprovalBridge | undefined> {
+    const state = getAgentState(value);
+    if (!state?.definition.tools) return undefined;
+    const executor =
+      this.options.code ?? await this.defaultCodeExecutor(input.bindings);
+    if (!executor?.approvalBridge) return undefined;
+    return executor.approvalBridge({
+      bindings: input.bindings,
+      tools: state.definition.tools,
+      context: this.contextFor({
+        bindings: input.bindings,
+        signal: input.signal ?? new AbortController().signal,
+        runId: input.runId,
+        stepCache: new Map(),
+      }),
+    });
+  }
+
   /**
    * Create the Flue approval recovery hook for one generated function.
    * Codemode keeps the pending action and replay cursor in its Durable Object
@@ -810,9 +1170,17 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
   }
 
   private parseBindings(value: unknown): TBindings {
-    return this.options.bindings
-      ? this.options.bindings.parse(value)
-      : (value as TBindings);
+    if (!this.options.bindings) return value as TBindings;
+    const parsed = this.options.bindings.parse(value);
+    // Zod object schemas strip unknown keys by default. Keep the validated
+    // view, but also retain host bindings that are added by Flary's generated
+    // Cloudflare host (Durable Objects, D1, R2, queues, and loaders). Without
+    // this merge, an authored binding schema can remove the services needed by
+    // the generated runtime before it receives the request.
+    if (isRecord(value) && isRecord(parsed)) {
+      return { ...value, ...parsed } as TBindings;
+    }
+    return parsed;
   }
 
   private async authorize(
@@ -1562,6 +1930,148 @@ export function getFunctionApp(
   return getFunctionState(value)?.app;
 }
 
+export function isFlaryAgent(value: unknown): value is FlaryAgent<any> {
+  return isRecord(value) &&
+    value.kind === "agent" &&
+    typeof value.name === "string" &&
+    typeof value.revision === "string";
+}
+
+export function getAgentState(value: unknown): AgentState | undefined {
+  if (!isFlaryAgent(value)) return undefined;
+  return (value as FlaryAgent<any> & { [AGENT_STATE]?: AgentState })[
+    AGENT_STATE
+  ];
+}
+
+export function getAgentApp(
+  value: unknown,
+): FlaryApplication<any> | undefined {
+  return getAgentState(value)?.app;
+}
+
+function resolveThreadService<TBindings>(
+  service: NonNullable<FlaryAppOptions<TBindings>["threadService"]>,
+  input: { readonly bindings: TBindings },
+): FlaryThreadHostService {
+  return typeof service === "function"
+    ? service({ bindings: input.bindings })
+    : service;
+}
+
+function agentAwareThreadService(
+  service: FlaryThreadHostService,
+  agents: Readonly<Record<string, AnyAgent>>,
+): FlaryThreadHostService {
+  return new Proxy(service, {
+    get(target, property, receiver) {
+      if (property === "create") {
+        return async (
+          scope: Parameters<FlaryThreadHostService["create"]>[0],
+          input: Parameters<FlaryThreadHostService["create"]>[1],
+        ) => {
+          const agent = agents[scope.appId];
+          if (!agent) {
+            throw new FlaryHostError(
+              404,
+              "agent_not_found",
+              "The agent was not found.",
+            );
+          }
+          const requestedModel = input.model ?? (
+            agent.definition.model
+              ? parseFlueModelSpecifier(agent.definition.model)
+              : agent.definition.models?.allow[0]
+                ? normalizeModelInput(agent.definition.models.allow[0])
+                : undefined
+          );
+          if (agent.definition.models?.allow.length && requestedModel) {
+            const allowed = agent.definition.models.allow.some((candidate) => {
+              const parsed = normalizeModelInput(candidate);
+              return parsed.provider === requestedModel.provider &&
+                parsed.model === requestedModel.model &&
+                parsed.deployment === requestedModel.deployment &&
+                parsed.variant === requestedModel.variant;
+            });
+            if (!allowed) {
+              throw new FlaryFunctionError(
+                "invalid_agent_model",
+                "The selected model is not allowed for this agent.",
+                400,
+              );
+            }
+          }
+          return target.create(scope, {
+            ...input,
+            agentId: agent.name,
+            model: input.model ?? (
+              agent.definition.model
+                ? parseFlueModelSpecifier(agent.definition.model)
+                : agent.definition.models?.allow[0]
+                  ? normalizeModelInput(agent.definition.models.allow[0])
+                  : getAgentState(agent)?.app.options.model
+                    ? parseFlueModelSpecifier(
+                        getAgentState(agent)!.app.options.model!,
+                      )
+                  : parseFlueModelSpecifier("openai/gpt-5")
+            ),
+            metadata: {
+              ...(input.metadata ?? {}),
+              flaryAgentRevision: agent.revision,
+              ...(agent.definition.models
+                ? {
+                    flaryModelPolicy: {
+                      allow: agent.definition.models.allow.map((candidate) =>
+                        normalizeModelInput(candidate),
+                      ),
+                      switching: agent.definition.models.switching ?? "user",
+                      fallback: agent.definition.models.fallback ?? "none",
+                      ...(agent.definition.models.compactionModel
+                        ? {
+                            compactionModel: normalizeModelInput(
+                              agent.definition.models.compactionModel,
+                            ),
+                          }
+                        : {}),
+                    },
+                  }
+                : {}),
+              flaryDelegation: {
+                mode: agent.definition.delegation?.mode ?? "explicit",
+                maxConcurrentChildren:
+                  agent.definition.delegation?.maxConcurrent ?? 4,
+                maxTotalChildren:
+                  agent.definition.delegation?.maxTotal ?? 16,
+                maxDepth: agent.definition.delegation?.maxDepth ?? 2,
+              },
+              flaryCompaction: {
+                ...(agent.definition.compaction ?? { mode: "auto" }),
+              },
+              flaryLimits: { ...(agent.definition.limits ?? {}) },
+            },
+          });
+        };
+      }
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+function stableRevision(value: unknown): string {
+  const text = stableJson(value);
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    first = Math.imul(first ^ code, 0x01000193) >>> 0;
+    second = Math.imul(second ^ code, 0x85ebca6b) >>> 0;
+  }
+  return `rev_${first.toString(16).padStart(8, "0")}${second
+    .toString(16)
+    .padStart(8, "0")}`;
+}
+
 function validateFunctionDefinition(
   definition: FlaryFunctionOptions<any, any, any>,
 ): void {
@@ -1625,6 +2135,111 @@ function validateFunctionDefinition(
       "delegation.maxConcurrent cannot exceed delegation.maxTotal.",
       400,
     );
+  }
+}
+
+function validateAgentDefinition(
+  definition: FlaryAgentOptions<unknown>,
+): void {
+  const positiveInteger = (value: number | undefined, label: string): void => {
+    if (value !== undefined && (!Number.isSafeInteger(value) || value < 1)) {
+      throw new FlaryFunctionError(
+        "invalid_agent_limit",
+        `${label} must be a positive integer.`,
+        400,
+      );
+    }
+  };
+  positiveInteger(definition.delegation?.maxConcurrent, "delegation.maxConcurrent");
+  positiveInteger(definition.delegation?.maxTotal, "delegation.maxTotal");
+  positiveInteger(definition.delegation?.maxDepth, "delegation.maxDepth");
+  positiveInteger(definition.compaction?.reserveTokens, "compaction.reserveTokens");
+  positiveInteger(definition.compaction?.thresholdTokens, "compaction.thresholdTokens");
+  positiveInteger(definition.limits?.steps, "limits.steps");
+  positiveInteger(definition.limits?.toolCalls, "limits.toolCalls");
+  positiveInteger(definition.limits?.timeoutMs, "limits.timeoutMs");
+  if (
+    definition.delegation?.maxConcurrent !== undefined &&
+    definition.delegation.maxTotal !== undefined &&
+    definition.delegation.maxConcurrent > definition.delegation.maxTotal
+  ) {
+    throw new FlaryFunctionError(
+      "invalid_agent_delegation",
+      "delegation.maxConcurrent cannot exceed delegation.maxTotal.",
+      400,
+    );
+  }
+  if (
+    definition.limits?.costUsd !== undefined &&
+    (!Number.isFinite(definition.limits.costUsd) || definition.limits.costUsd <= 0)
+  ) {
+    throw new FlaryFunctionError(
+      "invalid_agent_limit",
+      "limits.costUsd must be a positive finite number.",
+      400,
+    );
+  }
+  for (const skill of definition.skills ?? []) {
+    if (skill.kind !== "skill" || !skill.revision) {
+      throw new FlaryFunctionError(
+        "invalid_agent_skill",
+        `Agent '${definition.name}' has an invalid skill.`,
+        400,
+      );
+    }
+  }
+  if (definition.models) {
+    if (definition.models.allow.length === 0) {
+      throw new FlaryFunctionError(
+        "invalid_agent_models",
+        "models.allow must contain at least one model.",
+        400,
+      );
+    }
+    for (const candidate of definition.models.allow) {
+      try {
+        ModelSelectionSchema.parse(normalizeModelInput(candidate));
+      } catch {
+        throw new FlaryFunctionError(
+          "invalid_agent_model",
+          "Every allowed model must use the provider/model form.",
+          400,
+        );
+      }
+    }
+    const defaultModel = definition.model ?? undefined;
+    if (defaultModel) {
+      const parsedDefault = parseFlueModelSpecifier(defaultModel);
+      if (
+        !parsedDefault ||
+        !definition.models.allow.some((candidate) => {
+          const parsed = normalizeModelInput(candidate);
+          return parsed.provider === parsedDefault.provider &&
+            parsed.model === parsedDefault.model &&
+            parsed.deployment === parsedDefault.deployment &&
+            parsed.variant === parsedDefault.variant;
+        })
+      ) {
+        throw new FlaryFunctionError(
+          "invalid_agent_model_policy",
+          "The agent default model must be present in models.allow.",
+          400,
+        );
+      }
+    }
+    if (definition.models.compactionModel !== undefined) {
+      try {
+        ModelSelectionSchema.parse(
+          normalizeModelInput(definition.models.compactionModel),
+        );
+      } catch {
+        throw new FlaryFunctionError(
+          "invalid_agent_compaction_model",
+          "The compaction model must use the provider/model form.",
+          400,
+        );
+      }
+    }
   }
 }
 
@@ -1958,39 +2573,121 @@ function defaultSandboxResolver<TBindings>(
       normalizeId: true,
       labels: { runId: input.context.runId ?? "flary" },
     });
+    const processRuntime = input.storage
+      ? new DurableSandboxProcessRuntime({
+          sandbox,
+          registry: new SqliteSandboxProcessRegistry(input.storage),
+        })
+      : undefined;
     return {
-      descriptors: [{
-        name: "exec",
-        description: "Run one command in the isolated Linux sandbox",
-        operation: "write",
-        requiresApproval: true,
-        inputSchema: {
-          type: "object",
-          properties: {
-            command: { type: "string", minLength: 1 },
-            cwd: { type: "string" },
-            timeoutMs: { type: "number", minimum: 1 },
+      descriptors: [
+        {
+          name: "exec",
+          description: "Run one command in the isolated Linux sandbox",
+          operation: "write",
+          requiresApproval: true,
+          inputSchema: {
+            type: "object",
+            properties: {
+              command: { type: "string", minLength: 1 },
+              cwd: { type: "string" },
+              timeoutMs: { type: "number", minimum: 1 },
+            },
+            required: ["command"],
+            additionalProperties: false,
           },
-          required: ["command"],
-          additionalProperties: false,
         },
-      }],
+        ...(["processStart", "processAttach", "processStdin", "processSignal", "processSleep", "processWake"] as const)
+          .map((name) => ({
+            name,
+            description: `Durable sandbox ${name} operation`,
+            operation: (name === "processAttach" ? "read" : "write") as "read" | "write",
+            requiresApproval: name !== "processAttach",
+            inputSchema: { type: "object", additionalProperties: true },
+          })),
+      ],
       call: async (name, value) => {
-        if (name !== "exec" || !isRecord(value) || typeof value.command !== "string") {
-          throw new Error("Sandbox exec needs a command");
+        if (!isRecord(value)) throw new Error("Sandbox input must be an object");
+        if (name === "exec") {
+          if (typeof value.command !== "string") {
+            throw new Error("Sandbox exec needs a command");
+          }
+          const result = await sandbox.exec(value.command, {
+            ...(typeof value.cwd === "string" ? { cwd: value.cwd } : {}),
+            ...(typeof value.timeoutMs === "number" ? { timeout: value.timeoutMs } : {}),
+          });
+          return {
+            command: result.command,
+            exitCode: result.exitCode,
+            success: result.success,
+            stdout: result.stdout,
+            stderr: result.stderr,
+            duration: result.duration,
+          };
         }
-        const result = await sandbox.exec(value.command, {
-          ...(typeof value.cwd === "string" ? { cwd: value.cwd } : {}),
-          ...(typeof value.timeoutMs === "number" ? { timeout: value.timeoutMs } : {}),
-        });
-        return {
-          command: result.command,
-          exitCode: result.exitCode,
-          success: result.success,
-          stdout: result.stdout,
-          stderr: result.stderr,
-          duration: result.duration,
-        };
+        if (!processRuntime) {
+          throw new Error("Durable sandbox processes need Code Mode SQLite");
+        }
+        const processId =
+          stringValue(value.processId) ??
+          `process_${crypto.randomUUID().replaceAll("-", "")}`;
+        const requestId =
+          stringValue(value.requestId) ??
+          `control_${crypto.randomUUID().replaceAll("-", "")}`;
+        if (name === "processStart") {
+          if (typeof value.command !== "string") {
+            throw new Error("processStart needs a command");
+          }
+          return processRuntime.start({
+            id: processId,
+            runId: input.context.runId ?? sandboxId,
+            sandboxId,
+            command: value.command,
+            cwd: stringValue(value.cwd) ?? "/workspace",
+            ...(isRecord(value.environment)
+              ? {
+                  environmentHash: await hashSandboxEnvironment(
+                    Object.fromEntries(
+                      Object.entries(value.environment).map(([key, item]) => [
+                        key,
+                        String(item),
+                      ]),
+                    ),
+                  ),
+                }
+              : {}),
+          });
+        }
+        if (name === "processAttach") {
+          return processRuntime.attach(
+            processId,
+            typeof value.afterCursor === "number" ? value.afterCursor : 0,
+          );
+        }
+        if (name === "processStdin") {
+          if (typeof value.data !== "string") {
+            throw new Error("processStdin needs data");
+          }
+          return processRuntime.stdin({
+            requestId,
+            processId,
+            data: value.data,
+          });
+        }
+        if (name === "processSignal") {
+          return processRuntime.signal({
+            requestId,
+            processId,
+            signal: String(value.signal ?? "SIGTERM") as never,
+          });
+        }
+        if (name === "processSleep") {
+          return processRuntime.sleep(processId, requestId);
+        }
+        if (name === "processWake") {
+          return processRuntime.wake(processId, requestId);
+        }
+        throw new Error(`Sandbox tool '${name}' is not available`);
       },
     };
   };

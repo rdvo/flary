@@ -146,3 +146,44 @@ test("approval-required tools fail closed without a host approval handler", asyn
     /Approval is required/,
   );
 });
+
+test("lazy catalog actions emit redacted queryable audit records", async () => {
+  const catalog = new InMemoryToolCatalog();
+  defineFlaryTool({
+    id: "docs.search",
+    input: z.object({ query: z.string() }),
+    capabilities: ["docs.read"],
+    async execute(input) {
+      return { query: input.query };
+    },
+  }).register(catalog);
+  const audits: Array<{ action: string; inputHash?: string; state: string }> = [];
+  const runtime = new LazyToolRuntime({
+    catalog,
+    runId: "run_audit",
+    mode: {
+      ...resolveAgentMode("ask"),
+      allowedCapabilities: ["docs.read"],
+    },
+    onAudit(event) {
+      audits.push(event);
+    },
+  });
+
+  await runtime.search({ query: "private phrase" });
+  await runtime.describe("docs.search");
+  await runtime.call({
+    id: "docs.search",
+    callId: "call_docs",
+    arguments: { query: "private phrase" },
+  });
+
+  assert.deepEqual(audits.map(({ action }) => action), [
+    "search",
+    "describe",
+    "call",
+  ]);
+  assert.ok(audits[0]?.inputHash?.match(/^[0-9a-f]{64}$/));
+  assert.equal(JSON.stringify(audits).includes("private phrase"), false);
+  assert.ok(audits.every(({ state }) => state === "completed"));
+});
