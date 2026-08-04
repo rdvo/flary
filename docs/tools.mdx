@@ -53,11 +53,33 @@ const billing = app.openapi({
 });
 ```
 
-## Lazy model access
+## Built-in coding tools
 
-The model sees one bounded `execute` tool. Generated code can search the
-catalog, describe one selected tool, and call it. The full catalog and all
-schemas do not enter every model request.
+`app.workspace()` is a complete durable file and Git source. It adds `list`,
+`stat`, `glob`, `grep`, `read`, `diff`, `write`, `edit`, `batchEdit`, `move`,
+`delete`, and the governed Git operations. File writes and state-changing Git
+operations require approval by default.
+
+`app.sandbox()` is separate. It runs Linux commands, tests, builds, package
+installation, and durable processes. Use the workspace source for file and Git
+state. Use the Sandbox source for programs that need a Linux process.
+
+See the [complete Codex-style coding agent](/docs/examples/coding-agent/) for
+the real starter files, every tool name, the isolated executor flow, a durable
+reviewer subagent, checkpoints, and reconnect code.
+
+## Small core, lazy extensions
+
+The model sees one bounded `execute` tool. The tool instructions include the
+names and purpose of configured core workspace, shell, and browser actions.
+The agent therefore knows that actions such as `workspace.grep`,
+`workspace.edit`, and `shell.exec` exist without a catalog search.
+
+The exact action schemas are still lazy. Generated code describes a selected
+action before it calls it. MCP, OpenAPI, local functions, skills, and large or
+changing catalogs stay fully lazy. This keeps the stable coding surface easy
+to use and prevents hundreds of external schemas from entering every model
+request.
 
 Every call passes through capability checks, policy, approval, input
 validation, redaction, limits, and durable replay. Provider, MCP, and API

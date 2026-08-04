@@ -68,8 +68,12 @@ test("prompt functions expose one execute tool and validate the final output", a
 
   const result = await support({ question: "find x" });
   assert.deepEqual(result, { answer: "ok" });
-  const first = requests[0] as { tools?: readonly { name: string }[] };
+  const first = requests[0] as {
+    tools?: readonly { name: string; description?: string }[];
+  };
   assert.deepEqual(first.tools?.map((tool) => tool.name), ["execute"]);
+  assert.match(first.tools?.[0]?.description ?? "", /tools\.search/);
+  assert.doesNotMatch(first.tools?.[0]?.description ?? "", /lookup\.inputSchema/);
 });
 
 test("Codemode approvals map to Flue continuation and replay", async () => {

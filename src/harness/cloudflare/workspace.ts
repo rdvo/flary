@@ -293,6 +293,7 @@ export async function createCloudflareWorkspaceConnection(
   const fileTools = [
     ["read", "Read one workspace file", "read"],
     ["list", "List workspace files", "read"],
+    ["stat", "Read safe metadata for one workspace file", "read"],
     ["glob", "Find workspace files by glob", "read"],
     ["grep", "Search workspace file contents", "read"],
     ["diff", "Compare workspace files or content", "read"],
@@ -310,7 +311,14 @@ export async function createCloudflareWorkspaceConnection(
         description,
         operation,
         requiresApproval: operation === "write",
-        inputSchema: { type: "object", additionalProperties: true },
+        inputSchema: name === "stat"
+          ? {
+              type: "object",
+              properties: { path: { type: "string" } },
+              required: ["path"],
+              additionalProperties: false,
+            }
+          : { type: "object", additionalProperties: true },
       })),
       ...[...GIT_METHODS].map((name) => ({
         name: `git_${name}`,
@@ -386,9 +394,12 @@ async function callWorkspace(
   if (typeof operation !== "function") {
     throw new Error("The workspace operation is not available");
   }
+  const normalizedInput = method === "stat" && isRecord(input)
+    ? input.path
+    : input;
   return (operation as (value: unknown) => Promise<unknown>).call(
     workspace,
-    input,
+    normalizedInput,
   );
 }
 

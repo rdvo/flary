@@ -31,6 +31,16 @@ test("generated workspace connections share one durable object and expose Git", 
   const parent = await createCloudflareWorkspaceConnection(namespace, scope);
   const child = await createCloudflareWorkspaceConnection(namespace, scope);
 
+  for (const name of ["list", "stat", "glob", "grep", "read", "diff"]) {
+    const descriptor = parent.descriptors.find((tool) => tool.name === name);
+    assert.equal(descriptor?.operation, "read", `${name} is a built-in read tool`);
+    assert.equal(descriptor?.requiresApproval, false);
+  }
+  for (const name of ["write", "edit", "batchEdit", "move", "delete"]) {
+    const descriptor = parent.descriptors.find((tool) => tool.name === name);
+    assert.equal(descriptor?.operation, "write", `${name} is a built-in write tool`);
+    assert.equal(descriptor?.requiresApproval, true);
+  }
   assert.ok(parent.descriptors.some((tool) => tool.name === "git_status"));
   assert.ok(parent.descriptors.some((tool) => tool.name === "git_push"));
   assert.equal(

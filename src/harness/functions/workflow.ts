@@ -41,6 +41,10 @@ import type {
   ApprovalRecoveryState,
 } from "../execution/approval-continuation.js";
 import type { UserInputQuestion, UserInputRecord } from "../contracts/user-input.js";
+import {
+  coreToolGuidance,
+  executeToolDescription,
+} from "./tool-guidance.js";
 
 const WorkflowEnvelopeSchema = v.object({
   __flary: v.object({
@@ -98,10 +102,9 @@ export function defineFlaryFunctionWorkflow(
       ? {
           tools: [
             ...(definition.tools
-              ? [defineTool({
+                ? [defineTool({
                   name: "execute",
-                  description:
-                    "Run bounded TypeScript in Flary's isolated tool runtime. Search and describe tools before calling them.",
+                  description: executeToolDescription(definition.tools),
                   input: v.object({ code: v.string() }),
                   async run({ input, signal }) {
                     return toJson(
@@ -184,10 +187,9 @@ export function defineFlaryFunctionAgent(
       ? {
           tools: [
             ...(definition.tools
-              ? [defineTool({
+                ? [defineTool({
                   name: "execute",
-                  description:
-                    "Run bounded TypeScript in Flary's isolated tool runtime. Search and describe tools before calling them.",
+                  description: executeToolDescription(definition.tools),
                   input: v.object({ code: v.string() }),
                   async run({ input, signal }) {
                     return toJson(
@@ -238,8 +240,7 @@ export function defineFlaryInteractiveAgent(
       ...(definition.tools
         ? [defineTool({
             name: "execute",
-            description:
-              "Run bounded TypeScript in Flary's isolated tool runtime. Search and describe tools before calling them.",
+            description: executeToolDescription(definition.tools),
             input: v.object({ code: v.string() }),
             async run({ input, signal }) {
               return toJson(await state.app.executeAgentCode(active, {
@@ -415,7 +416,7 @@ function interactiveAgentInstructions(value: FlaryAgent<any>): string {
       `Act as the ${definition.name} agent.`,
     definition.mode ? `Operating mode: ${definition.mode}.` : "",
     definition.tools
-      ? "You have one execute tool. Its code can search, describe, and call the private tool catalog."
+      ? `You have one execute tool. ${coreToolGuidance(definition.tools)}`
       : "",
     definition.delegation?.mode === "disabled"
       ? "Do not delegate work."
@@ -611,7 +612,7 @@ function functionInstructions(
     definition.description ?? "Complete the Flary function.",
     definition.mode ? `Operating mode: ${definition.mode}.` : "",
     definition.tools
-      ? "You have one execute tool. Its code can search, describe, and call the private tool catalog."
+      ? `You have one execute tool. ${coreToolGuidance(definition.tools)}`
       : "",
     definition.delegation?.mode === "disabled"
       ? "Do not delegate work to subagents."
@@ -650,7 +651,7 @@ async function functionSubagents(
     const tools = definition.tools
       ? [defineTool({
           name: "execute",
-          description: "Run bounded TypeScript in Flary's isolated tool runtime.",
+          description: executeToolDescription(definition.tools),
           input: v.object({ code: v.string() }),
           async run({ input, signal }) {
             return toJson(await child.app.executeCodeFromWorkflow(candidate, {

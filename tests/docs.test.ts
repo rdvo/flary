@@ -58,3 +58,23 @@ test("beginner documentation has no hard-coded release or internal engine setup"
   assert.match(layout, /packageManifest\.version/);
   assert.doesNotMatch(layout, /docs-version">0\./);
 });
+
+test("the coding guide uses the built starter and names the built-in coding tools", () => {
+  const guide = fs.readFileSync(
+    path.join(docsRoot, "examples/coding-agent.mdx"),
+    "utf8",
+  );
+  const tools = fs.readFileSync(
+    path.join(root, "templates/starter/src/tools.ts"),
+    "utf8",
+  );
+  const coder = fs.readFileSync(
+    path.join(root, "templates/starter/src/coder.ts"),
+    "utf8",
+  );
+  assert.match(guide, /templates\/starter\/src\/tools\.ts\?raw/);
+  assert.match(guide, /workspace\.(?:grep|read)/);
+  assert.match(guide, /shell\.exec/);
+  assert.match(tools, /app\.workspace\(/);
+  assert.match(coder, /subagents:\s*\{\s*reviewer\s*\}/);
+});

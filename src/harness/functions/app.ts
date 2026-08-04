@@ -118,6 +118,7 @@ import {
   hashSandboxEnvironment,
 } from "../cloudflare/sandbox-process-registry.js";
 import { createCloudflareWorkspaceConnection } from "../cloudflare/workspace.js";
+import { executeToolDescription } from "./tool-guidance.js";
 import { CloudflareSandboxWorkspaceBackend } from "../cloudflare/workspace-execution.js";
 import { parseThreadName } from "../storage/scopes.js";
 import { createCloudflareBrowserConnection } from "./browser.js";
@@ -1899,8 +1900,7 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     const executeTool = definition.tools
       ? {
           name: "execute",
-          description:
-            "Run bounded JavaScript in the isolated Flary tool runtime. Search for a tool before you describe or call it.",
+          description: executeToolDescription(definition.tools),
           inputSchema: {
             type: "object",
             properties: { code: { type: "string" } },
@@ -2856,6 +2856,7 @@ function defaultWorkspaceResolver<TBindings>(
     const descriptors = [
       ["read", "Read one workspace file", "read"],
       ["list", "List workspace files", "read"],
+      ["stat", "Read safe metadata for one workspace file", "read"],
       ["glob", "Find workspace files by glob", "read"],
       ["grep", "Search workspace file contents", "read"],
       ["diff", "Compare workspace files or content", "read"],
@@ -2876,7 +2877,14 @@ function defaultWorkspaceResolver<TBindings>(
           description,
           operation,
           requiresApproval: operation === "write",
-          inputSchema: { type: "object", additionalProperties: true },
+          inputSchema: name === "stat"
+            ? {
+                type: "object",
+                properties: { path: { type: "string" } },
+                required: ["path"],
+                additionalProperties: false,
+              }
+            : { type: "object", additionalProperties: true },
         })),
       call: async (name, value) => {
         if (allowed && !allowed.has(name)) {
@@ -2886,7 +2894,13 @@ function defaultWorkspaceResolver<TBindings>(
         if (typeof method !== "function") {
           throw new Error(`Workspace tool '${name}' is not available`);
         }
-        return (method as (input: unknown) => Promise<unknown>).call(workspace, value);
+        const normalizedValue = name === "stat" && isRecord(value)
+          ? value.path
+          : value;
+        return (method as (input: unknown) => Promise<unknown>).call(
+          workspace,
+          normalizedValue,
+        );
       },
     };
   };

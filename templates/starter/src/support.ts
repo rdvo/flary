@@ -1,7 +1,7 @@
 import { z } from "flary";
 
 import { app } from "./flary";
-import { tools } from "./tools";
+import { supportTools } from "./tools";
 
 export const support = app.fn({
   input: z.object({ question: z.string().min(1) }),
@@ -9,7 +9,7 @@ export const support = app.fn({
     answer: z.string(),
     sources: z.array(z.string().url()),
   }),
-  tools,
+  tools: supportTools,
   prompt: ({ question }) => `
 Answer the question. Use the documentation tool when product facts are needed.
 Return JSON with an answer and a sources array.
