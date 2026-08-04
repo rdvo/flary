@@ -26,20 +26,15 @@ jobs:
           # different package than the version being verified below.
           ref: ${{ inputs.release_tag || github.ref }}
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: "8.15.4"
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22.19.0"
           registry-url: "https://registry.npmjs.org/"
-          cache: pnpm
+          cache: npm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: npm ci
 
       - name: Validate release version
         id: release
