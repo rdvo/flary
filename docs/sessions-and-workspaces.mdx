@@ -48,6 +48,16 @@ The file is not copied into a local server folder. It is also not injected in
 full into every later model request. The agent uses lazy `list`, `glob`,
 `grep`, and `read` tools to load only the files that it needs.
 
+### The durability rule
+
+A write is durable when it goes through the Flary workspace tools. A file
+created only inside a Linux Sandbox belongs to that Sandbox filesystem until
+the application imports or synchronizes it. Flary 0.7 does not automatically
+copy every Sandbox file into the Workspace Durable Object.
+
+Attachments and large tool results also use separate R2 references. They do
+not become workspace files unless the application or agent saves them there.
+
 ## Session history is not the workspace
 
 A session stores user messages, assistant messages, tool calls and results,
@@ -100,9 +110,11 @@ is:
    control-ledger projection.
 3. Enforce root-wide tool-call limits transactionally across all child
    threads.
-4. Add a first-party coding handoff that can create a branch, push it, and
+4. Mount or synchronize the durable workspace with the Linux Sandbox so a
+   shell command and a workspace tool always see the same checked-out tree.
+5. Add a first-party coding handoff that can create a branch, push it, and
    open a pull request without application-specific MCP or OpenAPI wiring.
-5. Complete live eviction and provider-recovery tests for deployed OpenAI and
+6. Complete live eviction and provider-recovery tests for deployed OpenAI and
    Anthropic threads.
 
 Flary targets Codex-style behavior. It does not copy the private Codex app
