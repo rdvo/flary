@@ -254,6 +254,7 @@ export function flary(options: FlaryVitePluginOptions = {}): {
       const migrationClasses = [
         "FlaryRuntime",
         "FlaryThreadControl",
+        "FlaryWorkspace",
         "FlueRegistry",
         ...runtimeClasses,
       ];
@@ -392,6 +393,7 @@ function mergeWranglerConfig(
   const generatedBindings = [
     { name: "FLARY_RUN_SERVICE", class_name: "FlaryRuntime" },
     { name: "FLARY_THREAD_CONTROL", class_name: "FlaryThreadControl" },
+    { name: "FLARY_WORKSPACE", class_name: "FlaryWorkspace" },
     ...runtimeClasses.map((name) => ({
       name: flueBindingName(name),
       class_name: name,
@@ -426,6 +428,7 @@ function mergeWranglerConfig(
   for (const name of [
     "FlaryRuntime",
     "FlaryThreadControl",
+    "FlaryWorkspace",
     "FlueRegistry",
     ...runtimeClasses,
   ]) {
@@ -450,6 +453,12 @@ function mergeWranglerConfig(
     r2Buckets.push({
       binding: "FLARY_SESSION_ARCHIVE",
       bucket_name: `${resourcePrefix}-session-archive`,
+    });
+  }
+  if (!r2Buckets.some((value) => value.binding === "WORKSPACE_BLOBS")) {
+    r2Buckets.push({
+      binding: "WORKSPACE_BLOBS",
+      bucket_name: `${resourcePrefix}-workspace-blobs`,
     });
   }
   const d1Databases = Array.isArray(base.d1_databases)
@@ -648,6 +657,7 @@ function generateFlueRuntime(input: {
     const migrationClasses = [
       "FlaryRuntime",
       "FlaryThreadControl",
+      "FlaryWorkspace",
       "FlueRegistry",
       ...runtimeClasses,
     ];
@@ -753,7 +763,10 @@ function patchGeneratedFlueInternalRoutes(
     const replacement = kind === "agent"
       ? `  async onRequest(request) {\n    const flaryAction = new URL(request.url).searchParams.get('flary');\n    if ((flaryAction === 'compact' || flaryAction === 'rollback') && request.method === 'POST') {\n      const token = this.env.FLARY_INTERNAL_TOKEN;\n      if (typeof token !== 'string' || token.length < 32 || request.headers.get('authorization') !== \`Bearer \${token}\`) return new Response(null, { status: 404 });\n      if (flaryAction === 'compact') {\n        await cloudflareAgents.compact(this);\n        return Response.json({ ok: true });\n      }\n      const body = await request.json();\n      const result = await cloudflareAgents.rollback(this, body.turnId, body.reason);\n      return Response.json(result);\n    }\n    const internal = await ${variable}.flaryInternalRequest?.(request, this.env);\n    if (internal) return internal;\n    return cloudflareAgents.onRequest(this, request);\n  }`
       : `  async onRequest(request) {\n    if (new URL(request.url).searchParams.get('flary') === 'wake' && request.method === 'GET') {\n      await cloudflareAgents.wakeSubmissions(this);\n      return Response.json({ ok: true });\n    }\n    const internal = await ${variable}.flaryInternalRequest?.(request, this.env);\n    if (internal) return internal;\n    return dispatchWorkflow(request, this, ${JSON.stringify(functionEntry.name)});\n  }`;
-    source = source.replace(old, replacement);
+    source = source.replace(old, replacement).replace(
+      "cloudflareAgents.rollback(this, body.turnId, body.reason)",
+      "cloudflareAgents.rollback(this, body.turnId, body.reason, body.excludeTarget === true)",
+    );
   }
   fs.writeFileSync(entry, source, "utf8");
 }
@@ -806,7 +819,7 @@ function generatedCloudflareSource(input: {
   return [
     GENERATED_MARKER,
     'import { DurableObject } from "cloudflare:workers";',
-    'import { createCloudflareFlueGateway, createFlaryCodemodeApprovalHooks, handleFlaryDurableRunObjectRequest, handleFlarySessionProjectionQueue, handleFlaryThreadControlAlarm, handleFlaryThreadControlObjectRequest } from "flary/cloudflare";',
+    'import { createCloudflareFlueGateway, createFlaryCodemodeApprovalHooks, handleFlaryDurableRunObjectRequest, handleFlarySessionProjectionQueue, handleFlaryThreadControlAlarm, handleFlaryThreadControlObjectRequest, handleFlaryWorkspaceObjectRequest } from "flary/cloudflare";',
     "",
     "export class FlaryRuntime extends DurableObject {",
     "  async fetch(request: Request): Promise<Response> {",
@@ -819,6 +832,17 @@ function generatedCloudflareSource(input: {
     "        createGateway: (bindings) => createCloudflareFlueGateway(bindings, { token: typeof bindings.FLARY_INTERNAL_TOKEN === \"string\" ? bindings.FLARY_INTERNAL_TOKEN : undefined }),",
     "        createApprovalHooks: (bindings, repository) => createFlaryCodemodeApprovalHooks(bindings, { repository })!(bindings, repository),",
     "      },",
+    "    });",
+    "  }",
+    "}",
+    "",
+    "export class FlaryWorkspace extends DurableObject {",
+    "  async fetch(request: Request): Promise<Response> {",
+    "    return handleFlaryWorkspaceObjectRequest({",
+    "      state: { storage: this.ctx.storage as never },",
+    "      env: this.env as Record<string, unknown>,",
+    "      request,",
+    "      blobs: (this.env as Record<string, unknown>).WORKSPACE_BLOBS,",
     "    });",
     "  }",
     "}",

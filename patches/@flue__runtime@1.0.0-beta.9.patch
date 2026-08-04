@@ -1,7 +1,7 @@
-diff --git a/node_modules/@flue/runtime/dist/conversation-projections-XMug3C6A.mjs b/node_modules/@flue/runtime/dist/conversation-projections-XMug3C6A.mjs
+diff --git a/dist/conversation-projections-XMug3C6A.mjs b/dist/conversation-projections-XMug3C6A.mjs
 index d052200..247924a 100644
---- a/node_modules/@flue/runtime/dist/conversation-projections-XMug3C6A.mjs
-+++ b/node_modules/@flue/runtime/dist/conversation-projections-XMug3C6A.mjs
+--- a/dist/conversation-projections-XMug3C6A.mjs
++++ b/dist/conversation-projections-XMug3C6A.mjs
 @@ -99,7 +99,8 @@ const AgentProfileSchema = v.strictObject({
  	subagents: v.optional(v.array(v.unknown())),
  	thinkingLevel: v.optional(v.string()),
@@ -33,16 +33,16 @@ index d052200..247924a 100644
 +	const targetEntryId = rollback?.type === "message" && rollback.message.role === "signal" ? rollback.message.attributes?.targetEntryId : void 0;
 +	const targetIndex = typeof targetEntryId === "string" ? canonicalPath.findIndex((entry) => entry.id === targetEntryId) : -1;
 +	const path = rollbackIndex >= 0 && targetIndex >= 0 && targetIndex < rollbackIndex ? [
-+		...canonicalPath.slice(0, targetIndex + 1),
++		...canonicalPath.slice(0, rollback?.type === "message" && rollback.message.role === "signal" && rollback.message.attributes?.excludeTarget === true ? targetIndex : targetIndex + 1),
 +		...canonicalPath.slice(rollbackIndex)
 +	] : canonicalPath;
  	const latestCompactionIndex = path.findLastIndex((entry) => entry.type === "compaction");
  	if (latestCompactionIndex === -1) return pathToContextEntries(path, options);
  	const compaction = path[latestCompactionIndex];
-diff --git a/node_modules/@flue/runtime/dist/conversation-stream-store-Bitz7UoW.mjs b/node_modules/@flue/runtime/dist/conversation-stream-store-Bitz7UoW.mjs
+diff --git a/dist/conversation-stream-store-Bitz7UoW.mjs b/dist/conversation-stream-store-Bitz7UoW.mjs
 index 9403255..94471b3 100644
---- a/node_modules/@flue/runtime/dist/conversation-stream-store-Bitz7UoW.mjs
-+++ b/node_modules/@flue/runtime/dist/conversation-stream-store-Bitz7UoW.mjs
+--- a/dist/conversation-stream-store-Bitz7UoW.mjs
++++ b/dist/conversation-stream-store-Bitz7UoW.mjs
 @@ -15,6 +15,16 @@ const DURABILITY_DEFAULT_MAX_ATTEMPTS = 10;
  const DURABILITY_DEFAULT_TIMEOUT_MS = 36e5;
  /** Default lease duration for submission ownership in milliseconds (30 seconds). */
@@ -259,16 +259,16 @@ index 9403255..94471b3 100644
  			if (opts.isShutdownAbort?.(error)) {
  				if (submission.kind === "direct") observers.fail(submission.submissionId, error);
  				throw error;
-diff --git a/node_modules/@flue/runtime/dist/internal.d.mts b/node_modules/@flue/runtime/dist/internal.d.mts
+diff --git a/dist/internal.d.mts b/dist/internal.d.mts
 index c785e22..714ff51 100644
---- a/node_modules/@flue/runtime/dist/internal.d.mts
-+++ b/node_modules/@flue/runtime/dist/internal.d.mts
+--- a/dist/internal.d.mts
++++ b/dist/internal.d.mts
 @@ -84,6 +84,12 @@ interface CloudflareAgentRuntime {
    attach(instance: CloudflareAgentInstance, prepared: CloudflareAgentPreparedCoordinator): void;
    onStart(instance: CloudflareAgentInstance, inherited: () => Promise<unknown> | unknown): Promise<void>;
    wakeSubmissions(instance: CloudflareAgentInstance): Promise<void>;
 +  compact(instance: CloudflareAgentInstance): Promise<void>;
-+  rollback(instance: CloudflareAgentInstance, turnId: string, reason?: string): Promise<{
++  rollback(instance: CloudflareAgentInstance, turnId: string, reason?: string, excludeTarget?: boolean): Promise<{
 +    turnId: string;
 +    targetEntryId: string;
 +    markerId: string;
@@ -276,10 +276,10 @@ index c785e22..714ff51 100644
    onRequest(instance: CloudflareAgentInstance, request: Request): Promise<Response | null>;
    onFiberRecovered(instance: CloudflareAgentInstance, ctx: CloudflareAgentRecoveredFiberContext, inherited: () => Promise<unknown> | unknown): Promise<unknown>;
  }
-diff --git a/node_modules/@flue/runtime/dist/internal.mjs b/node_modules/@flue/runtime/dist/internal.mjs
+diff --git a/dist/internal.mjs b/dist/internal.mjs
 index 1147b97..03531c4 100644
---- a/node_modules/@flue/runtime/dist/internal.mjs
-+++ b/node_modules/@flue/runtime/dist/internal.mjs
+--- a/dist/internal.mjs
++++ b/dist/internal.mjs
 @@ -703,7 +703,8 @@ async function initializeRootHarness(agent, config, emitEvent) {
  		model: resolvedModel,
  		thinkingLevel: definition.thinkingLevel ?? config.agentConfig.thinkingLevel,
@@ -297,8 +297,8 @@ index 1147b97..03531c4 100644
 +		compact(instance) {
 +			return getCoordinator(instance).compact();
 +		},
-+		rollback(instance, turnId, reason) {
-+			return getCoordinator(instance).rollback(turnId, reason);
++		rollback(instance, turnId, reason, excludeTarget) {
++			return getCoordinator(instance).rollback(turnId, reason, excludeTarget);
 +		},
  		onRequest(instance, request) {
  			return getCoordinator(instance).onRequest(request);
@@ -318,7 +318,7 @@ index 1147b97..03531c4 100644
 +			await session.compact();
 +		});
 +	}
-+	rollback(turnId, reason) {
++	rollback(turnId, reason, excludeTarget) {
 +		return this.runWithInstanceContext(async () => {
 +			if (await this.submissions.hasUnsettledSubmissions()) throw new Error("[flue] Cannot roll back while an agent submission is active.");
 +			const writer = await this.ensureConversationWriter();
@@ -349,7 +349,7 @@ index 1147b97..03531c4 100644
 +				signalType: "flary_rollback",
 +				tagName: "rollback",
 +				content: reason || `Rolled back to ${turnId}.`,
-+				attributes: { targetEntryId, turnId }
++				attributes: { targetEntryId, turnId, excludeTarget: excludeTarget === true }
 +			}]);
 +			return { turnId, targetEntryId, markerId: messageId };
 +		});
@@ -366,10 +366,10 @@ index 1147b97..03531c4 100644
  		if (isAbortRequest(request, this.agentName, this.instance.name)) {
  			const aborted = await this.abortInstance();
  			return Response.json({ aborted });
-diff --git a/node_modules/@flue/runtime/dist/run-store-CYeXjR-d.mjs b/node_modules/@flue/runtime/dist/run-store-CYeXjR-d.mjs
+diff --git a/dist/run-store-CYeXjR-d.mjs b/dist/run-store-CYeXjR-d.mjs
 index 7aad15d..c3f38a8 100644
---- a/node_modules/@flue/runtime/dist/run-store-CYeXjR-d.mjs
-+++ b/node_modules/@flue/runtime/dist/run-store-CYeXjR-d.mjs
+--- a/dist/run-store-CYeXjR-d.mjs
++++ b/dist/run-store-CYeXjR-d.mjs
 @@ -10,7 +10,11 @@ const DirectAgentImageSchema = v.object({
  });
  const DirectAgentPayloadSchema = v.object({
@@ -383,10 +383,10 @@ index 7aad15d..c3f38a8 100644
  });
  const WorkflowRouteParamSchema = v.object({ name: v.string() });
  /** Shared `?wait` query contract for agent and workflow invocation routes. */
-diff --git a/node_modules/@flue/runtime/dist/types-USSZhfC6.d.mts b/node_modules/@flue/runtime/dist/types-USSZhfC6.d.mts
+diff --git a/dist/types-USSZhfC6.d.mts b/dist/types-USSZhfC6.d.mts
 index e41ab79..94f8abb 100644
---- a/node_modules/@flue/runtime/dist/types-USSZhfC6.d.mts
-+++ b/node_modules/@flue/runtime/dist/types-USSZhfC6.d.mts
+--- a/dist/types-USSZhfC6.d.mts
++++ b/dist/types-USSZhfC6.d.mts
 @@ -83,6 +83,14 @@ type DirectAgentImage = PromptImage & {
  interface DirectAgentPayload {
    message: string;

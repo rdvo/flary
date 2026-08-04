@@ -17,7 +17,10 @@ import {
 } from "../host/runs.js";
 import { FlaryHostError } from "../host/errors.js";
 import { createFlaryHostRouter } from "../host/router.js";
-import type { FlaryThreadHostService } from "../host/types.js";
+import type {
+  FlaryThreadHostService,
+  FlaryThreadTarget,
+} from "../host/types.js";
 import {
   OpenAICompatibleAdapter,
   AnthropicMessagesAdapter,
@@ -112,6 +115,8 @@ import {
   SqliteSandboxProcessRegistry,
   hashSandboxEnvironment,
 } from "../cloudflare/sandbox-process-registry.js";
+import { createCloudflareWorkspaceConnection } from "../cloudflare/workspace.js";
+import { parseThreadName } from "../storage/scopes.js";
 
 const FUNCTION_STATE = Symbol("flary.function.state");
 const AGENT_STATE = Symbol("flary.agent.state");
@@ -302,6 +307,95 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
   ): this {
     this.#threadServiceOverride = threadService;
     return this;
+  }
+
+  /** Run one durable coordination action for a model-visible agent tool. */
+  async agentSubagentAction(
+    root: FlaryAgent<TBindings>,
+    current: FlaryAgent<TBindings>,
+    input: {
+      readonly bindings: TBindings;
+      readonly runId: string;
+      readonly action: string;
+      readonly value?: Readonly<Record<string, unknown>>;
+    },
+  ): Promise<unknown> {
+    const configured = this.#threadServiceOverride;
+    if (!configured) {
+      throw new FlaryFunctionError(
+        "thread_service_missing",
+        "Durable subagent coordination needs the generated thread service.",
+        500,
+      );
+    }
+    const service = resolveThreadService(configured, {
+      bindings: input.bindings,
+    });
+    if (!service.subagentAction) {
+      throw new FlaryFunctionError(
+        "subagents_unavailable",
+        "The durable thread host does not support subagents.",
+        501,
+      );
+    }
+    const ref = parseThreadName(input.runId);
+    const currentTarget: FlaryThreadTarget = {
+      authorization: {
+        organizationId: ref.organizationId,
+        actor: { id: "flary-agent", kind: "service" },
+      },
+      appId: ref.appId,
+      threadId: ref.threadId,
+    };
+    const currentBinding = await service.inspect(currentTarget);
+    const rootThreadId =
+      typeof currentBinding.metadata?.flarySubagentRootThreadId === "string"
+        ? currentBinding.metadata.flarySubagentRootThreadId
+        : ref.threadId;
+    const rootTarget = { ...currentTarget, threadId: rootThreadId };
+    const value: Record<string, unknown> = {
+      ...(input.value ?? {}),
+      currentThreadId: ref.threadId,
+    };
+
+    if (input.action === "spawn") {
+      const requestedName = String(value.agent ?? value.agentId ?? "");
+      const child = findDeclaredChild(current, requestedName);
+      if (!child) {
+        throw new FlaryFunctionError(
+          "subagent_not_declared",
+          `Subagent '${requestedName}' is not declared by '${current.name}'.`,
+          400,
+        );
+      }
+      const selection = resolveAgentModelSelection(child, value.model);
+      value.agentId = child.name;
+      value.model = selection;
+      value.parentThreadId = ref.threadId;
+      value.requestId = value.requestId ?? `request_${crypto.randomUUID()}`;
+      value.metadata = {
+        ...objectRecord(value.metadata),
+        flaryRuntimeAgentId: root.name,
+        flaryAgentRevision: child.revision,
+        flarySubagentRootThreadId: rootThreadId,
+        flarySubagentParentThreadId: ref.threadId,
+        flaryModelPolicy: modelPolicyMetadata(child),
+        flaryDelegation: delegationMetadata(child),
+        flaryCompaction: { ...(child.definition.compaction ?? { mode: "auto" }) },
+        flaryLimits: { ...(child.definition.limits ?? {}) },
+      };
+    } else if (input.action === "send") {
+      value.fromThreadId = ref.threadId;
+      value.requestId = value.requestId ?? `request_${crypto.randomUUID()}`;
+    } else if (
+      input.action === "interrupt" ||
+      input.action === "close" ||
+      input.action === "resume"
+    ) {
+      value.requestId = value.requestId ?? `request_${crypto.randomUUID()}`;
+    }
+
+    return service.subagentAction(rootTarget, input.action, value);
   }
 
   /** True when this app has a Flue-backed durable host. */
@@ -1022,8 +1116,13 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
         500,
       );
     }
+    const identity = await this.identityForAgentRun(
+      input.bindings,
+      input.runId,
+    );
     const context = this.contextFor({
       bindings: input.bindings,
+      identity,
       signal: input.signal ?? new AbortController().signal,
       runId: input.runId,
       stepCache: new Map(),
@@ -1059,11 +1158,16 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     const executor =
       this.options.code ?? await this.defaultCodeExecutor(input.bindings);
     if (!executor?.approvalContinuation) return undefined;
+    const identity = await this.identityForAgentRun(
+      input.bindings,
+      input.runId,
+    );
     return executor.approvalContinuation({
       bindings: input.bindings,
       tools: state.definition.tools,
       context: this.contextFor({
         bindings: input.bindings,
+        identity,
         signal: input.signal ?? new AbortController().signal,
         runId: input.runId,
         stepCache: new Map(),
@@ -1084,11 +1188,16 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     const executor =
       this.options.code ?? await this.defaultCodeExecutor(input.bindings);
     if (!executor?.approvalBridge) return undefined;
+    const identity = await this.identityForAgentRun(
+      input.bindings,
+      input.runId,
+    );
     return executor.approvalBridge({
       bindings: input.bindings,
       tools: state.definition.tools,
       context: this.contextFor({
         bindings: input.bindings,
+        identity,
         signal: input.signal ?? new AbortController().signal,
         runId: input.runId,
         stepCache: new Map(),
@@ -1157,6 +1266,31 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
   /** Validate a generated Flue workflow result with the function Zod schema. */
   parseWorkflowOutput(value: unknown, output: unknown): unknown {
     return this.functionState(value).definition.output.parse(output);
+  }
+
+  private async identityForAgentRun(
+    bindings: TBindings,
+    runId: string,
+  ): Promise<FlaryIdentity | undefined> {
+    const configured = this.#threadServiceOverride;
+    if (!configured) return undefined;
+    const ref = parseThreadName(runId);
+    const binding = await resolveThreadService(configured, { bindings }).inspect({
+      authorization: {
+        organizationId: ref.organizationId,
+        actor: { id: "flary-agent", kind: "service" },
+      },
+      appId: ref.appId,
+      threadId: ref.threadId,
+    });
+    return {
+      tenantId: binding.thread.organizationId,
+      userId: binding.createdBy.id,
+      applicationId: binding.workspace.appId,
+      projectId: binding.workspace.projectId,
+      workspaceId: binding.workspace.workspaceId,
+      branch: binding.workspace.branch,
+    };
   }
 
   private defaultBindings(): TBindings {
@@ -2017,39 +2151,86 @@ function agentAwareThreadService(
             ),
             metadata: {
               ...(input.metadata ?? {}),
+              flaryRuntimeAgentId: agent.name,
               flaryAgentRevision: agent.revision,
-              ...(agent.definition.models
-                ? {
-                    flaryModelPolicy: {
-                      allow: agent.definition.models.allow.map((candidate) =>
-                        normalizeModelInput(candidate),
-                      ),
-                      switching: agent.definition.models.switching ?? "user",
-                      fallback: agent.definition.models.fallback ?? "none",
-                      ...(agent.definition.models.compactionModel
-                        ? {
-                            compactionModel: normalizeModelInput(
-                              agent.definition.models.compactionModel,
-                            ),
-                          }
-                        : {}),
-                    },
-                  }
-                : {}),
-              flaryDelegation: {
-                mode: agent.definition.delegation?.mode ?? "explicit",
-                maxConcurrentChildren:
-                  agent.definition.delegation?.maxConcurrent ?? 4,
-                maxTotalChildren:
-                  agent.definition.delegation?.maxTotal ?? 16,
-                maxDepth: agent.definition.delegation?.maxDepth ?? 2,
-              },
+              flaryModelPolicy: modelPolicyMetadata(agent) as never,
+              flaryDelegation: delegationMetadata(agent) as never,
               flaryCompaction: {
                 ...(agent.definition.compaction ?? { mode: "auto" }),
               },
               flaryLimits: { ...(agent.definition.limits ?? {}) },
             },
           });
+        };
+      }
+      if (property === "subagentAction") {
+        return async (
+          scope: FlaryThreadTarget,
+          action: string,
+          input: Readonly<Record<string, unknown>>,
+        ) => {
+          if (!target.subagentAction) {
+            throw new FlaryFunctionError(
+              "subagents_unavailable",
+              "The durable thread host does not support subagents.",
+              501,
+            );
+          }
+          const root = agents[scope.appId];
+          if (!root) {
+            throw new FlaryHostError(404, "agent_not_found", "The agent was not found.");
+          }
+          const currentBinding = await target.inspect(scope);
+          const current = findAgentInTree(root, currentBinding.agentId);
+          if (!current) {
+            throw new FlaryFunctionError(
+              "subagent_not_declared",
+              `Agent '${currentBinding.agentId}' is not declared by '${root.name}'.`,
+              400,
+            );
+          }
+          const rootThreadId =
+            typeof currentBinding.metadata?.flarySubagentRootThreadId === "string"
+              ? currentBinding.metadata.flarySubagentRootThreadId
+              : scope.threadId;
+          const value: Record<string, unknown> = {
+            ...input,
+            currentThreadId: scope.threadId,
+          };
+          if (action === "spawn") {
+            const requestedName = String(value.agent ?? value.agentId ?? "");
+            const child = findDeclaredChild(current, requestedName);
+            if (!child) {
+              throw new FlaryFunctionError(
+                "subagent_not_declared",
+                `Subagent '${requestedName}' is not declared by '${current.name}'.`,
+                400,
+              );
+            }
+            value.agentId = child.name;
+            value.model = resolveAgentModelSelection(child, value.model);
+            value.parentThreadId = scope.threadId;
+            value.requestId = value.requestId ?? `request_${crypto.randomUUID()}`;
+            value.metadata = {
+              ...objectRecord(value.metadata),
+              flaryRuntimeAgentId: root.name,
+              flaryAgentRevision: child.revision,
+              flarySubagentRootThreadId: rootThreadId,
+              flarySubagentParentThreadId: scope.threadId,
+              flaryModelPolicy: modelPolicyMetadata(child),
+              flaryDelegation: delegationMetadata(child),
+              flaryCompaction: { ...(child.definition.compaction ?? { mode: "auto" }) },
+              flaryLimits: { ...(child.definition.limits ?? {}) },
+            };
+          } else if (action === "send") {
+            value.fromThreadId = scope.threadId;
+            value.requestId = value.requestId ?? `request_${crypto.randomUUID()}`;
+          }
+          return target.subagentAction(
+            { ...scope, threadId: rootThreadId },
+            action,
+            value,
+          );
         };
       }
       const value = Reflect.get(target, property, receiver);
@@ -2452,6 +2633,116 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function objectRecord(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
+}
+
+function findDeclaredChild(
+  parent: FlaryAgent<any>,
+  requestedName: string,
+): FlaryAgent<any> | undefined {
+  for (const [key, child] of Object.entries(parent.definition.subagents ?? {})) {
+    if (key === requestedName || child.name === requestedName) return child;
+  }
+  return undefined;
+}
+
+function findAgentInTree(
+  root: FlaryAgent<any>,
+  name: string,
+): FlaryAgent<any> | undefined {
+  if (root.name === name) return root;
+  for (const child of Object.values(root.definition.subagents ?? {})) {
+    const match = findAgentInTree(child, name);
+    if (match) return match;
+  }
+  return undefined;
+}
+
+function resolveAgentModelSelection(
+  agent: FlaryAgent<any>,
+  requested: unknown,
+) {
+  const state = getAgentState(agent);
+  const selected = requested !== undefined
+    ? normalizeModelInput(requested as never)
+    : agent.definition.model
+      ? parseFlueModelSpecifier(agent.definition.model)
+      : agent.definition.models?.allow[0]
+        ? normalizeModelInput(agent.definition.models.allow[0])
+        : state?.app.options.model
+          ? parseFlueModelSpecifier(state.app.options.model)
+          : parseFlueModelSpecifier("openai/gpt-5");
+  if (!selected) {
+    throw new FlaryFunctionError(
+      "subagent_model_missing",
+      `Subagent '${agent.name}' has no model.`,
+      400,
+    );
+  }
+  const allowed = modelPolicyMetadata(agent).allow as Array<{
+    provider: string;
+    model: string;
+    deployment?: string;
+    variant?: string;
+  }>;
+  if (!allowed.some((candidate) =>
+    candidate.provider === selected.provider &&
+    candidate.model === selected.model &&
+    candidate.deployment === selected.deployment &&
+    candidate.variant === selected.variant
+  )) {
+    throw new FlaryFunctionError(
+      "invalid_subagent_model",
+      `Model '${selected.provider}/${selected.model}' is not allowed for '${agent.name}'.`,
+      400,
+    );
+  }
+  return selected;
+}
+
+function modelPolicyMetadata(agent: FlaryAgent<any>): Record<string, unknown> & {
+  allow: unknown[];
+} {
+  const selected = resolveDefaultAgentModel(agent);
+  return {
+    allow: agent.definition.models?.allow.map((candidate) =>
+      normalizeModelInput(candidate)
+    ) ?? (selected ? [selected] : []),
+    switching: agent.definition.models?.switching ?? "user",
+    fallback: agent.definition.models?.fallback ?? "none",
+    ...(agent.definition.models?.compactionModel
+      ? {
+          compactionModel: normalizeModelInput(
+            agent.definition.models.compactionModel,
+          ),
+        }
+      : {}),
+  };
+}
+
+function resolveDefaultAgentModel(agent: FlaryAgent<any>) {
+  const state = getAgentState(agent);
+  return agent.definition.model
+    ? parseFlueModelSpecifier(agent.definition.model)
+    : agent.definition.models?.allow[0]
+      ? normalizeModelInput(agent.definition.models.allow[0])
+      : state?.app.options.model
+        ? parseFlueModelSpecifier(state.app.options.model)
+        : parseFlueModelSpecifier("openai/gpt-5");
+}
+
+function delegationMetadata(agent: FlaryAgent<any>): Record<string, unknown> {
+  return {
+    mode: agent.definition.delegation?.mode ?? "explicit",
+    maxConcurrentChildren: agent.definition.delegation?.maxConcurrent ?? 4,
+    maxTotalChildren: agent.definition.delegation?.maxTotal ?? 16,
+    maxDepth: agent.definition.delegation?.maxDepth ?? 2,
+    allowPeerMessaging:
+      agent.definition.delegation?.allowPeerMessaging ?? true,
+  };
+}
+
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
@@ -2464,13 +2755,6 @@ function defaultWorkspaceResolver<TBindings>(
   return async (source, input) => {
     const storageRecord = isRecord(storage) ? storage : undefined;
     const sql = storageRecord?.sql;
-    if (!sql) {
-      throw new FlaryFunctionError(
-        "workspace_runtime_missing",
-        "app.workspace() needs Durable Object SQLite storage.",
-        503,
-      );
-    }
     const options = isRecord(source.options) ? source.options : {};
     const identity = input.context.identity;
     if (!identity?.tenantId) {
@@ -2495,12 +2779,36 @@ function defaultWorkspaceResolver<TBindings>(
         "default",
       workspaceId:
         stringValue(options.workspaceId) ??
+        stringValue(identity.workspaceId) ??
         input.context.runId ??
         "default",
-      branch: stringValue(options.branch) ?? "main",
+      branch:
+        stringValue(options.branch) ??
+        stringValue(identity.branch) ??
+        "main",
     };
     const r2Name = stringValue(options.r2Binding) ?? "WORKSPACE_BLOBS";
     const r2 = isRecord(bindings) ? bindings[r2Name] : undefined;
+    const workspaceNamespace = isRecord(bindings)
+      ? bindings.FLARY_WORKSPACE
+      : undefined;
+    if (
+      isRecord(workspaceNamespace) &&
+      typeof workspaceNamespace.idFromName === "function" &&
+      typeof workspaceNamespace.get === "function"
+    ) {
+      return createCloudflareWorkspaceConnection(
+        workspaceNamespace as never,
+        scope,
+      );
+    }
+    if (!sql) {
+      throw new FlaryFunctionError(
+        "workspace_runtime_missing",
+        "app.workspace() needs the generated FLARY_WORKSPACE binding.",
+        503,
+      );
+    }
     const { ShellWorkspace } = await import("../storage/shell-workspace.js");
     const workspace = new ShellWorkspace({
       sql: sql as never,
@@ -2564,6 +2872,7 @@ function defaultSandboxResolver<TBindings>(
     const { getSandbox } = await import("@cloudflare/sandbox");
     const sandboxId =
       stringValue(options.sandboxId) ??
+      stringValue(input.context.identity?.workspaceId) ??
       input.context.runId ??
       "default";
     const sandbox = getSandbox(binding as never, sandboxId, {

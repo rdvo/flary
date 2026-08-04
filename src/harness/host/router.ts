@@ -16,9 +16,11 @@ import {
   ThreadGoalRequestSchema,
   ThreadHistoryDiffRequestSchema,
   ThreadHistoryDiffResponseSchema,
+  ThreadHistoryRestoreRequestSchema,
   ThreadHistoryListRequestSchema,
   ThreadHistoryListResponseSchema,
   ThreadMessageRequestSchema,
+  ThreadEditRequestSchema,
   ThreadModelSetRequestSchema,
   ThreadModeRequestSchema,
   ThreadPinRequestSchema,
@@ -515,6 +517,22 @@ export function createFlaryHostRouter<TBindings extends object>(
     return context.json(admission, 202);
   });
 
+  router.post("/apps/:appId/threads/:threadId/messages/edit", async (context) => {
+    const target = await targetFor(
+      context.req.raw,
+      context.env,
+      context.req.param("appId"),
+      context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.edit) throw featureUnavailable("Message replacement");
+    const input = ThreadEditRequestSchema.parse(await context.req.json());
+    return context.json(
+      FlaryThreadAdmissionSchema.parse(await service.edit(target, input)),
+      202,
+    );
+  });
+
   router.post("/apps/:appId/threads/:threadId/interrupt", async (context) => {
     const target = await targetFor(
       context.req.raw, context.env, context.req.param("appId"), context.req.param("threadId"),
@@ -722,6 +740,26 @@ export function createFlaryHostRouter<TBindings extends object>(
           await service.historyDiff(target, input),
         ),
       );
+    },
+  );
+
+  router.post(
+    "/apps/:appId/threads/:threadId/history/restore",
+    async (context) => {
+      const target = await targetFor(
+        context.req.raw,
+        context.env,
+        context.req.param("appId"),
+        context.req.param("threadId"),
+      );
+      const service = serviceFor(context.env);
+      if (!service.historyRestore) {
+        throw featureUnavailable("Workspace checkpoint restore");
+      }
+      const input = ThreadHistoryRestoreRequestSchema.parse(
+        await context.req.json(),
+      );
+      return context.json({ result: await service.historyRestore(target, input) });
     },
   );
 

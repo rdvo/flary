@@ -118,39 +118,51 @@ for await (const event of run.stream()) {
   {
     id: "coding",
     label: "Coding agent",
-    description: "A branch-scoped coding function with lazy tools and approvals.",
+    description: "A persistent coding thread with cross-provider subagents and checkpoints.",
     examples: [
       {
         id: "coding-agent",
         label: "Agent",
-        filename: "src/agents/coding.ts",
+        filename: "src/agents.ts",
         language: "typescript",
-        code: `import { flary, z } from "flary";
-import { tools } from "./tools";
+        code: `import { app } from "./flary";
+import { codingTools } from "./tools";
 
-const app = flary<Env>({
-  name: "coding-agent",
-  model: "openai/gpt-5.6-codex",
-  bindings: z.object({
-    OPENAI_API_KEY: z.string().min(1),
-    LOADER: z.unknown(),
-  }),
+export const reviewer = app.agent({
+  name: "reviewer",
+  model: "openai/gpt-5.6-sol",
+  models: { allow: ["openai/gpt-5.6-sol"] },
+  instructions: "Review the current diff and run focused checks.",
+  tools: codingTools,
 });
 
-export const coding = app.fn({
-  input: z.object({ request: z.string() }),
-  output: z.object({ summary: z.string() }),
+export const coder = app.agent({
+  name: "coder",
+  model: "anthropic/claude-sonnet",
+  models: {
+    allow: ["anthropic/claude-sonnet", "openai/gpt-5.6-sol"],
+    switching: "user",
+    fallback: "none",
+  },
   mode: "build",
   thinking: "high",
-  tools,
-  prompt: ({ request }) =>
-    \`Inspect the workspace and make this change:\\n\\n\${request}\`,
-});`,
+  tools: codingTools,
+  subagents: { reviewer },
+  delegation: {
+    mode: "auto",
+    maxConcurrent: 4,
+    maxTotal: 16,
+    maxDepth: 2,
+  },
+  instructions: "Implement the task, run checks, and review the diff.",
+});
+
+export const functions = { coder, reviewer };`,
       },
       {
         id: "coding-tools",
         label: "Tools",
-        filename: "src/tools/catalog.ts",
+        filename: "src/tools.ts",
         language: "typescript",
         code: `import { z } from "flary";
 import { app } from "./flary";
@@ -177,7 +189,12 @@ const applyPatch = app.fn({
     bindings.WORKSPACE.applyPatch(patch),
 });
 
-const tools = app.tools({ readFile, applyPatch });`,
+export const codingTools = app.tools({
+  readFile,
+  applyPatch,
+  workspace: app.workspace({ branch: "run" }),
+  shell: app.sandbox({ network: "restricted" }),
+});`,
       },
       {
         id: "coding-modes",
@@ -215,23 +232,34 @@ export const diagnose = AgentModeSchema.parse({
       {
         id: "coding-client",
         label: "Client",
-        filename: "src/lib/coding-agent.ts",
+        filename: "src/lib/coder.ts",
         language: "typescript",
         code: `import { flary } from "flary/client";
-import type { coding } from "./coding";
+import type { functions } from "../worker";
 
-const client = flary<{ coding: typeof coding }>({
+const api = flary<typeof functions>({
   baseUrl: "https://coding.example.com",
   headers: () => ({
     authorization: \`Bearer \${sessionToken()}\`,
   }),
 });
 
-const run = await client.coding.start({
-  request: "Find and fix the failing authentication test.",
-}, { idempotencyKey: "project_main:turn:7" });
+const thread = await api.coder.threads.create({
+  workspace: {
+    organizationId: "acme",
+    appId: "coder",
+    projectId: "api",
+    workspaceId: "main",
+    branch: "main",
+  },
+  mode: "build",
+});
 
-for await (const event of run.stream()) {
+await thread.send({
+  message: "Find and fix the failing authentication test.",
+});
+
+for await (const event of thread.stream()) {
   renderAgentEvent(event);
 }`,
       },
@@ -336,7 +364,7 @@ export function CodeExamples() {
         <div className="code-example__commands" aria-label="Flary setup commands">
           <div>
             <span>Install</span>
-            <code>npm install --save-exact flary@next</code>
+            <code>npm install flary</code>
           </div>
           <div>
             <span>Add to an app</span>
@@ -344,7 +372,7 @@ export function CodeExamples() {
           </div>
           <div>
             <span>New Worker</span>
-            <code>npx flary@next create my-agent</code>
+            <code>npx flary create my-agent</code>
           </div>
         </div>
       </aside>

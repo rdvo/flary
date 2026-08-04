@@ -3,6 +3,8 @@ import {
   ThreadBindingSchema,
   ThreadCreateRequestSchema,
   ThreadForkRequestSchema,
+  ThreadEditRequestSchema,
+  ThreadHistoryRestoreRequestSchema,
   ThreadMessageRequestSchema,
   ThreadModelSetRequestSchema,
   type ApprovalDecision,
@@ -26,6 +28,7 @@ import type {
   FlaryThreadTarget,
 } from "../host/types.js";
 import { threadName } from "../storage/scopes.js";
+import { cloudflareWorkspaceObjectName } from "./workspace.js";
 import { createCloudflareFlueFetch, createCloudflareFlueGateway } from "./function-host.js";
 import { SqliteSubagentCoordinator } from "./subagent-coordinator.js";
 import {
@@ -444,10 +447,10 @@ export function createCloudflareThreadService<
             recordedAt: new Date().toISOString(),
           },
         });
-        await gateway.abort(binding.agentId, instanceId).catch(() => undefined);
+        await gateway.abort(runtimeAgentId(binding), instanceId).catch(() => undefined);
       }
       const admission = await gateway.send(
-        binding.agentId,
+        runtimeAgentId(binding),
         instanceId,
         input.message,
         {
@@ -481,12 +484,65 @@ export function createCloudflareThreadService<
         instanceId,
         modelPin: pin,
         segmentId,
+        turnMessage: input.message,
+      });
+      return admission;
+    },
+    async edit(target, rawInput) {
+      const input = ThreadEditRequestSchema.parse(rawInput);
+      const editId = input.idempotencyKey ?? `edit_${crypto.randomUUID()}`;
+      const binding = await service.inspect(target);
+      const rollback = {
+        turnId: input.turnId,
+        reason: "message replacement",
+        excludeTarget: true,
+      };
+      const rollbackResult = await agentControlRpc(
+        options.env,
+        binding,
+        "rollback",
+        rollback,
+      );
+      await projectAgentSnapshot(options.env, binding, (event, sourceCursor) =>
+        rpc(controlName(target), "project", {
+          ...ownership(target),
+          event,
+          sourceCursor,
+        })
+      );
+      await rpc(controlName(target), "record", {
+        ...ownership(target),
+        recordType: "rollback",
+        payload: {
+          ...rollback,
+          applied: !objectValue(rollbackResult).runtimeUnavailable,
+        },
+      });
+      const admission = await service.submit(target, {
+        message: input.message,
+        ...(input.mode ? { mode: input.mode } : {}),
+        ...(input.images ? { images: input.images } : {}),
+        ...(input.model ? { model: input.model } : {}),
+        ...(input.thinkingLevel
+          ? { thinkingLevel: input.thinkingLevel }
+          : {}),
+        cacheRetention: input.cacheRetention,
+        idempotencyKey: editId,
+      });
+      await rpc(controlName(target), "record", {
+        ...ownership(target),
+        recordType: "message.edited",
+        payload: {
+          replacedTurnId: input.turnId,
+          replacementSubmissionId: admission.submissionId,
+          editId,
+        },
       });
       return admission;
     },
     async interrupt(target) {
       const binding = await service.inspect(target);
-      await gateway.abort(binding.agentId, threadName(binding.thread));
+      await gateway.abort(runtimeAgentId(binding), threadName(binding.thread));
     },
     async compact(target, input) {
       const binding = await service.inspect(target);
@@ -580,8 +636,36 @@ export function createCloudflareThreadService<
       const value = await rpc(controlName(target), "export", ownership(target));
       return String(value.jsonl ?? "");
     },
+    async history(target, limit) {
+      const binding = await service.inspect(target);
+      return workspaceControl(options.env, binding, "__history", { limit });
+    },
+    async historyDiff(target, input) {
+      const binding = await service.inspect(target);
+      return workspaceControl(options.env, binding, "__diff", input);
+    },
+    async historyRestore(target, rawInput) {
+      const input = ThreadHistoryRestoreRequestSchema.parse(rawInput);
+      const binding = await service.inspect(target);
+      await gateway.abort(
+        runtimeAgentId(binding),
+        threadName(binding.thread),
+      ).catch(() => undefined);
+      const result = await workspaceControl(
+        options.env,
+        binding,
+        "__restore",
+        input,
+      );
+      await rpc(controlName(target), "record", {
+        ...ownership(target),
+        recordType: "artifact.restored",
+        payload: { commitId: input.commitId, result },
+      });
+      return result;
+    },
     async subagentAction(target, action, input) {
-      const value = await rpc(controlName(target), "subagent", {
+      let value = await rpc(controlName(target), "subagent", {
         ...ownership(target),
         action,
         input,
@@ -589,10 +673,16 @@ export function createCloudflareThreadService<
       if (action === "spawn" && value.thread) {
         const child = value.thread as {
           threadId: string;
+          rootThreadId: string;
+          parentThreadId?: string;
           agentId: string;
           task: string;
+          model?: ModelSelection;
+          reasoningEffort?: string;
+          metadata?: Record<string, unknown>;
         };
         const parentBinding = await service.inspect(target);
+        const childMetadata = objectValue(child.metadata);
         const childBinding = ThreadBindingSchema.parse({
           ...parentBinding,
           thread: {
@@ -601,11 +691,19 @@ export function createCloudflareThreadService<
             agentId: child.agentId,
           },
           agentId: child.agentId,
+          defaultModel: child.model ?? parentBinding.defaultModel,
+          defaultThinkingLevel:
+            child.reasoningEffort ?? parentBinding.defaultThinkingLevel,
+          parentThread: parentBinding.thread,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           metadata: {
             ...(parentBinding.metadata ?? {}),
-            parentThreadId: target.threadId,
+            ...childMetadata,
+            parentThreadId: child.parentThreadId ?? target.threadId,
+            flarySubagentRootThreadId: child.rootThreadId,
+            flarySubagentParentThreadId:
+              child.parentThreadId ?? target.threadId,
             subagent: true,
           },
         });
@@ -620,23 +718,52 @@ export function createCloudflareThreadService<
           binding: childBinding,
         });
         await d1?.put(childBinding);
-        const childInstanceId = threadName(childBinding.thread);
-        const admission = await gateway.send(
-          child.agentId,
-          childInstanceId,
-          child.task,
-        );
-        await trackAdmission(childName, {
-          ...ownership(target),
-          admission,
-          agentId: child.agentId,
-          instanceId: childInstanceId,
-        });
-        await rpc(controlName(target), "subagent", {
-          ...ownership(target),
-          action: "start",
-          input: { threadId: child.threadId },
-        });
+        try {
+          await rpc(controlName(target), "admitTurn", {
+            ...ownership(target),
+            admissionId: `subagent_${child.threadId}`,
+          });
+          const admission = await service.submit(
+            {
+              ...target,
+              authorization: {
+                ...target.authorization,
+                actor: parentBinding.createdBy,
+              },
+              threadId: child.threadId,
+            },
+            {
+              message: child.task,
+              ...(child.model ? { model: child.model } : {}),
+              ...(child.reasoningEffort
+                ? { thinkingLevel: child.reasoningEffort as never }
+                : {}),
+              idempotencyKey: `subagent_${child.threadId}`,
+            },
+          );
+          await rpc(controlName(target), "subagent", {
+            ...ownership(target),
+            action: "start",
+            input: {
+              threadId: child.threadId,
+              admissionId: admission.submissionId,
+            },
+          });
+        } catch (error) {
+          await rpc(controlName(target), "subagent", {
+            ...ownership(target),
+            action: "fail",
+            input: {
+              threadId: child.threadId,
+              error: {
+                code: "subagent_admission_failed",
+                message: error instanceof Error ? error.message : String(error),
+                retryable: true,
+              },
+            },
+          }).catch(() => undefined);
+          throw error;
+        }
       }
       if (action === "send" && value.message) {
         const message = value.message as {
@@ -653,20 +780,17 @@ export function createCloudflareThreadService<
           const childInstanceId = threadName(childBinding.thread);
           if (message.mode === "interrupt") {
             await gateway
-              .abort(child.agentId, childInstanceId)
+              .abort(runtimeAgentId(childBinding), childInstanceId)
               .catch(() => undefined);
           }
-          const admission = await gateway.send(
-            child.agentId,
-            childInstanceId,
-            message.content,
+          await service.submit(
+            { ...target, threadId: message.toThreadId },
+            {
+              message: message.content,
+              mode: message.mode === "interrupt" ? "steer" : "queue",
+              idempotencyKey: `mailbox_${String((value.message as { id?: unknown }).id ?? crypto.randomUUID())}`,
+            },
           );
-          await trackAdmission(childName, {
-            ...ownership(target),
-            admission,
-            agentId: child.agentId,
-            instanceId: childInstanceId,
-          });
         }
       }
       if (action === "interrupt" && value.thread) {
@@ -676,8 +800,27 @@ export function createCloudflareThreadService<
         const childValue = await rpc(childName, "inspect", ownership(target));
         const childBinding = ThreadBindingSchema.parse(childValue.binding);
         await gateway
-          .abort(child.agentId, threadName(childBinding.thread))
+          .abort(runtimeAgentId(childBinding), threadName(childBinding.thread))
           .catch(() => undefined);
+      }
+      if (action === "wait") {
+        const timeoutMs = Math.min(
+          Math.max(Number(input.timeoutMs ?? 0), 0),
+          30_000,
+        );
+        const deadline = Date.now() + timeoutMs;
+        while (!subagentWaitSettled(value) && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          value = await rpc(controlName(target), "subagent", {
+            ...ownership(target),
+            action,
+            input,
+          });
+        }
+        value = {
+          ...value,
+          timedOut: !subagentWaitSettled(value),
+        };
       }
       return value;
     },
@@ -1139,6 +1282,9 @@ async function dispatchThreadControl(
       instanceId: String(body.instanceId ?? threadName(binding.thread)),
       ...(body.modelPin ? { modelPin: body.modelPin } : {}),
       ...(typeof body.segmentId === "string" ? { segmentId: body.segmentId } : {}),
+      ...(typeof body.turnMessage === "string"
+        ? { turnMessage: body.turnMessage }
+        : {}),
       status: "active",
     });
     if (!host?.env || !host.execution) {
@@ -1152,13 +1298,40 @@ async function dispatchThreadControl(
         admission,
         modelPin: body.modelPin as ResolvedModelPin | undefined,
         segmentId: typeof body.segmentId === "string" ? body.segmentId : undefined,
+        turnMessage:
+          typeof body.turnMessage === "string" ? body.turnMessage : undefined,
       }),
     );
     await host.storage?.setAlarm?.(Date.now() + 30_000);
     return { tracked: true };
   }
+  if (method === "accountUsage") {
+    const binding = requireBinding(sql);
+    return accountInteractiveDelta(
+      sql,
+      binding,
+      nonnegative(body.stepDelta, 0),
+      typeof body.costDelta === "number" ? body.costDelta : 0,
+    );
+  }
   if (method === "subagent") {
-    return subagentAction(sql, requireBinding(sql), String(body.action), objectValue(body.input));
+    const binding = requireBinding(sql);
+    const action = String(body.action);
+    const result = subagentAction(sql, binding, action, objectValue(body.input));
+    if (action !== "list" && action !== "wait") {
+      const recordType: SessionRecordType = action === "spawn"
+        ? "subagent.spawned"
+        : action === "send"
+          ? "subagent.message"
+          : action === "close"
+            ? "subagent.closed"
+            : "subagent.status";
+      await appendLedger(sql, binding, recordType, {
+        action,
+        result: jsonValue(result),
+      });
+    }
+    return result;
   }
   if (method === "schedule") {
     const result = await scheduleAction(
@@ -1248,6 +1421,10 @@ export async function handleFlaryThreadControlAlarm(input: {
       admission,
       modelPin: projection.modelPin as ResolvedModelPin | undefined,
       segmentId: typeof projection.segmentId === "string" ? projection.segmentId : undefined,
+      turnMessage:
+        typeof projection.turnMessage === "string"
+          ? projection.turnMessage
+          : undefined,
     });
     input.execution?.waitUntil(work);
   }
@@ -1306,7 +1483,7 @@ export async function handleFlaryThreadControlAlarm(input: {
     if (!claimed) continue;
     try {
       const admission = await gateway.send(
-        binding.agentId,
+        runtimeAgentId(binding),
         threadName(binding.thread),
         String(schedule.message ?? ""),
       );
@@ -1548,6 +1725,7 @@ async function projectAdmission(input: {
   readonly admission: FlueAdmission;
   readonly modelPin?: ResolvedModelPin;
   readonly segmentId?: string;
+  readonly turnMessage?: string;
 }): Promise<void> {
   const gateway = createCloudflareFlueGateway(input.env, {
     token:
@@ -1568,7 +1746,7 @@ async function projectAdmission(input: {
         : "flary-thread-control-v1",
   });
   try {
-    await gateway.wait(input.admission, async (event) => {
+    const result = await gateway.wait(input.admission, async (event) => {
       const sourceCursor = canonicalEventCursor(
         input.admission.submissionId,
         event as unknown as Record<string, unknown>,
@@ -1582,6 +1760,12 @@ async function projectAdmission(input: {
         input.sql,
         input.binding,
         event as unknown as Record<string, unknown>,
+      );
+      const rootLimit = await accountRootInteractiveEvent(
+        input.env,
+        input.binding,
+        limit.stepDelta,
+        limit.costDelta,
       );
       const projectedEvent = input.modelPin
         ? {
@@ -1605,22 +1789,19 @@ async function projectAdmission(input: {
         sourceCursor,
         new Date().toISOString(),
       );
-      if (limit.exceeded) {
+      const appliedLimit = limit.exceeded ? limit : rootLimit;
+      if (appliedLimit.exceeded) {
         await gateway.abort(
-          input.binding.agentId,
+          runtimeAgentId(input.binding),
           threadName(input.binding.thread),
         );
-        throw new Error(limit.message);
+        throw new Error(appliedLimit.message);
       }
       await sealSessionArchiveIfNeeded(
         input.sql,
         input.env,
         input.binding.thread.threadId,
       );
-    });
-    put(input.sql, `projection:${input.admission.submissionId}`, {
-      admission: input.admission,
-      status: "completed",
     });
     if (input.modelPin) {
       await appendLedger(input.sql, input.binding, "provider.segment.completed", {
@@ -1631,6 +1812,23 @@ async function projectAdmission(input: {
       });
     }
     await captureCanonicalSnapshot(input, gateway);
+    const checkpoint = await checkpointWorkspace(input);
+    if (checkpoint) {
+      await appendLedger(input.sql, input.binding, "artifact.checkpoint", {
+        submissionId: input.admission.submissionId,
+        checkpoint,
+      });
+    }
+    await settleSubagent(input, "complete", {
+      output: jsonValue(result),
+    });
+    await recordSubagentTurn(input, result);
+    // Settle last. An eviction before this write causes the alarm to replay
+    // checkpointing and parent propagation instead of leaving a child stuck.
+    put(input.sql, `projection:${input.admission.submissionId}`, {
+      admission: input.admission,
+      status: "completed",
+    });
   } catch (error) {
     put(input.sql, `projection:${input.admission.submissionId}`, {
       admission: input.admission,
@@ -1645,15 +1843,201 @@ async function projectAdmission(input: {
         completionReason: "failed",
       }).catch(() => undefined);
     }
+    await settleSubagent(input, "fail", {
+      error: {
+        code: "subagent_execution_failed",
+        message: error instanceof Error ? error.message : String(error),
+        retryable: true,
+      },
+    }).catch(() => undefined);
     throw error;
   }
+}
+
+async function recordSubagentTurn(
+  input: {
+    readonly sql: ThreadControlStorage["sql"];
+    readonly env: Record<string, unknown>;
+    readonly binding: ThreadBinding;
+    readonly admission: FlueAdmission;
+    readonly turnMessage?: string;
+  },
+  result: unknown,
+): Promise<void> {
+  const turn = {
+    id: `turn_${input.admission.submissionId}`.slice(0, 200),
+    sessionId:
+      typeof input.binding.metadata?.flarySubagentRootThreadId === "string"
+        ? input.binding.metadata.flarySubagentRootThreadId
+        : input.binding.thread.threadId,
+    threadId: input.binding.thread.threadId,
+    ordinal: Date.now(),
+    messages: [
+      ...(input.turnMessage
+        ? [{ role: "user", content: input.turnMessage }]
+        : []),
+      { role: "assistant", content: summarizeSubagentResult(result) },
+    ],
+    createdAt: new Date().toISOString(),
+  };
+  const rootThreadId = input.binding.metadata?.flarySubagentRootThreadId;
+  if (typeof rootThreadId !== "string") {
+    subagentAction(input.sql, input.binding, "turn", { turn });
+    return;
+  }
+  const namespace = input.env.FLARY_THREAD_CONTROL as
+    | DurableObjectNamespace
+    | undefined;
+  if (!namespace) return;
+  const name =
+    `thread:${input.binding.thread.organizationId}:${input.binding.thread.appId}:${rootThreadId}`;
+  const response = await namespace.get(namespace.idFromName(name)).fetch(
+    new Request("https://flary.internal/subagent", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "subagent",
+        tenantId: input.binding.thread.organizationId,
+        applicationId: input.binding.thread.appId,
+        action: "turn",
+        input: { turn },
+      }),
+    }),
+  );
+  if (!response.ok) throw new Error("The parent did not accept the child turn");
+}
+
+async function checkpointWorkspace(input: {
+  readonly env: Record<string, unknown>;
+  readonly binding: ThreadBinding;
+  readonly admission: FlueAdmission;
+  readonly modelPin?: ResolvedModelPin;
+}): Promise<unknown | undefined> {
+  const namespace = input.env.FLARY_WORKSPACE as
+    | DurableObjectNamespace
+    | undefined;
+  if (!namespace || !input.env.WORKSPACE_BLOBS) return undefined;
+  return workspaceControl(input.env, input.binding, "__checkpoint", {
+    id: `checkpoint_${input.admission.submissionId}`.slice(0, 200),
+    submissionId: input.admission.submissionId,
+    sessionId: input.binding.thread.threadId,
+    ...(input.modelPin ? { modelPin: input.modelPin } : {}),
+  });
+}
+
+async function workspaceControl(
+  env: Record<string, unknown>,
+  binding: ThreadBinding,
+  method: "__checkpoint" | "__history" | "__diff" | "__restore",
+  value: unknown,
+): Promise<any> {
+  const namespace = env.FLARY_WORKSPACE as DurableObjectNamespace | undefined;
+  if (!namespace) throw new Error("FLARY_WORKSPACE is not configured");
+  const name = await cloudflareWorkspaceObjectName(binding.workspace);
+  const response = await namespace.get(namespace.idFromName(name)).fetch(
+    new Request(`https://flary.internal/workspace/${method}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ scope: binding.workspace, input: value }),
+    }),
+  );
+  const body = await response.json().catch(() => undefined);
+  if (!response.ok || !objectValue(body).output) {
+    throw new Error(
+      typeof objectValue(objectValue(body).error).message === "string"
+        ? String(objectValue(objectValue(body).error).message)
+        : "Workspace history operation failed",
+    );
+  }
+  return objectValue(body).output;
+}
+
+async function settleSubagent(
+  input: {
+    readonly env: Record<string, unknown>;
+    readonly binding: ThreadBinding;
+    readonly admission: FlueAdmission;
+  },
+  action: "complete" | "fail",
+  value: Record<string, unknown>,
+): Promise<void> {
+  const rootThreadId = input.binding.metadata?.flarySubagentRootThreadId;
+  if (typeof rootThreadId !== "string") return;
+  const namespace = input.env.FLARY_THREAD_CONTROL as
+    | DurableObjectNamespace
+    | undefined;
+  if (!namespace) return;
+  const rootName =
+    `thread:${input.binding.thread.organizationId}:${input.binding.thread.appId}:${rootThreadId}`;
+  const call = async (requestAction: string, requestInput: Record<string, unknown>) => {
+    const response = await namespace.get(namespace.idFromName(rootName)).fetch(
+      new Request("https://flary.internal/subagent", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          method: "subagent",
+          tenantId: input.binding.thread.organizationId,
+          applicationId: input.binding.thread.appId,
+          action: requestAction,
+          input: requestInput,
+        }),
+      }),
+    );
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(`Parent subagent update failed: ${JSON.stringify(body)}`);
+    }
+  };
+  await call(action, {
+    threadId: input.binding.thread.threadId,
+    requestId: `settle_${input.admission.submissionId}`,
+    idempotencyKey: `settle_${input.admission.submissionId}`,
+    ...value,
+  });
+  const parentThreadId = input.binding.metadata?.flarySubagentParentThreadId;
+  if (action === "complete" && typeof parentThreadId === "string") {
+    await call("send", {
+      requestId: `result_${input.admission.submissionId}`,
+      idempotencyKey: `result_${input.admission.submissionId}`,
+      fromThreadId: input.binding.thread.threadId,
+      toThreadId: parentThreadId,
+      kind: "result",
+      mode: "queue",
+      content: summarizeSubagentResult(value.output),
+    });
+  }
+}
+
+function jsonValue(value: unknown): unknown {
+  if (value === undefined) return null;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return String(value);
+  }
+}
+
+function summarizeSubagentResult(value: unknown): string {
+  if (typeof value === "string" && value.trim()) return value.slice(0, 100_000);
+  const record = objectValue(value);
+  for (const key of ["answer", "summary", "content", "text"]) {
+    if (typeof record[key] === "string" && record[key].trim()) {
+      return record[key].slice(0, 100_000);
+    }
+  }
+  return JSON.stringify(jsonValue(value)).slice(0, 100_000) || "Subagent completed.";
 }
 
 function accountInteractiveEvent(
   sql: ThreadControlStorage["sql"],
   binding: ThreadBinding,
   event: Record<string, unknown>,
-): { exceeded: boolean; message: string } {
+): {
+  exceeded: boolean;
+  message: string;
+  stepDelta: number;
+  costDelta: number;
+} {
   const type = String(event.type ?? "");
   const stepDelta =
     type === "message-started" || type === "turn_request" ? 1 : 0;
@@ -1670,8 +2054,17 @@ function accountInteractiveEvent(
       ? cost.total
       : 0;
   if (stepDelta === 0 && costDelta === 0) {
-    return { exceeded: false, message: "" };
+    return { exceeded: false, message: "", stepDelta, costDelta };
   }
+  return accountInteractiveDelta(sql, binding, stepDelta, costDelta);
+}
+
+function accountInteractiveDelta(
+  sql: ThreadControlStorage["sql"],
+  binding: ThreadBinding,
+  stepDelta: number,
+  costDelta: number,
+): { exceeded: boolean; message: string; stepDelta: number; costDelta: number } {
   const next = sql.transactionSync(() => {
     const current = interactiveUsage(sql);
     const value = {
@@ -1688,15 +2081,57 @@ function accountInteractiveEvent(
     return {
       exceeded: true,
       message: `The interactive step limit of ${maxSteps} was exceeded`,
+      stepDelta,
+      costDelta,
     };
   }
   if (next.costUsd > maxCost) {
     return {
       exceeded: true,
       message: `The interactive cost limit of ${maxCost} USD was exceeded`,
+      stepDelta,
+      costDelta,
     };
   }
-  return { exceeded: false, message: "" };
+  return { exceeded: false, message: "", stepDelta, costDelta };
+}
+
+async function accountRootInteractiveEvent(
+  env: Record<string, unknown>,
+  binding: ThreadBinding,
+  stepDelta: number,
+  costDelta: number,
+): Promise<{ exceeded: boolean; message: string }> {
+  const rootThreadId = binding.metadata?.flarySubagentRootThreadId;
+  if (typeof rootThreadId !== "string") {
+    return { exceeded: false, message: "" };
+  }
+  if (stepDelta === 0 && costDelta === 0) {
+    return { exceeded: false, message: "" };
+  }
+  const namespace = env.FLARY_THREAD_CONTROL as DurableObjectNamespace | undefined;
+  if (!namespace) return { exceeded: false, message: "" };
+  const name =
+    `thread:${binding.thread.organizationId}:${binding.thread.appId}:${rootThreadId}`;
+  const response = await namespace.get(namespace.idFromName(name)).fetch(
+    new Request("https://flary.internal/accountUsage", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "accountUsage",
+        tenantId: binding.thread.organizationId,
+        applicationId: binding.thread.appId,
+        stepDelta,
+        costDelta,
+      }),
+    }),
+  );
+  const value = objectValue(await response.json().catch(() => ({})));
+  if (!response.ok) throw new Error("Root usage accounting failed");
+  return {
+    exceeded: value.exceeded === true,
+    message: typeof value.message === "string" ? value.message : "",
+  };
 }
 
 function interactiveUsage(sql: ThreadControlStorage["sql"]): {
@@ -1786,7 +2221,20 @@ function subagentAction(
   const coordinator = initializeSubagents(sql, binding);
   const sessionId = binding.thread.threadId;
   if (action === "list") {
-    return { threads: coordinator.listThreads(), activity: coordinator.readActivity(numericValue(input.afterSequence, 0)) };
+    const currentThreadId = typeof input.currentThreadId === "string"
+      ? input.currentThreadId
+      : binding.thread.threadId;
+    return {
+      threads: coordinator.listThreads(),
+      messages: coordinator.readMessages(
+        currentThreadId,
+        numericValue(input.afterSequence, 0),
+      ),
+      activity: coordinator.readActivity(numericValue(input.afterSequence, 0)),
+    };
+  }
+  if (action === "turn") {
+    return { turn: coordinator.appendTurn(input.turn as never) };
   }
   if (action === "spawn") {
     return {
@@ -1826,6 +2274,12 @@ function subagentAction(
       : [];
     return {
       threads: ids.map((id) => coordinator.getThread(id)).filter(Boolean),
+      messages: typeof input.currentThreadId === "string"
+        ? coordinator.readMessages(
+            input.currentThreadId,
+            numericValue(input.afterSequence, 0),
+          )
+        : [],
       activity: coordinator.readActivity(numericValue(input.afterSequence, 0)),
     };
   }
@@ -1977,7 +2431,7 @@ async function captureCanonicalSnapshot(
   );
   if (!archive || !gateway.history) return;
   const snapshot = await gateway.history(
-    input.binding.agentId,
+    runtimeAgentId(input.binding),
     threadName(input.binding.thread),
   );
   await archive.append(
@@ -2001,6 +2455,13 @@ function requireBinding(sql: ThreadControlStorage["sql"]): ThreadBinding {
   ).toArray()[0];
   if (!row) throw new Error("The thread was not found");
   return ThreadBindingSchema.parse(JSON.parse(row.value_json));
+}
+
+/** The generated root Flue class also serves declared durable child threads. */
+function runtimeAgentId(binding: ThreadBinding): string {
+  return typeof binding.metadata?.flaryRuntimeAgentId === "string"
+    ? binding.metadata.flaryRuntimeAgentId
+    : binding.agentId;
 }
 
 interface StoredModelPolicy {
@@ -2159,7 +2620,7 @@ async function agentApprovalRpc(
   }
   const instanceId = threadName(binding.thread);
   const response = await fetcher(
-    `https://flue.internal/agents/${encodeURIComponent(binding.agentId)}/${encodeURIComponent(instanceId)}?flary=${action}`,
+    `https://flue.internal/agents/${encodeURIComponent(runtimeAgentId(binding))}/${encodeURIComponent(instanceId)}?flary=${action}`,
     {
       method: action === "approval" ? "POST" : "GET",
       headers,
@@ -2177,8 +2638,9 @@ async function agentControlRpc(
   action: "compact" | "rollback",
   input: unknown,
 ): Promise<unknown> {
+  const agentId = runtimeAgentId(binding);
   const namespace = env[
-    `FLUE_AGENT_${binding.agentId.replaceAll(/[^A-Za-z0-9]/g, "_").toUpperCase()}`
+    `FLUE_AGENT_${agentId.replaceAll(/[^A-Za-z0-9]/g, "_").toUpperCase()}`
   ] as DurableObjectNamespace | undefined;
   if (!namespace) {
     return { runtimeUnavailable: true };
@@ -2194,7 +2656,7 @@ async function agentControlRpc(
     .get(namespace.idFromName(instanceId))
     .fetch(
       new Request(
-        `https://flue.internal/agents/${encodeURIComponent(binding.agentId)}/${encodeURIComponent(instanceId)}?flary=${action}`,
+        `https://flue.internal/agents/${encodeURIComponent(agentId)}/${encodeURIComponent(instanceId)}?flary=${action}`,
         {
           method: "POST",
           headers,
@@ -2221,14 +2683,15 @@ async function projectAgentSnapshot(
     sourceCursor: string,
   ) => Promise<unknown>,
 ): Promise<void> {
+  const agentId = runtimeAgentId(binding);
   const namespace = env[
-    `FLUE_AGENT_${binding.agentId.replaceAll(/[^A-Za-z0-9]/g, "_").toUpperCase()}`
+    `FLUE_AGENT_${agentId.replaceAll(/[^A-Za-z0-9]/g, "_").toUpperCase()}`
   ] as DurableObjectNamespace | undefined;
   if (!namespace) return;
   const instanceId = threadName(binding.thread);
   const fetcher = createCloudflareFlueFetch(env);
   const response = await fetcher(
-    `https://flue.internal/agents/${encodeURIComponent(binding.agentId)}/${encodeURIComponent(instanceId)}?view=history`,
+    `https://flue.internal/agents/${encodeURIComponent(agentId)}/${encodeURIComponent(instanceId)}?view=history`,
     { method: "GET" },
   );
   if (!response.ok) {
@@ -2243,7 +2706,7 @@ async function projectAgentSnapshot(
       snapshot,
       timestamp: new Date().toISOString(),
     },
-    `flue:control:${binding.agentId}:${instanceId}:${offset}`,
+    `flue:control:${agentId}:${instanceId}:${offset}`,
   );
 }
 
@@ -2251,6 +2714,15 @@ function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function subagentWaitSettled(value: unknown): boolean {
+  const threads = objectValue(value).threads;
+  return Array.isArray(threads) && threads.length > 0 && threads.every((thread) => {
+    const status = objectValue(thread).status;
+    return status === "completed" || status === "failed" ||
+      status === "cancelled" || status === "closed";
+  });
 }
 
 function positive(value: unknown, fallback: number): number {

@@ -17,7 +17,7 @@ application's account.
 | Function HTTP route | Yes | No | No | No |
 | Compile `*.prompt.md` | No | No | No | No |
 | Function-first durable chat or support thread | Yes | Yes (SQLite) | Generated catalog | Generated archive |
-| Persistent coding agent with small files | Yes | Yes (SQLite) | Generated catalog | Generated archive |
+| Persistent coding agent with small files | Yes | Flue, Thread Control, and Workspace (SQLite) | Generated catalog | Generated workspace history |
 | Low-level D1 run adapter | Yes | Optional | Yes | No |
 | Files larger than 1,500,000 bytes | Yes | Yes (SQLite) | No | Yes |
 | R2 history fallback | Yes | Yes (SQLite) | No | Yes |
@@ -34,6 +34,10 @@ Durable Object. The generated Thread Control Durable Object keeps the
 rebuildable session ledger, approvals, audit indexes, subagent mailboxes,
 goals, rollback markers, process state, and read cursors. It does not replace
 the Flue transcript.
+
+The generated Workspace Durable Object keeps one tenant-bound file and Git
+state for a workspace and branch. Parent and child agents use the same object.
+This prevents separate Flue instances from getting separate file systems.
 
 ### D1
 
@@ -54,8 +58,10 @@ Apply `FLARY_RUNS_D1_MIGRATION` through your application's migration process.
 
 ### R2
 
-The workspace runtime keeps files up to `1,500,000` bytes in workspace
-SQLite. Larger files go to R2. R2 can also store immutable history when the
+The workspace runtime keeps files up to `1,500,000` bytes in Workspace Durable
+Object SQLite. Larger files go to the generated `WORKSPACE_BLOBS` R2 bucket.
+Every completed turn also creates an immutable workspace checkpoint there.
+R2 can store immutable history when the
 Cloudflare Artifacts binding is not available. Thread Control automatically
 compresses, encrypts, and seals records outside its 10,000-record hot window
 to R2. It verifies each encrypted segment before a read.

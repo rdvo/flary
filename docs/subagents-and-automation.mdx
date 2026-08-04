@@ -14,6 +14,8 @@ For the function-first API, declare children on `app.agent()`:
 ~~~ts
 const reviewer = app.agent({
   name: "reviewer",
+  model: "openai/gpt-5.6-sol",
+  models: { allow: ["openai/gpt-5.6-sol"] },
   instructions: "Review the diff and report concrete defects.",
 });
 
@@ -21,43 +23,48 @@ export const coder = app.agent({
   name: "coder",
   instructions: "Implement the requested repository change.",
   subagents: { reviewer },
+  model: "anthropic/claude-sonnet",
+  models: { allow: ["anthropic/claude-sonnet"] },
   delegation: {
     mode: "auto",
     maxConcurrent: 4,
     maxTotal: 16,
     maxDepth: 2,
+    allowPeerMessaging: true,
   },
 });
 ~~~
 
 The generated Thread Control Durable Object stores child lineage, admission
-limits, mailbox messages, and control results in SQLite. Each child uses a
-separate Flue agent instance and canonical stream. A Worker restart does not
-remove child state.
+limits, mailbox messages, results, and control state in SQLite. Each child
+uses a separate Flue instance, Thread Control projection, and canonical
+stream. The generated root Flue class selects the declared child definition
+from the durable instance ID. A Worker restart does not remove child state.
 
-## Define a bounded child task
+The parent and child can use different providers. Flary checks the exact child
+model allow-list, resolves the tenant credential grant, and stores the child
+model pin before it starts the child turn. Provider-private cache and reasoning
+state stay in the child thread.
+
+## Start and control child threads
 
 ~~~ts
-const child = await coordinator.spawn({
-  parentThreadId: trusted.threadId,
-  role: "researcher",
-  agentId: "research",
-  model: {
-    provider: "openai",
-    model: "gpt-5.6-mini",
-  },
-  mode: "ask",
-  seedTurns: [
-    {
-      role: "user",
-      content: "Find the current refund policy in the approved sources.",
-    },
-  ],
-  limits: {
-    maxSteps: 8,
-    maxToolCalls: 12,
-    maxDurationMs: 90_000,
-  },
+const child = await thread.subagents.spawn({
+  agent: "reviewer",
+  task: "Review the current diff and report concrete defects.",
+  model: "openai/gpt-5.6-sol",
+  seedTurns: 2,
+});
+
+await thread.subagents.send({
+  toThreadId: child.thread.threadId,
+  content: "Also check the migration path.",
+  mode: "queue",
+});
+
+const result = await thread.subagents.wait({
+  threadIds: [child.thread.threadId],
+  timeoutMs: 30_000,
 });
 ~~~
 
@@ -72,19 +79,26 @@ through the coordinator. Child tools use the same mode, capability, approval,
 tenant, and connection checks as a normal thread.
 
 ~~~ts
-await coordinator.send(child.id, {
-  type: "instruction",
+await thread.subagents.send({
+  toThreadId: child.thread.threadId,
+  kind: "instruction",
   content: "Compare the two sources and return one recommendation.",
 });
-
-for await (const event of coordinator.observe(child.id)) {
-  publishToParent(event);
-}
 ~~~
 
-Use bounded fan-out for independent research. Keep writes in the parent or
-serialize them by workspace resource. A child must not receive a stronger
-credential or tenant scope than its parent.
+The model gets the same spawn, list, send, wait, interrupt, and close controls.
+Results and failures are stored in the coordinator and sent to the parent
+mailbox automatically. Parent status is projected after child settlement, so
+a restart can replay result propagation without starting the child again.
+Related agents can send peer messages only when `allowPeerMessaging` permits
+it.
+
+An external UI or channel adapter can use the same controls through
+`thread.subagents`. See [Telegram, Discord, and custom UIs](/docs/channels-and-webhooks/).
+
+Use bounded fan-out for independent research. Workspace writes still pass
+through the common policy, approval, and journal path. A child cannot receive
+a stronger tenant or connection scope than its parent.
 
 ## Tool and cost limits
 

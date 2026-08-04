@@ -74,6 +74,17 @@ test("the Vite plugin emits populated Flue runtime entries", () => {
     migrations?: unknown;
   };
   assert.ok(wrangler.exports?.FlaryRuntime);
+  assert.ok(wrangler.exports?.FlaryWorkspace);
+  assert.ok(
+    (wrangler as any).durable_objects.bindings.some(
+      (binding: { name: string }) => binding.name === "FLARY_WORKSPACE",
+    ),
+  );
+  assert.ok(
+    (wrangler as any).r2_buckets.some(
+      (binding: { binding: string }) => binding.binding === "WORKSPACE_BLOBS",
+    ),
+  );
   assert.equal("migrations" in wrangler, false);
 });
 
@@ -112,6 +123,7 @@ test("the Vite plugin emits persistent app.agent entries", () => {
   assert.equal(manifest.agents[0].revision, coder.revision);
   const wrangler = JSON.parse(assets.get("flary.wrangler.json") ?? "{}");
   assert.ok(wrangler.exports.FlaryThreadControl);
+  assert.ok(wrangler.exports.FlaryWorkspace);
   assert.ok(
     wrangler.d1_databases.some(
       (binding: { binding: string }) =>
@@ -274,6 +286,7 @@ test("the Vite plugin generates Flue Durable Object entry and bindings", (t) => 
   assert.match(generatedEntry, /flaryInternalRequest/);
   assert.match(generatedEntry, /cloudflareAgents\.compact\(this\)/);
   assert.match(generatedEntry, /cloudflareAgents\.rollback\(this/);
+  assert.match(generatedEntry, /body\.excludeTarget === true/);
   const wrangler = JSON.parse(
     fs.readFileSync(path.join(root, ".flue-vite.wrangler.jsonc"), "utf8"),
   ) as {

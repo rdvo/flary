@@ -1,122 +1,248 @@
 ---
 title: Coding agent
-description: Build a durable coding function with lazy tools, workspace policy, and explicit modes.
+description: Build a persistent coding thread with cross-provider subagents, Git tools, checkpoints, and restore.
 section: Examples
 order: 2
 ---
 
-A coding agent uses the same function runtime as a support bot. The difference
-is its workspace, mode, and tool policy.
+Use `app.agent()` for a coding session that must behave like a persistent
+development agent. The thread keeps one canonical transcript, one workspace,
+provider pins for each turn, approvals, audits, child agents, and checkpoint
+history.
 
-## Define the app
+Use `app.fn()` when the work has a finite input and output and does not need an
+interactive thread.
 
-```ts
+## Define the application
+
+~~~ts
 // src/flary.ts
-import { flary, z } from "flary";
+import { flary } from "flary";
 
-export const app = flary<Env>({
+export const app = flary({
   name: "coding-agent",
-  model: "openai/gpt-5.6-codex",
-  bindings: z.object({
-    OPENAI_API_KEY: z.string().min(1),
-    LOADER: z.unknown().optional(),
-    WORKSPACE: z.any(),
-  }),
-  auth: ({ request, bindings }) => authenticateDeveloper(request, bindings),
+  model: "anthropic/claude-sonnet",
+  auth: async ({ request }) => {
+    const user = await authenticateDeveloper(request);
+    return {
+      tenantId: user.organizationId,
+      userId: user.id,
+      roles: user.roles,
+    };
+  },
 });
-```
+~~~
 
-## Define workspace tools
+The application owns authentication. Provider credentials stay in Worker
+secrets or trusted connection resolvers. They do not enter prompts or tool
+arguments.
 
-```ts
+## Register the tool sources
+
+~~~ts
 // src/tools.ts
 import { z } from "flary";
 import { app } from "./flary";
 
-const readFile = app.fn({
-  name: "workspace.read_file",
-  description: "Read one file from the bound workspace.",
-  input: z.object({ path: z.string().min(1) }),
-  output: z.object({ path: z.string(), content: z.string() }),
-  policy: { operation: "read", capabilities: ["file.read"] },
-  run: ({ path }, { bindings }) => bindings.WORKSPACE.read(path),
+const searchDocs = app.fn({
+  description: "Search approved project documentation.",
+  input: z.object({ query: z.string().min(1) }),
+  output: z.array(z.object({
+    title: z.string(),
+    url: z.string().url(),
+    excerpt: z.string(),
+  })),
+  policy: { operation: "read", capabilities: ["docs.read"] },
+  run: ({ query }) => docs.search(query),
 });
 
-const applyPatch = app.fn({
-  name: "workspace.apply_patch",
-  description: "Apply one checked patch to the bound branch.",
-  input: z.object({ patch: z.string().min(1) }),
-  output: z.object({ changedFiles: z.array(z.string()) }),
-  policy: {
-    operation: "write",
-    capabilities: ["file.write"],
-    requiresApproval: true,
-  },
-  run: ({ patch }, { bindings }) => bindings.WORKSPACE.applyPatch(patch),
-});
+const github = app.mcp("github");
 
-export const tools = app.tools({ readFile, applyPatch });
-```
-
-The `run` functions are trusted application code. Their Zod schemas become
-lazy tool descriptors. Code Mode exposes a small search/describe/call surface
-instead of loading every tool schema into every model request.
-
-## Define the coding function
-
-```ts
-// src/coding.ts
-import { z } from "flary";
-import { app } from "./flary";
-import { tools } from "./tools";
-
-export const coding = app.fn({
-  input: z.object({ request: z.string().min(1) }),
-  output: z.object({
-    summary: z.string(),
-    changedFiles: z.array(z.string()),
+export const codingTools = app.tools({
+  searchDocs,
+  github,
+  workspace: app.workspace({ branch: "run" }),
+  shell: app.sandbox({
+    network: "restricted",
+    sleepAfter: "10m",
   }),
-  mode: "build",
-  thinking: "high",
-  tools,
-  prompt: ({ request }) => [
-    "Inspect the bound workspace.",
-    "Make small changes, run checks, and report exact files changed.",
-    `Task: ${request}`,
-  ].join("\n"),
 });
-```
+~~~
 
-Build mode can write the bound workspace. The `requiresApproval` policy on
-`applyPatch` still pauses the run before the mutation.
+`app.workspace()` uses the generated branch-scoped Workspace Durable Object.
+It provides file and Git operations through the lazy catalog. `app.sandbox()`
+is separate and runs builds or long processes when the host has a Sandbox
+binding.
 
-## Serve and call it
+## Declare cross-provider agents
 
-```ts
+~~~ts
+// src/agents.ts
+import { app } from "./flary";
+import { codingTools } from "./tools";
+
+export const reviewer = app.agent({
+  name: "reviewer",
+  model: "openai/gpt-5.6-sol",
+  models: { allow: ["openai/gpt-5.6-sol"] },
+  instructions: [
+    "Inspect the current workspace diff.",
+    "Run focused checks and report concrete defects.",
+  ].join("\n"),
+  mode: "review",
+  tools: codingTools,
+});
+
+export const coder = app.agent({
+  name: "coder",
+  model: "anthropic/claude-sonnet",
+  models: {
+    allow: ["anthropic/claude-sonnet", "openai/gpt-5.6-sol"],
+    switching: "user",
+    fallback: "none",
+  },
+  instructions: [
+    "Inspect the repository before making changes.",
+    "Implement the request, run checks, review the diff, and report the result.",
+    "Delegate focused review work when it improves the result.",
+  ].join("\n"),
+  thinking: "high",
+  mode: "build",
+  tools: codingTools,
+  subagents: { reviewer },
+  delegation: {
+    mode: "auto",
+    maxConcurrent: 4,
+    maxTotal: 16,
+    maxDepth: 2,
+    allowPeerMessaging: true,
+  },
+  compaction: { mode: "auto" },
+  limits: { steps: 200, toolCalls: 500, costUsd: 20 },
+});
+
+export const functions = { coder, reviewer };
+~~~
+
+The Anthropic parent can start the OpenAI reviewer. Each child gets a separate
+durable transcript, model pin, approval state, audit view, usage record, and
+mailbox. The child shares the parent workspace unless the application creates
+an isolated workspace.
+
+## Serve the complete API
+
+~~~ts
 // src/index.ts
 import { app } from "./flary";
-import { coding } from "./coding";
+import { functions } from "./agents";
 
-export default app.serve({ coding });
-```
+export default app.serve(functions);
+~~~
 
-Start a durable coding run from the product client with
-`client.coding.start({ request })`. The run can pause for approval or user
-input and can resume after a disconnect.
+No handwritten Hono routes are required. The Vite integration generates the
+Flue, Thread Control, Runtime, and Workspace Durable Object bindings, plus the
+D1 catalog, projection Queue, and R2 bindings.
 
-The low-level gateway exposes these internal tool operations to Code Mode:
+## Create and reconnect to a thread
 
-- `tool_search`
-- `tool_describe`
-- `tool_call`
-- `tool_batch`
-- `request_user_input`
+~~~ts
+import { flary } from "flary/client";
+import type { functions } from "../worker/src/agents";
 
-Independent reads can run in parallel. Writes to the same resource are
-serialized and use idempotency keys.
+const api = flary<typeof functions>({
+  baseUrl: "https://agent.example.com",
+  headers: () => ({
+    authorization: `Bearer ${sessionToken()}`,
+  }),
+});
 
-## Add modes
+const thread = await api.coder.threads.create({
+  workspace: {
+    organizationId: "acme",
+    appId: "coder",
+    projectId: "api",
+    workspaceId: "main",
+    branch: "main",
+  },
+  mode: "build",
+  thinkingLevel: "high",
+});
 
-Use `mode: "ask"` or `mode: "plan"` for read-only variants. Use a custom
-Zod-backed profile when the coding product needs a narrower capability set.
-See [Modes and permissions](/docs/modes-permissions/).
+await thread.send({
+  message: "Add rate limits to the public API and run the tests.",
+  mode: "queue",
+});
+
+for await (const event of thread.stream()) {
+  renderAgentEvent(event);
+}
+~~~
+
+Store `thread.ref.threadId` and the newest stream cursor in the product. A web
+UI, CLI, Telegram bot, or Discord bot can reopen the same thread later:
+
+~~~ts
+const sameThread = await api.coder.threads.open({
+  organizationId: "acme",
+  threadId: savedThreadId,
+});
+
+await sameThread.send({ message: "Continue from the current workspace." });
+~~~
+
+The client does not resend the complete transcript. Flue reconstructs context
+from the canonical durable thread. A one-turn model override or a persistent
+model change keeps the same thread and workspace:
+
+~~~ts
+await sameThread.model.set("openai/gpt-5.6-sol");
+await sameThread.send({ message: "Continue with the OpenAI model." });
+
+await sameThread.send({
+  message: "Ask the Anthropic model to review this turn.",
+  model: "anthropic/claude-sonnet",
+});
+~~~
+
+## Subagents and workspace checkpoints
+
+The model can start declared children through its coordination tools. The UI
+can use the same durable controls:
+
+~~~ts
+const child = await sameThread.subagents.spawn({
+  agent: "reviewer",
+  task: "Review the current diff and run focused tests.",
+  model: "openai/gpt-5.6-sol",
+  seedTurns: 2,
+});
+
+await sameThread.subagents.send({
+  toThreadId: child.thread.threadId,
+  content: "Also check the database migration.",
+  mode: "queue",
+});
+
+await sameThread.subagents.wait({
+  threadIds: [child.thread.threadId],
+  timeoutMs: 30_000,
+});
+~~~
+
+Every completed turn creates an immutable workspace checkpoint. Checkpoints do
+not replace Git commits; they let the product show exact turn diffs and restore
+the files that existed after a prior turn.
+
+~~~ts
+const checkpoints = await sameThread.checkpoints.list();
+const diff = await sameThread.checkpoints.diff({
+  baseCommitId: "checkpoint_submission_1",
+  headCommitId: "checkpoint_submission_2",
+});
+
+await sameThread.checkpoints.restore("checkpoint_submission_1");
+~~~
+
+Git writes still use policy, approval, journaling, and idempotency controls.
+Create a pull request through an approved GitHub MCP or OpenAPI connection
+after the branch is pushed.

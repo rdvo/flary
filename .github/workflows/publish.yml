@@ -73,7 +73,48 @@ jobs:
       - name: Test packed consumer
         run: npm run test:npm-install
 
+      - name: Detect live provider test configuration
+        id: live
+        shell: bash
+        run: |
+          set -euo pipefail
+          configured=true
+          for name in \
+            OPENAI_API_KEY \
+            ANTHROPIC_API_KEY \
+            FLARY_OPENAI_CACHE_TEST_MODEL \
+            FLARY_ANTHROPIC_CACHE_TEST_MODEL \
+            FLARY_E2E_BASE_URL \
+            FLARY_E2E_TOKEN \
+            FLARY_E2E_APP_ID \
+            FLARY_E2E_ORGANIZATION_ID \
+            FLARY_E2E_AGENT_ID \
+            FLARY_E2E_THREAD_ID \
+            FLARY_E2E_MODEL_JSON
+          do
+            if [[ -z "${!name:-}" ]]; then
+              configured=false
+            fi
+          done
+          echo "configured=$configured" >> "$GITHUB_OUTPUT"
+          if [[ "$configured" != "true" ]]; then
+            echo "::notice::Live provider recovery tests are not configured for this repository."
+          fi
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          FLARY_OPENAI_CACHE_TEST_MODEL: ${{ secrets.FLARY_OPENAI_CACHE_TEST_MODEL }}
+          FLARY_ANTHROPIC_CACHE_TEST_MODEL: ${{ secrets.FLARY_ANTHROPIC_CACHE_TEST_MODEL }}
+          FLARY_E2E_BASE_URL: ${{ secrets.FLARY_E2E_BASE_URL }}
+          FLARY_E2E_TOKEN: ${{ secrets.FLARY_E2E_TOKEN }}
+          FLARY_E2E_APP_ID: ${{ secrets.FLARY_E2E_APP_ID }}
+          FLARY_E2E_ORGANIZATION_ID: ${{ secrets.FLARY_E2E_ORGANIZATION_ID }}
+          FLARY_E2E_AGENT_ID: ${{ secrets.FLARY_E2E_AGENT_ID }}
+          FLARY_E2E_THREAD_ID: ${{ secrets.FLARY_E2E_THREAD_ID }}
+          FLARY_E2E_MODEL_JSON: ${{ secrets.FLARY_E2E_MODEL_JSON }}
+
       - name: Live provider recovery tests
+        if: steps.live.outputs.configured == 'true'
         run: npm run test:live
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

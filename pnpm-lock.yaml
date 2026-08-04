@@ -4,12 +4,19 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  brace-expansion: 5.0.9
+  dompurify: 3.4.13
+  fast-uri: 3.1.5
+  hono: 4.12.34
+  undici: 7.29.0
+
 patchedDependencies:
   '@earendil-works/pi-ai@0.80.10':
     hash: ztc4t3k3sfijkpe4vqtdeswqdq
     path: patches/@earendil-works__pi-ai@0.80.10.patch
   '@flue/runtime@1.0.0-beta.9':
-    hash: lgkjy2mltsy7qdqp4thjlyjh6q
+    hash: 4qdkvvdpka6r7n4kmhdi3nk5mm
     path: patches/@flue__runtime@1.0.0-beta.9.patch
 
 importers:
@@ -33,7 +40,7 @@ importers:
         version: 0.80.10(patch_hash=ztc4t3k3sfijkpe4vqtdeswqdq)(@modelcontextprotocol/sdk@1.30.0)(zod@4.4.3)
       '@flue/runtime':
         specifier: 1.0.0-beta.9
-        version: 1.0.0-beta.9(patch_hash=lgkjy2mltsy7qdqp4thjlyjh6q)(@cfworker/json-schema@4.1.1)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(typescript@5.9.3)(zod@4.4.3)
+        version: 1.0.0-beta.9(patch_hash=4qdkvvdpka6r7n4kmhdi3nk5mm)(@cfworker/json-schema@4.1.1)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(typescript@5.9.3)(zod@4.4.3)
       '@flue/sdk':
         specifier: 1.0.0-beta.9
         version: 1.0.0-beta.9
@@ -41,8 +48,8 @@ importers:
         specifier: ^1.30.0
         version: 1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3)
       hono:
-        specifier: ^4.5.0
-        version: 4.12.32
+        specifier: 4.12.34
+        version: 4.12.34
       patch-package:
         specifier: 8.0.1
         version: 8.0.1
@@ -103,7 +110,7 @@ importers:
         version: 0.4.3(@modelcontextprotocol/sdk@1.30.0)(zod@4.4.3)
       '@flue/runtime':
         specifier: 1.0.0-beta.9
-        version: 1.0.0-beta.9(patch_hash=lgkjy2mltsy7qdqp4thjlyjh6q)(@cfworker/json-schema@4.1.1)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(typescript@5.9.3)(zod@4.4.3)
+        version: 1.0.0-beta.9(patch_hash=4qdkvvdpka6r7n4kmhdi3nk5mm)(@cfworker/json-schema@4.1.1)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(typescript@5.9.3)(zod@4.4.3)
       '@monaco-editor/react':
         specifier: 4.7.0
         version: 4.7.0(monaco-editor@0.56.0)(react-dom@19.2.8)(react@19.2.8)
@@ -120,8 +127,8 @@ importers:
         specifier: workspace:*
         version: link:../..
       hono:
-        specifier: ^4.12.30
-        version: 4.12.32
+        specifier: 4.12.34
+        version: 4.12.34
       lucide-react:
         specifier: ^0.511.0
         version: 0.511.0(react@19.2.8)
@@ -158,7 +165,7 @@ importers:
         version: 1.48.0(vite@8.1.5)(wrangler@4.115.0)
       '@flue/cli':
         specifier: 1.0.0-beta.9
-        version: 1.0.0-beta.9(@cfworker/json-schema@4.1.1)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@types/node@20.19.43)(esbuild@0.28.1)(hono@4.12.32)(tsx@4.23.1)(typescript@5.9.3)(wrangler@4.115.0)(yaml@2.9.0)(zod@4.4.3)
+        version: 1.0.0-beta.9(@cfworker/json-schema@4.1.1)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@types/node@20.19.43)(esbuild@0.28.1)(hono@4.12.34)(tsx@4.23.1)(typescript@5.9.3)(wrangler@4.115.0)(yaml@2.9.0)(zod@4.4.3)
       '@types/react':
         specifier: ^19.1.8
         version: 19.2.17
@@ -1459,7 +1466,7 @@ packages:
       '@cloudflare/containers': 0.3.7
       aws4fetch: 1.0.20
       capnweb: 0.8.0
-      hono: 4.12.32
+      hono: 4.12.34
     dev: false
 
   /@cloudflare/shell@0.4.3(@modelcontextprotocol/sdk@1.30.0)(zod@4.4.3):
@@ -2361,15 +2368,15 @@ packages:
       levn: 0.4.1
     dev: true
 
-  /@flue/cli@1.0.0-beta.9(@cfworker/json-schema@4.1.1)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@types/node@20.19.43)(esbuild@0.28.1)(hono@4.12.32)(tsx@4.23.1)(typescript@5.9.3)(wrangler@4.115.0)(yaml@2.9.0)(zod@4.4.3):
+  /@flue/cli@1.0.0-beta.9(@cfworker/json-schema@4.1.1)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@types/node@20.19.43)(esbuild@0.28.1)(hono@4.12.34)(tsx@4.23.1)(typescript@5.9.3)(wrangler@4.115.0)(yaml@2.9.0)(zod@4.4.3):
     resolution: {integrity: sha512-RPv28ecD7lQ2XBZbuohte3rXDqHHrdXTpCGC5mSxYQsEkOeDN2LOmImQZbJqCrkIAFmMgntzOhaF2+14R61C4Q==}
     engines: {node: '>=22.19.0'}
     hasBin: true
     dependencies:
       '@cloudflare/vite-plugin': 1.48.0(vite@8.1.5)(wrangler@4.115.0)
-      '@flue/runtime': 1.0.0-beta.9(patch_hash=lgkjy2mltsy7qdqp4thjlyjh6q)(@cfworker/json-schema@4.1.1)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(typescript@5.9.3)(zod@4.4.3)
+      '@flue/runtime': 1.0.0-beta.9(patch_hash=4qdkvvdpka6r7n4kmhdi3nk5mm)(@cfworker/json-schema@4.1.1)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(typescript@5.9.3)(zod@4.4.3)
       '@flue/sdk': 1.0.0-beta.9
-      '@hono/node-server': 2.0.12(hono@4.12.32)
+      '@hono/node-server': 2.0.12(hono@4.12.34)
       '@vercel/detect-agent': 1.2.3
       debug: 4.4.3
       minisearch: 7.2.0
@@ -2410,20 +2417,20 @@ packages:
       - zod-to-json-schema
     dev: true
 
-  /@flue/runtime@1.0.0-beta.9(patch_hash=lgkjy2mltsy7qdqp4thjlyjh6q)(@cfworker/json-schema@4.1.1)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(typescript@5.9.3)(zod@4.4.3):
+  /@flue/runtime@1.0.0-beta.9(patch_hash=4qdkvvdpka6r7n4kmhdi3nk5mm)(@cfworker/json-schema@4.1.1)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(typescript@5.9.3)(zod@4.4.3):
     resolution: {integrity: sha512-ksh0ZkTVyqQnGvU3OnbVX6luAJwe6tt8q7O0vn99b7Cx6XcPTXzY/YEkXrOtCHzV6ZwfSdO9ZfaWbhTD1tdQuQ==}
     engines: {node: '>=22.19.0'}
     dependencies:
       '@earendil-works/pi-agent-core': 0.80.10(@modelcontextprotocol/sdk@1.30.0)(zod@4.4.3)
       '@earendil-works/pi-ai': 0.80.10(patch_hash=ztc4t3k3sfijkpe4vqtdeswqdq)(@modelcontextprotocol/sdk@1.30.0)(zod@4.4.3)
-      '@hono/node-server': 2.0.12(hono@4.12.25)
-      '@hono/standard-validator': 0.2.3(@standard-schema/spec@1.1.0)(hono@4.12.25)
+      '@hono/node-server': 2.0.12(hono@4.12.34)
+      '@hono/standard-validator': 0.2.3(@standard-schema/spec@1.1.0)(hono@4.12.34)
       '@modelcontextprotocol/sdk': 1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3)
       '@standard-community/standard-json': 0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.7.1)(quansync@0.2.11)(valibot@1.4.2)(zod@4.4.3)
       '@standard-community/standard-openapi': 0.2.9(@standard-community/standard-json@0.3.5)(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(valibot@1.4.2)(zod@4.4.3)
       '@valibot/to-json-schema': 1.7.1(valibot@1.4.2)
-      hono: 4.12.25
-      hono-openapi: 1.3.1(@hono/standard-validator@0.2.3)(@standard-community/standard-json@0.3.5)(@standard-community/standard-openapi@0.2.9)(@types/json-schema@7.0.15)(hono@4.12.25)(openapi-types@12.1.3)
+      hono: 4.12.34
+      hono-openapi: 1.3.1(@hono/standard-validator@0.2.3)(@standard-community/standard-json@0.3.5)(@standard-community/standard-openapi@0.2.9)(@types/json-schema@7.0.15)(hono@4.12.34)(openapi-types@12.1.3)
       js-yaml: 4.3.0
       just-bash: 3.2.0
       openapi-types: 12.1.3
@@ -2473,30 +2480,22 @@ packages:
       - supports-color
       - utf-8-validate
 
-  /@hono/node-server@2.0.12(hono@4.12.25):
+  /@hono/node-server@2.0.12(hono@4.12.34):
     resolution: {integrity: sha512-eWpQYr67tqJLeaSUl0Q+TquuYfUdTibpOJlUMV2FfUP7+KqCC5TufnwnlXL6mobZBJbGAYRd7ZvEBDCbLInjhg==}
     engines: {node: '>=20'}
     peerDependencies:
-      hono: ^4
+      hono: 4.12.34
     dependencies:
-      hono: 4.12.25
+      hono: 4.12.34
 
-  /@hono/node-server@2.0.12(hono@4.12.32):
-    resolution: {integrity: sha512-eWpQYr67tqJLeaSUl0Q+TquuYfUdTibpOJlUMV2FfUP7+KqCC5TufnwnlXL6mobZBJbGAYRd7ZvEBDCbLInjhg==}
-    engines: {node: '>=20'}
-    peerDependencies:
-      hono: ^4
-    dependencies:
-      hono: 4.12.32
-
-  /@hono/standard-validator@0.2.3(@standard-schema/spec@1.1.0)(hono@4.12.25):
+  /@hono/standard-validator@0.2.3(@standard-schema/spec@1.1.0)(hono@4.12.34):
     resolution: {integrity: sha512-bp9vHu6Va6SfMHC3D4ZLBbT/woi+AZ9CRdTXQu3kLJuLh2W/Gb9UO4hijS+BQAGFXi4EGpXdetxpzwTAawSVeg==}
     peerDependencies:
       '@standard-schema/spec': ^1.0.0
-      hono: '>=3.9.0'
+      hono: 4.12.34
     dependencies:
       '@standard-schema/spec': 1.1.0
-      hono: 4.12.25
+      hono: 4.12.34
 
   /@humanfs/core@0.19.2:
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -2923,7 +2922,7 @@ packages:
         optional: true
     dependencies:
       '@cfworker/json-schema': 4.1.1
-      '@hono/node-server': 2.0.12(hono@4.12.32)
+      '@hono/node-server': 2.0.12(hono@4.12.34)
       ajv: 8.20.0
       ajv-formats: 3.0.1(ajv@8.20.0)
       content-type: 1.0.5
@@ -2933,7 +2932,7 @@ packages:
       eventsource-parser: 3.1.0
       express: 5.2.1
       express-rate-limit: 8.6.1(express@5.2.1)
-      hono: 4.12.32
+      hono: 4.12.34
       jose: 6.2.4
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
@@ -4016,7 +4015,7 @@ packages:
     resolution: {integrity: sha512-Thbli+OlOj+iMPYFBVBfJ3OmCAnaSyNn4M1vz9T6Gka5Jt9ba/HIR56joy65tY6kx/FCF5VXNB819Y7/GUrBGA==}
     dependencies:
       fast-deep-equal: 3.1.3
-      fast-uri: 3.1.4
+      fast-uri: 3.1.5
       json-schema-traverse: 1.0.0
       require-from-string: 2.0.2
 
@@ -4353,8 +4352,8 @@ packages:
   /bowser@2.14.1:
     resolution: {integrity: sha512-tzPjzCxygAKWFOJP011oxFHs57HzIhOEracIgAePE4pqB3LikALKnSzUyU4MGs9/iCEUuHlAJTjTc5M+u7YEGg==}
 
-  /brace-expansion@5.0.8:
-    resolution: {integrity: sha512-JZyDyq3D4AUifKTPOB7DELf6XsB3WdPuNxCtob1vFXPsSXhdAiHBWJ/tJ8HAc9aH84BK+5JFZLNkJKx3G9kzQg==}
+  /brace-expansion@5.0.9:
+    resolution: {integrity: sha512-ScQ4IuvIEF1TMlP7Zt+vjJ//9zlPb2SDcxWxM3bk8s6t6GGdJ7KO1dCcTidOPJKePW30LE/2cT7wCyPho9/Wxg==}
     engines: {node: 20 || >=22}
     dependencies:
       balanced-match: 4.0.4
@@ -4759,8 +4758,8 @@ packages:
       domelementtype: 2.3.0
     dev: true
 
-  /dompurify@3.4.8:
-    resolution: {integrity: sha512-yb1cEmaOum7wFvOCSQxyfgVlv5D47Rc30iZWoMpbDIWTnJ6grDDQyu2KFJzB2k7u0pMuJcQ1zphH//fFnw2tjQ==}
+  /dompurify@3.4.13:
+    resolution: {integrity: sha512-2vmYIoqjze2d+kakP8S/nS5shfsl587kzwEjcGlTdiksUVgFHnFCsLYDVj/JNqJVOQZGSYBTmuycv0PodwmnMQ==}
     optionalDependencies:
       '@types/trusted-types': 2.0.7
     dev: false
@@ -5347,8 +5346,8 @@ packages:
       fast-string-truncated-width: 3.0.3
     dev: true
 
-  /fast-uri@3.1.4:
-    resolution: {integrity: sha512-8JnbkQ4juDyvYs4mgFGQqg4yCYtFDtUtmp2QIQq11ZZe5CFQ5wcqm1rqDgAh/QdMySuBnPzMUiJUNZG5N/AiQw==}
+  /fast-uri@3.1.5:
+    resolution: {integrity: sha512-gHwA1O9LDIcKunMKhObS/HimwtehO1nPUECKAu5TpKgaO19fcWEl4bliWe1jWxVFvIXztJjjQ4L8XQ1EU9f7Jw==}
 
   /fast-wrap-ansi@0.2.2:
     resolution: {integrity: sha512-7F2Fl+TjRSenLqlU3UjSH0iyqopqoZIu7eZVpEirP2g1GtWa2G/ecEmBdgz31+Mxr+ELclgg6sokpSFIQiZ02Q==}
@@ -5838,14 +5837,14 @@ packages:
       space-separated-tokens: 2.0.2
     dev: true
 
-  /hono-openapi@1.3.1(@hono/standard-validator@0.2.3)(@standard-community/standard-json@0.3.5)(@standard-community/standard-openapi@0.2.9)(@types/json-schema@7.0.15)(hono@4.12.25)(openapi-types@12.1.3):
+  /hono-openapi@1.3.1(@hono/standard-validator@0.2.3)(@standard-community/standard-json@0.3.5)(@standard-community/standard-openapi@0.2.9)(@types/json-schema@7.0.15)(hono@4.12.34)(openapi-types@12.1.3):
     resolution: {integrity: sha512-NLVeVkhKZ3drmQNEIPac8HX8Y54uf1hJAgIM/7MfDsaeVVmB+QILWQxx5x3R3NvRHgedcbEbOCGY2uR7WQYyMw==}
     peerDependencies:
       '@hono/standard-validator': ^0.2.0
       '@standard-community/standard-json': ^0.3.5
       '@standard-community/standard-openapi': ^0.2.9
       '@types/json-schema': ^7.0.15
-      hono: ^4.11.2
+      hono: 4.12.34
       openapi-types: ^12.1.3
     peerDependenciesMeta:
       '@hono/standard-validator':
@@ -5853,19 +5852,15 @@ packages:
       hono:
         optional: true
     dependencies:
-      '@hono/standard-validator': 0.2.3(@standard-schema/spec@1.1.0)(hono@4.12.25)
+      '@hono/standard-validator': 0.2.3(@standard-schema/spec@1.1.0)(hono@4.12.34)
       '@standard-community/standard-json': 0.3.5(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(@valibot/to-json-schema@1.7.1)(quansync@0.2.11)(valibot@1.4.2)(zod@4.4.3)
       '@standard-community/standard-openapi': 0.2.9(@standard-community/standard-json@0.3.5)(@standard-schema/spec@1.1.0)(openapi-types@12.1.3)(valibot@1.4.2)(zod@4.4.3)
       '@types/json-schema': 7.0.15
-      hono: 4.12.25
+      hono: 4.12.34
       openapi-types: 12.1.3
 
-  /hono@4.12.25:
-    resolution: {integrity: sha512-2NFaIyNVgJmBs/ecmtGzlmluTFs5cHEWGTdu0t1HBwYzoGXOL5nUQBRMXsXWla5i4KkG//QMzVP88m1+I3fdAQ==}
-    engines: {node: '>=16.9.0'}
-
-  /hono@4.12.32:
-    resolution: {integrity: sha512-XcuyW9qE2kJn07PkecMOBd5Vq/hMy7mmGw+idz1yblbg9N17ijJODrvPkn7/dwL3Kulj8LcRJ69DLOWf91dRUg==}
+  /hono@4.12.34:
+    resolution: {integrity: sha512-GqXJqY/xJkJmuloTrnV1ZEXG3fqte+VjkUqoRNZXcrUidiUOP4fMSIHHY4tsqZBK++kVyWmt/AAfSUuy57/eSA==}
     engines: {node: '>=16.9.0'}
 
   /html-escaper@3.0.3:
@@ -6176,7 +6171,7 @@ packages:
       sprintf-js: 1.1.3
       sql.js: 1.14.1
       turndown: 7.2.4
-      undici: 7.28.0
+      undici: 7.29.0
       yaml: 2.9.0
     optionalDependencies:
       '@mongodb-js/zstd': 7.0.0
@@ -7004,7 +6999,7 @@ packages:
     dependencies:
       '@cspotcode/source-map-support': 0.8.1
       sharp: 0.35.2
-      undici: 7.28.0
+      undici: 7.29.0
       workerd: 1.20260722.1
       ws: 8.21.0
       youch: 4.1.0-beta.10
@@ -7017,7 +7012,7 @@ packages:
     resolution: {integrity: sha512-vpLQEs+VLCr1nU0BXS07maYoFwlDAH0gngQuuttxIwutDFEMHq2blX+8vpgxDdK3J1PwjCJiep77OitTZ4Ll1A==}
     engines: {node: 18 || 20 || >=22}
     dependencies:
-      brace-expansion: 5.0.8
+      brace-expansion: 5.0.9
 
   /minimist@1.2.8:
     resolution: {integrity: sha512-2yyAR8qBkN3YuheJanUpWC5U3bb5osDywNB8RzDVlDwDHbocAJveqqj1u8+SVD7jkWT4yvsHCpWqqWqAxb0zCA==}
@@ -7049,7 +7044,7 @@ packages:
   /monaco-editor@0.56.0:
     resolution: {integrity: sha512-sXboRm3BeBeLm938eaiyLMe0OxzfXIlZvbv4ir/jVgQy1zDhWjgmny0WoN45fuDKhCCQsYMbBJrv/A6jd8aCUg==}
     dependencies:
-      dompurify: 3.4.8
+      dompurify: 3.4.13
       marked: 14.0.0
     dev: false
 
@@ -8493,8 +8488,8 @@ packages:
     resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
     dev: true
 
-  /undici@7.28.0:
-    resolution: {integrity: sha512-cRZYrTDwWznlnRiPjggAGxZXanty6M8RV1ff8Wm4LWXBp7/IG8v5DnOm74DtUBp9OONpK75YlPnIjQqX0dBDtA==}
+  /undici@7.29.0:
+    resolution: {integrity: sha512-IDxfleLmmbSskfWSUATiN1nfn2rDuvnMOqb5CWR92iIfojA0Ud+ulOAAEQ57LPr9rWmsreUyf5lwyao+7GNNVw==}
     engines: {node: '>=20.18.1'}
 
   /unenv@2.0.0-rc.24:

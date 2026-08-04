@@ -23,7 +23,9 @@ import {
   ThreadHistoryDiffResponseSchema,
   ThreadHistoryDiffRequestSchema,
   ThreadHistoryListResponseSchema,
+  ThreadHistoryRestoreRequestSchema,
   ThreadMessageRequestSchema,
+  ThreadEditRequestSchema,
   ThreadModelSetRequestSchema,
   ThreadModeRequestSchema,
   ThreadGoalRequestSchema,
@@ -140,6 +142,22 @@ export class FlaryThreadClient {
       },
     );
     return value as AgentSendResult;
+  }
+
+  async edit(
+    refInput: ThreadRef,
+    input: import("../contracts/threads.js").ThreadEditRequest,
+  ): Promise<AgentSendResult> {
+    const ref = ThreadRefSchema.parse(refInput);
+    const body = ThreadEditRequestSchema.parse(input);
+    return await this.apiJson(
+      `${this.#apiPath}/apps/${encodeURIComponent(ref.appId)}/threads/${encodeURIComponent(ref.threadId)}/messages/edit`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    ) as AgentSendResult;
   }
 
   async create(options: FlaryThreadClientCreateOptions): Promise<ThreadBinding> {
@@ -335,6 +353,23 @@ export class FlaryThreadClient {
       },
     );
     return ThreadHistoryDiffResponseSchema.parse(value);
+  }
+
+  async historyRestore(
+    refInput: ThreadRef,
+    input: { commitId: string },
+  ): Promise<unknown> {
+    const ref = ThreadRefSchema.parse(refInput);
+    const body = ThreadHistoryRestoreRequestSchema.parse(input);
+    const value = await this.apiJson(
+      `${this.#apiPath}/apps/${encodeURIComponent(ref.appId)}/threads/${encodeURIComponent(ref.threadId)}/history/restore`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+    return (value as { result?: unknown }).result;
   }
 
   async cursor(refInput: ThreadRef) {

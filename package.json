@@ -1,6 +1,6 @@
 {
   "name": "flary",
-  "version": "0.6.0-rc.1",
+  "version": "0.7.0",
   "description": "Durable, provider-neutral AI agent harness for Cloudflare Workers",
   "main": "dist/index.js",
   "module": "dist/index.js",
@@ -48,7 +48,7 @@
     "@flue/runtime": "1.0.0-beta.9",
     "@flue/sdk": "1.0.0-beta.9",
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "hono": "^4.5.0",
+    "hono": "4.12.34",
     "patch-package": "8.0.1",
     "yaml": "^2.8.1",
     "valibot": "^1.4.0",
@@ -173,9 +173,23 @@
     }
   },
   "pnpm": {
+    "overrides": {
+      "brace-expansion": "5.0.9",
+      "dompurify": "3.4.13",
+      "fast-uri": "3.1.5",
+      "hono": "4.12.34",
+      "undici": "7.29.0"
+    },
     "patchedDependencies": {
       "@flue/runtime@1.0.0-beta.9": "patches/@flue__runtime@1.0.0-beta.9.patch",
       "@earendil-works/pi-ai@0.80.10": "patches/@earendil-works__pi-ai@0.80.10.patch"
     }
+  },
+  "overrides": {
+    "brace-expansion": "5.0.9",
+    "dompurify": "3.4.13",
+    "fast-uri": "3.1.5",
+    "hono": "$hono",
+    "undici": "7.29.0"
   }
 }

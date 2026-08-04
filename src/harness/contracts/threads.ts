@@ -175,6 +175,12 @@ export const ThreadMessageRequestSchema = z
   .strict();
 export type ThreadMessageRequest = z.input<typeof ThreadMessageRequestSchema>;
 
+/** Replace a prior user turn without mutating the append-only transcript. */
+export const ThreadEditRequestSchema = ThreadMessageRequestSchema.extend({
+  turnId: IdentifierSchema,
+}).strict();
+export type ThreadEditRequest = z.input<typeof ThreadEditRequestSchema>;
+
 export const ThreadRenameRequestSchema = z
   .object({ title: NonEmptyStringSchema.max(500) })
   .strict();
@@ -308,6 +314,13 @@ export const ThreadHistoryDiffResponseSchema = z
   .strict();
 export type ThreadHistoryDiffResponse = z.infer<
   typeof ThreadHistoryDiffResponseSchema
+>;
+
+export const ThreadHistoryRestoreRequestSchema = z
+  .object({ commitId: IdentifierSchema })
+  .strict();
+export type ThreadHistoryRestoreRequest = z.infer<
+  typeof ThreadHistoryRestoreRequestSchema
 >;
 
 export const ThreadMutationResponseSchema = z

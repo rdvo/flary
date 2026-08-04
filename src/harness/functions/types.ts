@@ -142,6 +142,8 @@ export interface FlaryDelegationPolicy {
   readonly maxConcurrent?: number;
   readonly maxTotal?: number;
   readonly maxDepth?: number;
+  /** Let durable children in the same root thread exchange mailbox messages. */
+  readonly allowPeerMessaging?: boolean;
 }
 
 export interface FlaryDurability {

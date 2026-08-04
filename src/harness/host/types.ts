@@ -222,6 +222,10 @@ export interface FlaryThreadHostService {
     target: FlaryThreadTarget,
     input: ThreadMessageRequest,
   ): Promise<FlaryThreadAdmission>;
+  edit?(
+    target: FlaryThreadTarget,
+    input: import("../contracts/threads.js").ThreadEditRequest,
+  ): Promise<FlaryThreadAdmission>;
   interrupt?(target: FlaryThreadTarget): Promise<void>;
   compact?(
     target: FlaryThreadTarget,
@@ -284,6 +288,10 @@ export interface FlaryThreadHostService {
       headCommitId: string;
     },
   ): Promise<ThreadHistoryDiffResponse>;
+  historyRestore?(
+    target: FlaryThreadTarget,
+    input: import("../contracts/threads.js").ThreadHistoryRestoreRequest,
+  ): Promise<unknown>;
   recallSearch?(
     target: FlaryThreadTarget,
     input: FlaryRecallSearchRequest,

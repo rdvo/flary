@@ -18,6 +18,7 @@ import { z } from "zod";
 import { toFlueThinkingLevel } from "../flue/agent.js";
 import { normalizeModelInput } from "../contracts/provider.js";
 import { toFlueModelSpecifier } from "../providers/resolver.js";
+import { parseThreadName } from "../storage/scopes.js";
 import { getAgentState, getFunctionState } from "./app.js";
 import type { FlaryAgent, FlaryFunction } from "./types.js";
 import {
@@ -214,49 +215,47 @@ export function defineFlaryFunctionAgent(
 export function defineFlaryInteractiveAgent(
   value: FlaryAgent<any>,
 ): AgentDefinition {
-  const state = getAgentState(value);
-  if (!state) throw new Error("The value is not a Flary interactive agent");
-  const definition = state.definition;
-  const model = definition.model ??
-    (definition.models?.allow[0]
-      ? toFlueModelSpecifier(normalizeModelInput(definition.models.allow[0]))
-      : state.app.options.model ?? "openai/gpt-5");
+  const rootState = getAgentState(value);
+  if (!rootState) throw new Error("The value is not a Flary interactive agent");
   return defineAgent(async ({ env, id }): Promise<AgentRuntimeConfig> => {
+    const active = interactiveAgentForRun(value, id);
+    const state = getAgentState(active)!;
+    const definition = state.definition;
+    const model = definition.model ??
+      (definition.models?.allow[0]
+        ? toFlueModelSpecifier(normalizeModelInput(definition.models.allow[0]))
+        : state.app.options.model ?? "openai/gpt-5");
     const approvalContinuation = definition.tools
-      ? await state.app.agentApprovalContinuation(value, {
+      ? await state.app.agentApprovalContinuation(active, {
           bindings: env,
           runId: id,
         })
       : undefined;
-    const profiles: AgentProfile[] = [];
-    for (const [name, candidate] of Object.entries(definition.subagents ?? {})) {
-      const child = getAgentState(candidate);
-      if (!child) throw new Error(`Subagent '${name}' must use app.agent()`);
-      const childDefinition = child.definition;
-      profiles.push(defineAgentProfile({
-        name,
-        ...(childDefinition.description
-          ? { description: childDefinition.description }
-          : {}),
-        ...(childDefinition.model ?? child.app.options.model
-          ? { model: childDefinition.model ?? child.app.options.model }
-          : {}),
-        instructions: interactiveAgentInstructions(candidate),
-        ...(childDefinition.skills?.length
-          ? { skills: childDefinition.skills.map(toFlueSkillReference) }
-          : {}),
-        ...(childDefinition.thinking
-          ? {
-              thinkingLevel: toFlueThinkingLevel(
-                childDefinition.thinking as never,
-              ),
-            }
-          : {}),
-      }));
-    }
+    const coordinationTools = definition.delegation?.mode === "disabled"
+      ? []
+      : interactiveCoordinationTools(value, active, env, id);
+    const tools = [
+      ...(definition.tools
+        ? [defineTool({
+            name: "execute",
+            description:
+              "Run bounded TypeScript in Flary's isolated tool runtime. Search and describe tools before calling them.",
+            input: v.object({ code: v.string() }),
+            async run({ input, signal }) {
+              return toJson(await state.app.executeAgentCode(active, {
+                code: input.code,
+                bindings: env,
+                runId: id,
+                signal,
+              }));
+            },
+          })]
+        : []),
+      ...coordinationTools,
+    ];
     return {
       model,
-      instructions: interactiveAgentInstructions(value),
+      instructions: interactiveAgentInstructions(active),
       ...(definition.skills?.length
         ? { skills: definition.skills.map(toFlueSkillReference) }
         : {}),
@@ -284,28 +283,127 @@ export function defineFlaryInteractiveAgent(
         maxAttempts: 10,
         timeoutMs: definition.limits?.timeoutMs ?? 6 * 60 * 60 * 1_000,
       },
-      ...(definition.tools
-        ? {
-            tools: [defineTool({
-              name: "execute",
-              description:
-                "Run bounded TypeScript in Flary's isolated tool runtime. Search and describe tools before calling them.",
-              input: v.object({ code: v.string() }),
-              async run({ input, signal }) {
-                return toJson(await state.app.executeAgentCode(value, {
-                  code: input.code,
-                  bindings: env,
-                  runId: id,
-                  signal,
-                }));
-              },
-            })],
-          }
-        : {}),
-      ...(profiles.length > 0 ? { subagents: profiles } : {}),
+      ...(tools.length > 0 ? { tools } : {}),
       ...(approvalContinuation ? { approvalContinuation } : {}),
     };
   });
+}
+
+function interactiveAgentForRun(
+  root: FlaryAgent<any>,
+  runId: string,
+): FlaryAgent<any> {
+  let agentId: string;
+  try {
+    agentId = parseThreadName(runId).agentId;
+  } catch {
+    return root;
+  }
+  const matches: FlaryAgent<any>[] = [];
+  const visit = (candidate: FlaryAgent<any>): void => {
+    if (candidate.name === agentId) matches.push(candidate);
+    for (const child of Object.values(candidate.definition.subagents ?? {})) {
+      visit(child);
+    }
+  };
+  visit(root);
+  if (matches.length === 1) return matches[0]!;
+  if (matches.length > 1) {
+    throw new Error(`Agent name '${agentId}' is ambiguous in the subagent tree`);
+  }
+  throw new Error(`Agent '${agentId}' is not declared under '${root.name}'`);
+}
+
+function interactiveCoordinationTools(
+  root: FlaryAgent<any>,
+  active: FlaryAgent<any>,
+  env: unknown,
+  runId: string,
+) {
+  const state = getAgentState(active)!;
+  const call = (
+    action: string,
+    value: Readonly<Record<string, unknown>> = {},
+  ) => state.app.agentSubagentAction(root, active, {
+    bindings: env,
+    runId,
+    action,
+    value,
+  });
+  const children = Object.entries(active.definition.subagents ?? {});
+  const childHelp = children.length > 0
+    ? children.map(([name, child]) =>
+        `${name}: ${child.definition.description ?? child.name}`
+      ).join("; ")
+    : "No child agents are declared.";
+  return [
+    defineTool({
+      name: "spawn_agent",
+      description: `Start one durable child thread. Available agents: ${childHelp}`,
+      input: v.object({
+        agent: v.string(),
+        task: v.string(),
+        model: v.optional(v.string()),
+        seedTurns: v.optional(v.number()),
+        nickname: v.optional(v.string()),
+      }),
+      async run({ input }) {
+        return toJson(await call("spawn", input));
+      },
+    }),
+    defineTool({
+      name: "list_agents",
+      description: "List durable agent threads and their current status.",
+      input: v.object({}),
+      async run() {
+        return toJson(await call("list"));
+      },
+    }),
+    defineTool({
+      name: "send_message",
+      description: "Send a queued or interrupting message to a related agent thread.",
+      input: v.object({
+        threadId: v.string(),
+        content: v.string(),
+        mode: v.optional(v.picklist(["queue", "interrupt"])),
+        kind: v.optional(v.picklist(["instruction", "progress", "question", "result", "control"])),
+      }),
+      async run({ input }) {
+        return toJson(await call("send", {
+          ...input,
+          toThreadId: input.threadId,
+        }));
+      },
+    }),
+    defineTool({
+      name: "wait_agents",
+      description: "Read durable status, results, and new activity for child threads.",
+      input: v.object({
+        threadIds: v.array(v.string()),
+        afterSequence: v.optional(v.number()),
+        timeoutMs: v.optional(v.number()),
+      }),
+      async run({ input }) {
+        return toJson(await call("wait", input));
+      },
+    }),
+    defineTool({
+      name: "interrupt_agent",
+      description: "Interrupt a running child agent thread.",
+      input: v.object({ threadId: v.string(), reason: v.optional(v.string()) }),
+      async run({ input }) {
+        return toJson(await call("interrupt", input));
+      },
+    }),
+    defineTool({
+      name: "close_agent",
+      description: "Close a child agent thread after its result is collected.",
+      input: v.object({ threadId: v.string(), reason: v.optional(v.string()) }),
+      async run({ input }) {
+        return toJson(await call("close", input));
+      },
+    }),
+  ];
 }
 
 function interactiveAgentInstructions(value: FlaryAgent<any>): string {
@@ -319,6 +417,11 @@ function interactiveAgentInstructions(value: FlaryAgent<any>): string {
     definition.tools
       ? "You have one execute tool. Its code can search, describe, and call the private tool catalog."
       : "",
+    definition.delegation?.mode === "disabled"
+      ? "Do not delegate work."
+      : Object.keys(definition.subagents ?? {}).length > 0
+        ? "You can start durable child agents, send messages to related agents, and wait for their results. Each child can use its own provider and model."
+        : "",
   ].filter(Boolean).join("\n\n");
 }
 

@@ -5,10 +5,10 @@ section: Core
 order: 1
 ---
 
-A durable run is the function API's reconnectable execution unit. A durable
-thread behind that run has a stable identity, a tenant binding, a workspace or
-project scope, an active mode, a provider lineage, and a resumable event
-cursor.
+A durable run is the finite function API's reconnectable execution unit. A
+persistent `app.agent()` thread contains many turns and has a stable identity,
+a tenant binding, a workspace scope, an active mode, provider lineage, child
+threads, and a resumable event cursor.
 
 Flue owns the canonical transcript and execution stream in the thread Durable
 Object. Flary adds trusted context, run admission, normalized events, tool
@@ -34,6 +34,26 @@ browser disconnects
 
 The client must treat the returned run ID and sequence as durable state. It
 must not create a second run only because an event stream disconnected.
+
+For an interactive agent, store the thread ID instead. Reopen it through the
+typed agent client and continue after the saved cursor:
+
+~~~ts
+const thread = await api.coder.threads.open({
+  organizationId: "acme",
+  threadId: savedThreadId,
+});
+
+await thread.send({ message: "Continue the implementation." });
+
+for await (const event of thread.stream({ after: savedCursor })) {
+  renderEvent(event); // Persist the event offset returned by the stream.
+}
+~~~
+
+The caller does not resend the full history. Flue reconstructs the active
+context from the canonical transcript, compaction lineage, rollback markers,
+and the model pin for the admitted turn.
 
 ## Create and observe a function run
 
@@ -164,9 +184,10 @@ specific reconciliation tool.
 | --- | --- |
 | Visible messages and execution stream | Flue thread Durable Object |
 | Thread binding and active mode ID | Flary thread SQLite |
-| Run admission and idempotency | D1 run repository |
+| Finite function admission and idempotency | Generated Runtime Durable Object SQLite |
+| Tenant-scoped thread list | Generated D1 thread catalog |
 | Replay projection and usage | Flary normalized event projection |
-| Large workspace blobs | Tenant-scoped R2 object |
+| Large workspace blobs, archives, and checkpoints | Tenant-scoped R2 objects |
 | Provider-private continuation metadata | Encrypted host storage |
 
 JavaScript variables, open promises, and an HTTP connection are not durable.

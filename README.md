@@ -48,8 +48,8 @@ system on the host application.
 ## Install
 
 ```bash
-npm install flary@next
-npx flary@next init
+npm install flary
+npx flary init
 ```
 
 Use `flary init` to add function-first examples to an existing project. It
@@ -57,7 +57,7 @@ does not replace the application's current framework or deployment setup.
 Create a new Cloudflare Worker starter with:
 
 ```bash
-npx flary@next create my-agent
+npx flary create my-agent
 ```
 
 The generated project starts with Zod-backed functions and a local HTTP route.
@@ -212,6 +212,13 @@ Serve functions with one line:
 export default app.serve({ support, ship });
 ```
 
+`app.serve()` creates the function and persistent-thread routes. Developers do
+not write one `app.get()` or `app.post()` route for each Flary operation. The
+returned Hono application can be the Worker export or can be mounted below a
+prefix in an existing Hono application. Direct `app.fn()` calls work in normal
+TypeScript without Cloudflare. Persistent `app.agent()` threads use the
+generated Cloudflare host so execution can survive request and isolate exits.
+
 The existing low-level Flue, tool catalog, MCP, and host APIs remain available
 for applications that need a custom runtime.
 
@@ -224,13 +231,15 @@ tenant-bound control and audit view.
 ```ts
 export const reviewer = app.agent({
   name: "reviewer",
+  model: "openai/gpt-5.6-sol",
+  models: { allow: ["openai/gpt-5.6-sol"] },
   instructions: "Review changes and report concrete defects.",
 });
 
 export const coder = app.agent({
   name: "coder",
   instructions: "Inspect the repository, implement the task, and run checks.",
-  model: "openai/gpt-5",
+  model: "anthropic/claude-sonnet",
   models: {
     allow: ["openai/gpt-5", "anthropic/claude-sonnet"],
     switching: "user",
@@ -245,6 +254,7 @@ export const coder = app.agent({
     maxConcurrent: 4,
     maxTotal: 16,
     maxDepth: 2,
+    allowPeerMessaging: true,
   },
   compaction: { mode: "auto" },
   limits: { steps: 200, toolCalls: 500, costUsd: 20 },
@@ -274,14 +284,21 @@ await thread.send({
   mode: "queue",
 });
 
+// Replace a user turn. Flary records a rollback and a new turn. It does not
+// change the old transcript record.
+await thread.edit({
+  turnId: "turn_123",
+  message: "Use a token bucket for each API key.",
+});
+
 // Change the session default for future turns.
-await thread.model.set("anthropic/claude-sonnet");
+await thread.model.set("openai/gpt-5");
 await thread.send({ message: "Continue the implementation." });
 
 // A one-turn override does not change the session default.
 await thread.send({
-  message: "Review this with the OpenAI model.",
-  model: "openai/gpt-5",
+  message: "Review this with the Anthropic model.",
+  model: "anthropic/claude-sonnet",
 });
 
 for await (const event of thread.stream()) {
@@ -294,6 +311,29 @@ interrupt, fork, append-only rollback, manual compaction, rename, archive,
 pin, unread state, goals, approvals, user input, durable subagents, and
 redacted audit export. `thread.schedules` registers durable interval, one-time,
 or UTC cron messages and reads their admission history.
+
+Declared subagents are normal durable threads. They can use a different
+provider from the parent, send mailbox messages to related agents, and keep
+their own transcript, approvals, audit, usage, and model pin. The generated
+workspace Durable Object gives the parent and children the same files and Git
+state. Each completed turn creates an immutable workspace checkpoint:
+
+```ts
+const checkpoints = await thread.checkpoints.list();
+const diff = await thread.checkpoints.diff({
+  baseCommitId: "checkpoint_turn_1",
+  headCommitId: "checkpoint_turn_2",
+});
+await thread.checkpoints.restore("checkpoint_turn_1");
+```
+
+A web UI, Telegram bot, Discord bot, or support worker can open the same
+authenticated `threadId`. All clients then use the same Flue transcript and
+Thread Control state. A client reconnects with its last stream cursor. It does
+not keep the session alive with a process or WebSocket.
+
+See [Telegram, Discord, and custom UIs](https://flary.dev/docs/channels-and-webhooks/)
+for a complete webhook, channel mapping, command, and outbound Queue pattern.
 
 ## Provider operations, routing, and evaluations
 
@@ -475,16 +515,17 @@ credential without returning a raw token through Flary. Hosted OpenAI login uses
 authorization by default. Local self-hosted clients can select
 `browser_callback`. Claude uses authorization-code completion.
 
-Flary 0.6 pins `@flue/runtime` and `@flue/sdk` to `1.0.0-beta.9`, and pins
+Flary 0.7 pins `@flue/runtime` and `@flue/sdk` to `1.0.0-beta.9`, and pins
 `@earendil-works/pi-ai` to `0.80.10`. The package applies checked-in patches
-during installation. This is an intentional 0.6 release decision: the Flue
+during installation. This is an intentional 0.7 release decision: the Flue
 pin is immutable, the patch is checked into the package, and the generated
 host records the exact runtime revision. Move to an upstream stable Flue
 release only in a later Flary release after the same recovery tests pass.
 
-Run `npm run test:npm-install` and `npm run test:live` before publishing.
-Promote 0.6 to the `latest` tag only after the live provider, Durable Object eviction/restart,
-tenant-isolation, approval/input, and clean-starter deployment tests pass.
+Run `npm run test:npm-install` before publishing. The tag workflow also runs
+`npm run test:live` when the repository has the complete provider and deployed
+test configuration. Open-source maintainers do not need to store provider
+keys in GitHub only to publish the package.
 
 The host must store private login state and credentials with authenticated
 encryption. Public Flary schemas do not include PKCE verifiers, device
@@ -1098,7 +1139,7 @@ The main `flary` command creates the open-source starter. It is separate from
 the hosted Flary website and managed runtime. Run it with:
 
 ```bash
-npx flary@next create ./my-flary-app
+npx flary create ./my-flary-app
 ```
 
 The old `create-flary` package remains as a compatibility alias.

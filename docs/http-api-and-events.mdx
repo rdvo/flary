@@ -10,6 +10,11 @@ creates function routes and validates inputs and outputs. Mount
 `createFlaryRunRouter` only when you need the lower-level generic run API or a
 custom Flue integration.
 
+`app.serve()` also registers the persistent-agent API for each `app.agent()`
+export. You do not write an `app.get()` or `app.post()` route for each action.
+Use its `prefix` option or mount the returned Hono application in an existing
+Hono server.
+
 ## Function routes
 
 For a function named `support`, `app.serve({ support })` creates:
@@ -29,6 +34,37 @@ The function client calls these routes through `client.support()` and
 `client.support.start()`. The client currently polls durable status for a
 remote function run. Use the low-level event route when the host requires an
 SSE cursor.
+
+## Persistent agent routes
+
+For an agent named `coder`, `app.serve({ coder })` creates authenticated routes
+for these resource families:
+
+| Resource | Examples |
+| --- | --- |
+| Threads | create, list, inspect, rename, archive, unarchive, pin, delete |
+| Turns | send, queue, steer, edit, interrupt, rollback, compact, read history |
+| Models | get, list allowed, set future default, read model history |
+| Human control | approvals, user input, goals, unread cursor |
+| Subagents | spawn, list, send, wait, interrupt, resume, close |
+| Operations | audit, schedules, Recall, checkpoints, diff, restore |
+
+Use the typed client instead of constructing these paths by hand:
+
+~~~ts
+const thread = await api.coder.threads.open({
+  organizationId: "acme",
+  threadId: savedThreadId,
+});
+
+await thread.send({ message: "Continue the task." });
+for await (const event of thread.stream({ after: savedCursor })) {
+  render(event);
+}
+~~~
+
+The model stream uses the generated Flue route. Control and projection routes
+use the Flary host API. Both validate the same authenticated thread binding.
 
 ## Low-level run routes
 

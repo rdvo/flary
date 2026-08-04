@@ -1,0 +1,241 @@
+---
+title: Telegram, Discord, and custom UIs
+description: Connect any authenticated channel to the same durable Flary agent thread.
+section: Core
+order: 2
+---
+
+Flary does not require its own chat UI. A Telegram bot, Discord bot, support
+inbox, web application, mobile application, or queue consumer is a transport
+adapter around the same typed thread client.
+
+~~~text
+Telegram, Discord, web UI, or API
+  -> verify the caller or webhook
+  -> resolve channel key to Flary thread ID
+  -> create or open the durable thread
+  -> send, steer, interrupt, or inspect
+  -> deliver streamed events to the channel
+
+Flary thread
+  -> canonical Flue transcript
+  -> Thread Control SQLite ledger
+  -> provider and model pin for each turn
+  -> tools, approvals, audits, and subagents
+  -> shared workspace and R2 checkpoints
+~~~
+
+The channel does not own the agent state. It stores only a mapping such as
+`telegram:chat:topic -> threadId` and its last event cursor. You can open the
+same thread from another channel when the authenticated tenant is the same.
+
+## Define one persistent agent
+
+~~~ts
+// src/agents.ts
+import { app } from "./flary";
+import { codingTools } from "./tools";
+
+export const reviewer = app.agent({
+  name: "reviewer",
+  model: "openai/gpt-5.6-sol",
+  models: { allow: ["openai/gpt-5.6-sol"] },
+  instructions: "Review the current change and report concrete defects.",
+  tools: codingTools,
+});
+
+export const coder = app.agent({
+  name: "coder",
+  model: "anthropic/claude-sonnet",
+  models: {
+    allow: ["anthropic/claude-sonnet", "openai/gpt-5.6-sol"],
+    switching: "user",
+    fallback: "none",
+  },
+  instructions: "Work in the bound repository and verify each change.",
+  tools: codingTools,
+  subagents: { reviewer },
+  delegation: {
+    mode: "auto",
+    maxConcurrent: 4,
+    maxTotal: 16,
+    maxDepth: 2,
+    allowPeerMessaging: true,
+  },
+});
+
+export const functions = { coder, reviewer };
+~~~
+
+Register the generated API once:
+
+~~~ts
+// src/index.ts
+import { app } from "./flary";
+import { functions } from "./agents";
+
+export default app.serve(functions);
+~~~
+
+You do not write one route for each thread action. `app.serve()` registers the
+create, open, list, message, stream, interrupt, model, compaction, approval,
+subagent, audit, schedule, and workspace-history routes.
+
+## Connect a Telegram webhook
+
+Keep Telegram authentication and the channel-to-thread mapping in the bot
+application. The example uses a durable application store named
+`CHANNEL_THREADS`; it can be D1, KV, or another store with the same semantics.
+
+~~~ts
+import { flary } from "flary/client";
+import type { functions } from "./agents";
+
+type Env = {
+  FLARY_URL: string;
+  FLARY_BOT_TOKEN: string;
+  TELEGRAM_WEBHOOK_SECRET: string;
+  CHANNEL_THREADS: {
+    get(key: string): Promise<{ threadId: string; cursor?: string } | null>;
+    put(key: string, value: { threadId: string; cursor?: string }): Promise<void>;
+  };
+  OUTBOUND_EVENTS: {
+    send(value: { chatId: number; threadId: string; cursor?: string }): Promise<void>;
+  };
+};
+
+type TelegramUpdate = {
+  update_id: number;
+  message?: {
+    text?: string;
+    message_thread_id?: number;
+    chat: { id: number };
+  };
+};
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    if (
+      request.headers.get("x-telegram-bot-api-secret-token") !==
+      env.TELEGRAM_WEBHOOK_SECRET
+    ) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+
+    const update = (await request.json()) as TelegramUpdate;
+    const message = update.message;
+    if (!message?.text) return new Response("ok");
+
+    const channelKey = [
+      "telegram",
+      message.chat.id,
+      message.message_thread_id ?? "main",
+    ].join(":");
+
+    const api = flary<typeof functions>({
+      baseUrl: env.FLARY_URL,
+      headers: {
+        authorization: `Bearer ${env.FLARY_BOT_TOKEN}`,
+      },
+    });
+
+    let link = await env.CHANNEL_THREADS.get(channelKey);
+    let thread;
+
+    if (message.text === "/new" || !link) {
+      thread = await api.coder.threads.create({
+        workspace: {
+          organizationId: "personal",
+          appId: "coder",
+          projectId: "telegram",
+          workspaceId: crypto.randomUUID(),
+          branch: "main",
+        },
+        mode: "build",
+        thinkingLevel: "high",
+        metadata: { channel: "telegram", channelKey },
+      });
+      link = { threadId: thread.ref.threadId };
+      await env.CHANNEL_THREADS.put(channelKey, link);
+    } else {
+      thread = await api.coder.threads.open({
+        organizationId: "personal",
+        threadId: link.threadId,
+      });
+    }
+
+    if (message.text === "/stop") {
+      await thread.interrupt();
+    } else if (message.text === "/compact") {
+      await thread.compact({ reason: "Requested from Telegram" });
+    } else {
+      await thread.send({
+        message: message.text,
+        mode: "queue",
+        idempotencyKey: `telegram_${update.update_id}`,
+      });
+    }
+
+    // A queue consumer can reopen this thread and deliver events without
+    // holding the Telegram webhook request open.
+    await env.OUTBOUND_EVENTS.send({
+      chatId: message.chat.id,
+      threadId: thread.ref.threadId,
+      cursor: link.cursor,
+    });
+
+    return new Response("ok");
+  },
+};
+~~~
+
+Return the webhook response quickly. Use a Queue consumer or another durable
+consumer to read `thread.stream({ after: cursor })`, send assistant and
+approval events to Telegram, and store the newest cursor.
+
+Use the same pattern for Discord interaction webhooks and support tickets.
+Use the provider event ID as the idempotency key so a webhook retry does not
+start a duplicate turn.
+
+## Control the thread from the channel
+
+The bot can expose commands that call the typed handle:
+
+~~~ts
+await thread.model.set("openai/gpt-5.6-sol");
+await thread.send({ message: "Continue with the new model." });
+
+await thread.edit({
+  turnId: "turn_123",
+  message: "Use a token bucket, not a fixed window.",
+});
+
+const children = await thread.subagents.list();
+const child = await thread.subagents.spawn({
+  agent: "reviewer",
+  task: "Review the current workspace diff.",
+  model: "openai/gpt-5.6-sol",
+  seedTurns: 2,
+});
+
+const checkpoints = await thread.checkpoints.list();
+await thread.checkpoints.restore("checkpoint_submission_123");
+~~~
+
+The parent model can use the same subagent operations through its lazy tool
+catalog. A parent on Anthropic can start a child on OpenAI. Flary resolves and
+pins the child provider credential before admission. Child results and status
+are written to the parent mailbox.
+
+## Authentication boundary
+
+Do not trust a Telegram chat ID, Discord guild ID, or public thread ID by
+itself. The transport Worker must:
+
+- Verify the webhook signature or secret.
+- Map the external channel to one trusted Flary tenant.
+- Authenticate its request to the Flary Worker.
+- Keep provider credentials and the bot service token outside messages.
+- Check access again when another UI opens the same thread.
+
+Flary then verifies the immutable tenant binding for each thread operation.

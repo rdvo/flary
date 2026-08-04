@@ -135,3 +135,29 @@ for await (const event of run.stream()) {
 The run ID is stable across a browser disconnect. The client can reconnect to
 the same run. For exact event cursors and low-level route control, use the
 reference API in [Durable threads](/docs/durable-threads/).
+
+## Use a persistent support session
+
+Use `app.agent()` when one ticket contains many turns, tools, approvals, or
+child investigations:
+
+```ts
+export const supportAgent = app.agent({
+  name: "support-agent",
+  model: "anthropic/claude-sonnet",
+  models: {
+    allow: ["anthropic/claude-sonnet", "openai/gpt-5.6-sol"],
+    switching: "user",
+    fallback: "none",
+  },
+  instructions: "Resolve the support issue with approved product facts.",
+  mode: "ask",
+  tools,
+});
+```
+
+Map the product ticket ID to `thread.ref.threadId`. Every reply can reopen the
+same durable thread. The full transcript, tool calls, approvals, audits, model
+switches, and subagent lineage stay attached to that thread. See
+[Telegram, Discord, and custom UIs](/docs/channels-and-webhooks/) for the
+transport pattern.

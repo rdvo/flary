@@ -109,7 +109,7 @@ const description =
             Define Zod-backed functions with <code>app.fn()</code>. Call them
             directly with no Cloudflare resources.
           </p>
-          <code>npm install --save-exact flary@next</code>
+          <code>npm install flary</code>
         </article>
         <article>
           <span>02</span>
@@ -119,15 +119,15 @@ const description =
             Start with the generated function Worker. Add locally emulated
             Durable Objects and D1 when you add durable runs.
           </p>
-          <code>npx flary@next create my-agent</code>
+          <code>npx flary create my-agent</code>
         </article>
         <article>
           <span>03</span>
           <p class="setup-kicker">Production runtime</p>
           <h3>Your Cloudflare account</h3>
           <p>
-            Durable Objects run threads. D1 indexes runs. Add R2 only for
-            large files or history fallback.
+            Durable Objects run threads and workspaces. D1 indexes threads.
+            R2 stores archives, large files, and turn checkpoints.
           </p>
           <code>wrangler deploy</code>
         </article>
@@ -135,11 +135,11 @@ const description =
       <div class="resource-line" aria-label="Cloudflare resource requirements">
         <div>
           <span>Required for durable production</span>
-          <strong>Worker · Durable Objects · D1</strong>
+          <strong>Worker · Durable Objects · D1 · Queue</strong>
         </div>
         <div>
           <span>Optional by feature</span>
-          <strong>R2 · Sandbox · Dynamic Workers · Artifacts</strong>
+          <strong>R2 for coding/history · Sandbox · Dynamic Workers</strong>
         </div>
       </div>
     </section>

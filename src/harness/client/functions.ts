@@ -12,8 +12,15 @@ import type {
   ThreadBinding,
   ThreadCreateRequest,
   ThreadForkRequest,
+  ThreadHistoryDiffResponse,
+  ThreadHistoryListResponse,
   ThreadRef,
 } from "../contracts/index.js";
+import type {
+  SubagentActivityEvent,
+  SubagentMailboxMessage,
+  SubagentThread,
+} from "../contracts/subagents.js";
 import {
   createFlaryThreadClient,
   type FlaryThreadClient,
@@ -53,6 +60,29 @@ export interface FlaryRemoteRun<Output> {
   sendInput(input: unknown, options?: FlarySendInputOptions): Promise<void>;
 }
 
+export interface FlarySubagentListResult {
+  readonly threads: readonly SubagentThread[];
+  readonly messages: readonly SubagentMailboxMessage[];
+  readonly activity: readonly SubagentActivityEvent[];
+}
+
+export interface FlarySubagentSpawnResult {
+  readonly thread: SubagentThread;
+}
+
+export interface FlarySubagentSendResult {
+  readonly message: SubagentMailboxMessage;
+  readonly thread?: SubagentThread;
+}
+
+export interface FlarySubagentWaitResult extends FlarySubagentListResult {
+  readonly timedOut: boolean;
+}
+
+export interface FlarySubagentControlResult {
+  readonly thread: SubagentThread;
+}
+
 type FunctionClient<F> = F extends FlaryFunction<infer Input, infer Output, any>
   ? ((input: FlaryInput<Input>) => Promise<FlaryOutput<Output>>) & {
       start(
@@ -85,6 +115,15 @@ export interface FlaryAgentThreadHandle {
     images?: readonly { type: "image"; data: string; mimeType: string; filename?: string }[];
     idempotencyKey?: string;
   }): Promise<unknown>;
+  edit(input: {
+    turnId: string;
+    message: string;
+    mode?: "queue" | "steer";
+    model?: ModelInput;
+    thinkingLevel?: ReasoningEffort;
+    cacheRetention?: "none" | "short" | "long";
+    idempotencyKey?: string;
+  }): Promise<unknown>;
   interrupt(): Promise<void>;
   cancel(): Promise<unknown>;
   fork(input?: ThreadForkRequest): Promise<FlaryAgentThreadHandle>;
@@ -112,17 +151,39 @@ export interface FlaryAgentThreadHandle {
     history(): Promise<readonly unknown[]>;
   };
   readonly subagents: {
-    list(input?: Readonly<Record<string, unknown>>): Promise<unknown>;
-    spawn(input: Readonly<Record<string, unknown>>): Promise<unknown>;
-    send(input: Readonly<Record<string, unknown>>): Promise<unknown>;
-    wait(input?: Readonly<Record<string, unknown>>): Promise<unknown>;
-    interrupt(input: Readonly<Record<string, unknown>>): Promise<unknown>;
-    resume(input: Readonly<Record<string, unknown>>): Promise<unknown>;
-    close(input: Readonly<Record<string, unknown>>): Promise<unknown>;
+    list(input?: { afterSequence?: number }): Promise<FlarySubagentListResult>;
+    spawn(input: {
+      agent: string;
+      task: string;
+      model?: ModelInput;
+      seedTurns?: number;
+      nickname?: string;
+      idempotencyKey?: string;
+    }): Promise<FlarySubagentSpawnResult>;
+    send(input: {
+      toThreadId: string;
+      content: string;
+      mode?: "queue" | "interrupt";
+      kind?: "instruction" | "progress" | "question" | "result" | "control";
+      idempotencyKey?: string;
+    }): Promise<FlarySubagentSendResult>;
+    wait(input: {
+      threadIds: readonly string[];
+      afterSequence?: number;
+      timeoutMs?: number;
+    }): Promise<FlarySubagentWaitResult>;
+    interrupt(input: { threadId: string; reason?: string }): Promise<FlarySubagentControlResult>;
+    resume(input: { threadId: string }): Promise<FlarySubagentControlResult>;
+    close(input: { threadId: string; reason?: string }): Promise<FlarySubagentControlResult>;
   };
   readonly audit: {
     list(options?: { after?: number; limit?: number; types?: readonly string[] }): Promise<readonly unknown[]>;
     export(): Promise<string>;
+  };
+  readonly checkpoints: {
+    list(options?: { limit?: number }): Promise<ThreadHistoryListResponse>;
+    diff(input: { baseCommitId?: string; headCommitId: string }): Promise<ThreadHistoryDiffResponse>;
+    restore(commitId: string): Promise<unknown>;
   };
   readonly schedules: {
     register(input: Readonly<Record<string, unknown>>): Promise<unknown>;
@@ -300,6 +361,10 @@ function makeAgentThreadHandle(
         ...(input.images ? { images: [...input.images] } : {}),
         idempotencyKey: input.idempotencyKey ?? crypto.randomUUID(),
       }),
+    edit: (input) => client.edit(ref, {
+      ...input,
+      idempotencyKey: input.idempotencyKey ?? crypto.randomUUID(),
+    }),
     interrupt: () => client.interrupt(ref),
     cancel: () => client.abort(ref, undefined, agentName),
     async fork(input = {}) {
@@ -326,17 +391,22 @@ function makeAgentThreadHandle(
       history: () => client.modelHistory(ref),
     },
     subagents: {
-      list: (input) => subagent("list", input),
-      spawn: (input) => subagent("spawn", input),
-      send: (input) => subagent("send", input),
-      wait: (input) => subagent("wait", input),
-      interrupt: (input) => subagent("interrupt", input),
-      resume: (input) => subagent("resume", input),
-      close: (input) => subagent("close", input),
+      list: (input) => subagent("list", input) as Promise<FlarySubagentListResult>,
+      spawn: (input) => subagent("spawn", input) as Promise<FlarySubagentSpawnResult>,
+      send: (input) => subagent("send", input) as Promise<FlarySubagentSendResult>,
+      wait: (input) => subagent("wait", input) as Promise<FlarySubagentWaitResult>,
+      interrupt: (input) => subagent("interrupt", input) as Promise<FlarySubagentControlResult>,
+      resume: (input) => subagent("resume", input) as Promise<FlarySubagentControlResult>,
+      close: (input) => subagent("close", input) as Promise<FlarySubagentControlResult>,
     },
     audit: {
       list: (options) => client.audit(ref, options),
       export: () => client.auditExport(ref),
+    },
+    checkpoints: {
+      list: (options) => client.historyCheckpoints(ref, options),
+      diff: (input) => client.historyDiff(ref, input),
+      restore: (commitId) => client.historyRestore(ref, { commitId }),
     },
     schedules: {
       register: (input) => client.schedule(ref, "register", input),

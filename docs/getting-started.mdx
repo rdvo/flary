@@ -19,11 +19,11 @@ durable run, or expose the same function through HTTP.
 
 ## Install
 
-Flary 0.6 is the stable function-first release. Pin the exact version in
-production so a runtime change does not alter an admitted function revision.
+Flary 0.7 is the current function-first release. The normal install command
+resolves the current `latest` npm tag and records it in the application lockfile.
 
 ```bash
-npm install --save-exact flary@0.6.0
+npm install flary
 ```
 
 Add a prompt example to an existing project:
@@ -116,6 +116,81 @@ The direct route is `POST /functions/support`. A durable invocation starts at
 `POST /functions/support/runs`; the returned run ID can be polled after a
 disconnect. The function client exposes this as `run.stream()`. See
 [Durable threads](/docs/durable-threads/) for the low-level SSE route.
+
+## TypeScript, HTTP, and serverless boundaries
+
+You do not have to write `app.get()` or `app.post()` routes for Flary. There
+are three separate ways to use the package:
+
+| API | HTTP server required | Cloudflare durable resources required |
+| --- | --- | --- |
+| Call `app.fn()` directly | No | No |
+| Serve direct functions with `app.serve()` | Yes | No |
+| Use `app.agent()` or durable `.start()` | Yes | Yes, through the generated Cloudflare host |
+
+`app.serve()` returns a Hono application and registers all Flary routes. It
+can be the Worker export:
+
+```ts
+export default app.serve(functions, { prefix: "/api/flary" });
+```
+
+It can also be mounted in an existing Hono application:
+
+```ts
+import { Hono } from "hono";
+
+const server = new Hono();
+server.route("/api/flary", app.serve(functions));
+
+server.get("/api/health", (context) => context.json({ ok: true }));
+export default server;
+```
+
+The authoring API is normal TypeScript. The complete persistent-agent runtime
+is Cloudflare-native today because it uses Durable Objects, D1, Queues, and R2
+for restart-safe state. Use Wrangler locally to emulate those resources.
+
+## Define a persistent agent
+
+Use `app.agent()` when several messages must share one durable session:
+
+```ts
+export const supportAgent = app.agent({
+  name: "support-agent",
+  model: "anthropic/claude-sonnet",
+  models: {
+    allow: ["anthropic/claude-sonnet", "openai/gpt-5.6-sol"],
+    switching: "user",
+    fallback: "none",
+  },
+  instructions: "Resolve the support issue and keep the customer informed.",
+  tools,
+});
+
+export const functions = { support, supportAgent };
+export default app.serve(functions);
+```
+
+The client stores only the thread ID and stream cursor:
+
+```ts
+const thread = await api.supportAgent.threads.create({
+  workspace: {
+    organizationId: "acme",
+    appId: "support-agent",
+    projectId: "support",
+    workspaceId: "ticket_42",
+    branch: "main",
+  },
+  mode: "ask",
+});
+
+await thread.send({ message: "Investigate ticket 42." });
+```
+
+Open the same thread ID from a web UI, Telegram bot, Discord bot, or support
+worker. See [Telegram, Discord, and custom UIs](/docs/channels-and-webhooks/).
 
 ## Keep prompts in Git when you need Markdown
 

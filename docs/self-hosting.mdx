@@ -41,15 +41,21 @@ npm run dev
 For an existing Worker:
 
 ```bash
-npm install --save-exact flary@0.6.0
+npm install flary
 npx flary init
 ```
 
-The generated starter uses `flary()`, `app.fn()`, `app.tools()`, and
-`app.serve()`. The Vite build generates the Flue agent/workflow entry, the
-Flary run and Thread Control Durable Objects, bindings, and SQLite lifecycle
-configuration. Apply the generated Wrangler configuration before a production
-deploy.
+The generated starter uses `flary()`, `app.fn()`, `app.agent()`,
+`app.tools()`, and `app.serve()`. The Vite build generates the Flue
+agent/workflow entry, the Flary Runtime, Thread Control, and Workspace Durable
+Objects, the D1 thread catalog, projection Queue, R2 storage, bindings, and
+SQLite lifecycle configuration. Apply the generated Wrangler configuration
+before a production deploy.
+
+The full durable runtime is Cloudflare-native today. Direct `app.fn()` calls
+remain normal TypeScript and do not need Cloudflare. Persistent `app.agent()`
+threads need the generated host because their transcript and control state
+must survive process and request boundaries.
 
 ## Bind resources
 

@@ -33,7 +33,7 @@ index d052200..247924a 100644
 +	const targetEntryId = rollback?.type === "message" && rollback.message.role === "signal" ? rollback.message.attributes?.targetEntryId : void 0;
 +	const targetIndex = typeof targetEntryId === "string" ? canonicalPath.findIndex((entry) => entry.id === targetEntryId) : -1;
 +	const path = rollbackIndex >= 0 && targetIndex >= 0 && targetIndex < rollbackIndex ? [
-+		...canonicalPath.slice(0, targetIndex + 1),
++		...canonicalPath.slice(0, rollback?.type === "message" && rollback.message.role === "signal" && rollback.message.attributes?.excludeTarget === true ? targetIndex : targetIndex + 1),
 +		...canonicalPath.slice(rollbackIndex)
 +	] : canonicalPath;
  	const latestCompactionIndex = path.findLastIndex((entry) => entry.type === "compaction");
@@ -268,7 +268,7 @@ index c785e22..714ff51 100644
    onStart(instance: CloudflareAgentInstance, inherited: () => Promise<unknown> | unknown): Promise<void>;
    wakeSubmissions(instance: CloudflareAgentInstance): Promise<void>;
 +  compact(instance: CloudflareAgentInstance): Promise<void>;
-+  rollback(instance: CloudflareAgentInstance, turnId: string, reason?: string): Promise<{
++  rollback(instance: CloudflareAgentInstance, turnId: string, reason?: string, excludeTarget?: boolean): Promise<{
 +    turnId: string;
 +    targetEntryId: string;
 +    markerId: string;
@@ -297,8 +297,8 @@ index 1147b97..03531c4 100644
 +		compact(instance) {
 +			return getCoordinator(instance).compact();
 +		},
-+		rollback(instance, turnId, reason) {
-+			return getCoordinator(instance).rollback(turnId, reason);
++		rollback(instance, turnId, reason, excludeTarget) {
++			return getCoordinator(instance).rollback(turnId, reason, excludeTarget);
 +		},
  		onRequest(instance, request) {
  			return getCoordinator(instance).onRequest(request);
@@ -318,7 +318,7 @@ index 1147b97..03531c4 100644
 +			await session.compact();
 +		});
 +	}
-+	rollback(turnId, reason) {
++	rollback(turnId, reason, excludeTarget) {
 +		return this.runWithInstanceContext(async () => {
 +			if (await this.submissions.hasUnsettledSubmissions()) throw new Error("[flue] Cannot roll back while an agent submission is active.");
 +			const writer = await this.ensureConversationWriter();
@@ -349,7 +349,7 @@ index 1147b97..03531c4 100644
 +				signalType: "flary_rollback",
 +				tagName: "rollback",
 +				content: reason || `Rolled back to ${turnId}.`,
-+				attributes: { targetEntryId, turnId }
++				attributes: { targetEntryId, turnId, excludeTarget: excludeTarget === true }
 +			}]);
 +			return { turnId, targetEntryId, markerId: messageId };
 +		});
