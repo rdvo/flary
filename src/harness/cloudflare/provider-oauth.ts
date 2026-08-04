@@ -180,7 +180,7 @@ export class CloudflareProviderOAuthPersistence {
 
   private async encrypt(value: unknown, associated: string): Promise<string> {
     const iv = crypto.getRandomValues(new Uint8Array(12));
-    const key = await crypto.subtle.importKey("raw", decodeBase64(this.options.encryptionKey), "AES-GCM", false, ["encrypt"]);
+    const key = await crypto.subtle.importKey("raw", decodeBase64(this.options.encryptionKey) as unknown as BufferSource, "AES-GCM", false, ["encrypt"]);
     const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: new TextEncoder().encode(associated) }, key, new TextEncoder().encode(JSON.stringify(value)));
     return `${encodeBase64(iv)}.${encodeBase64(new Uint8Array(ciphertext))}`;
   }
@@ -188,8 +188,8 @@ export class CloudflareProviderOAuthPersistence {
   private async decrypt<T>(value: string, associated: string): Promise<T> {
     const [iv, ciphertext] = value.split(".");
     if (!iv || !ciphertext) throw new Error("The encrypted provider state is invalid");
-    const key = await crypto.subtle.importKey("raw", decodeBase64(this.options.encryptionKey), "AES-GCM", false, ["decrypt"]);
-    const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: decodeBase64(iv), additionalData: new TextEncoder().encode(associated) }, key, decodeBase64(ciphertext));
+    const key = await crypto.subtle.importKey("raw", decodeBase64(this.options.encryptionKey) as unknown as BufferSource, "AES-GCM", false, ["decrypt"]);
+    const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: decodeBase64(iv) as unknown as BufferSource, additionalData: new TextEncoder().encode(associated) }, key, decodeBase64(ciphertext) as unknown as BufferSource);
     return JSON.parse(new TextDecoder().decode(plaintext)) as T;
   }
 }

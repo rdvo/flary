@@ -338,11 +338,11 @@ function browserStateStore(
       const clear = await crypto.subtle.decrypt(
         {
           name: "AES-GCM",
-          iv: base64ToBytes(String(envelope.iv ?? "")),
+          iv: base64ToBytes(String(envelope.iv ?? "")) as unknown as BufferSource,
           additionalData: aad,
         },
         await browserStateKey(secret),
-        base64ToBytes(String(envelope.ciphertext ?? "")),
+        base64ToBytes(String(envelope.ciphertext ?? "")) as unknown as BufferSource,
       );
       return JSON.parse(new TextDecoder().decode(clear));
     },
