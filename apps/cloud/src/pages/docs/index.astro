@@ -4,8 +4,8 @@ import {
   ArrowRight,
   Cloud,
   FileCode2,
+  HardDrive,
   MessagesSquare,
-  PlugZap,
 } from "lucide-react";
 import { docPath, sortDocs } from "../../docs";
 import DocsLayout from "../../layouts/DocsLayout.astro";
@@ -26,19 +26,19 @@ const examples = entries.filter((entry) => entry.data.section === "Examples");
       <p>Define a typed function, call it directly, or start it as a durable run.</p>
       <strong>Open guide <ArrowRight size={14} strokeWidth={1.7} /></strong>
     </a>
+    <a href="/docs/sessions-and-workspaces/">
+      <HardDrive size={18} strokeWidth={1.6} />
+      <span>Understand</span>
+      <h2>Sessions and files</h2>
+      <p>See where messages, workspaces, checkpoints, audits, and archives live.</p>
+      <strong>Learn the storage model <ArrowRight size={14} strokeWidth={1.7} /></strong>
+    </a>
     <a href="/docs/self-hosting/">
       <Cloud size={18} strokeWidth={1.6} />
-      <span>Keep going</span>
+      <span>Deploy</span>
       <h2>Self-host on Cloudflare</h2>
       <p>Mount durable threads, resumable events, tools, approvals, and tenant policy.</p>
       <strong>Self-host Flary <ArrowRight size={14} strokeWidth={1.7} /></strong>
-    </a>
-    <a href="/docs/durable-threads/">
-      <PlugZap size={18} strokeWidth={1.6} />
-      <span>Embed</span>
-      <h2>Add Flary to a product</h2>
-      <p>Keep your own auth, billing, and UI. Use Flary as the agent backend.</p>
-      <strong>Integration guide <ArrowRight size={14} strokeWidth={1.7} /></strong>
     </a>
   </section>
 
