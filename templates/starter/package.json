@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "deploy": "npm run build && wrangler deploy"
+    "deploy": "npx flary deploy"
   },
   "dependencies": {
     "@cloudflare/codemode": "0.5.1",
@@ -25,5 +25,8 @@
     "typescript": "^5.8.3",
     "vite": "^8.1.5",
     "wrangler": "^4.115.0"
+  },
+  "overrides": {
+    "undici": "7.29.0"
   }
 }

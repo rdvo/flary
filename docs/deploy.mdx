@@ -1,0 +1,51 @@
+---
+title: Deploy to your Cloudflare account
+description: Own the Worker, resources, secrets, and data without managing a VPS.
+section: Start
+order: 2
+---
+
+Flary deploys into your Cloudflare account. You own the Worker, Durable
+Objects, D1 databases, R2 buckets, Queues, secrets, and stored data. You do not
+manage a VPS or an always-on Node process.
+
+## Normal deployment
+
+```bash
+npx flary deploy
+```
+
+The command performs these steps:
+
+1. Verify Wrangler OAuth and account access.
+2. Build the project and generate the final Wrangler configuration.
+3. Let Wrangler provision binding-only D1 and R2 resources and named Queues.
+4. Upload required secrets from a temporary mode-`0600` file.
+5. Apply dashboard D1 migrations when the project is a dashboard.
+6. Deploy and check `/health` and the dashboard setup route.
+7. For a personal backend with a provider, call the example function with its
+   generated bearer token.
+
+The temporary secret file is always removed. Repeated setup and deployment
+reuse stable Worker and resource names. Setup never deletes a Worker,
+database, bucket, queue, credential, archive, or thread.
+
+## Check a project
+
+```bash
+npx flary doctor
+```
+
+Doctor checks Node, the package manager, Wrangler authentication, account
+selection, local required secrets, generated bindings, the dashboard migration
+file, optional Docker support, and deployed health when a URL is known.
+
+## Optional resources
+
+Browser Run is added only when `app.browser()` is registered. Sandbox is added
+only when `app.sandbox()` is registered. Sandbox also needs a running
+Docker-compatible builder and a paid Workers plan.
+
+If automatic provisioning is not supported by the selected account or plan,
+Wrangler reports the resource. Create only that resource manually, keep its
+binding name, and run `flary deploy` again.

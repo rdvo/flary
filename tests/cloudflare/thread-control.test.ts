@@ -5,11 +5,13 @@ import { DatabaseSync } from "node:sqlite";
 import {
   createCloudflareThreadService,
   handleFlaryThreadControlObjectRequest,
+  handleFlaryThreadControlWebSocketMessage,
 } from "../../src/harness/cloudflare/thread-control.ts";
 
 function namespace() {
   const stores = new Map<string, ReturnType<typeof sqlStorage>>();
   return {
+    stores,
     idFromName(name: string) {
       return name;
     },
@@ -36,12 +38,16 @@ function sqlStorage() {
     sql: {
       exec<T>(query: string, ...bindings: unknown[]) {
         const trimmed = query.trim().toLowerCase();
-        if (bindings.length === 0 && !trimmed.startsWith("select")) {
+        if (
+          bindings.length === 0 &&
+          !trimmed.startsWith("select") &&
+          !trimmed.includes("returning")
+        ) {
           database.exec(query);
           return { toArray: () => [] as T[] };
         }
         const statement = database.prepare(query);
-        if (trimmed.startsWith("select")) {
+        if (trimmed.startsWith("select") || trimmed.includes("returning")) {
           return { toArray: () => statement.all(...bindings) as T[] };
         }
         statement.run(...bindings);
@@ -193,4 +199,478 @@ test("thread model selection is durable, exact, and auditable", async () => {
     { after: 0, limit: 100 },
   );
   assert.ok(childRecords.some((record: any) => record.publicPayload?._forkedFrom));
+});
+
+test("an exact fork imports the canonical model transcript", async () => {
+  const controls = namespace();
+  const engineCalls: Array<{ instance: string; action: string; body: any }> = [];
+  const engine = {
+    idFromName(name: string) {
+      return name;
+    },
+    get(id: unknown) {
+      return {
+        async fetch(request: Request) {
+          const action = new URL(request.url).searchParams.get("flary") ?? "";
+          const body = await request.json().catch(() => ({}));
+          engineCalls.push({ instance: String(id), action, body });
+          if (action === "export") {
+            return Response.json({
+              format: "flue-canonical",
+              version: 1,
+              batches: [[{ type: "message", turnId: "turn_1" }]],
+            });
+          }
+          if (action === "import") return Response.json({ imported: true });
+          return Response.json({ error: "unsupported" }, { status: 400 });
+        },
+      };
+    },
+  };
+  const service = createCloudflareThreadService({
+    env: { FLUE_AGENT_CODER: engine },
+    namespace: controls,
+  });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_fork",
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  const parent = await service.create(scope, {
+    threadId: "thread_parent",
+    agentId: "coder",
+    workspace: {
+      organizationId: "tenant_fork",
+      appId: "coder",
+      projectId: "project",
+      workspaceId: "workspace",
+      branch: "main",
+    },
+    mode: "build",
+  });
+  const control = controls.get(controls.idFromName(
+    "thread:tenant_fork:coder:thread_parent",
+  ));
+  const recorded = await control.fetch(new Request("https://flary.internal/thread", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      method: "record",
+      tenantId: "tenant_fork",
+      applicationId: "coder",
+      recordType: "turn.completed",
+      payload: { turnId: "turn_1" },
+    }),
+  }));
+  assert.equal(recorded.ok, true);
+  const child = await service.fork(
+    { ...scope, threadId: parent.thread.threadId },
+    { threadId: "thread_child", turnId: "turn_1" },
+  );
+  assert.equal(child.workspace.branch, "main-fork-thread_child");
+  assert.deepEqual(engineCalls.map(({ action }) => action), ["export", "import"]);
+  assert.equal(engineCalls[0]?.body.turnId, "turn_1");
+  assert.equal(engineCalls[1]?.body.turnId, "turn_1");
+  assert.equal(engineCalls[1]?.body.archive.format, "flue-canonical");
+});
+
+test("durable child state accepts waits, resumes, and typed completion output", async () => {
+  const controls = namespace();
+  const service = createCloudflareThreadService({ env: {}, namespace: controls });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_children",
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  const binding = await service.create(scope, {
+    threadId: "thread_root",
+    agentId: "coder",
+    workspace: {
+      organizationId: "tenant_children",
+      appId: "coder",
+      projectId: "project",
+      workspaceId: "workspace",
+      branch: "main",
+    },
+    mode: "build",
+    metadata: {
+      flaryDelegation: {
+        mode: "auto",
+        maxConcurrentChildren: 4,
+        maxTotalChildren: 16,
+        maxDepth: 2,
+      },
+    },
+  });
+  const control = controls.get(controls.idFromName(
+    "thread:tenant_children:coder:thread_root",
+  ));
+  const call = async (action: string, input: Record<string, unknown>) => {
+    const response = await control.fetch(new Request("https://flary.internal/subagent", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "subagent",
+        tenantId: "tenant_children",
+        applicationId: "coder",
+        action,
+        input,
+      }),
+    }));
+    if (!response.ok) assert.fail(await response.text());
+    return response.json() as Promise<any>;
+  };
+  const spawned = await call("spawn", {
+    requestId: "spawn_1",
+    parentThreadId: binding.thread.threadId,
+    agentId: "reviewer",
+    task: "Review the change.",
+    seedTurns: 0,
+  });
+  const childId = spawned.thread.threadId as string;
+  assert.equal((await call("wait", {
+    requestId: "wait_1",
+    threadId: childId,
+    threadIds: [childId],
+  })).threads[0].status, "queued");
+  assert.equal((await call("start", {
+    requestId: "start_1",
+    idempotencyKey: "start_1",
+    threadId: childId,
+  })).thread.status, "running");
+  assert.equal((await call("wait", {
+    requestId: "pause_1",
+    idempotencyKey: "pause_1",
+    threadId: childId,
+  })).thread.status, "waiting");
+  assert.equal((await call("resume", {
+    requestId: "resume_1",
+    idempotencyKey: "resume_1",
+    threadId: childId,
+  })).thread.status, "running");
+  const output = {
+    summary: "The review is complete.",
+    changedFiles: [],
+    checks: [],
+    usage: {
+      steps: 1,
+      toolCalls: 0,
+      tokens: 10,
+      costUsd: 0.01,
+      sandboxSeconds: 0,
+      browserSeconds: 0,
+    },
+    errors: [],
+  };
+  const completed = await call("complete", {
+    requestId: "complete_1",
+    idempotencyKey: "complete_1",
+    threadId: childId,
+    output,
+  });
+  assert.equal(completed.thread.status, "completed");
+  assert.deepEqual(completed.thread.output, output);
+});
+
+test("portable export restores canonical and public history into a new thread", async () => {
+  const controls = namespace();
+  const engineCalls: Array<{ instance: string; action: string; body: any }> = [];
+  const canonical = {
+    format: "flue-canonical",
+    version: 1,
+    batches: [[{ type: "message", turnId: "turn_1", text: "hello" }]],
+  };
+  const engine = {
+    idFromName(name: string) { return name; },
+    get(id: unknown) {
+      return {
+        async fetch(request: Request) {
+          const action = new URL(request.url).searchParams.get("flary") ?? "";
+          const body = await request.json().catch(() => ({}));
+          engineCalls.push({ instance: String(id), action, body });
+          if (action === "export") return Response.json(canonical);
+          if (action === "import") return Response.json({ imported: true });
+          return Response.json({ error: "unsupported" }, { status: 400 });
+        },
+      };
+    },
+  };
+  const service = createCloudflareThreadService({
+    env: { FLUE_AGENT_CODER: engine },
+    namespace: controls,
+  });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_restore",
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  const create = (threadId: string) => service.create(scope, {
+    threadId,
+    agentId: "coder",
+    workspace: {
+      organizationId: "tenant_restore",
+      appId: "coder",
+      projectId: "project",
+      workspaceId: threadId,
+      branch: "main",
+    },
+    mode: "build",
+  });
+  await create("thread_source");
+  const source = { ...scope, threadId: "thread_source" };
+  const sourceControl = controls.get(controls.idFromName(
+    "thread:tenant_restore:coder:thread_source",
+  ));
+  await sourceControl.fetch(new Request("https://flary.internal/thread", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      method: "record",
+      tenantId: "tenant_restore",
+      applicationId: "coder",
+      recordType: "message.user",
+      payload: { text: "hello" },
+    }),
+  }));
+  const archive = await service.exportSession!(source);
+  assert.equal(archive.format, "flary-thread-archive");
+  assert.deepEqual(archive.canonical, canonical);
+
+  await create("thread_restored");
+  const target = { ...scope, threadId: "thread_restored" };
+  const result = await service.restore!(target, { archive, replace: true });
+  assert.equal((result as { restored: boolean }).restored, true);
+  const records = await service.auditList!(target, { after: 0, limit: 100 });
+  assert.ok(records.some((record: any) =>
+    record.recordType === "message.user" &&
+    record.publicPayload?._restoredFrom?.sessionId === "thread_source"
+  ));
+  assert.deepEqual(engineCalls.map(({ action }) => action), ["export", "import"]);
+  assert.deepEqual(engineCalls[1]?.body.archive, canonical);
+});
+
+test("root usage reservations reject excess work before it starts", async () => {
+  const controls = namespace();
+  const service = createCloudflareThreadService({ env: {}, namespace: controls });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_limits",
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  await service.create(scope, {
+    threadId: "thread_limits",
+    agentId: "coder",
+    workspace: {
+      organizationId: "tenant_limits",
+      appId: "coder",
+      projectId: "project",
+      workspaceId: "workspace",
+      branch: "main",
+    },
+    mode: "build",
+    metadata: { flaryLimits: { toolCalls: 1 } },
+  });
+  const control = controls.get(controls.idFromName(
+    "thread:tenant_limits:coder:thread_limits",
+  ));
+  const usage = async (
+    method: "reserveUsage" | "settleUsage" | "unknownUsage",
+    reservationId: string,
+  ) => control.fetch(new Request("https://flary.internal/usage-reservation", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      method,
+      tenantId: "tenant_limits",
+      applicationId: "coder",
+      reservationId,
+      kind: "tool-call",
+      delta: {
+        steps: 0,
+        toolCalls: 1,
+        tokens: 0,
+        costUsd: 0,
+        sandboxSeconds: 0,
+        browserSeconds: 0,
+      },
+    }),
+  }));
+  assert.equal((await usage("reserveUsage", "tool_1")).ok, true);
+  const blocked = await usage("reserveUsage", "tool_2");
+  assert.equal(blocked.ok, false);
+  assert.match(await blocked.text(), /limit.*exceeded/i);
+  assert.equal((await usage("unknownUsage", "tool_1")).ok, true);
+  assert.equal((await usage("reserveUsage", "tool_3")).ok, false);
+});
+
+test("hibernating realtime commands resume from socket attachments and deduplicate", async () => {
+  const controls = namespace();
+  const service = createCloudflareThreadService({ env: {}, namespace: controls });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_realtime",
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  await service.create(scope, {
+    threadId: "thread_realtime",
+    agentId: "coder",
+    workspace: {
+      organizationId: "tenant_realtime",
+      appId: "coder",
+      projectId: "project",
+      workspaceId: "workspace",
+      branch: "main",
+    },
+    mode: "build",
+  });
+  const storage = controls.stores.get(
+    "thread:tenant_realtime:coder:thread_realtime",
+  )!;
+  const sent: any[] = [];
+  let attachment: Record<string, unknown> = {
+    tenantId: "tenant_realtime",
+    applicationId: "coder",
+    threadId: "thread_realtime",
+    includeChildren: true,
+    actor: { id: "user", kind: "user" },
+    sent: 4,
+    acknowledged: 4,
+  };
+  const socket = {
+    send(value: string) { sent.push(JSON.parse(value)); },
+    close() {},
+    serializeAttachment(value: unknown) {
+      attachment = value as Record<string, unknown>;
+    },
+    deserializeAttachment() { return attachment; },
+  };
+  const queued: unknown[] = [];
+  const frame = JSON.stringify({
+    version: 1,
+    type: "command",
+    requestId: "request_1",
+    idempotencyKey: "command_1",
+    command: "send",
+    input: { message: "Continue." },
+  });
+
+  await handleFlaryThreadControlWebSocketMessage({
+    storage,
+    env: { FLARY_SESSION_PROJECTION_QUEUE: { async send(value: unknown) { queued.push(value); } } },
+    socket,
+    message: frame,
+  });
+  await handleFlaryThreadControlWebSocketMessage({
+    storage,
+    env: { FLARY_SESSION_PROJECTION_QUEUE: { async send(value: unknown) { queued.push(value); } } },
+    socket,
+    message: frame,
+  });
+  await handleFlaryThreadControlWebSocketMessage({
+    storage,
+    env: {},
+    socket,
+    message: JSON.stringify({ version: 1, type: "ack", cursor: 9 }),
+  });
+
+  assert.equal(queued.length, 1);
+  assert.deepEqual(
+    sent.filter((value) => value.type === "accepted").map((value) => value.duplicate),
+    [false, true],
+  );
+  assert.equal(attachment.acknowledged, 9);
+  assert.equal(attachment.sent, 4);
+});
+
+test("root realtime replay includes child events only when requested", async () => {
+  const controls = namespace();
+  const service = createCloudflareThreadService({ env: {}, namespace: controls });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_child_stream",
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  await service.create(scope, {
+    threadId: "thread_root",
+    agentId: "coder",
+    workspace: {
+      organizationId: "tenant_child_stream",
+      appId: "coder",
+      projectId: "project",
+      workspaceId: "workspace",
+      branch: "main",
+    },
+    mode: "build",
+  });
+  const storage = controls.stores.get(
+    "thread:tenant_child_stream:coder:thread_root",
+  )!;
+  const makeSocket = (includeChildren: boolean) => {
+    const frames: any[] = [];
+    let attachment: Record<string, unknown> = {
+      tenantId: "tenant_child_stream",
+      applicationId: "coder",
+      threadId: "thread_root",
+      includeChildren,
+      actor: { id: "user", kind: "user" },
+      sent: 1,
+      acknowledged: 1,
+    };
+    return {
+      frames,
+      socket: {
+        send(value: string) { frames.push(JSON.parse(value)); },
+        close() {},
+        serializeAttachment(value: unknown) {
+          attachment = value as Record<string, unknown>;
+        },
+        deserializeAttachment() { return attachment; },
+      },
+      attachment: () => attachment,
+    };
+  };
+  const withChildren = makeSocket(true);
+  const withoutChildren = makeSocket(false);
+  const response = await handleFlaryThreadControlObjectRequest({
+    storage,
+    webSockets: {
+      acceptWebSocket() {},
+      getWebSockets: () => [withChildren.socket, withoutChildren.socket],
+    },
+    request: new Request("https://flary.internal/project-child", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "projectChild",
+        tenantId: "tenant_child_stream",
+        applicationId: "coder",
+        childThreadId: "thread_reviewer",
+        childAgentId: "reviewer",
+        sourceCursor: "child:thread_reviewer:event:1",
+        recordType: "message.assistant",
+        recordedAt: new Date().toISOString(),
+        attempt: 0,
+        sourceRevision: "test",
+        payload: { text: "Review complete" },
+      }),
+    }),
+  });
+
+  assert.equal(response.ok, true);
+  const events = withChildren.frames.find((frame) => frame.type === "events");
+  assert.equal(events.records[0].publicPayload._child.threadId, "thread_reviewer");
+  assert.equal(withoutChildren.frames.some((frame) => frame.type === "events"), false);
+  assert.equal(withoutChildren.attachment().sent, events.cursor);
 });

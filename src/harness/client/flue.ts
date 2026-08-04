@@ -34,9 +34,13 @@ import {
   ThreadRenameRequestSchema,
   ThreadRollbackRequestSchema,
   ThreadRestoreRequestSchema,
+  ThreadPortableArchiveSchema,
   UserInputAnswerRequestSchema,
   UserInputRecordSchema,
   ThreadOperationalStateSchema,
+  RealtimeServerFrameSchema,
+  RealtimeTicketRequestSchema,
+  RealtimeTicketResponseSchema,
   type ApprovalDecision,
   type ThreadBinding,
   type ThreadCreateRequest,
@@ -48,6 +52,9 @@ import {
   type RecallReference,
   type ThreadHistoryDiffResponse,
   type ThreadHistoryListResponse,
+  type ThreadPortableArchive,
+  type RealtimeCommandName,
+  type RealtimeServerFrame,
 } from "../contracts/index.js";
 import { ThreadRefSchema } from "../contracts/tenancy.js";
 import { threadName } from "../storage/scopes.js";
@@ -60,6 +67,27 @@ export interface CreateFlaryThreadClientOptions
   mountPath?: string;
   /** Thread control mount below baseUrl. Defaults to `/api`. */
   apiPath?: string;
+  /** Optional WebSocket constructor for Node, tests, and custom transports. */
+  webSocketFactory?: (url: string) => FlaryRealtimeSocket;
+}
+
+export interface FlaryRealtimeSocket {
+  readonly readyState: number;
+  addEventListener(type: "open" | "message" | "close" | "error", listener: (event: any) => void): void;
+  removeEventListener?(type: "open" | "message" | "close" | "error", listener: (event: any) => void): void;
+  send(data: string): void;
+  close(code?: number, reason?: string): void;
+}
+
+export interface FlaryRealtimeConnection extends AsyncIterable<RealtimeServerFrame> {
+  events(): AsyncIterable<RealtimeServerFrame>;
+  command(
+    command: RealtimeCommandName,
+    input?: Readonly<Record<string, unknown>>,
+    options?: { requestId?: string; idempotencyKey?: string },
+  ): Promise<unknown>;
+  acknowledge(cursor: number): void;
+  close(code?: number, reason?: string): void;
 }
 
 export interface FlaryThreadMessageOptions
@@ -90,6 +118,7 @@ export class FlaryThreadClient {
   readonly #headers: CreateFlueClientOptions["headers"];
   readonly #token?: string;
   readonly #apiPath: string;
+  readonly #webSocketFactory?: (url: string) => FlaryRealtimeSocket;
 
   constructor(options: CreateFlaryThreadClientOptions) {
     this.#baseUrl = options.baseUrl.replace(/\/+$/, "");
@@ -97,6 +126,7 @@ export class FlaryThreadClient {
     this.#headers = options.headers;
     this.#token = options.token;
     this.#apiPath = normalizeApiPath(options.apiPath ?? "/api");
+    this.#webSocketFactory = options.webSocketFactory;
     const mountPath = options.mountPath ?? "/api/flue";
     this.flue = createFlueClient({
       baseUrl: joinBaseUrl(options.baseUrl, mountPath),
@@ -186,6 +216,56 @@ export class FlaryThreadClient {
       `${this.#apiPath}/apps/${encodeURIComponent(ref.appId)}/threads/${encodeURIComponent(ref.threadId)}`,
     );
     return ThreadBindingSchema.parse((value as { binding: unknown }).binding);
+  }
+
+  async connect(
+    refInput: ThreadRef,
+    input: { after?: number; includeChildren?: boolean } = {},
+  ): Promise<FlaryRealtimeConnection> {
+    const ref = ThreadRefSchema.parse(refInput);
+    const ticketInput = RealtimeTicketRequestSchema.parse(input);
+    const value = RealtimeTicketResponseSchema.parse(await this.apiJson(
+      `${this.#apiPath}/apps/${encodeURIComponent(ref.appId)}/threads/${encodeURIComponent(ref.threadId)}/realtime-ticket`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(ticketInput),
+      },
+    ));
+    const factory = this.#webSocketFactory ?? ((url: string) => {
+      const Constructor = (globalThis as unknown as { WebSocket?: new (url: string) => FlaryRealtimeSocket }).WebSocket;
+      if (!Constructor) throw new Error("A WebSocket implementation is required");
+      return new Constructor(url);
+    });
+    const socket = factory(value.url);
+    await waitForRealtimeSocket(socket);
+    return createRealtimeConnection(socket);
+  }
+
+  process(
+    refInput: ThreadRef,
+    action: "start" | "attach" | "stdin" | "signal" | "resize" | "sleep" | "wake",
+    input: Readonly<Record<string, unknown>>,
+  ): Promise<unknown> {
+    return this.control(refInput, `processes/${action}`, input);
+  }
+
+  async processes(refInput: ThreadRef): Promise<readonly unknown[]> {
+    const ref = ThreadRefSchema.parse(refInput);
+    const value = await this.apiJson(
+      `${this.#apiPath}/apps/${encodeURIComponent(ref.appId)}/threads/${encodeURIComponent(ref.threadId)}/processes`,
+    );
+    return Array.isArray((value as { processes?: unknown }).processes)
+      ? (value as { processes: unknown[] }).processes
+      : [];
+  }
+
+  browser(
+    refInput: ThreadRef,
+    action: "status" | "takeover" | "input" | "release" | "close",
+    input: Readonly<Record<string, unknown>> = {},
+  ): Promise<unknown> {
+    return this.control(refInput, `browser/${action}`, input);
   }
 
   async archive(refInput: ThreadRef): Promise<void> {
@@ -504,6 +584,16 @@ export class FlaryThreadClient {
     );
   }
 
+  async exportSession(refInput: ThreadRef): Promise<ThreadPortableArchive> {
+    const ref = ThreadRefSchema.parse(refInput);
+    const value = await this.apiJson(
+      `${this.#apiPath}/apps/${encodeURIComponent(ref.appId)}/threads/${encodeURIComponent(ref.threadId)}/export`,
+    );
+    return ThreadPortableArchiveSchema.parse(
+      (value as { archive: unknown }).archive,
+    );
+  }
+
   setGoal(refInput: ThreadRef, input: unknown) {
     return this.control(
       refInput,
@@ -694,6 +784,104 @@ export class FlaryThreadClient {
       `${this.#apiPath}/apps/${encodeURIComponent(ref.appId)}/threads/${encodeURIComponent(ref.threadId)}/${action}${suffix}`,
     );
   }
+}
+
+function createRealtimeConnection(socket: FlaryRealtimeSocket): FlaryRealtimeConnection {
+  const frames: RealtimeServerFrame[] = [];
+  const waiters: Array<(value: IteratorResult<RealtimeServerFrame>) => void> = [];
+  const commands = new Map<string, {
+    resolve(value: unknown): void;
+    reject(reason: unknown): void;
+  }>();
+  let closed = false;
+  const push = (frame: RealtimeServerFrame) => {
+    const waiter = waiters.shift();
+    if (waiter) waiter({ value: frame, done: false });
+    else frames.push(frame);
+  };
+  socket.addEventListener("message", (event) => {
+    try {
+      const frame = RealtimeServerFrameSchema.parse(JSON.parse(String(event.data)));
+      push(frame);
+      if (frame.type === "result") {
+        commands.get(frame.requestId)?.resolve(frame.result);
+        commands.delete(frame.requestId);
+      } else if (frame.type === "error" && frame.requestId) {
+        commands.get(frame.requestId)?.reject(new Error(frame.message));
+        commands.delete(frame.requestId);
+      }
+    } catch {
+      // Invalid server frames never enter the typed event stream.
+    }
+  });
+  socket.addEventListener("close", () => {
+    closed = true;
+    for (const waiter of waiters.splice(0)) waiter({ value: undefined, done: true });
+    for (const pending of commands.values()) pending.reject(new Error("The realtime connection closed"));
+    commands.clear();
+  });
+  const events = (): AsyncIterable<RealtimeServerFrame> => ({
+    [Symbol.asyncIterator]() {
+      return {
+        next(): Promise<IteratorResult<RealtimeServerFrame>> {
+          const frame = frames.shift();
+          if (frame) return Promise.resolve({ value: frame, done: false });
+          if (closed) return Promise.resolve({ value: undefined, done: true });
+          return new Promise((resolve) => waiters.push(resolve));
+        },
+      };
+    },
+  });
+  return {
+    [Symbol.asyncIterator]() {
+      return events()[Symbol.asyncIterator]();
+    },
+    events,
+    command(command, input = {}, options = {}) {
+      const requestId = options.requestId ?? crypto.randomUUID();
+      const idempotencyKey = options.idempotencyKey ?? crypto.randomUUID();
+      const promise = new Promise<unknown>((resolve, reject) => {
+        commands.set(requestId, { resolve, reject });
+      });
+      socket.send(JSON.stringify({
+        version: 1,
+        type: "command",
+        requestId,
+        idempotencyKey,
+        command,
+        input,
+      }));
+      return promise;
+    },
+    acknowledge(cursor) {
+      socket.send(JSON.stringify({ version: 1, type: "ack", cursor }));
+    },
+    close(code, reason) {
+      socket.close(code, reason);
+    },
+  };
+}
+
+function waitForRealtimeSocket(socket: FlaryRealtimeSocket): Promise<void> {
+  if (socket.readyState === 1) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const open = () => {
+      cleanup();
+      resolve();
+    };
+    const fail = () => {
+      cleanup();
+      reject(new Error("The realtime connection could not open"));
+    };
+    const cleanup = () => {
+      socket.removeEventListener?.("open", open);
+      socket.removeEventListener?.("error", fail);
+      socket.removeEventListener?.("close", fail);
+    };
+    socket.addEventListener("open", open);
+    socket.addEventListener("error", fail);
+    socket.addEventListener("close", fail);
+  });
 }
 
 export function createFlaryThreadClient(

@@ -108,13 +108,15 @@ export const ThreadForkRequestSchema = z
     threadId: IdentifierSchema.optional(),
     /** Optional canonical turn boundary used as the fork point. */
     turnId: IdentifierSchema.optional(),
+    /** Exact forks isolate the selected workspace checkpoint by default. */
+    workspace: z.enum(["snapshot", "shared"]).default("snapshot"),
     mode: AgentModeIdSchema.optional(),
     model: ModelSelectionSchema.optional(),
     thinkingLevel: ReasoningEffortSchema.optional(),
     metadata: MetadataSchema.optional(),
   })
   .strict();
-export type ThreadForkRequest = z.infer<typeof ThreadForkRequestSchema>;
+export type ThreadForkRequest = z.input<typeof ThreadForkRequestSchema>;
 
 export const ThreadModeRequestSchema = z
   .object({
@@ -209,13 +211,40 @@ export const ThreadRollbackRequestSchema = z
   .strict();
 export type ThreadRollbackRequest = z.infer<typeof ThreadRollbackRequestSchema>;
 
-/** Verified flary-jsonl archive used to rebuild a thread projection. */
-export const ThreadRestoreRequestSchema = z
+/** Complete authenticated archive used to rebuild one live Flary thread. */
+export const ThreadPortableArchiveSchema = z
   .object({
-    jsonl: z.string().min(1).max(50_000_000),
-    replace: z.boolean().default(true),
+    format: z.literal("flary-thread-archive"),
+    version: z.literal(1),
+    source: z.object({
+      tenantId: IdentifierSchema,
+      applicationId: IdentifierSchema,
+      threadId: IdentifierSchema,
+    }).strict(),
+    exportedAt: TimestampSchema,
+    ledgerJsonl: z.string().min(1).max(50_000_000),
+    canonical: z.unknown(),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
   })
   .strict();
+export type ThreadPortableArchive = z.infer<typeof ThreadPortableArchiveSchema>;
+
+/** Verified projection JSONL or a complete portable session archive. */
+export const ThreadRestoreRequestSchema = z
+  .object({
+    jsonl: z.string().min(1).max(50_000_000).optional(),
+    archive: ThreadPortableArchiveSchema.optional(),
+    replace: z.boolean().default(true),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if ((value.jsonl === undefined) === (value.archive === undefined)) {
+      context.addIssue({
+        code: "custom",
+        message: "Provide exactly one of jsonl or archive",
+      });
+    }
+  });
 export type ThreadRestoreRequest = z.input<typeof ThreadRestoreRequestSchema>;
 
 export const ThreadGoalRequestSchema = z

@@ -10,8 +10,8 @@ const capabilities = [
     body: "Runs survive disconnects and resume from an exact event cursor.",
   },
   {
-    title: "Modes and approvals",
-    body: "Use Ask, Plan, Build, Review, or a custom Zod permission profile.",
+    title: "Safe actions",
+    body: "Reads can run directly. Writes and sensitive browser actions can pause for approval.",
   },
   {
     title: "Lazy tools and MCP",
@@ -97,49 +97,49 @@ const description =
 
     <section class="setup" id="setup">
       <div class="section-intro">
-        <p class="eyebrow">Start local, deploy durable</p>
-        <h2>Use only the layer<br />your app needs.</h2>
+        <p class="eyebrow">One guided setup</p>
+        <h2>From zero to a live<br />agent Worker.</h2>
       </div>
       <div class="setup-grid">
         <article>
           <span>01</span>
-          <p class="setup-kicker">Function API</p>
-          <h3>Any TypeScript app</h3>
+          <p class="setup-kicker">Create</p>
+          <h3>Run the wizard</h3>
           <p>
-            Define Zod-backed functions with <code>app.fn()</code>. Call them
-            directly with no Cloudflare resources.
+            Choose a personal dashboard or an agent backend. Select your model
+            provider and optional features.
           </p>
-          <code>npm install flary</code>
+          <code>npx flary create</code>
         </article>
         <article>
           <span>02</span>
-          <p class="setup-kicker">Local runtime</p>
-          <h3>Cloudflare emulation</h3>
+          <p class="setup-kicker">Authorize</p>
+          <h3>Sign in to Cloudflare</h3>
           <p>
-            Start with the generated function Worker. Add locally emulated
-            Durable Objects and D1 when you add durable runs.
+            Wrangler OAuth opens in your browser. Choose the account that will
+            own the Worker, secrets, and data.
           </p>
-          <code>npx flary create my-agent</code>
+          <code>No token copying</code>
         </article>
         <article>
           <span>03</span>
-          <p class="setup-kicker">Production runtime</p>
-          <h3>Your Cloudflare account</h3>
+          <p class="setup-kicker">Deploy</p>
+          <h3>Open the result</h3>
           <p>
-            Durable Objects run threads and workspaces. D1 indexes threads.
-            R2 stores archives, large files, and turn checkpoints.
+            Flary provisions the resources, uploads secrets, deploys, and
+            checks the live Worker.
           </p>
-          <code>wrangler deploy</code>
+          <code>npx flary deploy</code>
         </article>
       </div>
       <div class="resource-line" aria-label="Cloudflare resource requirements">
         <div>
           <span>Required for durable production</span>
-          <strong>Worker · Durable Objects · D1 · Queue</strong>
+          <strong>Worker · Durable Objects · D1 · R2 · Queue</strong>
         </div>
         <div>
           <span>Optional by feature</span>
-          <strong>R2 for coding/history · Sandbox · Dynamic Workers</strong>
+          <strong>Browser Run · Sandbox</strong>
         </div>
       </div>
     </section>

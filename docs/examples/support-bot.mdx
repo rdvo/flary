@@ -1,163 +1,78 @@
 ---
 title: Support bot
-description: Define a typed support function, connect approved tools, and expose durable runs to a product UI.
+description: Add a typed support operation or durable ticket thread to your product.
 section: Examples
 order: 1
 ---
 
-This example defines one typed support function and exposes it behind a
-product-owned API. The product still owns login, organization roles, billing,
-connections, and the chat UI.
+Use a function for one question. Use an agent when a support ticket needs many
+messages, tools, approvals, or child investigations.
 
-## Define the app and tool
+## Define the support function
 
 ```ts
-// src/flary.ts
 import { flary, z } from "flary";
 
-export const app = flary<Env>({
-  name: "support",
-  model: "anthropic/claude-sonnet-4-5",
-  bindings: z.object({
-    ANTHROPIC_API_KEY: z.string().min(1),
-    APP_ENV: z.string(),
-  }),
-  auth: async ({ request, bindings }) => {
-    const caller = await authenticateProductRequest(request, bindings);
-    return {
-      tenantId: caller.tenantId,
-      userId: caller.userId,
-      applicationId: "support-console",
-      roles: caller.roles,
-      scopes: caller.scopes,
-    };
-  },
-});
-```
-
-```ts
-// src/tools.ts
-import { z } from "flary";
-import { app } from "./flary";
+const app = flary({ model: "openai/gpt-5" });
 
 const searchDocs = app.fn({
-  name: "docs.search",
-  description: "Search approved product documentation.",
+  description: "Search product documentation",
   input: z.object({ query: z.string().min(1) }),
   output: z.array(z.object({
     title: z.string(),
-    excerpt: z.string(),
     url: z.string().url(),
   })),
-  policy: { operation: "read", capabilities: ["docs.read"] },
-  run: async ({ query }) => docs.search(query),
+  run: ({ query }) => docs.search(query),
 });
 
-export const tools = app.tools({ searchDocs });
-```
-
-## Define the function
-
-```ts
-// src/support.ts
-import { z } from "flary";
-import { app } from "./flary";
-import { tools } from "./tools";
+const tools = app.tools({ searchDocs });
 
 export const support = app.fn({
-  input: z.object({
-    customer: z.object({ name: z.string().min(1) }),
-    question: z.string().min(1),
-  }),
+  input: z.object({ question: z.string().min(1) }),
   output: z.object({
     answer: z.string(),
     sources: z.array(z.string().url()),
   }),
   tools,
-  mode: "build",
-  thinking: "medium",
-  prompt: ({ customer, question }) => [
-    "Resolve the support request with approved tools.",
-    "Ask before changing customer data.",
-    `Customer: ${customer.name}`,
-    `Question: ${question}`,
-  ].join("\n"),
+  prompt: ({ question }) => `Answer with product facts and sources.\n\n${question}`,
 });
 ```
 
-The model sees one `execute` tool. Code Mode searches the private tool catalog,
-loads only the selected schema, and calls the native tool in trusted host code.
-The tool policy and active mode are checked before execution.
-
-## Serve the function
+Serve it from the generated Worker:
 
 ```ts
-import { app } from "./flary";
-import { support } from "./support";
-
 export default app.serve({ support });
 ```
 
-This exposes:
-
-- `POST /functions/support` for a direct call.
-- `POST /functions/support/runs` for a durable run.
-- `GET /functions/support/runs/:runId` for status and output.
-- Approval, user-input, and cancellation routes under the same run.
-
-For Cloudflare bindings and a Flue-backed run service, see
-[Self-hosting](/docs/self-hosting/). The function definition does not change.
-
-## Connect the product UI
+## Call it from your product
 
 ```ts
 import { flary } from "flary/client";
 import type { support } from "./support";
 
-const client = flary<{ support: typeof support }>({
+const api = flary<{ support: typeof support }>({
   baseUrl: "https://support.example.com",
   headers: () => ({ authorization: `Bearer ${sessionToken()}` }),
 });
 
-const run = await client.support.start(
-  {
-    customer: { name: "Ada" },
-    question: "How do I change my plan?",
-  },
-  { idempotencyKey: "ticket_42:turn:7" },
-);
-
-for await (const event of run.stream()) {
-  renderSupportEvent(event);
-}
+const result = await api.support({
+  question: "How do I change my plan?",
+});
 ```
 
-The run ID is stable across a browser disconnect. The client can reconnect to
-the same run. For exact event cursors and low-level route control, use the
-reference API in [Durable threads](/docs/durable-threads/).
+Your application owns login, customer identity, billing, and the screen. Flary
+owns model execution, tools, validation, and durable runs.
 
-## Use a persistent support session
-
-Use `app.agent()` when one ticket contains many turns, tools, approvals, or
-child investigations:
+## Keep one thread per ticket
 
 ```ts
 export const supportAgent = app.agent({
-  name: "support-agent",
-  model: "anthropic/claude-sonnet",
-  models: {
-    allow: ["anthropic/claude-sonnet", "openai/gpt-5.6-sol"],
-    switching: "user",
-    fallback: "none",
-  },
+  name: "support",
   instructions: "Resolve the support issue with approved product facts.",
-  mode: "ask",
   tools,
 });
 ```
 
-Map the product ticket ID to `thread.ref.threadId`. Every reply can reopen the
-same durable thread. The full transcript, tool calls, approvals, audits, model
-switches, and subagent lineage stay attached to that thread. See
-[Telegram, Discord, and custom UIs](/docs/channels-and-webhooks/) for the
-transport pattern.
+Store the product ticket ID with `thread.ref.threadId`. Reopen that thread for
+each reply. See [Build your UI or bot](/docs/clients/) for the transport
+pattern.

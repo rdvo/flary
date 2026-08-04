@@ -8,6 +8,22 @@ const site = process.env.PUBLIC_SITE_URL ?? "https://flary.dev";
 export default defineConfig({
   site,
   output: "static",
+  redirects: {
+    "/docs/getting-started": "/docs/quickstart",
+    "/docs/self-hosting": "/docs/deploy",
+    "/docs/one-off-agent": "/docs/functions",
+    "/docs/prompts": "/docs/functions",
+    "/docs/durable-threads": "/docs/threads",
+    "/docs/sessions-and-workspaces": "/docs/storage-and-recovery",
+    "/docs/workspaces-history": "/docs/storage-and-recovery",
+    "/docs/tools-and-mcp": "/docs/tools",
+    "/docs/host-neutral-toolsets": "/docs/low-level-hosting",
+    "/docs/providers-and-cache": "/docs/connections",
+    "/docs/modes-permissions": "/docs/agents",
+    "/docs/cloudflare-resources": "/docs/deploy",
+    "/docs/production-checklist": "/docs/operations",
+    "/docs/channels-and-webhooks": "/docs/clients",
+  },
   outDir: ".astro-dist",
   publicDir: "site-public",
   build: {

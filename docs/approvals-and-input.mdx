@@ -1,112 +1,37 @@
 ---
 title: Approvals and user input
-description: Pause a durable function for a human decision, persist the request, and resume without keeping the original request open.
-section: Tools
+description: Pause durable work for a decision or missing information and resume safely.
+section: Run
 order: 2
 ---
 
-Flary separates two kinds of pause:
+Approvals protect a known action. User input supplies information that the
+agent cannot safely infer. Both are durable thread records.
 
-- Approval: the host decides whether a specific state-changing tool call may
-  run.
-- User input: the function needs information such as a choice, text value, or
-  missing configuration.
-
-Both are durable. The host UI can be a chat panel, support console, terminal,
-or custom workflow.
-
-## Require approval for a function tool
-
-Mark a tool as a write and require approval:
+A write that requires approval pauses before the trusted host executes it. The
+client can list pending approvals and approve or reject one request. After
+approval, completed earlier calls replay from the journal and the approved
+write receives a stable idempotency key.
 
 ```ts
-import { flary, z } from "flary";
+for await (const event of thread.stream()) {
+  if (event.type === "approval.requested") {
+    await thread.approve({ approvalId: event.approvalId });
+  }
+}
+```
 
-const app = flary({ name: "billing" });
+A write that started but has no terminal record becomes `outcome_unknown`.
+Flary does not run it again automatically.
 
-export const refund = app.fn({
-  name: "billing.refund",
-  description: "Issue a refund for one order.",
-  input: z.object({
-    orderId: z.string(),
-    amountCents: z.number().int().positive(),
-  }),
-  output: z.object({ refundId: z.string() }),
-  policy: {
-    operation: "write",
-    capabilities: ["billing.refund"],
-    requiresApproval: true,
-  },
-  run: ({ orderId, amountCents }, { bindings }) =>
-    bindings.billing.refund(orderId, amountCents),
+Requested input uses the same restart-safe pattern:
+
+```ts
+await thread.sendInput({
+  requestId,
+  answers: { environment: "staging" },
 });
 ```
 
-The active mode can add another approval rule for a capability or tool. The
-runtime binds an approval to the exact run, tool, arguments, resource, mode,
-and credential generation.
-
-## Request user input
-
-Use a user-input tool in a low-level Flue integration, or expose the durable
-run continuation routes from `app.serve()`:
-
-```ts
-const run = await client.support.start({
-  question: "Which environment should I use?",
-});
-
-const requests = await fetch(
-  `/functions/support/runs/${run.runId}/user-input`,
-).then((response) => response.json());
-
-await fetch(
-  `/functions/support/runs/${run.runId}/user-input/${requests[0].id}`,
-  {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ answers: { environment: "staging" } }),
-  },
-);
-```
-
-The exact client method depends on whether the host uses the function client
-or the lower-level `FlaryThreadClient`. The HTTP route is:
-
-```text
-POST /functions/{name}/runs/{runId}/user-input/{requestId}
-```
-
-The answer is stored in the thread runtime before Flue resumes. If the Worker
-restarts, Flary submits a bounded continuation with the persisted answer
-instead of asking the provider to repeat the previous tool call.
-
-## Approval flow
-
-```text
-tool call admitted
-  → mode check
-  → approval.requested event
-  → thread status: waiting
-  → host displays exact action and arguments
-  → approve or reject with the actor identity
-  → capability lease issued for one call
-  → tool resumes or fails closed
-```
-
-Use a short-lived capability lease. A later mode change, argument change,
-credential rotation, or run cancellation invalidates the old decision.
-
-## Host API responsibilities
-
-Flary stores the request, decision, lease, and continuation metadata in thread
-SQLite. The host is responsible for:
-
-- Authenticating the person who approves.
-- Showing safe, redacted arguments.
-- Applying organization roles and approval rules.
-- Returning the decision through an authenticated endpoint.
-- Handling an expired or rejected request in the product UI.
-
-Never approve based on a model-generated summary alone. Render the tool ID,
-resource, affected values, and the exact irreversible action.
+Every approval and input request is tenant-scoped, audited, and available after
+reconnect.

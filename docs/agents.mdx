@@ -1,0 +1,50 @@
+---
+title: Persistent agents
+description: Define behavior once and create durable conversation threads from any client.
+section: Build
+order: 2
+---
+
+import { Code } from "astro:components";
+import coderExample from "../templates/starter/src/coder.ts?raw";
+
+An **agent** defines persistent behavior. A **thread** is one durable
+conversation with that agent.
+
+```ts
+export const coder = app.agent({
+  name: "coder",
+  instructions: "Inspect the workspace, make the requested change, and check it.",
+  tools,
+});
+```
+
+The agent uses the application's default model and Flary's safe runtime
+defaults. Its thread keeps messages, tool calls, approvals, model selection,
+usage, and recovery state.
+
+## Add controls only when needed
+
+You can later add an allowed-model list, custom limits, subagents, a mode, or a
+compaction policy. These controls are optional. Keep them out of the first
+agent until the product needs them.
+
+## Models
+
+An agent can allow explicit provider switching:
+
+```ts
+models: {
+  allow: ["openai/gpt-5", "anthropic/claude-sonnet"],
+  switching: "user",
+  fallback: "none",
+}
+```
+
+Read [Providers and connections](/docs/connections/) before you enable model
+switching. Flary preserves provider-neutral history and does not move private
+provider state across providers.
+
+## Tested starter source
+
+<Code code={coderExample} lang="ts" />

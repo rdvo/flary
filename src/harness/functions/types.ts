@@ -342,6 +342,18 @@ export interface FlarySandboxSource {
   readonly options: Record<string, unknown>;
 }
 
+export interface FlaryBrowserSource {
+  readonly kind: "browser";
+  readonly options: {
+    readonly profile?: "thread" | "ephemeral";
+    readonly siteAccess?: "approval" | "allow";
+    readonly sensitiveActions?: "approval" | "allow";
+    readonly uploads?: "disabled" | "approval";
+    readonly binding?: string;
+    readonly keepAliveMs?: number;
+  };
+}
+
 /** Host-side tool connection used by workspace and sandbox sources. */
 export interface FlaryToolConnection {
   readonly descriptors: readonly {
@@ -413,7 +425,8 @@ export type FlaryToolSource =
   | FlaryMcpSource
   | FlaryOpenApiSource
   | FlaryWorkspaceSource
-  | FlarySandboxSource;
+  | FlarySandboxSource
+  | FlaryBrowserSource;
 
 export interface FlaryToolRegistry {
   readonly kind: "tools";
@@ -555,6 +568,14 @@ export interface FlaryAppOptions<TBindings = unknown> {
       readonly bindings: TBindings;
       readonly context: FlaryStepContext<TBindings>;
       /** Durable Object SQLite used for process replay and controls. */
+      readonly storage?: unknown;
+    },
+  ) => FlaryToolConnection | Promise<FlaryToolConnection>;
+  readonly resolveBrowser?: (
+    source: FlaryBrowserSource,
+    input: {
+      readonly bindings: TBindings;
+      readonly context: FlaryStepContext<TBindings>;
       readonly storage?: unknown;
     },
   ) => FlaryToolConnection | Promise<FlaryToolConnection>;

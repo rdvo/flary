@@ -1,159 +1,42 @@
 ---
-title: Subagents and automation
-description: Spawn bounded helpers, pass only the context they need, and run durable jobs from queues, schedules, and webhooks.
-section: Advanced
+title: Subagents and schedules
+description: Delegate durable work across providers and run it now or on a schedule.
+section: Run
 order: 3
 ---
 
-Subagents are child executions, not a second storage system. A parent thread
-creates a child with an explicit role, model, tool allowlist, seed history,
-limits, and mailbox. The child reports events and a final result to the parent.
+A subagent is a declared child agent with its own durable thread, transcript,
+approvals, audits, usage, and model selection.
 
-For the function-first API, declare children on `app.agent()`:
-
-~~~ts
-const reviewer = app.agent({
-  name: "reviewer",
-  model: "openai/gpt-5.6-sol",
-  models: { allow: ["openai/gpt-5.6-sol"] },
-  instructions: "Review the diff and report concrete defects.",
-});
-
+```ts
 export const coder = app.agent({
   name: "coder",
-  instructions: "Implement the requested repository change.",
-  subagents: { reviewer },
-  model: "anthropic/claude-sonnet",
-  models: { allow: ["anthropic/claude-sonnet"] },
-  delegation: {
-    mode: "auto",
-    maxConcurrent: 4,
-    maxTotal: 16,
-    maxDepth: 2,
-    allowPeerMessaging: true,
-  },
+  subagents: { reviewer, researcher },
 });
-~~~
+```
 
-The generated Thread Control Durable Object stores child lineage, admission
-limits, mailbox messages, results, and control state in SQLite. Each child
-uses a separate Flue instance, Thread Control projection, and canonical
-stream. The generated root Flue class selects the declared child definition
-from the durable instance ID. A Worker restart does not remove child state.
+Flary applies safe child, depth, step, and cost defaults. Add a `delegation`
+or `limits` block only when the application needs different values.
 
-The parent and child can use different providers. Flary checks the exact child
-model allow-list, resolves the tenant credential grant, and stores the child
-model pin before it starts the child turn. Provider-private cache and reasoning
-state stay in the child thread.
+A child can use another provider:
 
-## Start and control child threads
-
-~~~ts
-const child = await thread.subagents.spawn({
+```ts
+await thread.subagents.spawn({
   agent: "reviewer",
-  task: "Review the current diff and report concrete defects.",
-  model: "openai/gpt-5.6-sol",
-  seedTurns: 2,
+  task: "Review the current change.",
+  model: "anthropic/claude-sonnet",
+  workspace: "shared",
 });
+```
 
-await thread.subagents.send({
-  toThreadId: child.thread.threadId,
-  content: "Also check the migration path.",
-  mode: "queue",
-});
+Parents, children, and siblings use durable mailboxes. A completed child sends
+a typed result with its summary, checkpoint, files, checks, usage, and errors.
+The root thread reserves and settles limits transactionally across the full
+tree.
 
-const result = await thread.subagents.wait({
-  threadIds: [child.thread.threadId],
-  timeoutMs: 30_000,
-});
-~~~
+Shared workspaces are the default for child agents. Possible writes are
+serialized. User-created thread forks use isolated workspace branches.
 
-Pass zero seed turns when the child needs only a task statement. Pass a small
-number of recent turns when context is necessary. Do not copy an entire
-conversation by default.
-
-## Parent and child communication
-
-The parent can wait for a child, send a follow-up, or read the child result
-through the coordinator. Child tools use the same mode, capability, approval,
-tenant, and connection checks as a normal thread.
-
-~~~ts
-await thread.subagents.send({
-  toThreadId: child.thread.threadId,
-  kind: "instruction",
-  content: "Compare the two sources and return one recommendation.",
-});
-~~~
-
-The model gets the same spawn, list, send, wait, interrupt, and close controls.
-Results and failures are stored in the coordinator and sent to the parent
-mailbox automatically. Parent status is projected after child settlement, so
-a restart can replay result propagation without starting the child again.
-Related agents can send peer messages only when `allowPeerMessaging` permits
-it.
-
-An external UI or channel adapter can use the same controls through
-`thread.subagents`. See [Telegram, Discord, and custom UIs](/docs/channels-and-webhooks/).
-
-Use bounded fan-out for independent research. Workspace writes still pass
-through the common policy, approval, and journal path. A child cannot receive
-a stronger tenant or connection scope than its parent.
-
-## Tool and cost limits
-
-Set limits on every child:
-
-- Maximum steps and model calls.
-- Maximum tool calls and parallel calls.
-- Maximum duration.
-- Maximum output or total tokens.
-- Maximum cost when the provider reports cost.
-- Allowed tools and mode.
-
-The parent remains responsible for accepting a child result. Do not import
-untrusted child output into a write tool without validation and, when needed,
-approval.
-
-## Scheduled and webhook work
-
-Flary exports Cloudflare adapters for scheduled jobs, webhooks, and queue
-workers. The host authenticates a webhook or schedule, creates a run with a
-stable idempotency key, and returns quickly.
-
-~~~ts
-export default {
-  async scheduled(controller, env, execution) {
-    const run = await env.RUNS.create({
-      tenantId: "system",
-      applicationId: "reports",
-      agentId: "weekly-report",
-      request: {
-        requestId: "weekly:" + controller.scheduledTime,
-        channelId: "weekly-report",
-        input: { week: new Date(controller.scheduledTime).toISOString() },
-        idempotencyKey: "weekly:" + controller.scheduledTime,
-      },
-    });
-
-    execution.waitUntil(env.RUNS.execute(run.runId));
-  },
-};
-~~~
-
-For a long job, the accepted run is the durable record. The webhook response
-does not stay open while the model, tools, or child agents work.
-
-## Common patterns
-
-| Pattern | Use |
-| --- | --- |
-| Fan-out research | Several ask-mode children read independent sources |
-| Review gate | A review child checks a build result before the parent requests approval |
-| Background sync | A schedule starts a run with an idempotent timestamp key |
-| Reactive support | A signed webhook starts a support run for a new ticket |
-| Build pipeline | A build run invokes Sandbox only for explicit test or deploy jobs |
-
-Subagents share Flary's event, usage, history, and tenant contracts. The host
-still decides retention, quotas, and whether a child is visible to the end
-user.
+Durable schedules can start a function or agent command later. Schedule
+history includes attempts, retry state, pause, resume, cancellation, and the
+created run or thread reference.

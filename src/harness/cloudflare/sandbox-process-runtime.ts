@@ -16,6 +16,11 @@ type LiveSandbox = Pick<
 export interface DurableSandboxProcessRuntimeOptions {
   readonly sandbox: LiveSandbox;
   readonly registry: SqliteSandboxProcessRegistry;
+  readonly onSettled?: (input: {
+    readonly processId: string;
+    readonly state: "completed" | "failed" | "cancelled";
+    readonly exitCode?: number;
+  }) => Promise<void>;
 }
 
 /**
@@ -27,10 +32,13 @@ export interface DurableSandboxProcessRuntimeOptions {
 export class DurableSandboxProcessRuntime {
   readonly #sandbox: LiveSandbox;
   readonly #registry: SqliteSandboxProcessRegistry;
+  readonly #onSettled?: DurableSandboxProcessRuntimeOptions["onSettled"];
+  readonly #notified = new Set<string>();
 
   constructor(options: DurableSandboxProcessRuntimeOptions) {
     this.#sandbox = options.sandbox;
     this.#registry = options.registry;
+    this.#onSettled = options.onSettled;
   }
 
   async start(input: SandboxProcessCreate): Promise<SandboxProcess> {
@@ -55,12 +63,14 @@ export class DurableSandboxProcessRuntime {
           });
         },
         onExit: (code) => {
-          void (code === null || code !== 0
-            ? this.#registry.fail(record.id, "process_failed", code ?? undefined)
-            : this.#registry.complete(record.id, code));
+          void this.#finish(
+            record.id,
+            code === null || code !== 0 ? "failed" : "completed",
+            code ?? undefined,
+          );
         },
         onError: () => {
-          void this.#registry.fail(record.id, "sandbox_process_error");
+          void this.#finish(record.id, "failed", undefined, "sandbox_process_error");
         },
       });
       return this.#registry.start(record.id);
@@ -192,15 +202,51 @@ export class DurableSandboxProcessRuntime {
     }
     const status = await live.getStatus();
     if (status === "completed") {
-      await this.#registry.complete(record.id, live.exitCode ?? 0);
+      await this.#finish(record.id, "completed", live.exitCode ?? 0);
     } else if (status === "failed" || status === "error") {
-      await this.#registry.fail(
-        record.id,
-        "sandbox_process_failed",
-        live.exitCode,
-      );
+      await this.#finish(record.id, "failed", live.exitCode, "sandbox_process_failed");
     } else if (status === "killed") {
       await this.#registry.cancel(record.id);
+      await this.#notify(record.id, "cancelled", live.exitCode);
+    }
+  }
+
+  async #finish(
+    processId: string,
+    state: "completed" | "failed",
+    exitCode?: number,
+    errorCode = "process_failed",
+  ): Promise<void> {
+    const current = await this.#registry.get(processId);
+    if (
+      current?.status === "completed" ||
+      current?.status === "failed" ||
+      current?.status === "cancelled"
+    ) {
+      await this.#notify(processId, current.status, current.exitCode);
+      return;
+    }
+    if (state === "completed") {
+      await this.#registry.complete(processId, exitCode ?? 0);
+    } else {
+      await this.#registry.fail(processId, errorCode, exitCode);
+    }
+    await this.#notify(processId, state, exitCode);
+  }
+
+  async #notify(
+    processId: string,
+    state: "completed" | "failed" | "cancelled",
+    exitCode?: number,
+  ): Promise<void> {
+    const key = `${processId}:${state}`;
+    if (!this.#onSettled || this.#notified.has(key)) return;
+    this.#notified.add(key);
+    try {
+      await this.#onSettled({ processId, state, ...(exitCode === undefined ? {} : { exitCode }) });
+    } catch (error) {
+      this.#notified.delete(key);
+      throw error;
     }
   }
 }

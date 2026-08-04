@@ -155,6 +155,28 @@ export const SubagentThreadSchema = z
   .strict();
 export type SubagentThread = z.infer<typeof SubagentThreadSchema>;
 
+/** Durable result sent from a completed child to its parent thread. */
+export const SubagentResultSchema = z.object({
+  summary: NonEmptyStringSchema,
+  checkpoint: JsonValueSchema.optional(),
+  changedFiles: z.array(z.string().min(1).max(4_096)).max(10_000),
+  checks: z.array(z.object({
+    command: z.string().min(1).max(16_384),
+    status: z.enum(["passed", "failed", "skipped"]),
+  }).strict()).max(1_000),
+  usage: z.object({
+    steps: NonNegativeIntegerSchema,
+    toolCalls: NonNegativeIntegerSchema,
+    tokens: NonNegativeIntegerSchema,
+    costUsd: z.number().finite().nonnegative(),
+    sandboxSeconds: NonNegativeIntegerSchema,
+    browserSeconds: NonNegativeIntegerSchema,
+  }).strict(),
+  errors: z.array(z.string().min(1).max(16_384)).max(1_000),
+  output: JsonValueSchema.optional(),
+}).strict();
+export type SubagentResult = z.infer<typeof SubagentResultSchema>;
+
 export const SpawnSubagentResponseSchema = z
   .object({
     thread: SubagentThreadSchema,

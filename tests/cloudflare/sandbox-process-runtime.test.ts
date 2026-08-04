@@ -10,6 +10,8 @@ import {
 test("durable sandbox runtime drives live start, stdin, signals, and attach", async () => {
   const storage = sqlite();
   const calls: Array<{ name: string; values: unknown[] }> = [];
+  const settlements: unknown[] = [];
+  let onExit: ((code: number | null) => void) | undefined;
   const process = {
     id: "process_1",
     command: "node server.js",
@@ -34,9 +36,13 @@ test("durable sandbox runtime drives live start, stdin, signals, and attach", as
   };
   const runtime = new DurableSandboxProcessRuntime({
     registry: new SqliteSandboxProcessRegistry(storage.sql),
+    async onSettled(input) {
+      settlements.push(input);
+    },
     sandbox: {
       async startProcess(command, options) {
         calls.push({ name: "start", values: [command, options] });
+        onExit = options?.onExit;
         return process;
       },
       async exec(command) {
@@ -87,6 +93,13 @@ test("durable sandbox runtime drives live start, stdin, signals, and attach", as
     ["SIGSTOP", "SIGCONT"],
   );
   assert.match(String(calls.find((call) => call.name === "exec")?.values[0]), /base64 -d/);
+  onExit?.(0);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(settlements, [{
+    processId: "process_1",
+    state: "completed",
+    exitCode: 0,
+  }]);
 });
 
 function sqlite() {

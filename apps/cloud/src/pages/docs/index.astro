@@ -4,7 +4,6 @@ import {
   ArrowRight,
   Cloud,
   FileCode2,
-  HardDrive,
   MessagesSquare,
 } from "lucide-react";
 import { docPath, sortDocs } from "../../docs";
@@ -16,29 +15,29 @@ const examples = entries.filter((entry) => entry.data.section === "Examples");
 
 <DocsLayout
   title="Build with Flary"
-  description="Start with a typed function call, self-host durable runs, or embed the runtime in an existing product."
+  description="Create a typed function or persistent agent and deploy it to your Cloudflare account."
 >
   <section class="docs-start-grid">
-    <a href="/docs/one-off-agent/">
+    <a href="/docs/quickstart/">
       <FileCode2 size={18} strokeWidth={1.6} />
-      <span>Run once</span>
-      <h2>One-off agent call</h2>
-      <p>Define a typed function, call it directly, or start it as a durable run.</p>
+      <span>Start</span>
+      <h2>Run the wizard</h2>
+      <p>Choose a personal dashboard or headless agent backend and deploy it.</p>
       <strong>Open guide <ArrowRight size={14} strokeWidth={1.7} /></strong>
     </a>
-    <a href="/docs/sessions-and-workspaces/">
-      <HardDrive size={18} strokeWidth={1.6} />
-      <span>Understand</span>
-      <h2>Sessions and files</h2>
-      <p>See where messages, workspaces, checkpoints, audits, and archives live.</p>
-      <strong>Learn the storage model <ArrowRight size={14} strokeWidth={1.7} /></strong>
+    <a href="/docs/clients/">
+      <MessagesSquare size={18} strokeWidth={1.6} />
+      <span>Connect</span>
+      <h2>Build your UI or bot</h2>
+      <p>Use Flary headlessly from a web UI, mobile app, Telegram, Discord, or a webhook.</p>
+      <strong>Open client guide <ArrowRight size={14} strokeWidth={1.7} /></strong>
     </a>
-    <a href="/docs/self-hosting/">
+    <a href="/docs/deploy/">
       <Cloud size={18} strokeWidth={1.6} />
       <span>Deploy</span>
-      <h2>Self-host on Cloudflare</h2>
-      <p>Mount durable threads, resumable events, tools, approvals, and tenant policy.</p>
-      <strong>Self-host Flary <ArrowRight size={14} strokeWidth={1.7} /></strong>
+      <h2>Deploy to Cloudflare</h2>
+      <p>Own the Worker, resources, secrets, and data without managing a VPS.</p>
+      <strong>Open deploy guide <ArrowRight size={14} strokeWidth={1.7} /></strong>
     </a>
   </section>
 

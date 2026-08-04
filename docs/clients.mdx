@@ -1,0 +1,71 @@
+---
+title: Build your UI or bot
+description: Connect a web UI, mobile app, Telegram bot, Discord bot, CMS, or webhook.
+section: Connect
+order: 3
+---
+
+Flary is the durable agent backend. Your application owns the screen, bot, or
+channel that people use.
+
+## Headless use
+
+Choose **Agent backend** in `flary create`. The deployed Worker provides typed
+HTTP, WebSocket, and SSE APIs. You do not write a route for each agent action.
+
+Use the typed client from a trusted server:
+
+```ts
+import { flary } from "flary/client";
+import type { functions } from "../worker/src/index";
+
+const api = flary<typeof functions>({
+  baseUrl: "https://my-agent.example.workers.dev",
+  headers: () => ({ authorization: `Bearer ${token}` }),
+});
+```
+
+Do not place a personal backend token in public browser code. Use your
+application session, a trusted server route, or the dashboard's secure cookie.
+
+## Your own web UI
+
+Store two values in the UI:
+
+- The Flary thread ID.
+- The last event cursor that the UI received.
+
+Open the saved thread, send a message, and resume after the saved cursor:
+
+```ts
+const thread = await api.support.threads.open({ threadId });
+
+await thread.send({
+  message: form.message,
+  idempotencyKey: form.requestId,
+});
+
+for await (const event of thread.stream({ after: savedCursor })) {
+  render(event);
+  saveCursor(event.cursor);
+}
+```
+
+Use `thread.connect()` when the UI needs bidirectional WebSocket control. SSE
+is the read-only fallback.
+
+## Telegram, Discord, CMS, or webhook
+
+The adapter is small:
+
+1. Authenticate the incoming user or service.
+2. Map the external conversation to a Flary thread ID.
+3. Send the message with an idempotency key.
+4. Save the newest durable cursor.
+5. Deliver public events back to the channel.
+
+Do not store model or tool credentials in the channel. The Flary Worker
+resolves them after it validates the tenant identity.
+
+Read [Threads and realtime clients](/docs/threads/) for all thread controls and
+[HTTP API and events](/docs/http-api-and-events/) for route-level integration.

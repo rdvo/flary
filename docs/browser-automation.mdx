@@ -1,0 +1,34 @@
+---
+title: Browser automation
+description: Add governed Cloudflare Browser Run sessions and human takeover.
+section: Run
+order: 4
+---
+
+Register Browser Run as a lazy tool source:
+
+```ts
+const tools = app.tools({
+  browser: app.browser({
+    profile: "thread",
+    siteAccess: "approval",
+    sensitiveActions: "approval",
+  }),
+});
+```
+
+The catalog includes navigation, DOM and accessibility snapshots, clicks,
+typing, selection, scrolling, screenshots, traces, console and network
+inspection, downloads, bounded JavaScript, and session recovery.
+
+Security defaults require approval for a new origin and for login, submission,
+purchase, permission, upload, or destructive actions. Private networks,
+metadata endpoints, unsafe redirects, and DNS rebinding are blocked. Page
+instructions are untrusted.
+
+Cookies and browser state are encrypted in R2 and scoped to one tenant and
+thread. A person can take control through the thread WebSocket without
+receiving raw CDP credentials. Agent browser actions pause during takeover.
+
+Browser Run is optional. Its binding is generated only when an application
+registers `app.browser()`.

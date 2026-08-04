@@ -1,0 +1,20 @@
+---
+title: Release status
+description: See stable, preview, dependency, migration, and compatibility notes outside beginner guides.
+section: Reference
+order: 4
+---
+
+The documentation header reads the installed package version from the root
+`package.json`.
+
+Large runtime changes ship under the npm `next` tag before they move to
+`latest`. Release candidates must pass package installation, generated
+template builds, Cloudflare deployment, provider recovery, tenant isolation,
+restart, archive restore, Browser, and Sandbox tests that apply to the release.
+
+Internal transcript-engine versions and legacy migration adapters are release
+details. Application code should use the stable function, agent, thread, and
+client contracts.
+
+See the repository tags and npm dist-tags for the exact published state.

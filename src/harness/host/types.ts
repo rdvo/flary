@@ -42,6 +42,7 @@ import {
   type ThreadRecordListRequest,
   type ThreadRenameRequest,
   type ThreadRollbackRequest,
+  type ThreadPortableArchive,
   type ThreadMessageRequest,
   type ThreadModelSetRequest,
   type ThreadRestoreRequest,
@@ -53,6 +54,10 @@ import {
   type UserInputRecord,
 } from "../contracts/user-input.js";
 import { ThreadOperationalStateSchema } from "../contracts/runtime.js";
+import type {
+  RealtimeTicketRequest,
+  RealtimeTicketResponse,
+} from "../contracts/realtime.js";
 import { ThreadRefSchema, type ThreadRef } from "../contracts/tenancy.js";
 import { AgentModeIdSchema, type AgentModeId } from "../contracts/modes.js";
 import type {
@@ -183,6 +188,16 @@ export interface FlaryThreadHostService {
     input: z.output<typeof ThreadCreateRequestSchema>,
   ): Promise<ThreadBinding>;
   inspect(target: FlaryThreadTarget): Promise<ThreadBinding>;
+  realtimeTicket?(
+    target: FlaryThreadTarget,
+    input: RealtimeTicketRequest,
+    requestUrl: string,
+  ): Promise<RealtimeTicketResponse>;
+  realtimeConnect?(
+    appId: string,
+    threadId: string,
+    ticket: string,
+  ): Promise<Response>;
   archive(target: FlaryThreadTarget): Promise<ThreadBinding>;
   unarchive?(target: FlaryThreadTarget): Promise<ThreadBinding>;
   rename?(
@@ -239,6 +254,7 @@ export interface FlaryThreadHostService {
     target: FlaryThreadTarget,
     input: ThreadRestoreRequest,
   ): Promise<unknown>;
+  exportSession?(target: FlaryThreadTarget): Promise<ThreadPortableArchive>;
   setGoal?(
     target: FlaryThreadTarget,
     input: ThreadGoalRequest,
@@ -259,6 +275,16 @@ export interface FlaryThreadHostService {
     input: Readonly<Record<string, unknown>>,
   ): Promise<unknown>;
   scheduleAction?(
+    target: FlaryThreadTarget,
+    action: string,
+    input: Readonly<Record<string, unknown>>,
+  ): Promise<unknown>;
+  processAction?(
+    target: FlaryThreadTarget,
+    action: string,
+    input: Readonly<Record<string, unknown>>,
+  ): Promise<unknown>;
+  browserAction?(
     target: FlaryThreadTarget,
     action: string,
     input: Readonly<Record<string, unknown>>,

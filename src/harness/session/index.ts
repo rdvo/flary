@@ -1,4 +1,5 @@
 export * from "./contracts.js";
+export * from "./engine.js";
 export * from "./integrity.js";
 export * from "./jsonl.js";
 export * from "./codex-import.js";

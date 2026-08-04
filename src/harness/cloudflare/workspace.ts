@@ -160,6 +160,19 @@ export async function handleFlaryWorkspaceObjectRequest<TEnv>(
       requireR2ForLargeFiles:
         options.requireR2ForLargeFiles ?? true,
     });
+    if (blobs && destructiveWorkspaceOperation(method)) {
+      await callWorkspaceControl(
+        workspace,
+        "__checkpoint",
+        {
+          id: `before_${method}_${crypto.randomUUID().replaceAll("-", "")}`.slice(0, 200),
+          sessionId: scope.workspaceId,
+          metadata: { beforeOperation: method },
+        },
+        scope,
+        blobs,
+      );
+    }
     const output = method.startsWith("git_")
       ? await callGit(workspace, method.slice(4), body.input, options.env)
       : method.startsWith("__")
@@ -229,6 +242,7 @@ const WORKSPACE_METHODS = new Set([
   "__history",
   "__diff",
   "__restore",
+  "__fork",
 ]);
 
 const GIT_METHODS = new Set([
@@ -432,6 +446,65 @@ async function callWorkspaceControl(
     },
     repository,
   });
+  if (method === "__fork") {
+    const sourceScope = WorkspaceRefSchema.parse(input.sourceScope);
+    if (
+      sourceScope.organizationId !== scope.organizationId ||
+      sourceScope.appId !== scope.appId ||
+      sourceScope.projectId !== scope.projectId ||
+      sourceScope.workspaceId !== scope.workspaceId
+    ) {
+      throw new Error("A workspace fork must stay inside the same workspace");
+    }
+    if (typeof input.commitId !== "string") {
+      throw new Error("Workspace fork needs commitId");
+    }
+    const sourceStore = new R2ArtifactHistoryStore({
+      bucket: blobs as ArtifactR2Bucket,
+      scope: sourceScope,
+      repository,
+    });
+    const commit = await sourceStore.read(repository, input.commitId);
+    if (!commit) throw new Error("The workspace checkpoint was not found");
+    const existing = await workspace.list({});
+    for (const file of existing.files) {
+      if (!file.path.startsWith("sessions/")) {
+        await workspace.delete({ path: file.path });
+      }
+    }
+    for (const file of commit.files) {
+      if (file.path.startsWith("sessions/")) continue;
+      await workspace.write({
+        path: file.path,
+        content: file.content,
+        encoding: file.metadata?.encoding === "base64" ? "base64" : "utf8",
+        mediaType: file.mediaType,
+      });
+    }
+    const forkId = typeof input.id === "string"
+      ? input.id
+      : `fork_${input.commitId}`.slice(0, 200);
+    const result = await new FlaryHistoryProjector(store).checkpoint({
+      id: forkId,
+      repository,
+      scope: recallScope,
+      branch: scope.branch,
+      reason: "explicit_commit",
+      files: commit.files,
+      metadata: {
+        forkedFromCommitId: commit.id,
+        forkedFromBranch: sourceScope.branch,
+        ...(typeof input.parentThreadId === "string"
+          ? { parentThreadId: input.parentThreadId }
+          : {}),
+      },
+    });
+    return {
+      forked: true,
+      source: summarizeArtifactCommit(commit),
+      checkpoint: summarizeArtifactCommit(result.commit),
+    };
+  }
   if (method === "__history") {
     const commits = await store.list(
       repository,
@@ -508,6 +581,45 @@ async function callWorkspaceControl(
       };
     }));
     const latest = await store.latest(repository, recallScope, scope.branch);
+    const prior = new Map(
+      (latest?.files ?? []).map((file) => [
+        file.path,
+        file.sha256 ?? file.content,
+      ]),
+    );
+    const current = new Map(
+      files.map((file) => [file.path, file.sha256 ?? file.content]),
+    );
+    const changedFiles = [...new Set([
+      ...files
+        .filter((file) => prior.get(file.path) !== (file.sha256 ?? file.content))
+        .map((file) => file.path),
+      ...[...prior.keys()].filter((path) => !current.has(path)),
+    ])].sort();
+    const treeHash = await sha256Text(
+      files
+        .map((file) => `${file.path}\u0000${file.sha256 ?? file.content}`)
+        .sort()
+        .join("\u0000"),
+    );
+    const git = await readGitCheckpoint(workspace);
+    const previousMetadata = isRecord(latest?.metadata)
+      ? latest.metadata
+      : {};
+    const previousGit = isRecord(previousMetadata.git)
+      ? previousMetadata.git
+      : {};
+    const baseGitCommit =
+      typeof previousGit.baseCommit === "string"
+        ? previousGit.baseCommit
+        : git.currentCommit;
+    const gitMetadata = {
+      ...(baseGitCommit ? { baseCommit: baseGitCommit } : {}),
+      ...(git.currentCommit ? { currentCommit: git.currentCommit } : {}),
+      branch: git.branch ?? scope.branch,
+      status: git.status,
+      diff: git.diff,
+    };
     const result = await new FlaryHistoryProjector(store).checkpoint({
       id: input.id,
       repository,
@@ -521,14 +633,88 @@ async function callWorkspaceControl(
           ? { submissionId: input.submissionId }
           : {}),
         ...(isRecord(input.modelPin) ? { modelPin: input.modelPin } : {}),
+        treeHash,
+        changedFiles,
+        diffReference: {
+          ...(latest ? { baseCommitId: latest.id } : {}),
+          headCommitId: input.id,
+        },
+        git: gitMetadata,
+        ...(isRecord(input.metadata) ? input.metadata : {}),
+        ...(Array.isArray(input.checks) ? { checks: input.checks } : {}),
       },
     });
     return {
       commit: summarizeArtifactCommit(result.commit),
       reused: result.reused,
+      treeHash,
+      changedFiles,
+      git: gitMetadata,
+      diffReference: {
+        ...(latest ? { baseCommitId: latest.id } : {}),
+        headCommitId: result.commit.id,
+      },
     };
   }
   throw new Error("The workspace control operation is not available");
+}
+
+function destructiveWorkspaceOperation(method: string): boolean {
+  if (["delete", "move", "batchEdit"].includes(method)) return true;
+  if (!method.startsWith("git_")) return false;
+  return new Set([
+    "git_clone",
+    "git_rm",
+    "git_commit",
+    "git_checkout",
+    "git_pull",
+    "git_init",
+  ]).has(method);
+}
+
+async function readGitCheckpoint(workspace: ShellWorkspace): Promise<{
+  readonly currentCommit?: string;
+  readonly branch?: string;
+  readonly status: unknown[];
+  readonly diff: unknown[];
+}> {
+  const provider = workspace.gitTools();
+  const execute = async (name: string, input: unknown): Promise<unknown> => {
+    const tool = (provider.tools as Record<string, {
+      execute?: (value: unknown) => Promise<unknown>;
+    }>)[name];
+    if (!tool?.execute) return undefined;
+    return tool.execute(input).catch(() => undefined);
+  };
+  const [log, branch, status, diff] = await Promise.all([
+    execute("log", { depth: 1 }),
+    execute("branch", { list: true }),
+    execute("status", {}),
+    execute("diff", {}),
+  ]);
+  const logs = Array.isArray(log) ? log : [];
+  const head = isRecord(logs[0]) ? logs[0] : {};
+  const branchValue = isRecord(branch) ? branch : {};
+  return {
+    ...(typeof head.oid === "string"
+      ? { currentCommit: head.oid }
+      : {}),
+    ...(typeof branchValue.current === "string"
+      ? { branch: branchValue.current }
+      : {}),
+    status: Array.isArray(status) ? status : [],
+    diff: Array.isArray(diff) ? diff : [],
+  };
+}
+
+async function sha256Text(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 export async function cloudflareWorkspaceObjectName(

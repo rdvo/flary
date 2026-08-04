@@ -263,7 +263,7 @@ diff --git a/node_modules/@flue/runtime/dist/internal.d.mts b/node_modules/@flue
 index c785e22..714ff51 100644
 --- a/node_modules/@flue/runtime/dist/internal.d.mts
 +++ b/node_modules/@flue/runtime/dist/internal.d.mts
-@@ -84,6 +84,12 @@ interface CloudflareAgentRuntime {
+@@ -84,6 +84,14 @@ interface CloudflareAgentRuntime {
    attach(instance: CloudflareAgentInstance, prepared: CloudflareAgentPreparedCoordinator): void;
    onStart(instance: CloudflareAgentInstance, inherited: () => Promise<unknown> | unknown): Promise<void>;
    wakeSubmissions(instance: CloudflareAgentInstance): Promise<void>;
@@ -273,6 +273,8 @@ index c785e22..714ff51 100644
 +    targetEntryId: string;
 +    markerId: string;
 +  }>;
++  exportCanonical(instance: CloudflareAgentInstance, turnId?: string): Promise<unknown>;
++  importCanonical(instance: CloudflareAgentInstance, archive: unknown, turnId?: string): Promise<unknown>;
    onRequest(instance: CloudflareAgentInstance, request: Request): Promise<Response | null>;
    onFiberRecovered(instance: CloudflareAgentInstance, ctx: CloudflareAgentRecoveredFiberContext, inherited: () => Promise<unknown> | unknown): Promise<unknown>;
  }
@@ -290,7 +292,7 @@ index 1147b97..03531c4 100644
  	};
  	if (!config.conversationWriter || !config.attachmentStore) throw new Error("[flue] Canonical conversation runtime is not configured.");
  	return new Harness(config.id, "default", agentConfig, env, emitEvent, definition.tools ?? [], toolFactory, config.conversationWriter, config.attachmentStore, definition.actions, config.runId === void 0 ? { instanceId: config.id } : { runId: config.runId });
-@@ -793,6 +794,12 @@ function createCloudflareAgentRuntime(options) {
+@@ -793,6 +794,18 @@ function createCloudflareAgentRuntime(options) {
  		wakeSubmissions(instance) {
  			return getCoordinator(instance).wakeSubmissions();
  		},
@@ -300,10 +302,16 @@ index 1147b97..03531c4 100644
 +		rollback(instance, turnId, reason, excludeTarget) {
 +			return getCoordinator(instance).rollback(turnId, reason, excludeTarget);
 +		},
++		exportCanonical(instance, turnId) {
++			return getCoordinator(instance).exportCanonical(turnId);
++		},
++		importCanonical(instance, archive, turnId) {
++			return getCoordinator(instance).importCanonical(archive, turnId);
++		},
  		onRequest(instance, request) {
  			return getCoordinator(instance).onRequest(request);
  		},
-@@ -840,11 +847,62 @@ var CloudflareAgentCoordinator = class {
+@@ -840,11 +853,111 @@ var CloudflareAgentCoordinator = class {
  			await this.reconcileSubmissions({ driverAlreadyArmed: true });
  		});
  	}
@@ -352,6 +360,55 @@ index 1147b97..03531c4 100644
 +				attributes: { targetEntryId, turnId, excludeTarget: excludeTarget === true }
 +			}]);
 +			return { turnId, targetEntryId, markerId: messageId };
++		});
++	}
++	exportCanonical(turnId) {
++		return this.runWithInstanceContext(async () => {
++			if (await this.submissions.hasUnsettledSubmissions()) throw new Error("[flue] Cannot export while an agent submission is active.");
++			const writer = await this.ensureConversationWriter();
++			await writer.flush();
++			const batches = [];
++			let offset = "-1";
++			for (;;) {
++				const page = await writer.store.read(writer.path, { offset, limit: 1e3 });
++				batches.push(...page.batches.map((batch) => batch.records));
++				offset = page.nextOffset;
++				if (page.upToDate) break;
++			}
++			return { format: "flue-canonical", version: 1, batches, throughTurnId: turnId };
++		});
++	}
++	importCanonical(archive, turnId) {
++		return this.runWithInstanceContext(async () => {
++			if (await this.submissions.hasUnsettledSubmissions()) throw new Error("[flue] Cannot import while an agent submission is active.");
++			if (!archive || archive.format !== "flue-canonical" || archive.version !== 1 || !Array.isArray(archive.batches)) throw new Error("[flue] The canonical archive is invalid.");
++			const writer = await this.ensureConversationWriter();
++			const meta = await writer.store.getMeta(writer.path);
++			if (meta && meta.nextOffset !== "-1") throw new Error("[flue] Canonical import needs an empty agent thread.");
++			for (const batch of archive.batches) {
++				if (!Array.isArray(batch)) throw new Error("[flue] The canonical archive batch is invalid.");
++				const records = batch.flatMap((record) => {
++					if (!record || typeof record !== "object" || record.type === "submission_settled") return [];
++					const { submissionId, attemptId, ...portable } = record;
++					return [portable];
++				});
++				if (records.length > 0) await writer.append(records);
++			}
++			if (turnId) {
++				const state = await writer.loadReducedState();
++				const conversation = [...state.conversations.values()].find((candidate) => candidate.kind === "root" && candidate.harness === "default" && candidate.session === "default") ?? [...state.conversations.values()].find((candidate) => candidate.kind === "root");
++				if (!conversation) throw new Error("[flue] The imported root conversation does not exist.");
++				let targetEntryId = conversation.entries.has(turnId) ? turnId : void 0;
++				if (!targetEntryId) for (const record of state.recordsById.values()) {
++					if (record.conversationId !== conversation.conversationId || record.turnId !== turnId) continue;
++					if (typeof record.messageId === "string" && conversation.entries.has(record.messageId)) targetEntryId = record.messageId;
++					if (typeof record.entryId === "string" && conversation.entries.has(record.entryId)) targetEntryId = record.entryId;
++				}
++				if (!targetEntryId) throw new Error(`[flue] Fork target "${turnId}" was not found in the imported conversation.`);
++				const messageId = `entry_flary_rollback_${crypto.randomUUID()}`;
++				await writer.append([{ v: 1, id: `record_flary_rollback_${crypto.randomUUID()}`, type: "signal", conversationId: conversation.conversationId, harness: conversation.harness, session: conversation.session, timestamp: new Date().toISOString(), messageId, parentId: conversation.activeLeafId, signalType: "flary_rollback", tagName: "rollback", content: `Forked through ${turnId}.`, attributes: { targetEntryId, turnId } }]);
++			}
++			return { imported: true, batches: archive.batches.length, throughTurnId: turnId };
 +		});
 +	}
  	onRequest(request) {

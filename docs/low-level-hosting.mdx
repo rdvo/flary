@@ -1,0 +1,20 @@
+---
+title: Low-level hosting
+description: Integrate Flary into an existing custom Worker host without the generated application shell.
+section: Reference
+order: 3
+---
+
+Most projects should use `flary create`, `app.serve()`, and `flary/vite`. Use
+the focused low-level exports only when an existing Worker already owns its
+Durable Object routing, storage adapters, or execution gateway.
+
+Low-level modules include `flary/host`, `flary/cloudflare`, `flary/flue`,
+`flary/tools`, `flary/storage`, and `flary/providers`.
+
+The host must supply authentication, trusted tenant identity, credential
+resolution, bindings, migrations, and lifecycle ownership. Do not create a
+second transcript or execution engine beside Flary's generated runtime.
+
+Legacy Workers can keep migration-based Durable Object configuration. New
+Workers use exports. A Wrangler configuration must never contain both.

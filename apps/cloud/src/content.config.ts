@@ -12,9 +12,10 @@ const docs = defineCollection({
     description: z.string(),
     section: z.enum([
       "Start",
-      "Core",
-      "Tools",
-      "Advanced",
+      "Build",
+      "Connect",
+      "Run",
+      "Operate",
       "Examples",
       "Reference",
     ]),

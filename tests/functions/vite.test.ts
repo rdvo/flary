@@ -72,6 +72,7 @@ test("the Vite plugin emits populated Flue runtime entries", () => {
   const wrangler = JSON.parse(assets.get("flary.wrangler.json") ?? "") as {
     exports?: Record<string, unknown>;
     migrations?: unknown;
+    secrets?: { required?: string[] };
   };
   assert.ok(wrangler.exports?.FlaryRuntime);
   assert.ok(wrangler.exports?.FlaryWorkspace);
@@ -86,6 +87,10 @@ test("the Vite plugin emits populated Flue runtime entries", () => {
     ),
   );
   assert.equal("migrations" in wrangler, false);
+  assert.deepEqual(wrangler.secrets?.required, [
+    "FLARY_INTERNAL_TOKEN",
+    "FLARY_SESSION_ARCHIVE_KEY",
+  ]);
 });
 
 test("the Vite plugin emits persistent app.agent entries", () => {
@@ -137,6 +142,11 @@ test("the Vite plugin emits persistent app.agent entries", () => {
     ),
   );
   assert.ok(
+    wrangler.r2_buckets.every(
+      (binding: { bucket_name?: string }) => binding.bucket_name === undefined,
+    ),
+  );
+  assert.ok(
     wrangler.queues.producers.some(
       (binding: { binding: string }) =>
         binding.binding === "FLARY_SESSION_PROJECTION_QUEUE",
@@ -148,6 +158,59 @@ test("the Vite plugin emits persistent app.agent entries", () => {
         binding.name === "FLARY_THREAD_CONTROL",
     ),
   );
+});
+
+test("the Vite plugin generates optional Browser Run and Sandbox resources", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flary-vite-runtime-tools-"));
+  try {
+  const app = createApp({
+    model: "openai/gpt-5",
+    threadService: {} as never,
+  });
+  const tools = app.tools({
+    browser: app.browser({ profile: "thread" }),
+    shell: app.sandbox({ network: "restricted" }),
+  });
+  const coder = app.agent({
+    name: "coder",
+    instructions: "Work on the repository.",
+    tools,
+  });
+  const plugin = flaryVite({
+    functions: { coder },
+    functionsEntry: "./src/index.ts",
+    root,
+  });
+  const assets = new Map<string, string>();
+  plugin.generateBundle.call({
+    emitFile(value) {
+      assets.set(value.fileName, value.source);
+    },
+  });
+  const manifest = JSON.parse(assets.get("flary.manifest.json") ?? "{}");
+  const wrangler = JSON.parse(assets.get("flary.wrangler.json") ?? "{}");
+  assert.equal(manifest.cloudflare.browserRunBinding, "BROWSER");
+  assert.equal(manifest.cloudflare.sandboxBinding, "SANDBOX");
+  assert.deepEqual(wrangler.browser, { binding: "BROWSER" });
+  assert.ok(
+    wrangler.durable_objects.bindings.some(
+      (binding: { name: string; class_name: string }) =>
+        binding.name === "SANDBOX" && binding.class_name === "Sandbox",
+    ),
+  );
+  assert.ok(
+    wrangler.r2_buckets.some(
+      (binding: { binding: string }) => binding.binding === "BACKUP_BUCKET",
+    ),
+  );
+  assert.equal(wrangler.containers[0].class_name, "Sandbox");
+  assert.match(
+    fs.readFileSync(path.join(root, "Dockerfile"), "utf8"),
+    /cloudflare\/sandbox:0\.12\.4/,
+  );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("the Vite plugin preserves legacy migrations without exports", () => {
@@ -272,6 +335,9 @@ test("the Vite plugin generates Flue Durable Object entry and bindings", (t) => 
   assert.match(wrapper, /flaryInternalRoute\(flaryFunction\)/);
   const authoredHost = fs.readFileSync(path.join(root, ".flue/app.ts"), "utf8");
   assert.match(authoredHost, /getFunctionApp\(firstExport\)/);
+  assert.match(authoredHost, /import authoredWorker, \{ functions \}/);
+  assert.match(authoredHost, /const authoredResponse = await publicWorker\.fetch\(request, env, ctx\)/);
+  assert.match(authoredHost, /authoredResponse\.status !== 404/);
   assert.match(authoredHost, /attachThreadService/);
   assert.match(authoredHost, /resolveModel: userApp\.options\.resolveModel/);
   assert.match(authoredHost, /\.serve\(functions\)/);

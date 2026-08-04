@@ -7,13 +7,21 @@ import {
   ThreadHistoryRestoreRequestSchema,
   ThreadMessageRequestSchema,
   ThreadModelSetRequestSchema,
+  UserInputAnswerRequestSchema,
   type ApprovalDecision,
   type ThreadBinding,
   type ThreadCreateRequest,
   type ThreadForkRequest,
   type ThreadMessageRequest,
   type ThreadModelSetRequest,
+  type ThreadPortableArchive,
 } from "../contracts/index.js";
+import {
+  RealtimeClientFrameSchema,
+  RealtimeTicketRequestSchema,
+  type RealtimeClientFrame,
+  type RealtimeServerFrame,
+} from "../contracts/realtime.js";
 import {
   ModelSelectionSchema,
   ResolvedModelPinSchema,
@@ -28,9 +36,15 @@ import type {
   FlaryThreadTarget,
 } from "../host/types.js";
 import { threadName } from "../storage/scopes.js";
-import { cloudflareWorkspaceObjectName } from "./workspace.js";
+import {
+  cloudflareWorkspaceObjectName,
+  createCloudflareWorkspaceConnection,
+} from "./workspace.js";
+import { CloudflareSandboxWorkspaceBackend } from "./workspace-execution.js";
 import { createCloudflareFlueFetch, createCloudflareFlueGateway } from "./function-host.js";
 import { SqliteSubagentCoordinator } from "./subagent-coordinator.js";
+import { DurableSandboxProcessRuntime } from "./sandbox-process-runtime.js";
+import { SqliteSandboxProcessRegistry } from "./sandbox-process-registry.js";
 import {
   D1ThreadCatalog,
   type D1DatabaseLike,
@@ -47,6 +61,11 @@ import {
   type SessionRecordType,
 } from "../session/index.js";
 import type { FlueAdmission, FlueAgentGateway } from "../flue/service.js";
+import { FlaryHostError } from "../host/errors.js";
+import {
+  assertPublicBrowserUrl,
+  browserStateObjectKey,
+} from "../functions/browser.js";
 
 interface DurableObjectStub {
   fetch(request: Request): Promise<Response>;
@@ -65,6 +84,18 @@ interface ProjectionQueueMessage {
   readonly body: unknown;
   ack(): void;
   retry(): void;
+}
+
+interface ThreadControlWebSocket {
+  send(message: string): void;
+  close(code?: number, reason?: string): void;
+  serializeAttachment?(value: unknown): void;
+  deserializeAttachment?(): unknown;
+}
+
+interface ThreadControlWebSocketHost {
+  acceptWebSocket(socket: ThreadControlWebSocket, tags?: string[]): void;
+  getWebSockets(tag?: string): ThreadControlWebSocket[];
 }
 
 interface ThreadControlStorage {
@@ -258,6 +289,37 @@ export function createCloudflareThreadService<
       await d1?.put(binding);
       return binding;
     },
+    async realtimeTicket(target, rawInput, requestUrl) {
+      const input = RealtimeTicketRequestSchema.parse(rawInput);
+      await service.inspect(target);
+      const ticket = `${target.authorization.organizationId}.${crypto.randomUUID()}.${crypto.randomUUID()}`;
+      const expiresAt = new Date(Date.now() + 60_000).toISOString();
+      await rpc(controlName(target), "issueRealtimeTicket", {
+        ...ownership(target),
+        ticketHash: await sha256Text(ticket),
+        expiresAt,
+        after: input.after,
+        includeChildren: input.includeChildren,
+        actor: target.authorization.actor,
+      });
+      const url = new URL(requestUrl);
+      url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+      url.pathname = url.pathname.replace(/\/realtime-ticket$/, "/realtime");
+      url.search = new URLSearchParams({ ticket }).toString();
+      return { url: url.toString(), expiresAt };
+    },
+    async realtimeConnect(appId, threadId, ticket) {
+      const tenantId = ticket.split(".", 1)[0];
+      if (!tenantId) {
+        return Response.json({ error: "The realtime ticket is invalid" }, { status: 401 });
+      }
+      const name = `thread:${tenantId}:${appId}:${threadId}`;
+      const stub = namespace.get(namespace.idFromName(name));
+      return stub.fetch(new Request(
+        `https://flary.internal/realtime?ticket=${encodeURIComponent(ticket)}`,
+        { headers: { upgrade: "websocket" } },
+      ));
+    },
     async inspect(target) {
       const value = await rpc(controlName(target), "inspect", ownership(target));
       return ThreadBindingSchema.parse(value.binding);
@@ -308,10 +370,43 @@ export function createCloudflareThreadService<
     async fork(target, rawInput) {
       const input = ThreadForkRequestSchema.parse(rawInput);
       const parent = await service.inspect(target);
+      const parentLedger = await rpc(controlName(target), "records", {
+        ...ownership(target),
+        after: 0,
+        limit: 1_000_000,
+      });
+      const records = Array.isArray(parentLedger.records)
+        ? parentLedger.records as Array<Record<string, unknown>>
+        : [];
+      const boundary = resolveForkBoundary(records, input.turnId);
+      let canonicalArchive: unknown;
+      if (boundary.turnId) {
+        const exported = await agentControlRpc(
+          options.env,
+          parent,
+          "export",
+          { turnId: boundary.turnId },
+        );
+        if (objectValue(exported).runtimeUnavailable) {
+          throw new FlaryHostError(
+            503,
+            "exact_fork_runtime_unavailable",
+            "The canonical session engine is not available for an exact fork",
+          );
+        }
+        canonicalArchive = exported;
+      }
+      const childThreadId = input.threadId ?? `thread_${crypto.randomUUID()}`;
+      const childWorkspace = input.workspace === "shared"
+        ? parent.workspace
+        : {
+            ...parent.workspace,
+            branch: forkWorkspaceBranch(parent.workspace.branch, childThreadId),
+          };
       const child = await service.create(target, {
-        threadId: input.threadId,
+        threadId: childThreadId,
         agentId: parent.agentId,
-        workspace: parent.workspace,
+        workspace: childWorkspace,
         persona: parent.persona,
         mode: input.mode ?? parent.defaultMode,
         model: input.model ?? parent.defaultModel,
@@ -321,28 +416,47 @@ export function createCloudflareThreadService<
         metadata: {
           ...(input.metadata ?? {}),
           parentThreadId: target.threadId,
-          ...(input.turnId ? { forkTurnId: input.turnId } : {}),
+          ...(boundary.turnId ? { forkTurnId: boundary.turnId } : {}),
+          forkWorkspaceMode: input.workspace,
         },
       });
-      const parentLedger = await rpc(controlName(target), "records", {
-        ...ownership(target),
-        after: 0,
-        limit: 1_000_000,
-      });
-      const records = Array.isArray(parentLedger.records)
-        ? parentLedger.records as Array<Record<string, unknown>>
-        : [];
-      const through = input.turnId
-        ? forkRecordsThroughTurn(records, input.turnId)
-        : records;
-      await rpc(controlName({
-        ...target,
-        threadId: child.thread.threadId,
-      }), "forkRecords", {
-        ...ownership(target),
-        records: through,
-        parentThreadId: target.threadId,
-      });
+      try {
+        if (canonicalArchive !== undefined) {
+          await agentControlRpc(options.env, child, "import", {
+            archive: canonicalArchive,
+            turnId: boundary.turnId,
+          });
+        }
+        await rpc(controlName({
+          ...target,
+          threadId: child.thread.threadId,
+        }), "forkRecords", {
+          ...ownership(target),
+          records: boundary.records,
+          parentThreadId: target.threadId,
+        });
+        if (
+          input.workspace === "snapshot" &&
+          boundary.checkpointId &&
+          options.env.FLARY_WORKSPACE &&
+          options.env.WORKSPACE_BLOBS
+        ) {
+          await workspaceControl(options.env, child, "__fork", {
+            sourceScope: parent.workspace,
+            commitId: boundary.checkpointId,
+            id: `fork_${child.thread.threadId}_${boundary.checkpointId}`.slice(0, 200),
+            parentThreadId: target.threadId,
+            sessionId: child.thread.threadId,
+          });
+        }
+      } catch (error) {
+        await service.delete?.({
+          authorization: target.authorization,
+          appId: target.appId,
+          threadId: child.thread.threadId,
+        }).catch(() => undefined);
+        throw error;
+      }
       return child;
     },
     async setMode(target, mode, reason) {
@@ -480,6 +594,7 @@ export function createCloudflareThreadService<
       await trackAdmission(controlName(target), {
         ...ownership(target),
         admission,
+        admissionId,
         agentId: binding.agentId,
         instanceId,
         modelPin: pin,
@@ -597,11 +712,80 @@ export function createCloudflareThreadService<
     },
     async restore(target, input) {
       const binding = await service.inspect(target);
+      if (input.archive) {
+        const archive = input.archive;
+        if (
+          archive.source.tenantId !== target.authorization.organizationId ||
+          archive.source.applicationId !== target.appId
+        ) {
+          throw new FlaryHostError(
+            404,
+            "archive_not_found",
+            "The session archive was not found",
+          );
+        }
+        if (archive.sha256 !== await portableArchiveHash(archive)) {
+          throw new FlaryHostError(
+            400,
+            "archive_hash_mismatch",
+            "The session archive hash does not match its content",
+          );
+        }
+        const imported = await agentControlRpc(options.env, binding, "import", {
+          archive: archive.canonical,
+        });
+        if (objectValue(imported).runtimeUnavailable) {
+          throw new FlaryHostError(
+            503,
+            "session_engine_unavailable",
+            "The canonical session engine is not available for restore",
+          );
+        }
+      }
       return rpc(controlName(target), "restore", {
         ...ownership(target),
         binding,
-        input,
+        input: input.archive
+          ? {
+              jsonl: input.archive.ledgerJsonl,
+              replace: input.replace,
+              retarget: input.archive.source.threadId !== target.threadId,
+            }
+          : input,
       });
+    },
+    async exportSession(target) {
+      const binding = await service.inspect(target);
+      const ledger = await rpc(controlName(target), "export", ownership(target));
+      const canonical = await agentControlRpc(
+        options.env,
+        binding,
+        "export",
+        {},
+      );
+      if (objectValue(canonical).runtimeUnavailable) {
+        throw new FlaryHostError(
+          503,
+          "session_engine_unavailable",
+          "The canonical session engine is not available for export",
+        );
+      }
+      const unsigned = {
+        format: "flary-thread-archive" as const,
+        version: 1 as const,
+        source: {
+          tenantId: target.authorization.organizationId,
+          applicationId: target.appId,
+          threadId: target.threadId,
+        },
+        exportedAt: new Date().toISOString(),
+        ledgerJsonl: String(ledger.jsonl ?? ""),
+        canonical,
+      };
+      return {
+        ...unsigned,
+        sha256: await sha256Json(unsigned),
+      } satisfies ThreadPortableArchive;
     },
     async setGoal(target, input) {
       return rpc(controlName(target), "record", {
@@ -831,6 +1015,20 @@ export function createCloudflareThreadService<
         input,
       });
     },
+    async processAction(target, action, input) {
+      return rpc(controlName(target), "process", {
+        ...ownership(target),
+        action,
+        input,
+      });
+    },
+    async browserAction(target, action, input) {
+      return rpc(controlName(target), "browser", {
+        ...ownership(target),
+        action,
+        input,
+      });
+    },
     async listApprovals(target) {
       const value = await agentApprovalRpc(options.env, await service.inspect(target), "approvals");
       return Array.isArray(value.approvals) ? value.approvals : [];
@@ -873,6 +1071,7 @@ export async function handleFlaryThreadControlObjectRequest(input: {
   readonly request: Request;
   readonly env?: Record<string, unknown>;
   readonly execution?: ThreadControlExecutionContext;
+  readonly webSockets?: ThreadControlWebSocketHost;
 }): Promise<Response> {
   const storage = normalizeThreadControlStorage(input.storage);
   const sql = storage.sql;
@@ -888,6 +1087,15 @@ export async function handleFlaryThreadControlObjectRequest(input: {
     CREATE TABLE IF NOT EXISTS flary_interactive_admissions (
       admission_id TEXT PRIMARY KEY NOT NULL,
       admitted_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS flary_interactive_reservations (
+      reservation_id TEXT PRIMARY KEY NOT NULL,
+      kind TEXT NOT NULL,
+      state TEXT NOT NULL,
+      reserved_json TEXT NOT NULL,
+      actual_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS flary_thread_schedules (
       schedule_id TEXT PRIMARY KEY NOT NULL,
@@ -909,7 +1117,27 @@ export async function handleFlaryThreadControlObjectRequest(input: {
       updated_at TEXT NOT NULL,
       UNIQUE (schedule_id, scheduled_for)
     );
+    CREATE TABLE IF NOT EXISTS flary_realtime_tickets (
+      ticket_hash TEXT PRIMARY KEY NOT NULL,
+      expires_at TEXT NOT NULL,
+      after_sequence INTEGER NOT NULL,
+      include_children INTEGER NOT NULL,
+      actor_json TEXT NOT NULL,
+      consumed_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS flary_realtime_commands (
+      idempotency_key TEXT PRIMARY KEY NOT NULL,
+      request_id TEXT NOT NULL,
+      command TEXT NOT NULL,
+      status TEXT NOT NULL,
+      result_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
+  if (input.request.headers.get("upgrade")?.toLowerCase() === "websocket") {
+    return openThreadControlWebSocket(storage.sql, input);
+  }
   const body = await input.request.json() as Record<string, unknown>;
   const method = String(body.method ?? "");
   try {
@@ -917,6 +1145,7 @@ export async function handleFlaryThreadControlObjectRequest(input: {
       ...input,
       storage,
     });
+    await broadcastThreadRecords(sql, input.webSockets).catch(() => undefined);
     return Response.json(result);
   } catch (error) {
     return Response.json(
@@ -934,8 +1163,59 @@ async function dispatchThreadControl(
     readonly env?: Record<string, unknown>;
     readonly execution?: ThreadControlExecutionContext;
     readonly storage?: ThreadControlStorage;
+    readonly webSockets?: ThreadControlWebSocketHost;
   },
 ): Promise<unknown> {
+  if (method === "issueRealtimeTicket") {
+    assertOwner(sql, body);
+    const ticketHash = String(body.ticketHash ?? "");
+    const expiresAt = String(body.expiresAt ?? "");
+    if (!/^[0-9a-f]{64}$/.test(ticketHash) || !Number.isFinite(Date.parse(expiresAt))) {
+      throw new Error("The realtime ticket is invalid");
+    }
+    sql.exec(
+      `INSERT INTO flary_realtime_tickets
+        (ticket_hash, expires_at, after_sequence, include_children, actor_json, consumed_at)
+       VALUES (?, ?, ?, ?, ?, NULL)`,
+      ticketHash,
+      expiresAt,
+      Math.max(0, Number(body.after ?? 0)),
+      body.includeChildren === true ? 1 : 0,
+      JSON.stringify(body.actor ?? {}),
+    );
+    return { issued: true, expiresAt };
+  }
+  if (method === "realtimeResult") {
+    assertOwner(sql, body);
+    const idempotencyKey = String(body.idempotencyKey ?? "");
+    const requestId = String(body.requestId ?? "");
+    const error = body.error && typeof body.error === "object"
+      ? body.error as Record<string, unknown>
+      : undefined;
+    const result = error ? undefined : body.result;
+    sql.exec(
+      `UPDATE flary_realtime_commands
+       SET status = ?, result_json = ?, updated_at = ?
+       WHERE idempotency_key = ?`,
+      error ? "failed" : "completed",
+      JSON.stringify(error ? { error } : { result }),
+      new Date().toISOString(),
+      idempotencyKey,
+    );
+    const frame: RealtimeServerFrame = error
+      ? {
+          version: 1,
+          type: "error",
+          requestId,
+          code: typeof error.code === "string" ? error.code : "command_failed",
+          message: typeof error.message === "string" ? error.message : "The realtime command failed",
+        }
+      : { version: 1, type: "result", requestId, result };
+    for (const socket of host?.webSockets?.getWebSockets() ?? []) {
+      socket.send(JSON.stringify(frame));
+    }
+    return { delivered: true };
+  }
   if (method === "initialize") {
     const binding = ThreadBindingSchema.parse(body.binding);
     put(sql, "owner", {
@@ -985,11 +1265,37 @@ async function dispatchThreadControl(
         binding.thread.threadId,
       );
     }
+    await bucket?.delete?.(browserStateObjectKey({
+      organizationId: binding.thread.organizationId,
+      appId: binding.thread.appId,
+      threadId: binding.thread.threadId,
+    }));
+    const browserStateRow = sql.exec<{ value_json: string }>(
+      "SELECT value_json FROM flary_thread_control WHERE key = 'browser-state'",
+    ).toArray()[0];
+    const browserState = browserStateRow
+      ? objectValue(JSON.parse(browserStateRow.value_json))
+      : {};
+    if (
+      host?.env?.BROWSER &&
+      typeof browserState.sessionId === "string"
+    ) {
+      const playwright = await import("@cloudflare/playwright");
+      await playwright.connect(
+        host.env.BROWSER as never,
+        browserState.sessionId,
+      ).then((browser) => browser.close()).catch(() => undefined);
+    }
     for (const table of [
       "flary_session_ledger_records",
       "flary_session_ledger_metadata",
       "flary_session_projection_dedupe",
       "flary_interactive_admissions",
+      "flary_interactive_reservations",
+      "flary_session_archive_segments",
+      "flary_canonical_session_archives",
+      "flary_realtime_tickets",
+      "flary_realtime_commands",
       "flary_thread_schedules",
       "flary_thread_schedule_runs",
       "flary_subagent_config",
@@ -999,6 +1305,13 @@ async function dispatchThreadControl(
       "flary_subagent_mailbox",
       "flary_subagent_activity",
       "flary_subagent_idempotency",
+      "flary_sandbox_processes",
+      "flary_sandbox_process_output",
+      "flary_sandbox_process_control",
+      "flary_sandbox_process_lifecycle",
+      "flary_workspace_execution",
+      "flary_workspace_execution_state",
+      "flary_browser_sessions",
     ]) {
       sql.exec(`DROP TABLE IF EXISTS ${table}`);
     }
@@ -1037,6 +1350,47 @@ async function dispatchThreadControl(
     ).project({
       sourceCursor,
       event: objectValue(body.event),
+    });
+    sql.exec(
+      `INSERT OR IGNORE INTO flary_session_projection_dedupe
+        (source_cursor, recorded_at) VALUES (?, ?)`,
+      sourceCursor,
+      new Date().toISOString(),
+    );
+    return { projected: true, record };
+  }
+  if (method === "projectChild") {
+    assertOwner(sql, body);
+    const binding = requireBinding(sql);
+    const childThreadId = String(body.childThreadId ?? "");
+    const sourceCursor = String(body.sourceCursor ?? "");
+    if (!childThreadId || childThreadId === binding.thread.threadId || !sourceCursor) {
+      throw new Error("The child projection identity is invalid");
+    }
+    const seen = sql.exec<{ source_cursor: string }>(
+      "SELECT source_cursor FROM flary_session_projection_dedupe WHERE source_cursor = ?",
+      sourceCursor,
+    ).toArray()[0];
+    if (seen) return { projected: false, replay: true };
+    const childAgentId = String(body.childAgentId ?? "subagent");
+    const producer = safeProducer(body);
+    const record = await new SqliteSessionLedger(sql).append({
+      tenantId: binding.thread.organizationId,
+      applicationId: binding.thread.appId,
+      sessionId: binding.thread.threadId,
+      threadId: binding.thread.threadId,
+      agentId: childAgentId,
+      parentId: childThreadId,
+      sourceCursor,
+      recordType: String(body.recordType ?? "runtime.event") as SessionRecordType,
+      recordedAt: String(body.recordedAt ?? new Date().toISOString()),
+      attempt: nonnegative(body.attempt, 0),
+      sourceRevision: String(body.sourceRevision ?? "flary-child-projection-v1"),
+      ...(producer ? { producer } : {}),
+      publicPayload: {
+        ...objectValue(body.payload),
+        _child: { threadId: childThreadId, agentId: childAgentId },
+      },
     });
     sql.exec(
       `INSERT OR IGNORE INTO flary_session_projection_dedupe
@@ -1195,14 +1549,17 @@ async function dispatchThreadControl(
     const binding = requireBinding(sql);
     const restoreInput = objectValue(body.input);
     const jsonl = typeof restoreInput.jsonl === "string" ? restoreInput.jsonl : "";
+    const retarget = restoreInput.retarget === true;
     if (!jsonl) throw new Error("A flary-jsonl archive is required");
     const imported = await importSessionJsonl(jsonl);
     for (const record of imported) {
       if (
         record.tenantId !== binding.thread.organizationId ||
         record.applicationId !== binding.thread.appId ||
-        record.sessionId !== binding.thread.threadId ||
-        record.threadId !== binding.thread.threadId
+        (!retarget && (
+          record.sessionId !== binding.thread.threadId ||
+          record.threadId !== binding.thread.threadId
+        ))
       ) {
         throw new Error("The archive does not belong to this thread");
       }
@@ -1226,7 +1583,40 @@ async function dispatchThreadControl(
       sql.exec("DELETE FROM flary_session_projection_dedupe");
     }
     const ledger = new SqliteSessionLedger(sql);
-    for (const record of imported) await ledger.appendRecord(record);
+    for (const record of imported) {
+      if (!retarget) {
+        await ledger.appendRecord(record);
+        continue;
+      }
+      await ledger.append({
+        tenantId: binding.thread.organizationId,
+        applicationId: binding.thread.appId,
+        sessionId: binding.thread.threadId,
+        threadId: binding.thread.threadId,
+        ...(record.turnId ? { turnId: record.turnId } : {}),
+        ...(record.runId ? { runId: record.runId } : {}),
+        ...(record.agentId ? { agentId: record.agentId } : {}),
+        ...(record.toolCallId ? { toolCallId: record.toolCallId } : {}),
+        ...(record.parentId ? { parentId: record.parentId } : {}),
+        sourceCursor: `import:${record.recordHash}`,
+        recordType: record.recordType,
+        recordedAt: record.recordedAt,
+        attempt: record.attempt,
+        sourceRevision: record.sourceRevision,
+        ...(record.producer ? { producer: record.producer } : {}),
+        publicPayload: {
+          ...record.publicPayload,
+          _restoredFrom: {
+            sessionId: record.sessionId,
+            sequence: record.sequence,
+            recordHash: record.recordHash,
+          },
+        },
+        ...(record.encryptedContentRef
+          ? { encryptedContentRef: record.encryptedContentRef }
+          : {}),
+      });
+    }
     put(sql, "restore-state", {
       restoredAt: new Date().toISOString(),
       recordCount: imported.length,
@@ -1247,23 +1637,18 @@ async function dispatchThreadControl(
   }
   if (method === "admitTurn") {
     const binding = requireBinding(sql);
-    const limits = objectValue(binding.metadata?.flaryLimits);
     const admissionId = String(body.admissionId ?? "");
     const existing = sql.exec<{ admission_id: string }>(
       "SELECT admission_id FROM flary_interactive_admissions WHERE admission_id = ?",
       admissionId,
     ).toArray()[0];
     if (existing) return { admitted: true, replay: true };
+    await reserveRootInteractiveUsage(sql, host?.env, binding, {
+      reservationId: `turn_${admissionId}`,
+      kind: "provider-step",
+      delta: emptyUsage({ steps: 1 }),
+    });
     return sql.transactionSync(() => {
-      const usage = interactiveUsage(sql);
-      const maxSteps = positive(limits.steps, Number.MAX_SAFE_INTEGER);
-      const maxCost = positiveNumber(limits.costUsd, Number.MAX_VALUE);
-      if (usage.steps >= maxSteps) {
-        throw new Error(`The interactive step limit of ${maxSteps} is exhausted`);
-      }
-      if (usage.costUsd >= maxCost) {
-        throw new Error(`The interactive cost limit of ${maxCost} USD is exhausted`);
-      }
       sql.exec(
         `INSERT INTO flary_interactive_admissions
           (admission_id, admitted_at) VALUES (?, ?)`,
@@ -1273,6 +1658,20 @@ async function dispatchThreadControl(
       return { admitted: true, replay: false };
     });
   }
+  if (
+    method === "reserveUsage" ||
+    method === "settleUsage" ||
+    method === "unknownUsage"
+  ) {
+    const binding = requireBinding(sql);
+    return rootInteractiveReservationAction(
+      sql,
+      host?.env,
+      binding,
+      method,
+      body,
+    );
+  }
   if (method === "track") {
     const binding = requireBinding(sql);
     const admission = body.admission as FlueAdmission;
@@ -1281,6 +1680,9 @@ async function dispatchThreadControl(
       agentId: String(body.agentId ?? binding.agentId),
       instanceId: String(body.instanceId ?? threadName(binding.thread)),
       ...(body.modelPin ? { modelPin: body.modelPin } : {}),
+      ...(typeof body.admissionId === "string"
+        ? { admissionId: body.admissionId }
+        : {}),
       ...(typeof body.segmentId === "string" ? { segmentId: body.segmentId } : {}),
       ...(typeof body.turnMessage === "string"
         ? { turnMessage: body.turnMessage }
@@ -1296,6 +1698,8 @@ async function dispatchThreadControl(
         env: host.env,
         binding,
         admission,
+        admissionId:
+          typeof body.admissionId === "string" ? body.admissionId : undefined,
         modelPin: body.modelPin as ResolvedModelPin | undefined,
         segmentId: typeof body.segmentId === "string" ? body.segmentId : undefined,
         turnMessage:
@@ -1310,8 +1714,14 @@ async function dispatchThreadControl(
     return accountInteractiveDelta(
       sql,
       binding,
-      nonnegative(body.stepDelta, 0),
-      typeof body.costDelta === "number" ? body.costDelta : 0,
+      {
+        steps: nonnegative(objectValue(body.delta).steps, 0),
+        toolCalls: nonnegative(objectValue(body.delta).toolCalls, 0),
+        tokens: nonnegative(objectValue(body.delta).tokens, 0),
+        costUsd: positiveNumber(objectValue(body.delta).costUsd, 0),
+        sandboxSeconds: nonnegative(objectValue(body.delta).sandboxSeconds, 0),
+        browserSeconds: nonnegative(objectValue(body.delta).browserSeconds, 0),
+      },
     );
   }
   if (method === "subagent") {
@@ -1327,6 +1737,167 @@ async function dispatchThreadControl(
             ? "subagent.closed"
             : "subagent.status";
       await appendLedger(sql, binding, recordType, {
+        action,
+        result: jsonValue(result),
+      });
+    }
+    return result;
+  }
+  if (method === "process") {
+    const binding = requireBinding(sql);
+    if (!host?.env) throw new Error("Sandbox processes need the generated Cloudflare host");
+    const processInput = objectValue(body.input);
+    const reservationId = `sandbox_${String(
+      processInput.requestId ?? processInput.processId ?? crypto.randomUUID(),
+    )}_${String(body.action ?? "control")}`;
+    await reserveRootInteractiveUsage(sql, host.env, binding, {
+      reservationId,
+      kind: "sandbox",
+      delta: emptyUsage({ sandboxSeconds: 1 }),
+    });
+    const startedAt = Date.now();
+    let result: unknown;
+    try {
+      result = await processAction(
+        sql,
+        host.env,
+        binding,
+        String(body.action ?? ""),
+        processInput,
+      );
+    } catch (error) {
+      await rootInteractiveReservationAction(
+        sql,
+        host.env,
+        binding,
+        "unknownUsage",
+        { reservationId },
+      ).catch(() => undefined);
+      throw error;
+    }
+    const sandboxDelta: InteractiveUsage = {
+      steps: 0,
+      toolCalls: 0,
+      tokens: 0,
+      costUsd: 0,
+      sandboxSeconds: Math.max(1, Math.ceil((Date.now() - startedAt) / 1_000)),
+      browserSeconds: 0,
+    };
+    try {
+      await rootInteractiveReservationAction(
+        sql,
+        host.env,
+        binding,
+        "settleUsage",
+        { reservationId, actual: sandboxDelta },
+      );
+    } catch (error) {
+      await rootInteractiveReservationAction(
+        sql,
+        host.env,
+        binding,
+        "unknownUsage",
+        { reservationId },
+      ).catch(() => undefined);
+      throw error;
+    }
+    if (
+      typeof binding.metadata?.flarySubagentRootThreadId === "string" &&
+      binding.metadata.flarySubagentRootThreadId !== binding.thread.threadId
+    ) {
+      const localLimit = accountInteractiveDelta(sql, binding, sandboxDelta);
+      if (localLimit.exceeded) throw new Error(localLimit.message);
+    }
+    const action = String(body.action ?? "");
+    const recordType: SessionRecordType = action === "start"
+      ? "process.started"
+      : action === "attach" || action === "list"
+        ? "process.output"
+        : action === "complete"
+          ? "process.completed"
+          : "process.control";
+    await appendLedger(sql, binding, recordType, {
+      action,
+      processId: objectValue(body.input).processId,
+      result: jsonValue(result),
+    });
+    return result;
+  }
+  if (method === "browser") {
+    const binding = requireBinding(sql);
+    const action = String(body.action ?? "status");
+    const browserInput = objectValue(body.input);
+    const accounted = action !== "status" && action !== "register";
+    const reservationId = `browser_${String(
+      browserInput.requestId ?? crypto.randomUUID(),
+    )}_${action}`;
+    if (accounted) {
+      await reserveRootInteractiveUsage(sql, host?.env, binding, {
+        reservationId,
+        kind: "browser",
+        delta: emptyUsage({ browserSeconds: 1 }),
+      });
+    }
+    const startedAt = Date.now();
+    let result: unknown;
+    try {
+      result = await browserAction(
+        sql,
+        host?.env,
+        binding,
+        action,
+        browserInput,
+      );
+    } catch (error) {
+      if (accounted) {
+        await rootInteractiveReservationAction(
+          sql,
+          host?.env,
+          binding,
+          "unknownUsage",
+          { reservationId },
+        ).catch(() => undefined);
+      }
+      throw error;
+    }
+    if (accounted) {
+      const browserDelta: InteractiveUsage = {
+        steps: 0,
+        toolCalls: 0,
+        tokens: 0,
+        costUsd: 0,
+        sandboxSeconds: 0,
+        browserSeconds: Math.max(1, Math.ceil((Date.now() - startedAt) / 1_000)),
+      };
+      try {
+        await rootInteractiveReservationAction(
+          sql,
+          host?.env,
+          binding,
+          "settleUsage",
+          { reservationId, actual: browserDelta },
+        );
+      } catch (error) {
+        await rootInteractiveReservationAction(
+          sql,
+          host?.env,
+          binding,
+          "unknownUsage",
+          { reservationId },
+        ).catch(() => undefined);
+        throw error;
+      }
+      if (
+        typeof binding.metadata?.flarySubagentRootThreadId === "string" &&
+        binding.metadata.flarySubagentRootThreadId !== binding.thread.threadId
+      ) {
+        const localLimit = accountInteractiveDelta(sql, binding, browserDelta);
+        if (localLimit.exceeded) throw new Error(localLimit.message);
+      }
+    }
+    if (action !== "status") {
+      await appendLedger(sql, binding, "runtime.event", {
+        type: "browser.control",
         action,
         result: jsonValue(result),
       });
@@ -1419,6 +1990,10 @@ export async function handleFlaryThreadControlAlarm(input: {
       env: input.env,
       binding,
       admission,
+      admissionId:
+        typeof projection.admissionId === "string"
+          ? projection.admissionId
+          : undefined,
       modelPin: projection.modelPin as ResolvedModelPin | undefined,
       segmentId: typeof projection.segmentId === "string" ? projection.segmentId : undefined,
       turnMessage:
@@ -1482,6 +2057,12 @@ export async function handleFlaryThreadControlAlarm(input: {
     });
     if (!claimed) continue;
     try {
+      const admissionId = `schedule_${row.schedule_id}_${scheduledFor}`;
+      await reserveRootInteractiveUsage(storage.sql, input.env, binding, {
+        reservationId: `turn_${admissionId}`,
+        kind: "provider-step",
+        delta: emptyUsage({ steps: 1 }),
+      });
       const admission = await gateway.send(
         runtimeAgentId(binding),
         threadName(binding.thread),
@@ -1501,6 +2082,7 @@ export async function handleFlaryThreadControlAlarm(input: {
         env: input.env,
         binding,
         admission,
+        admissionId,
       });
       input.execution?.waitUntil(projection);
       await appendLedger(storage.sql, binding, "schedule.run", {
@@ -1526,6 +2108,281 @@ export async function handleFlaryThreadControlAlarm(input: {
   }
 }
 
+interface RealtimeSocketAttachment {
+  readonly tenantId: string;
+  readonly applicationId: string;
+  readonly threadId: string;
+  readonly includeChildren: boolean;
+  readonly actor: Record<string, unknown>;
+  readonly sent: number;
+  readonly acknowledged: number;
+}
+
+async function openThreadControlWebSocket(
+  sql: ThreadControlStorage["sql"],
+  input: {
+    readonly request: Request;
+    readonly webSockets?: ThreadControlWebSocketHost;
+  },
+): Promise<Response> {
+  if (!input.webSockets) {
+    return Response.json(
+      { error: "The Durable Object WebSocket host is not configured" },
+      { status: 501 },
+    );
+  }
+  const ticket = new URL(input.request.url).searchParams.get("ticket") ?? "";
+  const ticketHash = await sha256Text(ticket);
+  const row = sql.exec<{
+    expires_at: string;
+    after_sequence: number;
+    include_children: number;
+    actor_json: string;
+    consumed_at: string | null;
+  }>(
+    `SELECT expires_at, after_sequence, include_children, actor_json, consumed_at
+     FROM flary_realtime_tickets WHERE ticket_hash = ?`,
+    ticketHash,
+  ).toArray()[0];
+  if (!row || row.consumed_at || Date.parse(row.expires_at) <= Date.now()) {
+    return Response.json({ error: "The realtime ticket is invalid or expired" }, { status: 401 });
+  }
+  const binding = requireBinding(sql);
+  const consumed = sql.transactionSync(() => {
+    const current = sql.exec<{ consumed_at: string | null }>(
+      "SELECT consumed_at FROM flary_realtime_tickets WHERE ticket_hash = ?",
+      ticketHash,
+    ).toArray()[0];
+    if (!current || current.consumed_at) return false;
+    sql.exec(
+      "UPDATE flary_realtime_tickets SET consumed_at = ? WHERE ticket_hash = ?",
+      new Date().toISOString(),
+      ticketHash,
+    );
+    return true;
+  });
+  if (!consumed) {
+    return Response.json({ error: "The realtime ticket was already used" }, { status: 409 });
+  }
+  const Pair = (globalThis as unknown as {
+    WebSocketPair?: new () => { 0: ThreadControlWebSocket; 1: ThreadControlWebSocket };
+  }).WebSocketPair;
+  if (!Pair) {
+    return Response.json({ error: "WebSocketPair is not available" }, { status: 501 });
+  }
+  const pair = new Pair();
+  const client = pair[0];
+  const server = pair[1];
+  const attachment: RealtimeSocketAttachment = {
+    tenantId: binding.thread.organizationId,
+    applicationId: binding.thread.appId,
+    threadId: binding.thread.threadId,
+    includeChildren: row.include_children === 1,
+    actor: objectValue(JSON.parse(row.actor_json)),
+    sent: Math.max(0, Number(row.after_sequence)),
+    acknowledged: Math.max(0, Number(row.after_sequence)),
+  };
+  server.serializeAttachment?.(attachment);
+  input.webSockets.acceptWebSocket(server, [
+    `thread:${binding.thread.threadId}`,
+    attachment.includeChildren ? "children:included" : "children:excluded",
+  ]);
+  const metadata = await new SqliteSessionLedger(sql).metadata(binding.thread.threadId);
+  server.send(JSON.stringify({
+    version: 1,
+    type: "ready",
+    threadId: binding.thread.threadId,
+    cursor: metadata?.latestSequence ?? 0,
+  } satisfies RealtimeServerFrame));
+  await sendThreadRecords(sql, server, attachment);
+  return new Response(null, {
+    status: 101,
+    webSocket: client,
+  } as ResponseInit & { webSocket: ThreadControlWebSocket });
+}
+
+/** Process a client frame after the Thread Control object wakes from hibernation. */
+export async function handleFlaryThreadControlWebSocketMessage(input: {
+  readonly storage: ThreadControlStorage;
+  readonly env: Record<string, unknown>;
+  readonly socket: ThreadControlWebSocket;
+  readonly message: string | ArrayBuffer;
+}): Promise<void> {
+  const storage = normalizeThreadControlStorage(input.storage);
+  const attachment = realtimeAttachment(input.socket);
+  let frame: RealtimeClientFrame;
+  try {
+    const text = typeof input.message === "string"
+      ? input.message
+      : new TextDecoder().decode(input.message);
+    frame = RealtimeClientFrameSchema.parse(JSON.parse(text));
+  } catch (error) {
+    input.socket.send(JSON.stringify({
+      version: 1,
+      type: "error",
+      code: "invalid_frame",
+      message: error instanceof Error ? error.message : "The realtime frame is invalid",
+    } satisfies RealtimeServerFrame));
+    return;
+  }
+  if (frame.type === "ping") {
+    input.socket.send(JSON.stringify({
+      version: 1,
+      type: "pong",
+      ...(frame.requestId ? { requestId: frame.requestId } : {}),
+    } satisfies RealtimeServerFrame));
+    return;
+  }
+  if (frame.type === "ack") {
+    input.socket.serializeAttachment?.({
+      ...attachment,
+      acknowledged: Math.max(attachment.acknowledged, frame.cursor),
+    } satisfies RealtimeSocketAttachment);
+    return;
+  }
+  const now = new Date().toISOString();
+  const existing = storage.sql.exec<{ status: string; result_json: string | null }>(
+    `SELECT status, result_json FROM flary_realtime_commands
+     WHERE idempotency_key = ?`,
+    frame.idempotencyKey,
+  ).toArray()[0];
+  if (existing) {
+    input.socket.send(JSON.stringify({
+      version: 1,
+      type: "accepted",
+      requestId: frame.requestId,
+      duplicate: true,
+    } satisfies RealtimeServerFrame));
+    if (existing.result_json) {
+      const stored = objectValue(JSON.parse(existing.result_json));
+      input.socket.send(JSON.stringify(stored.error
+        ? {
+            version: 1,
+            type: "error",
+            requestId: frame.requestId,
+            code: String(objectValue(stored.error).code ?? "command_failed"),
+            message: String(objectValue(stored.error).message ?? "The realtime command failed"),
+          }
+        : { version: 1, type: "result", requestId: frame.requestId, result: stored.result }));
+    }
+    return;
+  }
+  storage.sql.exec(
+    `INSERT INTO flary_realtime_commands
+      (idempotency_key, request_id, command, status, result_json, created_at, updated_at)
+     VALUES (?, ?, ?, 'pending', NULL, ?, ?)`,
+    frame.idempotencyKey,
+    frame.requestId,
+    frame.command,
+    now,
+    now,
+  );
+  input.socket.send(JSON.stringify({
+    version: 1,
+    type: "accepted",
+    requestId: frame.requestId,
+    duplicate: false,
+  } satisfies RealtimeServerFrame));
+  const queue = input.env.FLARY_SESSION_PROJECTION_QUEUE as ProjectionQueue | undefined;
+  if (!queue) {
+    await storeRealtimeCommandFailure(storage.sql, frame, "realtime_queue_missing", "The realtime command queue is not configured");
+    input.socket.send(JSON.stringify({
+      version: 1,
+      type: "error",
+      requestId: frame.requestId,
+      code: "realtime_queue_missing",
+      message: "The realtime command queue is not configured",
+    } satisfies RealtimeServerFrame));
+    return;
+  }
+  await queue.send({
+    kind: "realtime.command",
+    controlName: `thread:${attachment.tenantId}:${attachment.applicationId}:${attachment.threadId}`,
+    target: {
+      authorization: {
+        organizationId: attachment.tenantId,
+        actor: attachment.actor,
+      },
+      appId: attachment.applicationId,
+      threadId: attachment.threadId,
+    },
+    frame,
+  });
+}
+
+/** Close hook for generated hibernating WebSocket Durable Objects. */
+export function handleFlaryThreadControlWebSocketClose(input: {
+  readonly socket: ThreadControlWebSocket;
+  readonly code?: number;
+  readonly reason?: string;
+}): void {
+  input.socket.close(input.code ?? 1000, input.reason ?? "closed");
+}
+
+async function broadcastThreadRecords(
+  sql: ThreadControlStorage["sql"],
+  host?: ThreadControlWebSocketHost,
+): Promise<void> {
+  for (const socket of host?.getWebSockets() ?? []) {
+    await sendThreadRecords(sql, socket, realtimeAttachment(socket));
+  }
+}
+
+async function sendThreadRecords(
+  sql: ThreadControlStorage["sql"],
+  socket: ThreadControlWebSocket,
+  attachment: RealtimeSocketAttachment,
+): Promise<void> {
+  const page = await new SqliteSessionLedger(sql).list(attachment.threadId, {
+    ...(attachment.sent > 0 ? { after: `v1:${attachment.sent}` } : {}),
+    limit: 500,
+  });
+  if (page.items.length === 0) return;
+  const cursor = page.items.at(-1)!.sequence;
+  const visible = attachment.includeChildren
+    ? page.items
+    : page.items.filter((record) => !objectValue(record.publicPayload)._child);
+  if (visible.length > 0) {
+    socket.send(JSON.stringify({
+      version: 1,
+      type: "events",
+      cursor,
+      records: visible,
+    } satisfies RealtimeServerFrame));
+  }
+  socket.serializeAttachment?.({ ...attachment, sent: cursor });
+  if (page.nextCursor) {
+    socket.send(JSON.stringify({
+      version: 1,
+      type: "resync_required",
+      cursor,
+    } satisfies RealtimeServerFrame));
+  }
+}
+
+function realtimeAttachment(socket: ThreadControlWebSocket): RealtimeSocketAttachment {
+  const value = socket.deserializeAttachment?.();
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("The realtime connection has no durable attachment");
+  }
+  return value as RealtimeSocketAttachment;
+}
+
+async function storeRealtimeCommandFailure(
+  sql: ThreadControlStorage["sql"],
+  frame: Extract<RealtimeClientFrame, { type: "command" }>,
+  code: string,
+  message: string,
+): Promise<void> {
+  sql.exec(
+    `UPDATE flary_realtime_commands SET status = 'failed', result_json = ?, updated_at = ?
+     WHERE idempotency_key = ?`,
+    JSON.stringify({ error: { code, message } }),
+    new Date().toISOString(),
+    frame.idempotencyKey,
+  );
+}
+
 /** Deliver queued canonical projection work to its Thread Control object. */
 export async function handleFlarySessionProjectionQueue(input: {
   readonly messages: readonly ProjectionQueueMessage[];
@@ -1544,12 +2401,18 @@ export async function handleFlarySessionProjectionQueue(input: {
         return;
       }
       try {
+        if (body.kind === "realtime.command") {
+          await executeRealtimeCommand(input.env, body, controlName);
+          message.ack();
+          return;
+        }
         const stub = namespace.get(namespace.idFromName(controlName));
+        const method = body.kind === "child.projection" ? "projectChild" : "track";
         const response = await stub.fetch(
           new Request("https://flary.internal/track", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ ...body, method: "track" }),
+            body: JSON.stringify({ ...body, method }),
           }),
         );
         if (!response.ok) throw new Error(`Projection failed (${response.status})`);
@@ -1559,6 +2422,269 @@ export async function handleFlarySessionProjectionQueue(input: {
       }
     }),
   );
+}
+
+async function executeRealtimeCommand(
+  env: Record<string, unknown>,
+  body: Record<string, unknown>,
+  controlName: string,
+): Promise<void> {
+  const target = body.target as FlaryThreadTarget | undefined;
+  const parsed = RealtimeClientFrameSchema.safeParse(body.frame);
+  if (!target || !parsed.success || parsed.data.type !== "command") {
+    throw new Error("The queued realtime command is invalid");
+  }
+  const frame = parsed.data;
+  const service = createCloudflareThreadService({ env });
+  let result: unknown;
+  let error: { code: string; message: string } | undefined;
+  try {
+    if (frame.command === "send" || frame.command === "steer") {
+      result = await service.submit(target, ThreadMessageRequestSchema.parse({
+        ...frame.input,
+        mode: frame.command === "steer" ? "steer" : "queue",
+        idempotencyKey: frame.idempotencyKey,
+      }));
+    } else if (frame.command === "interrupt") {
+      if (!service.interrupt) throw new Error("Thread interrupt is not configured");
+      result = await service.interrupt(target);
+    } else if (frame.command === "approve" || frame.command === "reject") {
+      const requestId = String(frame.input.requestId ?? "");
+      await service.decideApproval(target, ApprovalDecisionSchema.parse({
+        requestId,
+        status: frame.command === "approve" ? "approved" : "rejected",
+        decidedBy: target.authorization.actor,
+        decidedAt: new Date().toISOString(),
+        ...(typeof frame.input.reason === "string" ? { comment: frame.input.reason } : {}),
+      }));
+      result = { ok: true };
+    } else if (frame.command === "user_input") {
+      if (!service.respondToUserInput) throw new Error("User input is not configured");
+      result = await service.respondToUserInput(
+        target,
+        String(frame.input.requestId ?? ""),
+        UserInputAnswerRequestSchema.parse(frame.input.response),
+      );
+    } else if (frame.command === "subagent") {
+      if (!service.subagentAction) throw new Error("Subagent control is not configured");
+      result = await service.subagentAction(
+        target,
+        String(frame.input.action ?? ""),
+        objectValue(frame.input.input),
+      );
+    } else if (frame.command.startsWith("process.")) {
+      if (!service.processAction) throw new Error("Sandbox process control is not configured");
+      result = await service.processAction(
+        target,
+        frame.command.slice("process.".length),
+        frame.input,
+      );
+    } else if (frame.command.startsWith("browser.")) {
+      if (!service.browserAction) throw new Error("Browser Run control is not configured");
+      result = await service.browserAction(
+        target,
+        frame.command.slice("browser.".length),
+        frame.input,
+      );
+    } else {
+      throw new FlaryHostError(
+        501,
+        "realtime_command_not_configured",
+        `The '${frame.command}' realtime command is not configured`,
+      );
+    }
+  } catch (cause) {
+    error = {
+      code: cause instanceof FlaryHostError ? cause.code : "command_failed",
+      message: cause instanceof Error ? cause.message : "The realtime command failed",
+    };
+  }
+  const namespace = env.FLARY_THREAD_CONTROL as DurableObjectNamespace;
+  const response = await namespace.get(namespace.idFromName(controlName)).fetch(
+    new Request("https://flary.internal/realtime-result", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "realtimeResult",
+        tenantId: target.authorization.organizationId,
+        applicationId: target.appId,
+        idempotencyKey: frame.idempotencyKey,
+        requestId: frame.requestId,
+        ...(error ? { error } : { result }),
+      }),
+    }),
+  );
+  if (!response.ok) throw new Error("The realtime result was not stored");
+}
+
+async function processAction(
+  sql: ThreadControlStorage["sql"],
+  env: Record<string, unknown>,
+  binding: ThreadBinding,
+  action: string,
+  input: Record<string, unknown>,
+): Promise<unknown> {
+  const sandboxBinding = env.SANDBOX;
+  if (!sandboxBinding) throw new Error("The SANDBOX binding is not configured");
+  const { getSandbox } = await import("@cloudflare/sandbox");
+  const sandboxId = `flary-${binding.thread.organizationId}-${binding.thread.threadId}`;
+  const sandbox = getSandbox(sandboxBinding as never, sandboxId, {
+    transport: "rpc",
+    sleepAfter: "10m",
+    enableDefaultSession: true,
+    normalizeId: true,
+    labels: { threadId: binding.thread.threadId },
+  });
+  const registry = new SqliteSandboxProcessRegistry(sql);
+  const workspaceNamespace = env.FLARY_WORKSPACE as
+    | DurableObjectNamespace
+    | undefined;
+  const workspaceBackend = workspaceNamespace
+    ? new CloudflareSandboxWorkspaceBackend({
+        sandbox,
+        workspace: await createCloudflareWorkspaceConnection(
+          workspaceNamespace as never,
+          binding.workspace,
+        ),
+        sql,
+        sessionId: binding.thread.threadId,
+      })
+    : undefined;
+  if (workspaceBackend && action === "start") await workspaceBackend.prepare();
+  const runtime = new DurableSandboxProcessRuntime({
+    sandbox,
+    registry,
+    onSettled: workspaceBackend
+      ? async ({ processId }) => {
+          const operationId = `process_${processId}_exit`;
+          try {
+            await workspaceBackend.settle({ operationId, changed: true });
+          } catch (error) {
+            await workspaceBackend.uncertain(operationId);
+            throw error;
+          }
+        }
+      : undefined,
+  });
+  if (action === "list") {
+    return { processes: await registry.list({ runId: binding.thread.threadId }) };
+  }
+  const processId = String(input.processId ?? "");
+  const requestId = String(input.requestId ?? `control_${crypto.randomUUID()}`);
+  if (action === "start") {
+    const command = String(input.command ?? "").trim();
+    if (!command) throw new Error("A process command is required");
+    return runtime.start({
+      id: processId || `process_${crypto.randomUUID().replaceAll("-", "")}`,
+      runId: binding.thread.threadId,
+      sandboxId,
+      command,
+      cwd: typeof input.cwd === "string" ? input.cwd : "/workspace",
+    });
+  }
+  if (!processId) throw new Error("A process ID is required");
+  const process = await registry.get(processId);
+  if (!process || process.runId !== binding.thread.threadId) {
+    throw new Error("The Sandbox process was not found");
+  }
+  if (action === "attach") {
+    return runtime.attach(processId, nonnegative(input.afterCursor, 0));
+  }
+  if (action === "stdin") {
+    return runtime.stdin({ requestId, processId, data: String(input.data ?? "") });
+  }
+  if (action === "signal") {
+    return runtime.signal({
+      requestId,
+      processId,
+      signal: String(input.signal ?? "SIGTERM") as Parameters<typeof runtime.signal>[0]["signal"],
+    });
+  }
+  if (action === "sleep") return runtime.sleep(processId, requestId);
+  if (action === "wake") return runtime.wake(processId, requestId);
+  if (action === "resize") {
+    throw new FlaryHostError(
+      501,
+      "process_resize_not_supported",
+      "Cloudflare Sandbox background processes do not expose PTY resize",
+    );
+  }
+  throw new Error(`Unknown Sandbox process action '${action}'`);
+}
+
+async function browserAction(
+  sql: ThreadControlStorage["sql"],
+  env: Record<string, unknown> | undefined,
+  binding: ThreadBinding,
+  action: string,
+  input: Record<string, unknown>,
+): Promise<unknown> {
+  const currentRow = sql.exec<{ value_json: string }>(
+    "SELECT value_json FROM flary_thread_control WHERE key = 'browser-state'",
+  ).toArray()[0];
+  const current = currentRow
+    ? objectValue(JSON.parse(currentRow.value_json))
+    : { control: "agent", status: "idle" };
+  if (action === "status") return { browser: current };
+  if (action === "register") {
+    const sessionId = String(input.sessionId ?? "");
+    if (!sessionId) throw new Error("A Browser Run session ID is required");
+    const state = {
+      ...current,
+      sessionId,
+      status: "active",
+      control: current.control === "human" ? "human" : "agent",
+      updatedAt: new Date().toISOString(),
+    };
+    put(sql, "browser-state", state);
+    return { browser: state };
+  }
+  if (action === "takeover" || action === "release") {
+    const state = {
+      ...current,
+      control: action === "takeover" ? "human" : "agent",
+      updatedAt: new Date().toISOString(),
+    };
+    put(sql, "browser-state", state);
+    return { browser: state };
+  }
+  if (action === "input") {
+    if (current.control !== "human") {
+      throw new Error("Browser input needs an active human takeover");
+    }
+    if (!env?.BROWSER || typeof current.sessionId !== "string") {
+      throw new Error("The Browser Run session is not available");
+    }
+    const playwright = await import("@cloudflare/playwright");
+    const browser = await playwright.connect(env.BROWSER as never, current.sessionId);
+    try {
+      const context = browser.contexts()[0];
+      const page = context?.pages()[0];
+      if (!page) throw new Error("The Browser Run page is not available");
+      const kind = String(input.kind ?? "");
+      if (kind === "click") {
+        await page.locator(String(input.selector ?? "")).click();
+      } else if (kind === "type") {
+        await page.locator(String(input.selector ?? "")).fill(String(input.text ?? "").slice(0, 100_000));
+      } else if (kind === "navigate") {
+        await page.goto(assertPublicBrowserUrl(String(input.url ?? "")).toString());
+      } else {
+        throw new Error("Human Browser Run input must be click, type, or navigate");
+      }
+      return { browser: current, url: page.url(), title: await page.title() };
+    } finally {
+      await browser.close();
+    }
+  }
+  if (action === "close") {
+    put(sql, "browser-state", {
+      status: "closed",
+      control: "agent",
+      updatedAt: new Date().toISOString(),
+    });
+    return { closed: true };
+  }
+  throw new Error(`Unknown Browser Run action '${action}'`);
 }
 
 async function scheduleAction(
@@ -1723,6 +2849,7 @@ async function projectAdmission(input: {
   readonly env: Record<string, unknown>;
   readonly binding: ThreadBinding;
   readonly admission: FlueAdmission;
+  readonly admissionId?: string;
   readonly modelPin?: ResolvedModelPin;
   readonly segmentId?: string;
   readonly turnMessage?: string;
@@ -1745,6 +2872,7 @@ async function projectAdmission(input: {
         ? input.binding.metadata.flaryAgentRevision
         : "flary-thread-control-v1",
   });
+  let providerStepSettled = false;
   try {
     const result = await gateway.wait(input.admission, async (event) => {
       const sourceCursor = canonicalEventCursor(
@@ -1756,16 +2884,45 @@ async function projectAdmission(input: {
         sourceCursor,
       ).toArray()[0];
       if (seen) return;
+      const providerStepEvent =
+        String((event as unknown as Record<string, unknown>).type ?? "") ===
+          "message-started" ||
+        String((event as unknown as Record<string, unknown>).type ?? "") ===
+          "turn_request";
+      if (providerStepEvent && input.admissionId && !providerStepSettled) {
+        await rootInteractiveReservationAction(
+          input.sql,
+          input.env,
+          input.binding,
+          "settleUsage",
+          {
+            reservationId: `turn_${input.admissionId}`,
+            actual: emptyUsage({ steps: 1 }),
+          },
+        );
+        providerStepSettled = true;
+      }
+      const isChild =
+        typeof input.binding.metadata?.flarySubagentRootThreadId === "string" &&
+        input.binding.metadata.flarySubagentRootThreadId !==
+          input.binding.thread.threadId;
       const limit = accountInteractiveEvent(
         input.sql,
         input.binding,
-        event as unknown as Record<string, unknown>,
+        providerStepSettled && !isChild
+          ? {
+              ...(event as unknown as Record<string, unknown>),
+              type: providerStepEvent ? "reserved-provider-step" : event.type,
+            }
+          : event as unknown as Record<string, unknown>,
       );
+      const rootDelta = providerStepSettled && providerStepEvent
+        ? { ...limit.delta, steps: 0 }
+        : limit.delta;
       const rootLimit = await accountRootInteractiveEvent(
         input.env,
         input.binding,
-        limit.stepDelta,
-        limit.costDelta,
+        rootDelta,
       );
       const projectedEvent = input.modelPin
         ? {
@@ -1779,10 +2936,26 @@ async function projectAdmission(input: {
             },
           }
         : event as unknown as Record<string, unknown>;
-      await projector.project({
+      const projected = await projector.project({
         sourceCursor,
         event: projectedEvent,
       });
+      await mirrorChildProjection(input, projected, sourceCursor);
+      if (
+        projected.recordType === "approval.requested" ||
+        projected.recordType === "input.requested"
+      ) {
+        await updateSubagentAtRoot(input, "wait", sourceCursor, {
+          reason: projected.recordType,
+        });
+      } else if (
+        projected.recordType === "approval.resolved" ||
+        projected.recordType === "input.resolved"
+      ) {
+        await updateSubagentAtRoot(input, "resume", sourceCursor, {
+          reason: projected.recordType,
+        });
+      }
       input.sql.exec(
         `INSERT OR IGNORE INTO flary_session_projection_dedupe
           (source_cursor, recorded_at) VALUES (?, ?)`,
@@ -1819,9 +2992,12 @@ async function projectAdmission(input: {
         checkpoint,
       });
     }
-    await settleSubagent(input, "complete", {
-      output: jsonValue(result),
-    });
+    const childResult = subagentResult(
+      result,
+      checkpoint,
+      interactiveUsage(input.sql),
+    );
+    await settleSubagent(input, "complete", { output: childResult });
     await recordSubagentTurn(input, result);
     // Settle last. An eviction before this write causes the alarm to replay
     // checkpointing and parent propagation instead of leaving a child stuck.
@@ -1830,6 +3006,15 @@ async function projectAdmission(input: {
       status: "completed",
     });
   } catch (error) {
+    if (input.admissionId && !providerStepSettled) {
+      await rootInteractiveReservationAction(
+        input.sql,
+        input.env,
+        input.binding,
+        "unknownUsage",
+        { reservationId: `turn_${input.admissionId}` },
+      ).catch(() => undefined);
+    }
     put(input.sql, `projection:${input.admission.submissionId}`, {
       admission: input.admission,
       status: "failed",
@@ -1852,6 +3037,59 @@ async function projectAdmission(input: {
     }).catch(() => undefined);
     throw error;
   }
+}
+
+async function mirrorChildProjection(
+  input: {
+    readonly env: Record<string, unknown>;
+    readonly binding: ThreadBinding;
+  },
+  record: SessionRecord,
+  sourceCursor: string,
+): Promise<void> {
+  const rootThreadId = input.binding.metadata?.flarySubagentRootThreadId;
+  if (
+    typeof rootThreadId !== "string" ||
+    rootThreadId === input.binding.thread.threadId
+  ) return;
+  const controlName =
+    `thread:${input.binding.thread.organizationId}:${input.binding.thread.appId}:${rootThreadId}`;
+  const body = {
+    kind: "child.projection",
+    controlName,
+    tenantId: input.binding.thread.organizationId,
+    applicationId: input.binding.thread.appId,
+    childThreadId: input.binding.thread.threadId,
+    childAgentId: input.binding.agentId,
+    sourceCursor: `child:${input.binding.thread.threadId}:${sourceCursor}`,
+    recordType: record.recordType,
+    recordedAt: record.recordedAt,
+    attempt: record.attempt,
+    sourceRevision: record.sourceRevision,
+    ...(record.producer ? { producer: record.producer } : {}),
+    payload: record.publicPayload,
+  };
+  const queue = input.env.FLARY_SESSION_PROJECTION_QUEUE as
+    | ProjectionQueue
+    | undefined;
+  if (queue) {
+    await queue.send(body);
+    return;
+  }
+  const namespace = input.env.FLARY_THREAD_CONTROL as
+    | DurableObjectNamespace
+    | undefined;
+  if (!namespace) {
+    throw new Error("Child event projection needs Thread Control or its Queue");
+  }
+  const response = await namespace.get(namespace.idFromName(controlName)).fetch(
+    new Request("https://flary.internal/project-child", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...body, method: "projectChild" }),
+    }),
+  );
+  if (!response.ok) throw new Error("The root thread rejected a child event");
 }
 
 async function recordSubagentTurn(
@@ -1928,7 +3166,7 @@ async function checkpointWorkspace(input: {
 async function workspaceControl(
   env: Record<string, unknown>,
   binding: ThreadBinding,
-  method: "__checkpoint" | "__history" | "__diff" | "__restore",
+  method: "__checkpoint" | "__history" | "__diff" | "__restore" | "__fork",
   value: unknown,
 ): Promise<any> {
   const namespace = env.FLARY_WORKSPACE as DurableObjectNamespace | undefined;
@@ -1961,6 +3199,33 @@ async function settleSubagent(
   action: "complete" | "fail",
   value: Record<string, unknown>,
 ): Promise<void> {
+  await updateSubagentAtRoot(
+    input,
+    action,
+    `settle_${input.admission.submissionId}`,
+    value,
+  );
+  const parentThreadId = input.binding.metadata?.flarySubagentParentThreadId;
+  if (action === "complete" && typeof parentThreadId === "string") {
+    await sendSubagentResultToParent(
+      input,
+      parentThreadId,
+      `result_${input.admission.submissionId}`,
+      value.output,
+    );
+  }
+}
+
+async function updateSubagentAtRoot(
+  input: {
+    readonly env: Record<string, unknown>;
+    readonly binding: ThreadBinding;
+    readonly admission: FlueAdmission;
+  },
+  action: "wait" | "resume" | "complete" | "fail",
+  idempotencyKey: string,
+  value: Record<string, unknown>,
+): Promise<void> {
   const rootThreadId = input.binding.metadata?.flarySubagentRootThreadId;
   if (typeof rootThreadId !== "string") return;
   const namespace = input.env.FLARY_THREAD_CONTROL as
@@ -1990,22 +3255,51 @@ async function settleSubagent(
   };
   await call(action, {
     threadId: input.binding.thread.threadId,
-    requestId: `settle_${input.admission.submissionId}`,
-    idempotencyKey: `settle_${input.admission.submissionId}`,
+    requestId: idempotencyKey,
+    idempotencyKey,
     ...value,
   });
-  const parentThreadId = input.binding.metadata?.flarySubagentParentThreadId;
-  if (action === "complete" && typeof parentThreadId === "string") {
-    await call("send", {
-      requestId: `result_${input.admission.submissionId}`,
-      idempotencyKey: `result_${input.admission.submissionId}`,
-      fromThreadId: input.binding.thread.threadId,
-      toThreadId: parentThreadId,
-      kind: "result",
-      mode: "queue",
-      content: summarizeSubagentResult(value.output),
-    });
-  }
+}
+
+async function sendSubagentResultToParent(
+  input: {
+    readonly env: Record<string, unknown>;
+    readonly binding: ThreadBinding;
+  },
+  parentThreadId: string,
+  idempotencyKey: string,
+  output: unknown,
+): Promise<void> {
+  const rootThreadId = input.binding.metadata?.flarySubagentRootThreadId;
+  if (typeof rootThreadId !== "string") return;
+  const namespace = input.env.FLARY_THREAD_CONTROL as
+    | DurableObjectNamespace
+    | undefined;
+  if (!namespace) return;
+  const rootName =
+    `thread:${input.binding.thread.organizationId}:${input.binding.thread.appId}:${rootThreadId}`;
+  const response = await namespace.get(namespace.idFromName(rootName)).fetch(
+    new Request("https://flary.internal/subagent", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "subagent",
+        tenantId: input.binding.thread.organizationId,
+        applicationId: input.binding.thread.appId,
+        action: "send",
+        input: {
+          requestId: idempotencyKey,
+          idempotencyKey,
+          fromThreadId: input.binding.thread.threadId,
+          toThreadId: parentThreadId,
+          kind: "result",
+          mode: "queue",
+          content: summarizeSubagentResult(output),
+        },
+      }),
+    }),
+  );
+  if (!response.ok) throw new Error("The parent did not accept the child result");
 }
 
 function jsonValue(value: unknown): unknown {
@@ -2028,6 +3322,36 @@ function summarizeSubagentResult(value: unknown): string {
   return JSON.stringify(jsonValue(value)).slice(0, 100_000) || "Subagent completed.";
 }
 
+function subagentResult(
+  value: unknown,
+  checkpoint: unknown,
+  usage: InteractiveUsage,
+): Record<string, unknown> {
+  const result = objectValue(value);
+  const changedFiles = Array.isArray(result.changedFiles)
+    ? result.changedFiles.filter((item): item is string => typeof item === "string").slice(0, 10_000)
+    : [];
+  const checks = Array.isArray(result.checks)
+    ? result.checks.flatMap((item) => {
+        const check = objectValue(item);
+        if (typeof check.command !== "string") return [];
+        const status = check.status === "passed" || check.status === "failed" || check.status === "skipped"
+          ? check.status
+          : "skipped";
+        return [{ command: check.command.slice(0, 16_384), status }];
+      }).slice(0, 1_000)
+    : [];
+  return {
+    summary: summarizeSubagentResult(value),
+    ...(checkpoint !== undefined ? { checkpoint: jsonValue(checkpoint) } : {}),
+    changedFiles,
+    checks,
+    usage,
+    errors: [],
+    output: jsonValue(value),
+  };
+}
+
 function accountInteractiveEvent(
   sql: ThreadControlStorage["sql"],
   binding: ThreadBinding,
@@ -2035,8 +3359,7 @@ function accountInteractiveEvent(
 ): {
   exceeded: boolean;
   message: string;
-  stepDelta: number;
-  costDelta: number;
+  delta: InteractiveUsage;
 } {
   const type = String(event.type ?? "");
   const stepDelta =
@@ -2053,60 +3376,315 @@ function accountInteractiveEvent(
     typeof cost.total === "number" && Number.isFinite(cost.total)
       ? cost.total
       : 0;
-  if (stepDelta === 0 && costDelta === 0) {
-    return { exceeded: false, message: "", stepDelta, costDelta };
+  const tokenDelta = nonnegative(usage.totalTokens, 0);
+  const toolCallDelta = type === "tool-input" ? 1 : 0;
+  const delta = {
+    steps: stepDelta,
+    toolCalls: toolCallDelta,
+    tokens: tokenDelta,
+    costUsd: costDelta,
+    sandboxSeconds: 0,
+    browserSeconds: 0,
+  };
+  if (Object.values(delta).every((value) => value === 0)) {
+    return { exceeded: false, message: "", delta };
   }
-  return accountInteractiveDelta(sql, binding, stepDelta, costDelta);
+  return accountInteractiveDelta(sql, binding, delta);
 }
 
 function accountInteractiveDelta(
   sql: ThreadControlStorage["sql"],
   binding: ThreadBinding,
-  stepDelta: number,
-  costDelta: number,
-): { exceeded: boolean; message: string; stepDelta: number; costDelta: number } {
+  delta: InteractiveUsage,
+): { exceeded: boolean; message: string; delta: InteractiveUsage } {
   const next = sql.transactionSync(() => {
     const current = interactiveUsage(sql);
     const value = {
-      steps: current.steps + stepDelta,
-      costUsd: current.costUsd + costDelta,
+      steps: current.steps + delta.steps,
+      toolCalls: current.toolCalls + delta.toolCalls,
+      tokens: current.tokens + delta.tokens,
+      costUsd: current.costUsd + delta.costUsd,
+      sandboxSeconds: current.sandboxSeconds + delta.sandboxSeconds,
+      browserSeconds: current.browserSeconds + delta.browserSeconds,
     };
     put(sql, "interactiveUsage", value);
     return value;
   });
+  return interactiveLimitResult(binding, next, delta);
+}
+
+function interactiveLimitResult(
+  binding: ThreadBinding,
+  next: InteractiveUsage,
+  delta: InteractiveUsage,
+): { exceeded: boolean; message: string; delta: InteractiveUsage } {
   const limits = objectValue(binding.metadata?.flaryLimits);
   const maxSteps = positive(limits.steps, Number.MAX_SAFE_INTEGER);
+  const maxToolCalls = positive(limits.toolCalls, Number.MAX_SAFE_INTEGER);
+  const maxTokens = positive(limits.tokens, Number.MAX_SAFE_INTEGER);
   const maxCost = positiveNumber(limits.costUsd, Number.MAX_VALUE);
+  const maxSandbox = positive(limits.sandboxSeconds, Number.MAX_SAFE_INTEGER);
+  const maxBrowser = positive(limits.browserSeconds, Number.MAX_SAFE_INTEGER);
   if (next.steps > maxSteps) {
     return {
       exceeded: true,
       message: `The interactive step limit of ${maxSteps} was exceeded`,
-      stepDelta,
-      costDelta,
+      delta,
     };
+  }
+  if (next.toolCalls > maxToolCalls) {
+    return { exceeded: true, message: `The interactive tool-call limit of ${maxToolCalls} was exceeded`, delta };
+  }
+  if (next.tokens > maxTokens) {
+    return { exceeded: true, message: `The interactive token limit of ${maxTokens} was exceeded`, delta };
   }
   if (next.costUsd > maxCost) {
     return {
       exceeded: true,
       message: `The interactive cost limit of ${maxCost} USD was exceeded`,
-      stepDelta,
-      costDelta,
+      delta,
     };
   }
-  return { exceeded: false, message: "", stepDelta, costDelta };
+  if (next.sandboxSeconds > maxSandbox) {
+    return { exceeded: true, message: `The interactive Sandbox limit of ${maxSandbox} seconds was exceeded`, delta };
+  }
+  if (next.browserSeconds > maxBrowser) {
+    return { exceeded: true, message: `The interactive browser limit of ${maxBrowser} seconds was exceeded`, delta };
+  }
+  return { exceeded: false, message: "", delta };
+}
+
+async function rootInteractiveReservationAction(
+  sql: ThreadControlStorage["sql"],
+  env: Record<string, unknown> | undefined,
+  binding: ThreadBinding,
+  method: "reserveUsage" | "settleUsage" | "unknownUsage",
+  body: Record<string, unknown>,
+): Promise<unknown> {
+  const rootThreadId = binding.metadata?.flarySubagentRootThreadId;
+  if (
+    typeof rootThreadId === "string" &&
+    rootThreadId !== binding.thread.threadId
+  ) {
+    const namespace = env?.FLARY_THREAD_CONTROL as
+      | DurableObjectNamespace
+      | undefined;
+    if (!namespace) {
+      throw new Error("Root usage reservations need FLARY_THREAD_CONTROL");
+    }
+    const name =
+      `thread:${binding.thread.organizationId}:${binding.thread.appId}:${rootThreadId}`;
+    const response = await namespace.get(namespace.idFromName(name)).fetch(
+      new Request("https://flary.internal/usage-reservation", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ...body,
+          method,
+          tenantId: binding.thread.organizationId,
+          applicationId: binding.thread.appId,
+        }),
+      }),
+    );
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(
+        typeof objectValue(result).error === "string"
+          ? String(objectValue(result).error)
+          : "Root usage reservation failed",
+      );
+    }
+    return result;
+  }
+  const reservationId = String(body.reservationId ?? "");
+  if (!reservationId) throw new Error("A usage reservation ID is required");
+  if (method === "reserveUsage") {
+    return reserveInteractiveUsage(sql, binding, {
+      reservationId,
+      kind: String(body.kind ?? "runtime"),
+      delta: usageValue(body.delta),
+    });
+  }
+  if (method === "settleUsage") {
+    return settleInteractiveUsage(
+      sql,
+      binding,
+      reservationId,
+      body.actual === undefined ? undefined : usageValue(body.actual),
+    );
+  }
+  return markInteractiveUsageUnknown(sql, reservationId);
+}
+
+async function reserveRootInteractiveUsage(
+  sql: ThreadControlStorage["sql"],
+  env: Record<string, unknown> | undefined,
+  binding: ThreadBinding,
+  input: {
+    readonly reservationId: string;
+    readonly kind: string;
+    readonly delta: InteractiveUsage;
+  },
+): Promise<unknown> {
+  return rootInteractiveReservationAction(sql, env, binding, "reserveUsage", {
+    reservationId: input.reservationId,
+    kind: input.kind,
+    delta: input.delta,
+  });
+}
+
+function reserveInteractiveUsage(
+  sql: ThreadControlStorage["sql"],
+  binding: ThreadBinding,
+  input: {
+    readonly reservationId: string;
+    readonly kind: string;
+    readonly delta: InteractiveUsage;
+  },
+): { reserved: true; replay: boolean; usage: InteractiveUsage } {
+  return sql.transactionSync(() => {
+    const existing = sql.exec<{ state: string; reserved_json: string }>(
+      `SELECT state, reserved_json FROM flary_interactive_reservations
+       WHERE reservation_id = ?`,
+      input.reservationId,
+    ).toArray()[0];
+    if (existing) {
+      const stored = usageValue(JSON.parse(existing.reserved_json));
+      if (JSON.stringify(stored) !== JSON.stringify(input.delta)) {
+        throw new Error("A usage reservation changed during replay");
+      }
+      return { reserved: true as const, replay: true, usage: interactiveUsage(sql) };
+    }
+    const current = interactiveUsage(sql);
+    const held = reservedInteractiveUsage(sql);
+    const projected = addUsage(addUsage(current, held), input.delta);
+    const limit = interactiveLimitResult(binding, projected, input.delta);
+    if (limit.exceeded) throw new Error(limit.message);
+    const now = new Date().toISOString();
+    sql.exec(
+      `INSERT INTO flary_interactive_reservations
+        (reservation_id, kind, state, reserved_json, actual_json, created_at, updated_at)
+       VALUES (?, ?, 'held', ?, NULL, ?, ?)`,
+      input.reservationId,
+      input.kind.slice(0, 100),
+      JSON.stringify(input.delta),
+      now,
+      now,
+    );
+    return { reserved: true as const, replay: false, usage: projected };
+  });
+}
+
+function settleInteractiveUsage(
+  sql: ThreadControlStorage["sql"],
+  binding: ThreadBinding,
+  reservationId: string,
+  actual?: InteractiveUsage,
+): { settled: true; replay: boolean; usage: InteractiveUsage } {
+  return sql.transactionSync(() => {
+    const row = sql.exec<{
+      state: string;
+      reserved_json: string;
+      actual_json: string | null;
+    }>(
+      `SELECT state, reserved_json, actual_json
+       FROM flary_interactive_reservations WHERE reservation_id = ?`,
+      reservationId,
+    ).toArray()[0];
+    if (!row) throw new Error("The usage reservation was not found");
+    if (row.state === "unknown") {
+      throw new Error("An unknown usage outcome needs operator resolution");
+    }
+    if (row.state === "settled") {
+      return { settled: true as const, replay: true, usage: interactiveUsage(sql) };
+    }
+    const applied = actual ?? usageValue(JSON.parse(row.reserved_json));
+    const next = addUsage(interactiveUsage(sql), applied);
+    const limit = interactiveLimitResult(binding, next, applied);
+    if (limit.exceeded) throw new Error(limit.message);
+    put(sql, "interactiveUsage", next);
+    sql.exec(
+      `UPDATE flary_interactive_reservations
+       SET state = 'settled', actual_json = ?, updated_at = ?
+       WHERE reservation_id = ? AND state = 'held'`,
+      JSON.stringify(applied),
+      new Date().toISOString(),
+      reservationId,
+    );
+    return { settled: true as const, replay: false, usage: next };
+  });
+}
+
+function markInteractiveUsageUnknown(
+  sql: ThreadControlStorage["sql"],
+  reservationId: string,
+): { unknown: true } {
+  sql.exec(
+    `UPDATE flary_interactive_reservations
+     SET state = 'unknown', updated_at = ?
+     WHERE reservation_id = ? AND state = 'held'`,
+    new Date().toISOString(),
+    reservationId,
+  );
+  return { unknown: true };
+}
+
+function reservedInteractiveUsage(
+  sql: ThreadControlStorage["sql"],
+): InteractiveUsage {
+  return sql.exec<{ reserved_json: string }>(
+    `SELECT reserved_json FROM flary_interactive_reservations
+     WHERE state IN ('held', 'unknown')`,
+  ).toArray().reduce(
+    (sum, row) => addUsage(sum, usageValue(JSON.parse(row.reserved_json))),
+    emptyUsage(),
+  );
+}
+
+function usageValue(value: unknown): InteractiveUsage {
+  const input = objectValue(value);
+  return {
+    steps: nonnegative(input.steps, 0),
+    toolCalls: nonnegative(input.toolCalls, 0),
+    tokens: nonnegative(input.tokens, 0),
+    costUsd: positiveNumber(input.costUsd, 0),
+    sandboxSeconds: nonnegative(input.sandboxSeconds, 0),
+    browserSeconds: nonnegative(input.browserSeconds, 0),
+  };
+}
+
+function emptyUsage(input: Partial<InteractiveUsage> = {}): InteractiveUsage {
+  return {
+    steps: input.steps ?? 0,
+    toolCalls: input.toolCalls ?? 0,
+    tokens: input.tokens ?? 0,
+    costUsd: input.costUsd ?? 0,
+    sandboxSeconds: input.sandboxSeconds ?? 0,
+    browserSeconds: input.browserSeconds ?? 0,
+  };
+}
+
+function addUsage(left: InteractiveUsage, right: InteractiveUsage): InteractiveUsage {
+  return {
+    steps: left.steps + right.steps,
+    toolCalls: left.toolCalls + right.toolCalls,
+    tokens: left.tokens + right.tokens,
+    costUsd: left.costUsd + right.costUsd,
+    sandboxSeconds: left.sandboxSeconds + right.sandboxSeconds,
+    browserSeconds: left.browserSeconds + right.browserSeconds,
+  };
 }
 
 async function accountRootInteractiveEvent(
   env: Record<string, unknown>,
   binding: ThreadBinding,
-  stepDelta: number,
-  costDelta: number,
+  delta: InteractiveUsage,
 ): Promise<{ exceeded: boolean; message: string }> {
   const rootThreadId = binding.metadata?.flarySubagentRootThreadId;
   if (typeof rootThreadId !== "string") {
     return { exceeded: false, message: "" };
   }
-  if (stepDelta === 0 && costDelta === 0) {
+  if (Object.values(delta).every((value) => value === 0)) {
     return { exceeded: false, message: "" };
   }
   const namespace = env.FLARY_THREAD_CONTROL as DurableObjectNamespace | undefined;
@@ -2121,8 +3699,7 @@ async function accountRootInteractiveEvent(
         method: "accountUsage",
         tenantId: binding.thread.organizationId,
         applicationId: binding.thread.appId,
-        stepDelta,
-        costDelta,
+        delta,
       }),
     }),
   );
@@ -2134,20 +3711,30 @@ async function accountRootInteractiveEvent(
   };
 }
 
-function interactiveUsage(sql: ThreadControlStorage["sql"]): {
+interface InteractiveUsage {
   steps: number;
+  toolCalls: number;
+  tokens: number;
   costUsd: number;
-} {
+  sandboxSeconds: number;
+  browserSeconds: number;
+}
+
+function interactiveUsage(sql: ThreadControlStorage["sql"]): InteractiveUsage {
   const row = sql.exec<{ value_json: string }>(
     "SELECT value_json FROM flary_thread_control WHERE key = 'interactiveUsage'",
   ).toArray()[0];
   const value = row ? objectValue(JSON.parse(row.value_json)) : {};
   return {
     steps: nonnegative(value.steps, 0),
+    toolCalls: nonnegative(value.toolCalls, 0),
+    tokens: nonnegative(value.tokens, 0),
     costUsd:
       typeof value.costUsd === "number" && Number.isFinite(value.costUsd)
         ? value.costUsd
         : 0,
+    sandboxSeconds: nonnegative(value.sandboxSeconds, 0),
+    browserSeconds: nonnegative(value.browserSeconds, 0),
   };
 }
 
@@ -2268,7 +3855,7 @@ function subagentAction(
     });
     return { message, thread: coordinator.getThread(toThreadId) };
   }
-  if (action === "wait") {
+  if (action === "wait" && Array.isArray(input.threadIds)) {
     const ids = Array.isArray(input.threadIds)
       ? input.threadIds.map(String)
       : [];
@@ -2287,7 +3874,14 @@ function subagentAction(
   const controlAction =
     action === "interrupt"
       ? "cancel"
-      : action === "close" || action === "resume" || action === "start"
+      : action === "close" ||
+          action === "resume" ||
+          action === "start" ||
+          action === "wait" ||
+          action === "complete" ||
+          action === "fail" ||
+          action === "cancel" ||
+          action === "handoff"
         ? action
         : undefined;
   if (!controlAction) throw new Error(`Unknown subagent action '${action}'`);
@@ -2297,7 +3891,18 @@ function subagentAction(
       sessionId,
       threadId,
       action: controlAction,
+      ...(input.output !== undefined
+        ? { output: jsonValue(input.output) as never }
+        : {}),
+      ...(input.error !== undefined ? { error: input.error as never } : {}),
+      ...(typeof input.targetThreadId === "string"
+        ? { targetThreadId: input.targetThreadId }
+        : {}),
       reason: typeof input.reason === "string" ? input.reason : undefined,
+      idempotencyKey:
+        typeof input.idempotencyKey === "string"
+          ? input.idempotencyKey
+          : undefined,
     }),
   };
 }
@@ -2489,13 +4094,103 @@ function modelPolicy(binding: ThreadBinding): StoredModelPolicy {
   };
 }
 
-function forkRecordsThroughTurn(
+interface ForkBoundary {
+  readonly records: Record<string, unknown>[];
+  readonly turnId?: string;
+  readonly checkpointId?: string;
+}
+
+function resolveForkBoundary(
   records: readonly Record<string, unknown>[],
-  turnId: string,
-): Record<string, unknown>[] {
-  const match = records.findIndex((record) => record.turnId === turnId);
-  if (match < 0) throw new Error(`The fork turn '${turnId}' was not found`);
-  return records.slice(0, match + 1);
+  requestedTurnId?: string,
+): ForkBoundary {
+  const completed = records.filter((record) =>
+    record.recordType === "turn.completed" && recordTurnId(record),
+  );
+  const latest = completed.at(-1);
+  const selected = requestedTurnId
+    ? completed.find((record) => recordTurnId(record) === requestedTurnId)
+    : latest;
+  if (!selected) {
+    if (!requestedTurnId) return { records: [...records] };
+    throw new FlaryHostError(
+      409,
+      "fork_turn_incomplete",
+      requestedTurnId
+        ? `The fork turn '${requestedTurnId}' is not a completed turn`
+        : "The thread has no completed turn to fork",
+      { latestCompletedTurnId: latest ? recordTurnId(latest) : undefined },
+    );
+  }
+  const turnId = recordTurnId(selected)!;
+  const completionIndex = records.indexOf(selected);
+  const sourceCursor = typeof selected.sourceCursor === "string"
+    ? selected.sourceCursor
+    : "";
+  const submissionId = sourceCursor.startsWith("flue:")
+    ? sourceCursor.slice(5).split(":", 1)[0]
+    : undefined;
+  let endIndex = completionIndex;
+  let checkpointId: string | undefined;
+  for (let index = completionIndex + 1; index < records.length; index += 1) {
+    const record = records[index]!;
+    if (record.recordType === "turn.started" && recordTurnId(record) !== turnId) {
+      break;
+    }
+    const payload = objectValue(record.publicPayload);
+    if (
+      record.recordType === "artifact.checkpoint" &&
+      (!submissionId || payload.submissionId === submissionId)
+    ) {
+      const checkpoint = objectValue(payload.checkpoint);
+      const commit = objectValue(checkpoint.commit);
+      if (typeof commit.id === "string") checkpointId = commit.id;
+      endIndex = index;
+    } else if (record.recordType !== "provider.segment.started") {
+      endIndex = index;
+    }
+  }
+  return {
+    records: records.slice(0, endIndex + 1),
+    turnId,
+    ...(checkpointId ? { checkpointId } : {}),
+  };
+}
+
+function recordTurnId(record: Record<string, unknown>): string | undefined {
+  if (typeof record.turnId === "string") return record.turnId;
+  const payload = objectValue(record.publicPayload);
+  return typeof payload.turnId === "string"
+    ? payload.turnId
+    : typeof payload.messageId === "string"
+      ? payload.messageId
+      : undefined;
+}
+
+function forkWorkspaceBranch(parent: string, threadId: string): string {
+  const suffix = threadId.replace(/[^A-Za-z0-9_-]/g, "-").slice(-48);
+  return `${parent.slice(0, Math.max(1, 200 - suffix.length - 6))}-fork-${suffix}`;
+}
+
+async function sha256Text(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function sha256Json(value: unknown): Promise<string> {
+  return sha256Text(JSON.stringify(value));
+}
+
+async function portableArchiveHash(
+  archive: ThreadPortableArchive,
+): Promise<string> {
+  const { sha256: _sha256, ...unsigned } = archive;
+  return sha256Json(unsigned);
 }
 
 function currentModel(
@@ -2635,7 +4330,7 @@ async function agentApprovalRpc(
 async function agentControlRpc(
   env: Record<string, unknown>,
   binding: ThreadBinding,
-  action: "compact" | "rollback",
+  action: "compact" | "rollback" | "export" | "import",
   input: unknown,
 ): Promise<unknown> {
   const agentId = runtimeAgentId(binding);

@@ -27,6 +27,7 @@ export const SessionRecordTypeSchema = z.enum([
   "session.world_state",
   "session.lifecycle",
   "runtime.event",
+  "runtime.migrated",
   "turn.started",
   "turn.completed",
   "turn.aborted",

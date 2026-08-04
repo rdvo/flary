@@ -1,6 +1,7 @@
 import { z } from "flary";
 
 import { app } from "./flary";
+import { generated } from "./flary.generated";
 
 export const searchDocs = app.fn({
   description: "Search the product documentation",
@@ -12,7 +13,6 @@ export const searchDocs = app.fn({
       excerpt: z.string(),
     }),
   ),
-  policy: { operation: "read", capabilities: ["docs.read"] },
   run: ({ query }) => [
     {
       title: `Documentation result for ${query}`,
@@ -22,4 +22,22 @@ export const searchDocs = app.fn({
   ],
 });
 
-export const tools = app.tools({ searchDocs });
+const optionalTools = {
+  ...(generated.features.mcp
+    ? {
+        github: app.mcp({
+          namespace: "github",
+          connection: "github",
+          url: "https://api.githubcopilot.com/mcp/readonly",
+        }),
+      }
+    : {}),
+  ...(generated.features.browser
+    ? { browser: app.browser({ profile: "thread" }) }
+    : {}),
+  ...(generated.features.sandbox
+    ? { shell: app.sandbox({ network: "restricted", sleepAfter: "10m" }) }
+    : {}),
+};
+
+export const tools = app.tools({ searchDocs, ...optionalTools });

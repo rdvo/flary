@@ -29,6 +29,7 @@ run("npm", ["init", "-y"], consumer, { quiet: true });
 const manifest = require(path.join(repository, "package.json"));
 const tarball = path.join(temporary, `flary-${manifest.version}.tgz`);
 run("npm", ["install", tarball, "--loglevel", "error"], consumer);
+run("npm", ["audit", "--audit-level=high"], consumer);
 
 const flue = fs.readFileSync(
   path.join(
@@ -78,6 +79,9 @@ run(
       'if (typeof cloudflare.createCloudflareWorkspaceTarget !== "function") throw new Error("Missing Cloudflare workspace target export");',
       'if (typeof cloudflare.createCloudflareCodeMode !== "function") throw new Error("Missing Cloudflare Code Mode export");',
       'if (typeof cloudflare.createCloudflareSandboxToolset !== "function") throw new Error("Missing Cloudflare Sandbox toolset export");',
+      'if (typeof cloudflare.CloudflareProviderOAuthPersistence !== "function") throw new Error("Missing provider OAuth persistence export");',
+      'if (typeof cloudflare.CloudflareMcpOAuthConnections !== "function") throw new Error("Missing MCP OAuth persistence export");',
+      'if (typeof providers.CloudflareWorkersAIAdapter !== "function") throw new Error("Missing Workers AI adapter export");',
     ].join("\n"),
   ],
   consumer,
@@ -182,7 +186,26 @@ if (
   throw new Error("The generated starter does not fail closed outside loopback");
 }
 run("npm", ["install", "--loglevel", "error"], starter);
+run("npm", ["audit", "--audit-level=high"], starter);
 run("npm", ["run", "build"], starter);
+
+const dashboard = path.join(temporary, "dashboard");
+fs.cpSync(
+  path.join(consumer, "node_modules/flary/templates/dashboard"),
+  dashboard,
+  { recursive: true },
+);
+fs.renameSync(path.join(dashboard, "gitignore"), path.join(dashboard, ".gitignore"));
+const dashboardManifestPath = path.join(dashboard, "package.json");
+const dashboardManifest = JSON.parse(fs.readFileSync(dashboardManifestPath, "utf8"));
+dashboardManifest.dependencies.flary = tarball;
+fs.writeFileSync(dashboardManifestPath, `${JSON.stringify(dashboardManifest, null, 2)}\n`);
+run("npm", ["install", "--loglevel", "error"], dashboard);
+run("npm", ["audit", "--audit-level=high"], dashboard);
+run("npm", ["run", "build"], dashboard);
+if (!fs.existsSync(path.join(dashboard, "migrations/0001_dashboard.sql"))) {
+  throw new Error("The dashboard template is missing its first-owner migration");
+}
 
 const generatedWrangler = JSON.parse(
   fs.readFileSync(path.join(starter, ".flue-vite.wrangler.jsonc"), "utf8"),
@@ -212,5 +235,5 @@ for (const file of findFiles(path.join(starter, "dist"), "wrangler.json")) {
 }
 
 console.log(
-  "Clean npm install verifies all function-first exports, builds the generated starter, and contains the pinned Flue/Pi patches.",
+  "Clean npm install verifies public exports, builds both templates, and contains the pinned Flue/Pi patches.",
 );

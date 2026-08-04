@@ -24,6 +24,7 @@ import type {
 import {
   OpenAICompatibleAdapter,
   AnthropicMessagesAdapter,
+  CloudflareWorkersAIAdapter,
   parseFlueModelSpecifier,
   type ModelAdapter,
 } from "../providers/index.js";
@@ -73,6 +74,7 @@ import type {
   FlaryAgent,
   FlaryAgentOptions,
   FlaryApplicationExport,
+  FlaryBrowserSource,
   FlaryCallableLike,
   FlaryEvent,
   FlaryFunction,
@@ -116,7 +118,9 @@ import {
   hashSandboxEnvironment,
 } from "../cloudflare/sandbox-process-registry.js";
 import { createCloudflareWorkspaceConnection } from "../cloudflare/workspace.js";
+import { CloudflareSandboxWorkspaceBackend } from "../cloudflare/workspace-execution.js";
 import { parseThreadName } from "../storage/scopes.js";
+import { createCloudflareBrowserConnection } from "./browser.js";
 
 const FUNCTION_STATE = Symbol("flary.function.state");
 const AGENT_STATE = Symbol("flary.agent.state");
@@ -617,6 +621,20 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     return Object.freeze({ kind: "sandbox" as const, options: { ...options } });
   }
 
+  browser(options: FlaryBrowserSource["options"] = {}): FlaryBrowserSource {
+    const source: FlaryBrowserSource = {
+      kind: "browser" as const,
+      options: {
+        profile: "thread",
+        siteAccess: "approval",
+        sensitiveActions: "approval",
+        uploads: "disabled",
+        ...options,
+      },
+    };
+    return Object.freeze(source);
+  }
+
   /**
    * Create Flary's default isolated code runtime with this app's resolvers.
    * Pass the returned value as `code` to a host-specific Flary application,
@@ -629,6 +647,7 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
       ...options,
       ...(this.options.resolveMcp ? { resolveMcp: this.options.resolveMcp } : {}),
       ...(this.options.resolveOpenApi ? { resolveOpenApi: this.options.resolveOpenApi } : {}),
+      ...(this.options.resolveBrowser ? { resolveBrowser: this.options.resolveBrowser } : {}),
     });
   }
 
@@ -1965,6 +1984,15 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     const configured = this.options.providers?.get(provider) ?? this.options.providers?.get("openai");
     if (configured) return configured;
     const source = isRecord(bindings) ? bindings : undefined;
+    if (
+      provider === "cloudflare" &&
+      source?.AI &&
+      typeof source.AI === "object" &&
+      "run" in source.AI &&
+      typeof source.AI.run === "function"
+    ) {
+      return new CloudflareWorkersAIAdapter(source.AI as ConstructorParameters<typeof CloudflareWorkersAIAdapter>[0]);
+    }
     const apiKey =
       stringValue(source?.OPENAI_API_KEY) ?? environmentValue("OPENAI_API_KEY");
     if (provider === "anthropic") {
@@ -2009,7 +2037,16 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
         (ctx ? defaultWorkspaceResolver(this.options, bindings, ctx.storage) : undefined),
       resolveSandbox:
         this.options.resolveSandbox ??
-        (ctx ? defaultSandboxResolver(bindings) : undefined),
+        (ctx ? defaultSandboxResolver(this.options, bindings) : undefined),
+      resolveBrowser:
+        this.options.resolveBrowser ??
+        (ctx
+          ? async (source, input) => createCloudflareBrowserConnection(source, {
+              bindings: input.bindings,
+              context: input.context,
+              storage: input.storage,
+            })
+          : undefined),
     });
   }
 
@@ -2856,6 +2893,7 @@ function defaultWorkspaceResolver<TBindings>(
 }
 
 function defaultSandboxResolver<TBindings>(
+  appOptions: FlaryAppOptions<TBindings>,
   bindings: unknown,
 ): NonNullable<FlaryAppOptions<TBindings>["resolveSandbox"]> {
   return async (source, input) => {
@@ -2882,10 +2920,47 @@ function defaultSandboxResolver<TBindings>(
       normalizeId: true,
       labels: { runId: input.context.runId ?? "flary" },
     });
+    const workspaceNamespace = isRecord(bindings)
+      ? bindings.FLARY_WORKSPACE
+      : undefined;
+    const workspaceScope = input.context.identity?.tenantId && workspaceNamespace
+      ? {
+          organizationId: input.context.identity.tenantId,
+          appId: input.context.identity.applicationId ?? appOptions.applicationId ?? appOptions.name ?? "flary",
+          projectId: input.context.identity.projectId ?? appOptions.projectId ?? "default",
+          workspaceId: stringValue(input.context.identity.workspaceId) ?? input.context.runId ?? "default",
+          branch: stringValue(input.context.identity.branch) ?? "main",
+        }
+      : undefined;
+    const workspaceBackend = input.storage && workspaceScope && isRecord(workspaceNamespace) &&
+        typeof workspaceNamespace.idFromName === "function" &&
+        typeof workspaceNamespace.get === "function"
+      ? new CloudflareSandboxWorkspaceBackend({
+          sandbox,
+          workspace: await createCloudflareWorkspaceConnection(
+            workspaceNamespace as never,
+            workspaceScope,
+          ),
+          sql: input.storage,
+          sessionId: input.context.runId ?? workspaceScope.workspaceId,
+        })
+      : undefined;
+    if (workspaceBackend) await workspaceBackend.prepare();
     const processRuntime = input.storage
       ? new DurableSandboxProcessRuntime({
           sandbox,
           registry: new SqliteSandboxProcessRegistry(input.storage),
+          onSettled: workspaceBackend
+            ? async ({ processId }) => {
+                const operationId = `process_${processId}_exit`;
+                try {
+                  await workspaceBackend.settle({ operationId, changed: true });
+                } catch (error) {
+                  await workspaceBackend.uncertain(operationId);
+                  throw error;
+                }
+              }
+            : undefined,
         })
       : undefined;
     return {
@@ -2917,6 +2992,9 @@ function defaultSandboxResolver<TBindings>(
       ],
       call: async (name, value) => {
         if (!isRecord(value)) throw new Error("Sandbox input must be an object");
+        const operationId = stringValue(value.requestId) ??
+          `sandbox_${crypto.randomUUID().replaceAll("-", "")}`;
+        try {
         if (name === "exec") {
           if (typeof value.command !== "string") {
             throw new Error("Sandbox exec needs a command");
@@ -2925,7 +3003,7 @@ function defaultSandboxResolver<TBindings>(
             ...(typeof value.cwd === "string" ? { cwd: value.cwd } : {}),
             ...(typeof value.timeoutMs === "number" ? { timeout: value.timeoutMs } : {}),
           });
-          return {
+          const output = {
             command: result.command,
             exitCode: result.exitCode,
             success: result.success,
@@ -2933,6 +3011,8 @@ function defaultSandboxResolver<TBindings>(
             stderr: result.stderr,
             duration: result.duration,
           };
+          await workspaceBackend?.settle({ operationId, changed: true });
+          return output;
         }
         if (!processRuntime) {
           throw new Error("Durable sandbox processes need Code Mode SQLite");
@@ -2947,7 +3027,7 @@ function defaultSandboxResolver<TBindings>(
           if (typeof value.command !== "string") {
             throw new Error("processStart needs a command");
           }
-          return processRuntime.start({
+          const output = await processRuntime.start({
             id: processId,
             runId: input.context.runId ?? sandboxId,
             sandboxId,
@@ -2966,6 +3046,7 @@ function defaultSandboxResolver<TBindings>(
                 }
               : {}),
           });
+          return output;
         }
         if (name === "processAttach") {
           return processRuntime.attach(
@@ -2977,26 +3058,38 @@ function defaultSandboxResolver<TBindings>(
           if (typeof value.data !== "string") {
             throw new Error("processStdin needs data");
           }
-          return processRuntime.stdin({
+          const output = await processRuntime.stdin({
             requestId,
             processId,
             data: value.data,
           });
+          await workspaceBackend?.settle({ operationId, changed: true });
+          return output;
         }
         if (name === "processSignal") {
-          return processRuntime.signal({
+          const output = await processRuntime.signal({
             requestId,
             processId,
             signal: String(value.signal ?? "SIGTERM") as never,
           });
+          await workspaceBackend?.settle({ operationId, changed: true });
+          return output;
         }
         if (name === "processSleep") {
-          return processRuntime.sleep(processId, requestId);
+          const output = await processRuntime.sleep(processId, requestId);
+          await workspaceBackend?.settle({ operationId, changed: true });
+          return output;
         }
         if (name === "processWake") {
-          return processRuntime.wake(processId, requestId);
+          const output = await processRuntime.wake(processId, requestId);
+          await workspaceBackend?.settle({ operationId, changed: true });
+          return output;
         }
         throw new Error(`Sandbox tool '${name}' is not available`);
+        } catch (error) {
+          await workspaceBackend?.uncertain(operationId).catch(() => undefined);
+          throw error;
+        }
       },
     };
   };

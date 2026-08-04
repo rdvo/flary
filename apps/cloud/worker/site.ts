@@ -18,6 +18,15 @@ function resolveAssetRequest(request: Request): Request | Response {
   const url = new URL(request.url);
 
   if (url.hostname !== DOCS_HOSTNAME) {
+    if (
+      url.pathname.startsWith("/docs/") &&
+      !url.pathname.endsWith("/") &&
+      !(url.pathname.split("/").at(-1) ?? "").includes(".")
+    ) {
+      const target = new URL(url);
+      target.pathname += "/";
+      return Response.redirect(target, 308);
+    }
     return request;
   }
 
@@ -38,6 +47,12 @@ function resolveAssetRequest(request: Request): Request | Response {
 
   if (isStaticAsset) {
     return request;
+  }
+
+  if (url.pathname !== "/" && !url.pathname.endsWith("/")) {
+    const target = new URL(url);
+    target.pathname += "/";
+    return Response.redirect(target, 308);
   }
 
   const target = new URL(url);

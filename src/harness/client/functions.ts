@@ -14,6 +14,7 @@ import type {
   ThreadForkRequest,
   ThreadHistoryDiffResponse,
   ThreadHistoryListResponse,
+  ThreadPortableArchive,
   ThreadRef,
 } from "../contracts/index.js";
 import type {
@@ -23,6 +24,8 @@ import type {
 } from "../contracts/subagents.js";
 import {
   createFlaryThreadClient,
+  type FlaryRealtimeConnection,
+  type FlaryRealtimeSocket,
   type FlaryThreadClient,
 } from "./flue.js";
 import type {
@@ -38,6 +41,7 @@ export interface FlaryFunctionClientOptions {
   readonly token?: string;
   readonly fetch?: typeof fetch;
   readonly pollMs?: number;
+  readonly webSocketFactory?: (url: string) => FlaryRealtimeSocket;
 }
 
 export interface FlaryRemoteRun<Output> {
@@ -106,6 +110,7 @@ export interface FlaryAgentThreadHandle {
   history(options?: Record<string, unknown>): unknown;
   turns(options?: { after?: number; limit?: number; types?: readonly string[] }): Promise<readonly unknown[]>;
   stream(options?: { after?: string; signal?: AbortSignal }): unknown;
+  connect(options?: { after?: number; includeChildren?: boolean }): Promise<FlaryRealtimeConnection>;
   send(input: {
     message: string;
     mode?: "queue" | "steer";
@@ -128,7 +133,11 @@ export interface FlaryAgentThreadHandle {
   cancel(): Promise<unknown>;
   fork(input?: ThreadForkRequest): Promise<FlaryAgentThreadHandle>;
   rollback(input: { turnId: string; reason?: string }): Promise<unknown>;
-  restore(input: { jsonl: string; replace?: boolean }): Promise<unknown>;
+  restore(input:
+    | { jsonl: string; replace?: boolean }
+    | { archive: ThreadPortableArchive; replace?: boolean }
+  ): Promise<unknown>;
+  export(): ReturnType<FlaryThreadClient["exportSession"]>;
   compact(input?: { reason?: string }): Promise<unknown>;
   rename(title: string): Promise<ThreadBinding>;
   archive(): Promise<void>;
@@ -185,6 +194,23 @@ export interface FlaryAgentThreadHandle {
     diff(input: { baseCommitId?: string; headCommitId: string }): Promise<ThreadHistoryDiffResponse>;
     restore(commitId: string): Promise<unknown>;
   };
+  readonly processes: {
+    list(): Promise<readonly unknown[]>;
+    start(input: { command: string; cwd?: string; processId?: string; requestId?: string }): Promise<unknown>;
+    attach(input: { processId: string; afterCursor?: number }): Promise<unknown>;
+    stdin(input: { processId: string; data: string; requestId?: string }): Promise<unknown>;
+    signal(input: { processId: string; signal: string; requestId?: string }): Promise<unknown>;
+    resize(input: { processId: string; cols: number; rows: number; requestId?: string }): Promise<unknown>;
+    sleep(input: { processId: string; requestId?: string }): Promise<unknown>;
+    wake(input: { processId: string; requestId?: string }): Promise<unknown>;
+  };
+  readonly browser: {
+    status(): Promise<unknown>;
+    takeover(): Promise<unknown>;
+    input(input: Readonly<Record<string, unknown>>): Promise<unknown>;
+    release(): Promise<unknown>;
+    close(): Promise<unknown>;
+  };
   readonly schedules: {
     register(input: Readonly<Record<string, unknown>>): Promise<unknown>;
     list(): Promise<unknown>;
@@ -239,6 +265,7 @@ export function flary<TFunctions extends Record<string, unknown>>(
     apiPath: "",
     mountPath: "/flue",
     fetch: options.fetch,
+    ...(options.webSocketFactory ? { webSocketFactory: options.webSocketFactory } : {}),
     ...(options.headers
       ? {
           headers: async () => {
@@ -351,6 +378,7 @@ function makeAgentThreadHandle(
         ...(options?.after ? { offset: options.after } : {}),
         ...(options?.signal ? { signal: options.signal } : {}),
       } as never, agentName),
+    connect: (options) => client.connect(ref, options),
     send: (input) =>
       client.submit(ref, {
         message: input.message,
@@ -373,6 +401,7 @@ function makeAgentThreadHandle(
     },
     rollback: (input) => client.rollback(ref, input),
     restore: (input) => client.restore(ref, input),
+    export: () => client.exportSession(ref),
     compact: (input = {}) => client.compact(ref, input),
     rename: (title) => client.rename(ref, title),
     archive: () => client.archive(ref),
@@ -407,6 +436,23 @@ function makeAgentThreadHandle(
       list: (options) => client.historyCheckpoints(ref, options),
       diff: (input) => client.historyDiff(ref, input),
       restore: (commitId) => client.historyRestore(ref, { commitId }),
+    },
+    processes: {
+      list: () => client.processes(ref),
+      start: (input) => client.process(ref, "start", input),
+      attach: (input) => client.process(ref, "attach", input),
+      stdin: (input) => client.process(ref, "stdin", input),
+      signal: (input) => client.process(ref, "signal", input),
+      resize: (input) => client.process(ref, "resize", input),
+      sleep: (input) => client.process(ref, "sleep", input),
+      wake: (input) => client.process(ref, "wake", input),
+    },
+    browser: {
+      status: () => client.browser(ref, "status"),
+      takeover: () => client.browser(ref, "takeover"),
+      input: (input) => client.browser(ref, "input", input),
+      release: () => client.browser(ref, "release"),
+      close: () => client.browser(ref, "close"),
     },
     schedules: {
       register: (input) => client.schedule(ref, "register", input),

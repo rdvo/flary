@@ -1,0 +1,62 @@
+---
+title: Providers and connections
+description: Authorize model providers, MCP servers, and APIs without exposing credentials.
+section: Connect
+order: 2
+---
+
+A **connection** is an authorized provider, MCP, or API account. Connection
+records are tenant-scoped. Secret values stay encrypted or in Worker secrets;
+public APIs return only status and safe metadata.
+
+The setup wizard supports OpenAI and Anthropic API keys and Cloudflare Workers
+AI. These choices work as deployment-level credentials for the first model
+call.
+
+The personal dashboard can also authorize ChatGPT/Codex and Claude Pro/Max
+subscriptions. It encrypts and stores those credentials. A trusted
+`resolveModel` implementation must select a stored subscription before an
+agent turn uses it. Authorization does not silently replace the deployment
+provider.
+
+For each turn, Flary stores a safe model pin with provider, model, variant,
+adapter revision, connection reference, and credential generation. It does
+not store the credential in the transcript.
+
+## Provider switching
+
+One thread can switch providers between turns. Flary converts the same
+canonical messages, completed tool exchanges, attachments, and compaction
+lineage for the target provider. Provider-private response IDs, cache keys,
+and hidden reasoning are never sent to another provider.
+
+There is no silent fallback for an explicit model selection. A revoked or
+missing credential fails before the turn starts.
+
+## Add an MCP server
+
+The personal dashboard uses a URL-first MCP flow:
+
+1. Open **Connections**.
+2. Enter a name and the server's HTTPS MCP URL.
+3. Select **Add MCP server**.
+4. Approve access on the server's authorization page.
+5. Return to Flary. The connection becomes ready after Flary checks its tool
+   list.
+
+This works with public MCP servers and servers that use the
+[MCP authorization flow](https://modelcontextprotocol.io/specification/draft/basic/authorization).
+For OAuth servers, Flary uses authorization-code flow with PKCE. It uses a
+[Client ID Metadata Document](https://modelcontextprotocol.io/specification/draft/basic/authorization/client-registration)
+when the server supports it, and Dynamic Client Registration as a compatibility
+fallback. The authorization callback returns directly to the user's deployed
+Worker. It does not pass through `flary.dev`.
+
+Flary accepts only public HTTPS endpoints. It blocks local and private network
+addresses, unsafe redirects, oversized metadata, and long requests. Access
+and refresh tokens are encrypted in D1. They do not enter prompts, generated
+code, transcripts, or public API results.
+
+Each ready connection gets a stable namespace. The dashboard exposes all
+ready connections through one lazy catalog. The model sees tool schemas only
+after it searches for and selects a tool.

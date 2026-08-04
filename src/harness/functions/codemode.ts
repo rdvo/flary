@@ -16,6 +16,7 @@ import type {
 } from "../execution/approval-continuation.js";
 import type {
   FlaryCodeExecutor as CodeExecutor,
+  FlaryBrowserSource,
   FlaryMcpConnection,
   FlaryMcpSource,
   FlaryOpenApiRuntime,
@@ -32,6 +33,7 @@ import { redactSecrets } from "../execution/redaction.js";
 import { createMcpConnection } from "./mcp.js";
 import { createOpenApiRuntime } from "./openapi.js";
 import { getFunctionState } from "./app.js";
+import { parseThreadName } from "../storage/scopes.js";
 
 /** Structural type so the public package does not import Cloudflare-only modules. */
 export interface FlaryDurableObjectState {
@@ -80,6 +82,14 @@ export interface FlaryCodemodeExecutorOptions<TBindings = unknown> {
   ) => FlaryToolConnection | Promise<FlaryToolConnection>;
   readonly resolveSandbox?: (
     source: FlarySandboxSource,
+    input: {
+      readonly bindings: TBindings;
+      readonly context: FlaryStepContext<TBindings>;
+      readonly storage?: unknown;
+    },
+  ) => FlaryToolConnection | Promise<FlaryToolConnection>;
+  readonly resolveBrowser?: (
+    source: FlaryBrowserSource,
     input: {
       readonly bindings: TBindings;
       readonly context: FlaryStepContext<TBindings>;
@@ -727,6 +737,20 @@ async function createSourceConnectors<TBindings>(
         sandbox,
       ));
     }
+    if (source.kind === "browser" && options.resolveBrowser) {
+      const browser = await options.resolveBrowser(source, {
+        bindings: input.bindings,
+        context: input.context,
+        storage: (ctx.storage as { readonly sql?: unknown }).sql,
+      });
+      connectors.push(createHostToolConnector(
+        codemode,
+        ctx,
+        options.env,
+        name,
+        browser,
+      ));
+    }
   }
   return connectors;
 }
@@ -890,11 +914,11 @@ function describeRegistry(registry: FlaryToolRegistry): RegistryDescriptor[] {
       id: namespace,
       name: namespace,
       description: `${source.kind} tools`,
-      operation: source.kind === "sandbox" || source.kind === "workspace" ? "write" : "read",
+      operation: source.kind === "sandbox" || source.kind === "workspace" || source.kind === "browser" ? "write" : "read",
       requiresApproval: source.kind !== "mcp",
       tags: [source.kind],
       capabilities: [],
-      ...(source.kind === "workspace" || source.kind === "sandbox"
+      ...(source.kind === "workspace" || source.kind === "sandbox" || source.kind === "browser"
         ? { idempotency: "required" as const }
         : {}),
     };
@@ -963,15 +987,113 @@ async function invokeCatalogTool(
   const id = (normalized as { id?: unknown }).id;
   const input = (normalized as { input?: unknown }).input;
   if (typeof id !== "string") throw new Error("A tool call needs an id");
-  const source = sourceTargets.get(id);
-  if (source) {
-    callCounter.count += 1;
-    if (callCounter.max !== undefined && callCounter.count > callCounter.max) {
-      throw new Error("The Flary tool-call limit was exceeded.");
-    }
-    return source.connector.executeTool(source.method, input ?? {});
+  if (
+    callCounter.max !== undefined &&
+    callCounter.count + 1 > callCounter.max
+  ) {
+    throw new Error("The Flary tool-call limit was exceeded.");
   }
-  return invokeRegistryTool(registry, normalized, context, callCounter);
+  const reservation = await reserveInteractiveToolCall(
+    context,
+    id,
+    input,
+    callCounter.count + 1,
+  );
+  try {
+    const source = sourceTargets.get(id);
+    if (source) {
+      callCounter.count += 1;
+      const result = await source.connector.executeTool(source.method, input ?? {});
+      await reservation?.settle();
+      return result;
+    }
+    const result = await invokeRegistryTool(registry, normalized, context, callCounter);
+    await reservation?.settle();
+    return result;
+  } catch (error) {
+    await reservation?.unknown().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function reserveInteractiveToolCall(
+  context: FlaryStepContext<unknown> | undefined,
+  toolId: string,
+  input: unknown,
+  ordinal: number,
+): Promise<{
+  settle(): Promise<void>;
+  unknown(): Promise<void>;
+} | undefined> {
+  if (!context?.runId || !context.bindings || typeof context.bindings !== "object") {
+    return undefined;
+  }
+  let ref: ReturnType<typeof parseThreadName>;
+  try {
+    ref = parseThreadName(context.runId);
+  } catch {
+    return undefined;
+  }
+  const namespace = (context.bindings as Record<string, unknown>)
+    .FLARY_THREAD_CONTROL as {
+      idFromName(name: string): unknown;
+      get(id: unknown): { fetch(request: Request): Promise<Response> };
+    } | undefined;
+  if (!namespace) return undefined;
+  const reservationId = `tool_${shortHash(
+    `${context.idempotencyKey ?? context.runId}:${ordinal}:${toolId}:${stableJson(input)}`,
+  )}`;
+  const name = `thread:${ref.organizationId}:${ref.appId}:${ref.threadId}`;
+  const call = async (
+    method: "reserveUsage" | "settleUsage" | "unknownUsage",
+    extra: Record<string, unknown> = {},
+  ): Promise<void> => {
+    const response = await namespace.get(namespace.idFromName(name)).fetch(
+      new Request("https://flary.internal/usage-reservation", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          method,
+          tenantId: ref.organizationId,
+          applicationId: ref.appId,
+          reservationId,
+          ...extra,
+        }),
+      }),
+    );
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(
+        typeof (body as { error?: unknown }).error === "string"
+          ? String((body as { error: string }).error)
+          : "The root tool-call limit reservation failed",
+      );
+    }
+  };
+  await call("reserveUsage", {
+    kind: "tool-call",
+    delta: {
+      steps: 0,
+      toolCalls: 1,
+      tokens: 0,
+      costUsd: 0,
+      sandboxSeconds: 0,
+      browserSeconds: 0,
+    },
+  });
+  return {
+    settle: () => call("settleUsage", {
+      actual: {
+        steps: 0,
+        toolCalls: 1,
+        tokens: 0,
+        costUsd: 0,
+        sandboxSeconds: 0,
+        browserSeconds: 0,
+      },
+    }),
+    unknown: () => call("unknownUsage"),
+  };
 }
 
 function toSchema(schema: unknown): Record<string, unknown> | undefined {

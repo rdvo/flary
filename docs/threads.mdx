@@ -1,0 +1,36 @@
+---
+title: Threads and realtime clients
+description: Create, send, stream, reconnect, steer, fork, and restore durable conversations.
+section: Run
+order: 1
+---
+
+Create or open a thread through the typed client:
+
+```ts
+const thread = await api.coder.threads.create({ title: "Fix checkout" });
+await thread.send({ message: "Inspect the failures and fix them." });
+
+for await (const event of thread.stream({ after: cursor })) {
+  render(event);
+}
+```
+
+The cursor is durable. Reconnect after a tab closes, a network break, or a
+Worker restart without resending the full conversation.
+
+## Realtime control
+
+`thread.connect()` uses a hibernating WebSocket for events and commands. SSE
+remains the read-only fallback. HTTP remains available for listing, imports,
+exports, attachments, and large results.
+
+Commands include send, queue, steer, interrupt, cancel, approve, reject, user
+input, subagent control, process control, and browser takeover. Each mutation
+has a request ID and idempotency key.
+
+## Fork, edit, and rollback
+
+A fork copies the visible history and workspace checkpoint through a completed
+turn. It gets a new thread and an isolated workspace branch. Edits and
+rollbacks append active-path markers; they do not delete the old audit trail.

@@ -66,6 +66,8 @@ export interface FlaryManifest {
     readonly canonicalSessionArchivePrefix: "canonical-sessions/";
     readonly threadCatalogBinding: "FLARY_THREAD_CATALOG";
     readonly projectionQueueBinding: "FLARY_SESSION_PROJECTION_QUEUE";
+    readonly browserRunBinding?: "BROWSER";
+    readonly sandboxBinding?: "SANDBOX";
     readonly flueRegistryBinding: "FLUE_REGISTRY";
     readonly flueRuntimeVersion: "1.0.0-beta.9";
     readonly migrations: readonly {
@@ -142,6 +144,9 @@ export function flary(options: FlaryVitePluginOptions = {}): {
         mode: state?.mode ?? (agentState ? "interactive" : mode),
         runtimeFile:
           `flary/${(state?.mode ?? (agentState ? "interactive" : mode)) === "run" ? "workflows" : "agents"}/${name}.js`,
+        sourceKinds: toolSourceKinds(
+          state?.definition.tools ?? agentState?.definition.tools,
+        ),
       };
     });
   return {
@@ -248,6 +253,20 @@ export function flary(options: FlaryVitePluginOptions = {}): {
           runtime: { kind: "agent" as const, module: runtimeFile },
         }));
       const tools = [...new Set((options.tools ?? []).flatMap((registry) => registry.names))];
+      const sourceKinds = entries.flatMap(({ state, agentState }) =>
+        Object.values(
+          state?.definition.tools?.entries ??
+          agentState?.definition.tools?.entries ??
+          {},
+        ).flatMap((source) =>
+          source && typeof source === "object" && "kind" in source
+            ? [String(source.kind)]
+            : [],
+        ),
+      );
+      const needsBrowser = sourceKinds.includes("browser");
+      const needsSandbox = sourceKinds.includes("sandbox");
+      if (needsSandbox) ensureSandboxDockerfile(resolvedRoot);
       const runtimeClasses = functions.map(({ name, mode }) =>
         mode === "run" ? `Flue${pascalCaseName(name)}Workflow` : `Flue${pascalCaseName(name)}Agent`,
       );
@@ -257,6 +276,7 @@ export function flary(options: FlaryVitePluginOptions = {}): {
         "FlaryWorkspace",
         "FlueRegistry",
         ...runtimeClasses,
+        ...(needsSandbox ? ["Sandbox"] : []),
       ];
       const manifest: FlaryManifest = {
         version: 1,
@@ -275,6 +295,8 @@ export function flary(options: FlaryVitePluginOptions = {}): {
           canonicalSessionArchivePrefix: "canonical-sessions/",
           threadCatalogBinding: "FLARY_THREAD_CATALOG",
           projectionQueueBinding: "FLARY_SESSION_PROJECTION_QUEUE",
+          ...(needsBrowser ? { browserRunBinding: "BROWSER" as const } : {}),
+          ...(needsSandbox ? { sandboxBinding: "SANDBOX" as const } : {}),
           flueRegistryBinding: "FLUE_REGISTRY",
           flueRuntimeVersion: "1.0.0-beta.9",
           migrations: [{
@@ -287,6 +309,7 @@ export function flary(options: FlaryVitePluginOptions = {}): {
         readWranglerConfig(options.root ?? process.cwd()),
         runtimeClasses,
         migrationClasses,
+        { needsBrowser, needsSandbox },
       );
       this.emitFile({
         type: "asset",
@@ -384,6 +407,10 @@ function mergeWranglerConfig(
   base: Record<string, any>,
   runtimeClasses: readonly string[],
   migrationClasses: readonly string[],
+  features: { readonly needsBrowser: boolean; readonly needsSandbox: boolean } = {
+    needsBrowser: false,
+    needsSandbox: false,
+  },
   lifecycle = durableObjectLifecycle(base),
 ): Record<string, any> {
   const currentBindings = isRecord(base.durable_objects) &&
@@ -399,6 +426,9 @@ function mergeWranglerConfig(
       class_name: name,
     })),
     { name: "FLUE_REGISTRY", class_name: "FlueRegistry" },
+    ...(features.needsSandbox
+      ? [{ name: "SANDBOX", class_name: "Sandbox" }]
+      : []),
   ];
   const byName = new Map<string, Record<string, unknown>>();
   for (const binding of currentBindings) {
@@ -431,6 +461,7 @@ function mergeWranglerConfig(
     "FlaryWorkspace",
     "FlueRegistry",
     ...runtimeClasses,
+    ...(features.needsSandbox ? ["Sandbox"] : []),
   ]) {
     if (!isRecord(currentExports[name])) {
       currentExports[name] = { type: "durable-object", storage: "sqlite" };
@@ -450,16 +481,13 @@ function mergeWranglerConfig(
     ? base.r2_buckets.filter(isRecord).map((value) => ({ ...value }))
     : [];
   if (!r2Buckets.some((value) => value.binding === "FLARY_SESSION_ARCHIVE")) {
-    r2Buckets.push({
-      binding: "FLARY_SESSION_ARCHIVE",
-      bucket_name: `${resourcePrefix}-session-archive`,
-    });
+    r2Buckets.push({ binding: "FLARY_SESSION_ARCHIVE" });
   }
   if (!r2Buckets.some((value) => value.binding === "WORKSPACE_BLOBS")) {
-    r2Buckets.push({
-      binding: "WORKSPACE_BLOBS",
-      bucket_name: `${resourcePrefix}-workspace-blobs`,
-    });
+    r2Buckets.push({ binding: "WORKSPACE_BLOBS" });
+  }
+  if (features.needsSandbox && !r2Buckets.some((value) => value.binding === "BACKUP_BUCKET")) {
+    r2Buckets.push({ binding: "BACKUP_BUCKET" });
   }
   const d1Databases = Array.isArray(base.d1_databases)
     ? base.d1_databases.filter(isRecord).map((value) => ({ ...value }))
@@ -498,6 +526,10 @@ function mergeWranglerConfig(
   } = base;
   return {
     ...baseWithoutLifecycle,
+    ...(features.needsBrowser &&
+        (typeof base.compatibility_date !== "string" || base.compatibility_date < "2026-03-24")
+      ? { compatibility_date: "2026-03-24" }
+      : {}),
     durable_objects: {
       ...(isRecord(base.durable_objects) ? base.durable_objects : {}),
       bindings: [...byName.values()],
@@ -506,14 +538,71 @@ function mergeWranglerConfig(
       ? { migrations }
       : { exports: currentExports }),
     worker_loaders: workerLoaders,
+    secrets: {
+      ...(isRecord(base.secrets) ? base.secrets : {}),
+      required: [...new Set([
+        "FLARY_INTERNAL_TOKEN",
+        "FLARY_SESSION_ARCHIVE_KEY",
+        ...(isRecord(base.secrets) && Array.isArray(base.secrets.required)
+          ? base.secrets.required.filter((value): value is string => typeof value === "string")
+          : []),
+      ])],
+    },
     r2_buckets: r2Buckets,
     d1_databases: d1Databases,
+    ...(features.needsBrowser
+      ? {
+          browser: isRecord(base.browser)
+            ? { ...base.browser, binding: base.browser.binding ?? "BROWSER" }
+            : { binding: "BROWSER" },
+        }
+      : {}),
+    ...(features.needsSandbox
+      ? {
+          containers: mergeSandboxContainers(base.containers),
+        }
+      : {}),
     queues: {
       ...authoredQueues,
       producers: queueProducers,
       consumers: queueConsumers,
     },
   };
+}
+
+function mergeSandboxContainers(value: unknown): Record<string, unknown>[] {
+  const containers = Array.isArray(value)
+    ? value.filter(isRecord).map((entry) => ({ ...entry }))
+    : [];
+  const current = containers.find((entry) => entry.class_name === "Sandbox");
+  if (current) {
+    current.image ??= "./Dockerfile";
+    current.instance_type ??= "lite";
+    current.max_instances ??= 5;
+  } else {
+    containers.push({
+      class_name: "Sandbox",
+      image: "./Dockerfile",
+      instance_type: "lite",
+      max_instances: 5,
+    });
+  }
+  return containers;
+}
+
+function ensureSandboxDockerfile(root: string): void {
+  const file = path.resolve(root, "Dockerfile");
+  if (fs.existsSync(file)) return;
+  fs.writeFileSync(
+    file,
+    [
+      "# Generated by flary/vite for app.sandbox().",
+      "FROM docker.io/cloudflare/sandbox:0.12.4",
+      "WORKDIR /workspace",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
 }
 
 function flueBindingName(className: string): string {
@@ -535,6 +624,7 @@ function screamingSnake(value: string): string {
 interface GeneratedFunctionEntry {
   readonly name: string;
   readonly mode?: "prompt" | "run" | "interactive";
+  readonly sourceKinds?: readonly string[];
 }
 
 /**
@@ -661,16 +751,33 @@ function generateFlueRuntime(input: {
       "FlueRegistry",
       ...runtimeClasses,
     ];
+    const sourceKinds = input.functions.flatMap((entry) => entry.sourceKinds ?? []);
+    const features = {
+      needsBrowser: sourceKinds.includes("browser"),
+      needsSandbox: sourceKinds.includes("sandbox"),
+    };
+    if (features.needsSandbox) ensureSandboxDockerfile(input.root);
     fs.writeFileSync(
       generatedWrangler,
       JSON.stringify(
-        mergeWranglerConfig(base, runtimeClasses, migrationClasses, lifecycle),
+        mergeWranglerConfig(base, runtimeClasses, [
+          ...migrationClasses,
+          ...(features.needsSandbox ? ["Sandbox"] : []),
+        ], features, lifecycle),
         null,
         2,
       ),
       "utf8",
     );
   }
+}
+
+function toolSourceKinds(registry: FlaryToolRegistry | undefined): string[] {
+  return Object.values(registry?.entries ?? {}).flatMap((source) =>
+    source && typeof source === "object" && "kind" in source
+      ? [String(source.kind)]
+      : [],
+  );
 }
 
 /**
@@ -761,7 +868,7 @@ function patchGeneratedFlueInternalRoutes(
       : `  async onRequest(request) {\n    return dispatchWorkflow(request, this, ${JSON.stringify(functionEntry.name)});\n  }`;
     if (!source.includes(`const ${className} =`) || !source.includes(old)) continue;
     const replacement = kind === "agent"
-      ? `  async onRequest(request) {\n    const flaryAction = new URL(request.url).searchParams.get('flary');\n    if ((flaryAction === 'compact' || flaryAction === 'rollback') && request.method === 'POST') {\n      const token = this.env.FLARY_INTERNAL_TOKEN;\n      if (typeof token !== 'string' || token.length < 32 || request.headers.get('authorization') !== \`Bearer \${token}\`) return new Response(null, { status: 404 });\n      if (flaryAction === 'compact') {\n        await cloudflareAgents.compact(this);\n        return Response.json({ ok: true });\n      }\n      const body = await request.json();\n      const result = await cloudflareAgents.rollback(this, body.turnId, body.reason);\n      return Response.json(result);\n    }\n    const internal = await ${variable}.flaryInternalRequest?.(request, this.env);\n    if (internal) return internal;\n    return cloudflareAgents.onRequest(this, request);\n  }`
+      ? `  async onRequest(request) {\n    const flaryAction = new URL(request.url).searchParams.get('flary');\n    if (['compact', 'rollback', 'export', 'import'].includes(flaryAction ?? '') && request.method === 'POST') {\n      const token = this.env.FLARY_INTERNAL_TOKEN;\n      if (typeof token !== 'string' || token.length < 32 || request.headers.get('authorization') !== \`Bearer \${token}\`) return new Response(null, { status: 404 });\n      if (flaryAction === 'compact') {\n        await cloudflareAgents.compact(this);\n        return Response.json({ ok: true });\n      }\n      const body = await request.json();\n      if (flaryAction === 'export') return Response.json(await cloudflareAgents.exportCanonical(this, body.turnId));\n      if (flaryAction === 'import') return Response.json(await cloudflareAgents.importCanonical(this, body.archive, body.turnId));\n      const result = await cloudflareAgents.rollback(this, body.turnId, body.reason);\n      return Response.json(result);\n    }\n    const internal = await ${variable}.flaryInternalRequest?.(request, this.env);\n    if (internal) return internal;\n    return cloudflareAgents.onRequest(this, request);\n  }`
       : `  async onRequest(request) {\n    if (new URL(request.url).searchParams.get('flary') === 'wake' && request.method === 'GET') {\n      await cloudflareAgents.wakeSubmissions(this);\n      return Response.json({ ok: true });\n    }\n    const internal = await ${variable}.flaryInternalRequest?.(request, this.env);\n    if (internal) return internal;\n    return dispatchWorkflow(request, this, ${JSON.stringify(functionEntry.name)});\n  }`;
     source = source.replace(old, replacement).replace(
       "cloudflareAgents.rollback(this, body.turnId, body.reason)",
@@ -819,7 +926,8 @@ function generatedCloudflareSource(input: {
   return [
     GENERATED_MARKER,
     'import { DurableObject } from "cloudflare:workers";',
-    'import { createCloudflareFlueGateway, createFlaryCodemodeApprovalHooks, handleFlaryDurableRunObjectRequest, handleFlarySessionProjectionQueue, handleFlaryThreadControlAlarm, handleFlaryThreadControlObjectRequest, handleFlaryWorkspaceObjectRequest } from "flary/cloudflare";',
+    'import { createCloudflareFlueGateway, createFlaryCodemodeApprovalHooks, handleFlaryDurableRunObjectRequest, handleFlarySessionProjectionQueue, handleFlaryThreadControlAlarm, handleFlaryThreadControlObjectRequest, handleFlaryThreadControlWebSocketClose, handleFlaryThreadControlWebSocketMessage, handleFlaryWorkspaceObjectRequest } from "flary/cloudflare";',
+    'export { Sandbox } from "@cloudflare/sandbox";',
     "",
     "export class FlaryRuntime extends DurableObject {",
     "  async fetch(request: Request): Promise<Response> {",
@@ -853,6 +961,7 @@ function generatedCloudflareSource(input: {
     "      storage: this.ctx.storage as never,",
     "      env: this.env as Record<string, unknown>,",
     "      execution: { waitUntil: (work) => this.ctx.waitUntil(work) },",
+    "      webSockets: { acceptWebSocket: (socket, tags) => this.ctx.acceptWebSocket(socket as WebSocket, tags), getWebSockets: (tag) => this.ctx.getWebSockets(tag) },",
     "      request,",
     "    });",
     "  }",
@@ -862,6 +971,20 @@ function generatedCloudflareSource(input: {
     "      env: this.env as Record<string, unknown>,",
     "      execution: { waitUntil: (work) => this.ctx.waitUntil(work) },",
     "    });",
+    "  }",
+    "  async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {",
+    "    return handleFlaryThreadControlWebSocketMessage({",
+    "      storage: this.ctx.storage as never,",
+    "      env: this.env as Record<string, unknown>,",
+    "      socket,",
+    "      message,",
+    "    });",
+    "  }",
+    "  webSocketClose(socket: WebSocket, code: number, reason: string): void {",
+    "    handleFlaryThreadControlWebSocketClose({ socket, code, reason });",
+    "  }",
+    "  webSocketError(socket: WebSocket): void {",
+    "    handleFlaryThreadControlWebSocketClose({ socket, code: 1011, reason: \"socket error\" });",
     "  }",
     "}",
     "",
@@ -880,7 +1003,7 @@ function generatedAppSource(input: {
 }): string {
   return [
     GENERATED_MARKER,
-    `import { functions } from ${JSON.stringify(relativeImport(path.join(input.root, ".flue"), input.entry))};`,
+    `import authoredWorker, { functions } from ${JSON.stringify(relativeImport(path.join(input.root, ".flue"), input.entry))};`,
     'import { getAgentApp, getFunctionApp } from "flary/functions";',
     'import { flue } from "@flue/runtime/routing";',
     'import { createCloudflareThreadService, createFlaryDurableRunService, handleFlarySessionProjectionQueue } from "flary/cloudflare";',
@@ -901,6 +1024,8 @@ function generatedAppSource(input: {
     ");",
     "const handler = userApp.serve(functions);",
     "const apiHandler = userApp.serve(functions, { prefix: \"/api\" });",
+    "const customWorker = authoredWorker as any;",
+    "const publicWorker = customWorker && typeof customWorker.fetch === \"function\" ? customWorker : handler;",
     "const flueApp = flue();",
     "function flueRequest(request, prefix) {",
     "  const url = new URL(request.url);",
@@ -908,14 +1033,21 @@ function generatedAppSource(input: {
     "  return new Request(url, request);",
     "}",
     "export default {",
-    "  fetch(request, env, ctx) {",
+    "  async fetch(request, env, ctx) {",
     "    const pathname = new URL(request.url).pathname;",
     "    if (pathname === \"/flue\" || pathname.startsWith(\"/flue/\")) return flueApp.fetch(flueRequest(request, \"/flue\"), env, ctx);",
     "    if (pathname === \"/api/flue\" || pathname.startsWith(\"/api/flue/\")) return flueApp.fetch(flueRequest(request, \"/api/flue\"), env, ctx);",
-    "    if (pathname === \"/api\" || pathname.startsWith(\"/api/\")) return apiHandler.fetch(request, env, ctx);",
-    "    return handler.fetch(request, env, ctx);",
+    "    const authoredResponse = await publicWorker.fetch(request, env, ctx);",
+    "    if (authoredResponse.status !== 404 || (pathname !== \"/api\" && !pathname.startsWith(\"/api/\"))) return authoredResponse;",
+    "    return apiHandler.fetch(request, env, ctx);",
     "  },",
-    "  queue: (batch, env) => handleFlarySessionProjectionQueue({ messages: batch.messages, env }),",
+    "  async queue(batch, env, ctx) {",
+    "    await handleFlarySessionProjectionQueue({ messages: batch.messages, env });",
+    "    if (typeof customWorker?.queue === \"function\") await customWorker.queue(batch, env, ctx);",
+    "  },",
+    "  scheduled: typeof customWorker?.scheduled === \"function\"",
+    "    ? (controller, env, ctx) => customWorker.scheduled(controller, env, ctx)",
+    "    : undefined,",
     "};",
     "",
   ].join("\n");

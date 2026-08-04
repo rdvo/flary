@@ -1,0 +1,37 @@
+---
+title: Storage and recovery
+description: Understand durable messages, audits, workspaces, archives, restore, and deletion.
+section: Operate
+order: 1
+---
+
+Conversation state and workspace files are separate.
+
+| Data | Active storage | Durable or cold storage |
+| --- | --- | --- |
+| Canonical conversation and execution | Agent Durable Object | Encrypted R2 segments |
+| Public events, approvals, and audits | Thread Control SQLite | Compressed R2 ledger segments |
+| Workspace files and Git state | Workspace Durable Object | R2 blobs and checkpoints |
+| Thread list | D1 | Rebuildable from manifests |
+| Sandbox filesystem | Live Sandbox | R2 backups |
+| Attachments and large results | SQLite metadata | Encrypted R2 objects |
+
+The transcript engine is internal. Normal application code uses thread APIs,
+not transcript-engine classes.
+
+## Files
+
+Files written in `/workspace` are synchronized to durable workspace storage.
+Every completed coding turn records a tree hash, Git state, changed files,
+diff, checks, environment hash, and artifact references. A replacement
+Sandbox restores the last complete checkpoint from R2.
+
+## Read old sessions
+
+Use thread history and event APIs for normal reads. Use authenticated JSONL
+export for a complete portable archive. Import and restore verify hashes before
+they create live thread state.
+
+Deleting a thread cascades through transcript state, projections, D1 indexes,
+R2 archives, attachments, child threads, schedules, audits, processes, and
+workspace state.

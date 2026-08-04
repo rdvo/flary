@@ -1,0 +1,230 @@
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+
+import {
+  parseWranglerAccounts,
+  runFlaryCli,
+  type CliPrompt,
+  type CommandRunner,
+} from "../src/cli-api.ts";
+
+function queuedPrompt(values: unknown[]): CliPrompt {
+  const next = async () => values.shift();
+  return {
+    intro: () => undefined,
+    select: next,
+    multiselect: next,
+    confirm: next,
+    password: next,
+    isCancel: () => false,
+    cancel: () => undefined,
+  };
+}
+
+test("legacy non-TTY create keeps backend and no-deploy behavior", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "flary-cli-legacy-"));
+  try {
+    const messages: string[] = [];
+    await runFlaryCli(["create", "example"], {
+      cwd: root,
+      isTTY: false,
+      log: (message) => messages.push(message),
+    });
+    const target = path.join(root, "example");
+    const state = JSON.parse(await readFile(path.join(target, ".flary", "project.json"), "utf8"));
+    assert.equal(state.template, "backend");
+    assert.equal(state.provider, "openai");
+    assert.equal(state.requiredSecrets.includes("FLARY_ACCESS_TOKEN"), false);
+    assert.match(await readFile(path.join(target, "src", "coder.ts"), "utf8"), /app\.agent/);
+    assert.ok(messages.some((message) => message.includes("npm install")));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("non-interactive dashboard create stores only secret names in project state", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "flary-cli-dashboard-"));
+  const calls: Array<{ command: string; args: readonly string[] }> = [];
+  const runner: CommandRunner = {
+    async run(command, args) {
+      calls.push({ command, args });
+      return { code: 0, stdout: "", stderr: "" };
+    },
+  };
+  try {
+    await runFlaryCli([
+      "create", "personal", "--template", "dashboard", "--provider", "none",
+      "--features", "mcp", "--package-manager", "npm", "--no-deploy", "--yes",
+    ], { cwd: root, isTTY: false, runner, env: {}, log: () => undefined });
+    const target = path.join(root, "personal");
+    const stateText = await readFile(path.join(target, ".flary", "project.json"), "utf8");
+    const state = JSON.parse(stateText);
+    assert.deepEqual(state.features, ["mcp"]);
+    assert.ok(state.requiredSecrets.includes("BETTER_AUTH_SECRET"));
+    assert.equal(state.requiredSecrets.includes("GITHUB_MCP_PAT"), false);
+    assert.doesNotMatch(stateText, /[a-f0-9]{48,}/);
+    const devVars = await readFile(path.join(target, ".dev.vars"), "utf8");
+    assert.match(devVars, /FLARY_SETUP_TOKEN=/);
+    assert.equal((await stat(path.join(target, ".dev.vars"))).mode & 0o777, 0o600);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.command, "npm");
+    const wrangler = JSON.parse(await readFile(path.join(target, "wrangler.jsonc"), "utf8"));
+    assert.ok(wrangler.secrets.required.includes("FLARY_SETUP_TOKEN"));
+    assert.deepEqual(wrangler.d1_databases, [{ binding: "FLARY_DASHBOARD_DB" }]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("guided create covers dashboard, Workers AI, optional features, and no deploy", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "flary-cli-guided-"));
+  const runner: CommandRunner = { async run() { return { code: 0, stdout: "", stderr: "" }; } };
+  try {
+    await runFlaryCli(["create", "guided"], {
+      cwd: root,
+      isTTY: true,
+      runner,
+      prompt: queuedPrompt(["dashboard", "workers-ai", "npm", ["browser"], false]),
+      log: () => undefined,
+    });
+    const target = path.join(root, "guided");
+    const state = JSON.parse(await readFile(path.join(target, ".flary", "project.json"), "utf8"));
+    assert.equal(state.provider, "workers-ai");
+    assert.deepEqual(state.features, ["mcp", "browser"]);
+    const wrangler = JSON.parse(await readFile(path.join(target, "wrangler.jsonc"), "utf8"));
+    assert.deepEqual(wrangler.ai, { binding: "AI" });
+    assert.equal(state.requiredSecrets.includes("OPENAI_API_KEY"), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("non-interactive provider setup fails when its key is absent", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "flary-cli-required-"));
+  try {
+    await assert.rejects(
+      runFlaryCli([
+        "create", "missing", "--template", "backend", "--provider", "openai",
+        "--package-manager", "npm", "--no-deploy", "--yes",
+      ], { cwd: root, isTTY: false, env: {}, log: () => undefined }),
+      /OPENAI_API_KEY is required/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("setup reconstructs non-secret state after an interrupted create", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "flary-cli-resume-"));
+  const runner: CommandRunner = { async run() { return { code: 0, stdout: "", stderr: "" }; } };
+  try {
+    await runFlaryCli([
+      "create", "resume", "--template", "dashboard", "--provider", "none",
+      "--package-manager", "npm", "--no-deploy", "--yes",
+    ], { cwd: root, isTTY: false, runner, env: {}, log: () => undefined });
+    const target = path.join(root, "resume");
+    await rm(path.join(target, ".flary", "project.json"));
+    await runFlaryCli(["setup", "--provider", "none", "--features", "mcp"], {
+      cwd: target, isTTY: false, env: {}, log: () => undefined,
+    });
+    const state = JSON.parse(await readFile(path.join(target, ".flary", "project.json"), "utf8"));
+    assert.equal(state.template, "dashboard");
+    assert.deepEqual(state.features, ["mcp"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("deploy passes a permission-restricted secrets file and always removes it", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "flary-cli-secrets-"));
+  const target = path.join(root, "backend");
+  let secretPath: string | undefined;
+  let secretMode: number | undefined;
+  const runner: CommandRunner = {
+    async run(command, args) {
+      if (command === "npm") return { code: 0, stdout: "", stderr: "" };
+      if (args.includes("whoami")) {
+        return { code: 0, stdout: JSON.stringify({ accounts: [{ id: "account-1", name: "Test" }] }), stderr: "" };
+      }
+      if (args.includes("deploy")) {
+        const index = args.indexOf("--secrets-file");
+        secretPath = String(args[index + 1]);
+        secretMode = (await stat(secretPath)).mode & 0o777;
+        const contents = await readFile(secretPath, "utf8");
+        assert.match(contents, /FLARY_INTERNAL_TOKEN/);
+        assert.ok(!args.join(" ").includes(JSON.parse(contents).FLARY_INTERNAL_TOKEN));
+        return { code: 1, stdout: "", stderr: "expected failure" };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    },
+  };
+  try {
+    await runFlaryCli([
+      "create", "backend", "--template", "backend", "--provider", "none",
+      "--package-manager", "npm", "--no-deploy", "--yes",
+    ], { cwd: root, isTTY: false, runner, env: {}, log: () => undefined });
+    await mkdir(path.join(target, "node_modules"));
+    await assert.rejects(
+      runFlaryCli(["deploy"], { cwd: target, isTTY: false, runner, env: {}, log: () => undefined }),
+      /Wrangler deployment failed/,
+    );
+    assert.equal(secretMode, 0o600);
+    assert.ok(secretPath);
+    await assert.rejects(stat(secretPath!));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("deploy falls back from the keyring flag and persists the selected account", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "flary-cli-account-"));
+  const target = path.join(root, "backend");
+  const calls: string[] = [];
+  let whoami = 0;
+  const runner: CommandRunner = {
+    async run(command, args) {
+      calls.push(`${command} ${args.join(" ")}`);
+      if (command === "npm") return { code: 0, stdout: "", stderr: "" };
+      if (args.includes("whoami")) {
+        whoami += 1;
+        return whoami === 1
+          ? { code: 1, stdout: '{"loggedIn":false}', stderr: "" }
+          : { code: 0, stdout: JSON.stringify({ accounts: [{ id: "one", name: "One" }, { id: "two", name: "Two" }] }), stderr: "" };
+      }
+      if (args.includes("--use-keyring")) return { code: 1, stdout: "", stderr: "Unknown argument: use-keyring" };
+      if (args.includes("login")) return { code: 0, stdout: "", stderr: "" };
+      if (args.includes("deploy")) return { code: 1, stdout: "", stderr: "stop after account selection" };
+      return { code: 0, stdout: "", stderr: "" };
+    },
+  };
+  try {
+    await runFlaryCli([
+      "create", "backend", "--template", "backend", "--provider", "none",
+      "--package-manager", "npm", "--no-deploy", "--yes",
+    ], { cwd: root, isTTY: false, runner, env: {}, log: () => undefined });
+    await mkdir(path.join(target, "node_modules"));
+    await assert.rejects(runFlaryCli(["deploy"], {
+      cwd: target, isTTY: true, runner, env: {},
+      prompt: queuedPrompt(["two"]), log: () => undefined,
+    }), /Wrangler deployment failed/);
+    const state = JSON.parse(await readFile(path.join(target, ".flary", "project.json"), "utf8"));
+    assert.equal(state.accountId, "two");
+    assert.ok(calls.some((call) => call.includes("login --use-keyring")));
+    assert.ok(calls.some((call) => /login$/.test(call)));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Wrangler account JSON is normalized", () => {
+  assert.deepEqual(parseWranglerAccounts(JSON.stringify({ accounts: [
+    { id: "a", name: "Alpha" },
+    { account_id: "b" },
+  ] })), [
+    { id: "a", name: "Alpha" },
+    { id: "b", name: "b" },
+  ]);
+});

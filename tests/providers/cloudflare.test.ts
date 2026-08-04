@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   CloudflareAIGatewayAdapter,
+  CloudflareWorkersAIAdapter,
   type ModelRequest,
 } from "../../src/harness/providers/index.js";
 
@@ -53,6 +54,28 @@ test("Cloudflare AI Gateway adapter sends the account gateway headers", async ()
   assert.equal(response.content, "Hello.");
 });
 
+test("Cloudflare Workers AI adapter uses the binding without a provider key", async () => {
+  let model = "";
+  let input: Record<string, unknown> | undefined;
+  const adapter = new CloudflareWorkersAIAdapter({
+    async run(selectedModel, selectedInput) {
+      model = selectedModel;
+      input = selectedInput;
+      return {
+        response: "Hello from Workers AI.",
+        usage: { prompt_tokens: 4, completion_tokens: 5, total_tokens: 9 },
+      };
+    },
+  });
+
+  const response = await adapter.complete(request);
+  assert.equal(model, request.model);
+  assert.deepEqual(input?.messages, [{ role: "user", content: "Say hello." }]);
+  assert.equal(response.content, "Hello from Workers AI.");
+  assert.equal(response.usage?.totalTokens, 9);
+  assert.equal(response.provider, "cloudflare");
+});
+
 test("Cloudflare AI Gateway adapter validates account IDs", () => {
   assert.throws(
     () =>
@@ -64,4 +87,3 @@ test("Cloudflare AI Gateway adapter validates account IDs", () => {
     /accountId must be a 32-character hex ID/,
   );
 });
-

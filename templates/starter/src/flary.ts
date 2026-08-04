@@ -1,7 +1,13 @@
-import { flary, z } from "flary";
+import { createMcpConnection, flary, z } from "flary";
+import { generated } from "./flary.generated";
 
 export const BindingsSchema = z.object({
   OPENAI_API_KEY: z.string().optional(),
+  ANTHROPIC_API_KEY: z.string().optional(),
+  GITHUB_MCP_PAT: z.string().optional(),
+  AI: z.custom<{ run(model: string, input: Record<string, unknown>): Promise<unknown> }>().optional(),
+  FLARY_ACCESS_TOKEN: z.string().optional(),
+  FLARY_SESSION_ARCHIVE_KEY: z.string().optional(),
   // Cloudflare injects this Worker Loader binding in deployed environments.
   // It stays optional so local tests can run without a loader.
   LOADER: z.unknown().optional(),
@@ -12,18 +18,32 @@ export const BindingsSchema = z.object({
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 export const app = flary({
-  model: "openai/gpt-5",
+  model: generated.model,
   bindings: BindingsSchema,
-  // Local development gets one placeholder identity. Every deployed request
-  // is rejected until this resolver is replaced with product authentication.
-  auth: async ({ request }) => {
-    if (!request || !LOCAL_HOSTS.has(new URL(request.url).hostname)) {
-      return undefined;
-    }
+  auth: async ({ request, bindings }) => {
+    if (!request) return undefined;
+    const local = LOCAL_HOSTS.has(new URL(request.url).hostname);
+    const bearer = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+    const personal = generated.authMode === "personal" &&
+      Boolean(bindings.FLARY_ACCESS_TOKEN) &&
+      bearer === bindings.FLARY_ACCESS_TOKEN;
+    // Existing-application mode accepts local requests only. Production stays
+    // closed until the application replaces this resolver with trusted identity.
+    if (!local && !personal) return undefined;
     return {
-      tenantId: "local-development",
-      userId: "local-developer",
-      roles: ["developer"],
+      tenantId: personal ? "personal" : "local-development",
+      userId: personal ? "owner" : "local-developer",
+      roles: ["owner"],
     };
+  },
+  resolveMcp: (source, { bindings }) => {
+    if (source.connection !== "github" || !bindings.GITHUB_MCP_PAT) {
+      throw new Error("The GitHub MCP connection is not configured");
+    }
+    return createMcpConnection(source, {
+      credentials: {
+        get: async () => ({ kind: "bearer", value: bindings.GITHUB_MCP_PAT! }),
+      },
+    });
   },
 });

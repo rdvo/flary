@@ -31,6 +31,10 @@ import {
   ThreadRestoreRequestSchema,
 } from "../contracts/threads.js";
 import { ThreadOperationalStateSchema } from "../contracts/runtime.js";
+import {
+  RealtimeTicketRequestSchema,
+  RealtimeTicketResponseSchema,
+} from "../contracts/realtime.js";
 import { ApprovalDecisionSchema } from "../contracts/approvals.js";
 import {
   UserInputAnswerRequestSchema,
@@ -416,6 +420,76 @@ export function createFlaryHostRouter<TBindings extends object>(
     return context.json({ binding }, 201);
   });
 
+  router.post("/apps/:appId/threads/:threadId/realtime-ticket", async (context) => {
+    const target = await targetFor(
+      context.req.raw,
+      context.env,
+      context.req.param("appId"),
+      context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.realtimeTicket) throw featureUnavailable("Thread realtime");
+    const input = RealtimeTicketRequestSchema.parse(await context.req.json());
+    return context.json(RealtimeTicketResponseSchema.parse(
+      await service.realtimeTicket(target, input, context.req.url),
+    ));
+  });
+
+  router.get("/apps/:appId/threads/:threadId/processes", async (context) => {
+    const target = await targetFor(
+      context.req.raw, context.env, context.req.param("appId"), context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.processAction) throw featureUnavailable("Sandbox processes");
+    return context.json(await service.processAction(target, "list", {}));
+  });
+
+  router.post("/apps/:appId/threads/:threadId/processes/:action", async (context) => {
+    const target = await targetFor(
+      context.req.raw, context.env, context.req.param("appId"), context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.processAction) throw featureUnavailable("Sandbox processes");
+    const input = await context.req.json().catch(() => ({}));
+    return context.json(await service.processAction(
+      target,
+      context.req.param("action"),
+      input && typeof input === "object" && !Array.isArray(input)
+        ? input as Record<string, unknown>
+        : {},
+    ));
+  });
+
+  router.post("/apps/:appId/threads/:threadId/browser/:action", async (context) => {
+    const target = await targetFor(
+      context.req.raw, context.env, context.req.param("appId"), context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.browserAction) throw featureUnavailable("Browser Run control");
+    const input = await context.req.json().catch(() => ({}));
+    return context.json(await service.browserAction(
+      target,
+      context.req.param("action"),
+      input && typeof input === "object" && !Array.isArray(input)
+        ? input as Record<string, unknown>
+        : {},
+    ));
+  });
+
+  router.get("/apps/:appId/threads/:threadId/realtime", async (context) => {
+    const service = serviceFor(context.env);
+    if (!service.realtimeConnect) throw featureUnavailable("Thread realtime");
+    const ticket = context.req.query("ticket");
+    if (!ticket) {
+      throw new FlaryHostError(401, "realtime_ticket_required", "A realtime ticket is required");
+    }
+    return service.realtimeConnect(
+      context.req.param("appId"),
+      context.req.param("threadId"),
+      ticket,
+    );
+  });
+
   router.post("/apps/:appId/threads/:threadId/mode", async (context) => {
     const target = await targetFor(
       context.req.raw,
@@ -573,6 +647,15 @@ export function createFlaryHostRouter<TBindings extends object>(
     if (!service.restore) throw featureUnavailable("Thread restore");
     const input = ThreadRestoreRequestSchema.parse(await context.req.json());
     return context.json({ result: await service.restore(target, input) }, 202);
+  });
+
+  router.get("/apps/:appId/threads/:threadId/export", async (context) => {
+    const target = await targetFor(
+      context.req.raw, context.env, context.req.param("appId"), context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.exportSession) throw featureUnavailable("Thread export");
+    return context.json({ archive: await service.exportSession(target) });
   });
 
   router.post("/apps/:appId/threads/:threadId/goal", async (context) => {

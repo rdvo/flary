@@ -14,6 +14,7 @@ export * from "./prompts";
 export * from "./prompt-revisions";
 export * from "./provider";
 export * from "./recall";
+export * from "./realtime";
 export * from "./runtime";
 export * from "./runs";
 export * from "./schedules";

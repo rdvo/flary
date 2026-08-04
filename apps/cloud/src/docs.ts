@@ -4,9 +4,10 @@ export type DocEntry = CollectionEntry<"docs">;
 
 export const DOC_SECTION_ORDER = [
   "Start",
-  "Core",
-  "Tools",
-  "Advanced",
+  "Build",
+  "Connect",
+  "Run",
+  "Operate",
   "Examples",
   "Reference",
 ] as const;

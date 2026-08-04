@@ -1,0 +1,72 @@
+---
+title: Tools, MCP, and OpenAPI
+description: Add local functions and authorized remote tools through one lazy catalog.
+section: Connect
+order: 1
+---
+
+import { Code } from "astro:components";
+import toolsExample from "../templates/starter/src/tools.ts?raw";
+
+Local tools are normal Zod-backed functions:
+
+```ts
+export const searchDocs = app.fn({
+  description: "Search product documentation",
+  input: z.object({ query: z.string().min(1) }),
+  output: z.array(z.object({ title: z.string(), url: z.string().url() })),
+  run: ({ query }) => docs.search(query),
+});
+
+const github = app.mcp("github");
+export const tools = app.tools({ searchDocs, github });
+```
+
+Importing this registry and assigning it to a function or agent completes
+registration. Local functions are read tools by default. Mark a tool as a
+write only when it changes external state; writes require approval by default.
+
+In the personal dashboard, open **Connections** and paste the server's HTTPS
+MCP URL. Flary discovers its OAuth service, opens the consent page, receives
+the callback in your Worker, encrypts the credential, checks the tool list,
+and makes the tools available to new agent turns. You do not edit TypeScript
+or copy an MCP token.
+
+The backend template stays code-first. Its optional GitHub example generates
+the source and trusted token resolver. A custom backend can declare a logical
+source and resolve it from its own connection store:
+
+```ts
+const connections = app.mcp({
+  namespace: "connections",
+  connection: "my-mcp-store",
+});
+```
+
+Add an OpenAPI service with one source declaration:
+
+```ts
+const billing = app.openapi({
+  namespace: "billing",
+  spec: "./openapi/billing.yaml",
+  connection: "billing-api",
+});
+```
+
+## Lazy model access
+
+The model sees one bounded `execute` tool. Generated code can search the
+catalog, describe one selected tool, and call it. The full catalog and all
+schemas do not enter every model request.
+
+Every call passes through capability checks, policy, approval, input
+validation, redaction, limits, and durable replay. Provider, MCP, and API
+credentials stay in trusted host code.
+
+OpenAPI `GET`, `HEAD`, and `OPTIONS` operations are reads by default. Mutating
+methods require approval by default. A remote specification cannot lower that
+protection.
+
+## Tested starter source
+
+<Code code={toolsExample} lang="ts" />

@@ -14,6 +14,7 @@ import {
 } from "../docs";
 import "../docs.css";
 import SiteLayout from "./SiteLayout.astro";
+import packageManifest from "../../../../package.json";
 
 interface Heading {
   depth: number;
@@ -76,9 +77,9 @@ function navigationGroups(): Array<{
         </a>
         <span class="docs-divider" aria-hidden="true"></span>
         <a class="docs-wordmark" href="/docs/">Docs</a>
-        <span class="docs-version">0.7</span>
+        <span class="docs-version">{packageManifest.version}</span>
         <nav aria-label="Documentation links">
-          <a href="/docs/getting-started/">Quickstart</a>
+          <a href="/docs/quickstart/">Quickstart</a>
           <a
             href="https://github.com/rdvo/flary"
             target="_blank"

@@ -28,17 +28,10 @@ const groups: ExampleGroup[] = [
         label: "App",
         filename: "src/flary.ts",
         language: "typescript",
-        code: `import { flary, z } from "flary";
+        code: `import { flary } from "flary";
 
-export const app = flary<Env>({
-  name: "support",
-  model: "anthropic/claude-sonnet-4-5",
-  bindings: z.object({
-    ANTHROPIC_API_KEY: z.string().min(1),
-    LOADER: z.unknown(),
-  }),
-  auth: ({ request, bindings }) =>
-    authenticateProductRequest(request, bindings),
+export const app = flary({
+  model: "openai/gpt-5",
 });`,
       },
       {
@@ -54,8 +47,6 @@ export const support = app.fn({
   input: z.object({ question: z.string().min(1) }),
   output: z.object({ answer: z.string() }),
   tools,
-  mode: "ask",
-  thinking: "medium",
   prompt: ({ question }) =>
     \`Answer with approved product facts:\\n\\n\${question}\`,
 });`,
@@ -69,15 +60,13 @@ export const support = app.fn({
 import { app } from "./flary";
 
 const searchDocs = app.fn({
-  name: "docs.search",
+  description: "Search product documentation",
   input: z.object({ query: z.string() }),
   output: z.array(z.object({
     title: z.string(),
     url: z.string().url(),
   })),
-  policy: { operation: "read", capabilities: ["docs.read"] },
-  run: ({ query }, { bindings }) =>
-    bindings.DOCS.search(query),
+  run: ({ query }) => docs.search(query),
 });
 
 export const tools = app.tools({ searchDocs });`,
@@ -131,7 +120,6 @@ import { codingTools } from "./tools";
 export const reviewer = app.agent({
   name: "reviewer",
   model: "openai/gpt-5.6-sol",
-  models: { allow: ["openai/gpt-5.6-sol"] },
   instructions: "Review the current diff and run focused checks.",
   tools: codingTools,
 });
@@ -139,22 +127,9 @@ export const reviewer = app.agent({
 export const coder = app.agent({
   name: "coder",
   model: "anthropic/claude-sonnet",
-  models: {
-    allow: ["anthropic/claude-sonnet", "openai/gpt-5.6-sol"],
-    switching: "user",
-    fallback: "none",
-  },
-  mode: "build",
-  thinking: "high",
+  instructions: "Implement the task, run checks, and review the diff.",
   tools: codingTools,
   subagents: { reviewer },
-  delegation: {
-    mode: "auto",
-    maxConcurrent: 4,
-    maxTotal: 16,
-    maxDepth: 2,
-  },
-  instructions: "Implement the task, run checks, and review the diff.",
 });
 
 export const functions = { coder, reviewer };`,
@@ -164,69 +139,11 @@ export const functions = { coder, reviewer };`,
         label: "Tools",
         filename: "src/tools.ts",
         language: "typescript",
-        code: `import { z } from "flary";
-import { app } from "./flary";
-
-const readFile = app.fn({
-  name: "workspace.read_file",
-  input: z.object({ path: z.string() }),
-  output: z.object({ content: z.string() }),
-  policy: { operation: "read", capabilities: ["file.read"] },
-  run: ({ path }, { bindings }) =>
-    bindings.WORKSPACE.read(path),
-});
-
-const applyPatch = app.fn({
-  name: "workspace.apply_patch",
-  input: z.object({ patch: z.string() }),
-  output: z.object({ changedFiles: z.array(z.string()) }),
-  policy: {
-    operation: "write",
-    capabilities: ["file.write"],
-    requiresApproval: true,
-  },
-  run: ({ patch }, { bindings }) =>
-    bindings.WORKSPACE.applyPatch(patch),
-});
+        code: `import { app } from "./flary";
 
 export const codingTools = app.tools({
-  readFile,
-  applyPatch,
   workspace: app.workspace({ branch: "run" }),
   shell: app.sandbox({ network: "restricted" }),
-});`,
-      },
-      {
-        id: "coding-modes",
-        label: "Modes",
-        filename: "src/agents/modes.ts",
-        language: "typescript",
-        code: `import { AgentModeSchema, resolveAgentMode } from "flary";
-
-export const ask = resolveAgentMode("ask");
-export const plan = resolveAgentMode("plan");
-export const build = resolveAgentMode("build");
-export const review = resolveAgentMode("review");
-
-export const diagnose = AgentModeSchema.parse({
-  id: "diagnose",
-  name: "Diagnose",
-  prompt:
-    "Inspect files, logs, and history. Explain the cause. " +
-    "Do not change the workspace.",
-  allowedCapabilities: [
-    "file.read",
-    "workspace.read",
-    "recall.search",
-    "tool.search",
-  ],
-  deniedCapabilities: ["file.write", "network.write"],
-  writableScopes: [],
-  approvalPolicy: {
-    requireForWrites: true,
-    requiredCapabilities: [],
-    requiredTools: [],
-  },
 });`,
       },
       {
@@ -245,14 +162,7 @@ const api = flary<typeof functions>({
 });
 
 const thread = await api.coder.threads.create({
-  workspace: {
-    organizationId: "acme",
-    appId: "coder",
-    projectId: "api",
-    workspaceId: "main",
-    branch: "main",
-  },
-  mode: "build",
+  title: "Fix authentication",
 });
 
 await thread.send({
@@ -363,16 +273,16 @@ export function CodeExamples() {
         </div>
         <div className="code-example__commands" aria-label="Flary setup commands">
           <div>
-            <span>Install</span>
-            <code>npm install flary</code>
+            <span>Guided setup</span>
+            <code>npx flary create</code>
           </div>
           <div>
-            <span>Add to an app</span>
+            <span>Existing app</span>
             <code>npx flary init</code>
           </div>
           <div>
-            <span>New Worker</span>
-            <code>npx flary create my-agent</code>
+            <span>Install only</span>
+            <code>npm install flary</code>
           </div>
         </div>
       </aside>
