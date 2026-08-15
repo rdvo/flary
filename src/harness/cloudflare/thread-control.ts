@@ -7,6 +7,8 @@ import {
   ThreadHistoryRestoreRequestSchema,
   ThreadMessageRequestSchema,
   ThreadModelSetRequestSchema,
+  ThreadDeletionSchema,
+  type ThreadDeletion,
   UserInputAnswerRequestSchema,
   type ApprovalDecision,
   type ThreadBinding,
@@ -80,6 +82,10 @@ interface ProjectionQueue {
   send(message: unknown): Promise<void>;
 }
 
+interface PurgeQueue {
+  send(message: unknown): Promise<void>;
+}
+
 interface ProjectionQueueMessage {
   readonly body: unknown;
   ack(): void;
@@ -109,6 +115,8 @@ interface ThreadControlStorage {
   /** Durable Object storage owns transactionSync in the Workers runtime. */
   transactionSync?<T>(closure: () => T): T;
   setAlarm?(scheduledTime: number | Date): Promise<void>;
+  /** Removes all Durable Object storage, including internal metadata. */
+  deleteAll?(): Promise<void>;
 }
 
 /**
@@ -141,6 +149,9 @@ function normalizeThreadControlStorage(
     ...(typeof input.setAlarm === "function"
       ? { setAlarm: input.setAlarm.bind(input) }
       : {}),
+    ...(typeof input.deleteAll === "function"
+      ? { deleteAll: input.deleteAll.bind(input) }
+      : {}),
   };
 }
 
@@ -155,6 +166,8 @@ export interface CreateCloudflareThreadServiceOptions<
     readonly tenantId: string;
     readonly userId: string;
     readonly applicationId: string;
+    readonly agentId: string;
+    readonly threadId: string;
     readonly connectionIds: readonly string[];
     readonly selection: ModelSelection;
   }) => Promise<Partial<ResolvedModelPin> | void> | Partial<ResolvedModelPin> | void;
@@ -229,6 +242,7 @@ export function createCloudflareThreadService<
   const projectionQueue = options.env.FLARY_SESSION_PROJECTION_QUEUE as
     | ProjectionQueue
     | undefined;
+  const purgeQueue = options.env.FLARY_THREAD_PURGE_QUEUE as PurgeQueue | undefined;
   const trackAdmission = async (
     name: string,
     body: Record<string, unknown>,
@@ -246,7 +260,6 @@ export function createCloudflareThreadService<
         return d1.list({
           tenantId: scope.authorization.organizationId,
           applicationId: scope.appId,
-          agentId: scope.appId,
         });
       }
       const value = await rpc(catalogName(scope), "list", ownership(scope));
@@ -282,16 +295,17 @@ export function createCloudflareThreadService<
         "initialize",
         { ...ownership(scope), binding },
       );
-      await rpc(catalogName(scope), "catalogPut", {
-        ...ownership(scope),
-        binding,
-      });
-      await d1?.put(binding);
+      await Promise.all([
+        rpc(catalogName(scope), "catalogPut", {
+          ...ownership(scope),
+          binding,
+        }),
+        d1?.put(binding),
+      ]);
       return binding;
     },
     async realtimeTicket(target, rawInput, requestUrl) {
       const input = RealtimeTicketRequestSchema.parse(rawInput);
-      await service.inspect(target);
       const ticket = `${target.authorization.organizationId}.${crypto.randomUUID()}.${crypto.randomUUID()}`;
       const expiresAt = new Date(Date.now() + 60_000).toISOString();
       await rpc(controlName(target), "issueRealtimeTicket", {
@@ -320,6 +334,52 @@ export function createCloudflareThreadService<
         { headers: { upgrade: "websocket" } },
       ));
     },
+    async terminalTicket(target, rawInput, requestUrl) {
+      const input = rawInput ?? {};
+      const ticket = `${target.authorization.organizationId}.${crypto.randomUUID()}.${crypto.randomUUID()}`;
+      const expiresAt = new Date(Date.now() + 60_000).toISOString();
+      await rpc(controlName(target), "issueTerminalTicket", {
+        ...ownership(target),
+        ticketHash: await sha256Text(ticket),
+        expiresAt,
+        cols: Math.min(400, Math.max(1, Number(input.cols ?? 80))),
+        rows: Math.min(200, Math.max(1, Number(input.rows ?? 24))),
+        actor: target.authorization.actor,
+      });
+      const url = new URL(requestUrl);
+      url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+      url.pathname = url.pathname.replace(/\/terminal-ticket$/, "/terminal");
+      url.search = new URLSearchParams({ ticket }).toString();
+      return { url: url.toString(), expiresAt };
+    },
+    async terminalConnect(target, ticket, request) {
+      const value = await rpc(controlName(target), "consumeTerminalTicket", {
+        ...ownership(target),
+        ticketHash: await sha256Text(ticket),
+      });
+      const sandboxBinding = options.env.SANDBOX;
+      if (!sandboxBinding) throw new Error("The SANDBOX binding is not configured");
+      const { getSandbox } = await import("@cloudflare/sandbox");
+      const sandbox = getSandbox(
+        sandboxBinding as never,
+        `flary-${target.authorization.organizationId}-${target.threadId}`,
+        { transport: "rpc", sleepAfter: "10m", enableDefaultSession: true, normalizeId: true },
+      );
+      const terminal = (sandbox as unknown as {
+        terminal?: (request: Request, input: { cols: number; rows: number }) => Promise<Response>;
+      }).terminal;
+      if (typeof terminal !== "function") {
+        throw new FlaryHostError(
+          501,
+          "sandbox_terminal_unavailable",
+          "This Sandbox SDK does not provide a WebSocket terminal",
+        );
+      }
+      return terminal.call(sandbox, request, {
+        cols: Number(value.cols ?? 80),
+        rows: Number(value.rows ?? 24),
+      });
+    },
     async inspect(target) {
       const value = await rpc(controlName(target), "inspect", ownership(target));
       return ThreadBindingSchema.parse(value.binding);
@@ -340,32 +400,118 @@ export function createCloudflareThreadService<
       return mutateBinding(target, "markRead", input);
     },
     async delete(target) {
-      const siblings = await service.list({
-        authorization: target.authorization,
-        appId: target.appId,
+      const binding = await service.inspect(target);
+      const children = await subagentChildren(service, target, binding);
+      const deletionId = `delete_${crypto.randomUUID().replaceAll("-", "")}`;
+      const acceptedAt = new Date().toISOString();
+      const value = await rpc(controlName(target), "beginDelete", {
+        ...ownership(target),
+        deletionId,
+        acceptedAt,
+        actor: target.authorization.actor,
       });
-      const children = siblings.filter((candidate) =>
-        candidate.metadata &&
-        typeof candidate.metadata.parentThreadId === "string" &&
-        candidate.metadata.parentThreadId === target.threadId,
-      );
-      for (const child of children) {
-        await service.delete?.({
-          authorization: target.authorization,
-          appId: target.appId,
-          threadId: child.thread.threadId,
+      const deletion = ThreadDeletionSchema.parse(value.deletion ?? {
+        id: deletionId,
+        threadId: binding.thread.threadId,
+        status: "accepted",
+        acceptedAt,
+      });
+      // Remove the list indexes at acknowledgement time. The durable purge
+      // continues after the user can open another chat.
+      await Promise.all([
+        rpc(catalogName(target), "catalogDelete", {
+          ...ownership(target),
+          threadId: target.threadId,
+        }),
+        d1?.delete({
+          tenantId: target.authorization.organizationId,
+          applicationId: target.appId,
+          threadId: target.threadId,
+        }),
+        d1?.putDeletion({
+          ...deletion,
+          tenantId: target.authorization.organizationId,
+          applicationId: target.appId,
+        }),
+      ]);
+      const message = {
+        kind: "thread.purge",
+        deletionId: deletion.id,
+        target,
+        children,
+      };
+      if (purgeQueue) {
+        try {
+          await purgeQueue.send(message);
+        } catch {
+          // A queue outage must not leave a half-deleted thread. Fall back to
+          // the idempotent purge in the current invocation.
+          await service.purge?.(target, deletion.id);
+        }
+      } else {
+        // Legacy hosts do not have the generated purge queue. Keep their
+        // behavior correct, but generated hosts use the fast path above.
+        await service.purge?.(target, deletion.id);
+        for (const child of children) {
+          await service.delete?.(child);
+        }
+      }
+      return deletion;
+    },
+    async purge(target, deletionId) {
+      const binding = await service.inspect(target);
+      const agentName = runtimeAgentId(binding);
+      const instanceId = threadName(binding.thread);
+      await gateway.abort(agentName, instanceId).catch(() => undefined);
+      await destroyThreadSandbox(options.env, binding);
+      const metadata = binding.metadata ?? {};
+      const ownsWorkspace =
+        typeof metadata.flarySubagentRootThreadId !== "string" &&
+        metadata.forkWorkspaceMode !== "shared";
+      if (
+        ownsWorkspace &&
+        options.env.FLARY_WORKSPACE &&
+        options.env.WORKSPACE_BLOBS
+      ) {
+        await workspaceControl(options.env, binding, "__destroy", {
+          sessionId: binding.thread.threadId,
         });
       }
-      await rpc(controlName(target), "delete", ownership(target));
-      await rpc(catalogName(target), "catalogDelete", {
+      if (!gateway.delete) {
+        throw new Error("The canonical Flue transcript cannot be deleted by this host");
+      }
+      await gateway.delete(agentName, instanceId);
+      await rpc(controlName(target), "delete", {
         ...ownership(target),
-        threadId: target.threadId,
+        deletionId,
       });
-      await d1?.delete({
+      const existing = await d1?.getDeletion({
         tenantId: target.authorization.organizationId,
         applicationId: target.appId,
-        threadId: target.threadId,
+        deletionId,
       });
+      await d1?.putDeletion({
+        id: deletionId,
+        threadId: target.threadId,
+        status: "complete",
+        acceptedAt: existing?.acceptedAt ?? new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        tenantId: target.authorization.organizationId,
+        applicationId: target.appId,
+      });
+    },
+    async deletion(target, deletionId) {
+      const stored = await d1?.getDeletion({
+        tenantId: target.authorization.organizationId,
+        applicationId: target.appId,
+        deletionId,
+      });
+      if (stored) return stored;
+      const value = await rpc(controlName(target), "deletion", {
+        ...ownership(target),
+        deletionId,
+      });
+      return ThreadDeletionSchema.parse(value.deletion);
     },
     async fork(target, rawInput) {
       const input = ThreadForkRequestSchema.parse(rawInput);
@@ -532,6 +678,8 @@ export function createCloudflareThreadService<
             tenantId: target.authorization.organizationId,
             userId: target.authorization.actor.id,
             applicationId: target.appId,
+            agentId: binding.thread.agentId,
+            threadId: binding.thread.threadId,
             connectionIds: binding.connectionIds,
             selection,
           })
@@ -542,7 +690,7 @@ export function createCloudflareThreadService<
         ...(selection ? { model: selection } : {}),
         ...(grant ? { grant } : {}),
       });
-      const pin = pinnedValue.pin as ResolvedModelPin;
+      const pin = ResolvedModelPinSchema.parse(pinnedValue.pin);
       const segmentId = String(pinnedValue.segmentId ?? `segment_${admissionId}`);
       await rpc(controlName(target), "admitTurn", {
         ...ownership(target),
@@ -563,13 +711,14 @@ export function createCloudflareThreadService<
         });
         await gateway.abort(runtimeAgentId(binding), instanceId).catch(() => undefined);
       }
+      const runtimeSelection = pin.runtimeSelection ?? pin.selection;
       const admission = await gateway.send(
         runtimeAgentId(binding),
         instanceId,
         input.message,
         {
           idempotencyKey: admissionId,
-          model: toFlueModelSpecifier(ModelSelectionSchema.parse(pin.selection)),
+          model: toFlueModelSpecifier(runtimeSelection),
           ...(input.images ? { images: input.images } : {}),
           ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
           ...(input.cacheRetention ? { cacheRetention: input.cacheRetention } : {}),
@@ -602,6 +751,53 @@ export function createCloudflareThreadService<
         turnMessage: input.message,
       });
       return admission;
+    },
+    async conversation(target) {
+      const binding = await service.inspect(target);
+      if (!gateway.history) {
+        throw new FlaryHostError(
+          503,
+          "session_engine_unavailable",
+          "The canonical session engine is not available",
+        );
+      }
+      const instanceId = threadName(binding.thread);
+      try {
+        return await gateway.history(runtimeAgentId(binding), instanceId);
+      } catch (error) {
+        const status = error && typeof error === "object" && "status" in error
+          ? Number((error as { status?: unknown }).status)
+          : undefined;
+        if (status !== 404) throw error;
+        return {
+          v: 1,
+          conversationId: instanceId,
+          offset: "0000000000000000_0000000000000000",
+          messages: [],
+          settlements: [],
+        };
+      }
+    },
+    async conversationUpdates(target, input) {
+      const binding = await service.inspect(target);
+      const instanceId = threadName(binding.thread);
+      const query = new URLSearchParams({
+        view: "updates",
+        offset: input.offset,
+        live: input.live,
+      });
+      return createCloudflareFlueFetch(options.env)(
+        `https://flue.internal/agents/${encodeURIComponent(runtimeAgentId(binding))}/${encodeURIComponent(instanceId)}?${query}`,
+        { signal: input.signal },
+      );
+    },
+    async attachment(target, attachmentId, input) {
+      const binding = await service.inspect(target);
+      const instanceId = threadName(binding.thread);
+      return createCloudflareFlueFetch(options.env)(
+        `https://flue.internal/agents/${encodeURIComponent(runtimeAgentId(binding))}/${encodeURIComponent(instanceId)}/attachments/${encodeURIComponent(attachmentId)}`,
+        { signal: input.signal },
+      );
     },
     async edit(target, rawInput) {
       const input = ThreadEditRequestSchema.parse(rawInput);
@@ -1134,6 +1330,14 @@ export async function handleFlaryThreadControlObjectRequest(input: {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS flary_terminal_tickets (
+      ticket_hash TEXT PRIMARY KEY NOT NULL,
+      expires_at TEXT NOT NULL,
+      cols INTEGER NOT NULL,
+      rows INTEGER NOT NULL,
+      actor_json TEXT NOT NULL,
+      consumed_at TEXT
+    );
   `);
   if (input.request.headers.get("upgrade")?.toLowerCase() === "websocket") {
     return openThreadControlWebSocket(storage.sql, input);
@@ -1168,6 +1372,7 @@ async function dispatchThreadControl(
 ): Promise<unknown> {
   if (method === "issueRealtimeTicket") {
     assertOwner(sql, body);
+    assertThreadOpen(sql);
     const ticketHash = String(body.ticketHash ?? "");
     const expiresAt = String(body.expiresAt ?? "");
     if (!/^[0-9a-f]{64}$/.test(ticketHash) || !Number.isFinite(Date.parse(expiresAt))) {
@@ -1185,8 +1390,53 @@ async function dispatchThreadControl(
     );
     return { issued: true, expiresAt };
   }
+  if (method === "issueTerminalTicket") {
+    assertOwner(sql, body);
+    assertThreadOpen(sql);
+    const ticketHash = String(body.ticketHash ?? "");
+    const expiresAt = String(body.expiresAt ?? "");
+    if (!/^[0-9a-f]{64}$/.test(ticketHash) || !Number.isFinite(Date.parse(expiresAt))) {
+      throw new Error("The terminal ticket is invalid");
+    }
+    sql.exec(
+      `INSERT INTO flary_terminal_tickets
+        (ticket_hash, expires_at, cols, rows, actor_json, consumed_at)
+       VALUES (?, ?, ?, ?, ?, NULL)`,
+      ticketHash,
+      expiresAt,
+      Math.min(400, Math.max(1, Number(body.cols ?? 80))),
+      Math.min(200, Math.max(1, Number(body.rows ?? 24))),
+      JSON.stringify(body.actor ?? {}),
+    );
+    return { issued: true, expiresAt };
+  }
+  if (method === "consumeTerminalTicket") {
+    assertOwner(sql, body);
+    assertThreadOpen(sql);
+    const ticketHash = String(body.ticketHash ?? "");
+    const row = sql.exec<{
+      expires_at: string;
+      cols: number;
+      rows: number;
+      consumed_at: string | null;
+    }>(
+      `SELECT expires_at, cols, rows, consumed_at
+       FROM flary_terminal_tickets WHERE ticket_hash = ?`,
+      ticketHash,
+    ).toArray()[0];
+    if (!row || row.consumed_at || Date.parse(row.expires_at) <= Date.now()) {
+      throw new Error("The terminal ticket is invalid or expired");
+    }
+    sql.exec(
+      "UPDATE flary_terminal_tickets SET consumed_at = ? WHERE ticket_hash = ?",
+      new Date().toISOString(),
+      ticketHash,
+    );
+    return { cols: row.cols, rows: row.rows };
+  }
   if (method === "realtimeResult") {
     assertOwner(sql, body);
+    assertThreadOpen(sql);
     const idempotencyKey = String(body.idempotencyKey ?? "");
     const requestId = String(body.requestId ?? "");
     const error = body.error && typeof body.error === "object"
@@ -1245,6 +1495,36 @@ async function dispatchThreadControl(
     };
   }
   assertOwner(sql, body);
+  if (method === "beginDelete") {
+    const existing = readDeletion(sql);
+    if (existing) return { deletion: existing, replay: true };
+    const binding = requireBinding(sql);
+    const deletion = ThreadDeletionSchema.parse({
+      id: String(body.deletionId ?? `delete_${crypto.randomUUID()}`),
+      threadId: binding.thread.threadId,
+      status: "accepted",
+      acceptedAt: String(body.acceptedAt ?? new Date().toISOString()),
+    });
+    put(sql, "deletion", deletion);
+    sql.exec("DELETE FROM flary_realtime_tickets");
+    sql.exec("DELETE FROM flary_realtime_commands");
+    sql.exec("DELETE FROM flary_terminal_tickets");
+    await appendLedger(sql, binding, "terminal", {
+      status: "deleting",
+      deletionId: deletion.id,
+    });
+    for (const socket of host?.webSockets?.getWebSockets() ?? []) {
+      socket.close(1000, "thread deleted");
+    }
+    return { deletion };
+  }
+  if (method === "deletion") {
+    const deletion = readDeletion(sql);
+    if (!deletion || deletion.id !== String(body.deletionId ?? "")) {
+      throw new Error("The deletion was not found");
+    }
+    return { deletion };
+  }
   if (method === "inspect") return { binding: requireBinding(sql) };
   if (method === "catalogDelete") {
     sql.exec("DELETE FROM flary_thread_control WHERE key = ?", `catalog:${String(body.threadId)}`);
@@ -1286,6 +1566,7 @@ async function dispatchThreadControl(
         browserState.sessionId,
       ).then((browser) => browser.close()).catch(() => undefined);
     }
+    await deleteStoredSandboxBackups(host?.env?.BACKUP_BUCKET, sql);
     for (const table of [
       "flary_session_ledger_records",
       "flary_session_ledger_metadata",
@@ -1296,6 +1577,7 @@ async function dispatchThreadControl(
       "flary_canonical_session_archives",
       "flary_realtime_tickets",
       "flary_realtime_commands",
+      "flary_terminal_tickets",
       "flary_thread_schedules",
       "flary_thread_schedule_runs",
       "flary_subagent_config",
@@ -1316,8 +1598,10 @@ async function dispatchThreadControl(
       sql.exec(`DROP TABLE IF EXISTS ${table}`);
     }
     sql.exec("DELETE FROM flary_thread_control");
+    await host?.storage?.deleteAll?.();
     return { ok: true };
   }
+  assertThreadOpen(sql);
   if (method === "record") {
     return appendLedger(
       sql,
@@ -1477,12 +1761,18 @@ async function dispatchThreadControl(
       : currentModel(sql, binding);
     if (!requested) throw new Error("No model is configured for this agent");
     assertAllowedModel(binding, requested);
-    const basePin = resolvedModelPin(binding, requested);
     const grant = body.grant && typeof body.grant === "object" && !Array.isArray(body.grant)
       ? body.grant as Record<string, unknown>
       : {};
+    // The authored selection remains the public model identity. A trusted
+    // host can add a secret-free, thread-unique alias for runtime dispatch.
+    const runtimeSelection = grant.runtimeSelection
+      ? ModelSelectionSchema.parse(grant.runtimeSelection)
+      : undefined;
+    const basePin = resolvedModelPin(binding, requested);
     const pin = ResolvedModelPinSchema.parse({
       ...basePin,
+      ...(runtimeSelection ? { runtimeSelection } : {}),
       ...(typeof grant.connectionReference === "string"
         ? { connectionReference: grant.connectionReference }
         : {}),
@@ -1704,6 +1994,7 @@ async function dispatchThreadControl(
         segmentId: typeof body.segmentId === "string" ? body.segmentId : undefined,
         turnMessage:
           typeof body.turnMessage === "string" ? body.turnMessage : undefined,
+        webSockets: host.webSockets,
       }),
     );
     await host.storage?.setAlarm?.(Date.now() + 30_000);
@@ -1974,6 +2265,7 @@ export async function handleFlaryThreadControlAlarm(input: {
   readonly storage: ThreadControlStorage;
   readonly env: Record<string, unknown>;
   readonly execution?: ThreadControlExecutionContext;
+  readonly webSockets?: ThreadControlWebSocketHost;
 }): Promise<void> {
   const storage = normalizeThreadControlStorage(input.storage);
   const binding = requireBinding(storage.sql);
@@ -2000,6 +2292,7 @@ export async function handleFlaryThreadControlAlarm(input: {
         typeof projection.turnMessage === "string"
           ? projection.turnMessage
           : undefined,
+      webSockets: input.webSockets,
     });
     input.execution?.waitUntil(work);
   }
@@ -2424,6 +2717,58 @@ export async function handleFlarySessionProjectionQueue(input: {
   );
 }
 
+/** Run destructive thread cleanup outside the user-facing delete request. */
+export async function handleFlaryThreadPurgeQueue(input: {
+  readonly messages: readonly ProjectionQueueMessage[];
+  readonly env: Record<string, unknown>;
+}): Promise<void> {
+  const service = createCloudflareThreadService({ env: input.env });
+  const database = input.env.FLARY_THREAD_CATALOG as D1DatabaseLike | undefined;
+  const catalog = database ? new D1ThreadCatalog(database) : undefined;
+  await Promise.all(input.messages.map(async (message) => {
+    const body = objectValue(message.body);
+    const target = body.target as FlaryThreadTarget | undefined;
+    const deletionId = String(body.deletionId ?? "");
+    const children = Array.isArray(body.children)
+      ? body.children.filter((value): value is FlaryThreadTarget => {
+          if (!value || typeof value !== "object") return false;
+          const candidate = value as Record<string, unknown>;
+          const authorization = candidate.authorization;
+          return typeof candidate.appId === "string" &&
+            typeof candidate.threadId === "string" &&
+            Boolean(authorization && typeof authorization === "object");
+        })
+      : [];
+    if (!target || !deletionId || !service.purge) {
+      message.ack();
+      return;
+    }
+    try {
+      await service.purge(target, deletionId);
+      // Child deletion is admitted only after the parent is accepted. Each
+      // child creates its own idempotent purge record and queue message.
+      await Promise.all(children.map((child) => service.delete?.(child)));
+      message.ack();
+    } catch (error) {
+      const existing = await catalog?.getDeletion({
+        tenantId: target.authorization.organizationId,
+        applicationId: target.appId,
+        deletionId,
+      });
+      if (existing) {
+        await catalog!.putDeletion({
+          ...existing,
+          status: "failed",
+          errorCode: error instanceof Error ? "purge_failed" : "purge_failed",
+          tenantId: target.authorization.organizationId,
+          applicationId: target.appId,
+        }).catch(() => undefined);
+      }
+      message.retry();
+    }
+  }));
+}
+
 async function executeRealtimeCommand(
   env: Record<string, unknown>,
   body: Record<string, unknown>,
@@ -2610,6 +2955,43 @@ async function processAction(
     );
   }
   throw new Error(`Unknown Sandbox process action '${action}'`);
+}
+
+async function destroyThreadSandbox(
+  env: Record<string, unknown>,
+  binding: ThreadBinding,
+): Promise<void> {
+  const sandboxBinding = env.SANDBOX;
+  if (!sandboxBinding) return;
+  const { getSandbox } = await import("@cloudflare/sandbox");
+  const sandboxId = `flary-${binding.thread.organizationId}-${binding.thread.threadId}`;
+  const sandbox = getSandbox(sandboxBinding as never, sandboxId, {
+    transport: "rpc",
+    sleepAfter: "10m",
+    enableDefaultSession: true,
+    normalizeId: true,
+    labels: { threadId: binding.thread.threadId },
+  });
+  await sandbox.destroy();
+}
+
+async function deleteStoredSandboxBackups(
+  bucket: unknown,
+  sql: ThreadControlStorage["sql"],
+): Promise<void> {
+  if (!bucket || typeof bucket !== "object" ||
+      typeof (bucket as { delete?: unknown }).delete !== "function") return;
+  const r2 = bucket as { delete(key: string): Promise<unknown> };
+  const rows = sql.exec<{ value_json: string }>(
+    "SELECT value_json FROM flary_workspace_execution_state WHERE key = 'latest-backup'",
+  ).toArray();
+  for (const row of rows) {
+    const backup = objectValue(JSON.parse(row.value_json));
+    const id = typeof backup.id === "string" ? backup.id : undefined;
+    if (!id) continue;
+    await r2.delete(`backups/${id}/data.sqsh`);
+    await r2.delete(`backups/${id}/meta.json`);
+  }
 }
 
 async function browserAction(
@@ -2853,6 +3235,7 @@ async function projectAdmission(input: {
   readonly modelPin?: ResolvedModelPin;
   readonly segmentId?: string;
   readonly turnMessage?: string;
+  readonly webSockets?: ThreadControlWebSocketHost;
 }): Promise<void> {
   const gateway = createCloudflareFlueGateway(input.env, {
     token:
@@ -2962,6 +3345,7 @@ async function projectAdmission(input: {
         sourceCursor,
         new Date().toISOString(),
       );
+      await broadcastThreadRecords(input.sql, input.webSockets);
       const appliedLimit = limit.exceeded ? limit : rootLimit;
       if (appliedLimit.exceeded) {
         await gateway.abort(
@@ -3166,7 +3550,7 @@ async function checkpointWorkspace(input: {
 async function workspaceControl(
   env: Record<string, unknown>,
   binding: ThreadBinding,
-  method: "__checkpoint" | "__history" | "__diff" | "__restore" | "__fork",
+  method: "__checkpoint" | "__history" | "__diff" | "__restore" | "__fork" | "__destroy",
   value: unknown,
 ): Promise<any> {
   const namespace = env.FLARY_WORKSPACE as DurableObjectNamespace | undefined;
@@ -4054,12 +4438,71 @@ async function captureCanonicalSnapshot(
   );
 }
 
+/**
+ * Return only durable subagent children for a thread.
+ *
+ * User forks also carry a parentThreadId, but they do not carry the
+ * subagent root marker. This keeps deleting a parent from deleting a user's
+ * independent fork.
+ */
+async function subagentChildren(
+  service: FlaryThreadHostService,
+  target: FlaryThreadTarget,
+  binding: ThreadBinding,
+): Promise<FlaryThreadTarget[]> {
+  const rootThreadId = typeof binding.metadata?.flarySubagentRootThreadId === "string"
+    ? binding.metadata.flarySubagentRootThreadId
+    : target.threadId;
+  let bindings: ThreadBinding[];
+  try {
+    bindings = await service.list(target);
+  } catch {
+    // Deletion must still be accepted when the list index is unavailable.
+    return [];
+  }
+  return bindings.flatMap((candidate) => {
+    const metadata = candidate.metadata ?? {};
+    const candidateRoot = metadata.flarySubagentRootThreadId;
+    const candidateParent = metadata.flarySubagentParentThreadId;
+    if (
+      candidate.thread.threadId === target.threadId ||
+      typeof candidateRoot !== "string" ||
+      candidateRoot !== rootThreadId ||
+      candidateParent !== target.threadId
+    ) {
+      return [];
+    }
+    return [{
+      authorization: target.authorization,
+      appId: target.appId,
+      threadId: candidate.thread.threadId,
+    }];
+  });
+}
+
 function requireBinding(sql: ThreadControlStorage["sql"]): ThreadBinding {
   const row = sql.exec<{ value_json: string }>(
     "SELECT value_json FROM flary_thread_control WHERE key = 'binding'",
   ).toArray()[0];
   if (!row) throw new Error("The thread was not found");
   return ThreadBindingSchema.parse(JSON.parse(row.value_json));
+}
+
+function readDeletion(
+  sql: ThreadControlStorage["sql"],
+): ThreadDeletion | undefined {
+  const row = sql.exec<{ value_json: string }>(
+    "SELECT value_json FROM flary_thread_control WHERE key = 'deletion'",
+  ).toArray()[0];
+  if (!row) return undefined;
+  return ThreadDeletionSchema.parse(JSON.parse(row.value_json));
+}
+
+function assertThreadOpen(sql: ThreadControlStorage["sql"]): void {
+  const deletion = readDeletion(sql);
+  if (deletion) {
+    throw new Error(`The thread is ${deletion.status} and does not accept new work`);
+  }
 }
 
 /** The generated root Flue class also serves declared durable child threads. */

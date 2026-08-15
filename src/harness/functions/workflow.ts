@@ -220,6 +220,10 @@ export function defineFlaryInteractiveAgent(
   const rootState = getAgentState(value);
   if (!rootState) throw new Error("The value is not a Flary interactive agent");
   return defineAgent(async ({ env, id }): Promise<AgentRuntimeConfig> => {
+    await rootState.app.options.prepareThreadRuntime?.({
+      bindings: env,
+      runId: id,
+    });
     const active = interactiveAgentForRun(value, id);
     const state = getAgentState(active)!;
     const definition = state.definition;

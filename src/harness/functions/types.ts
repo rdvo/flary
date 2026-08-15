@@ -52,6 +52,8 @@ export type FlaryModelGrantResolver = (input: {
   readonly tenantId: string;
   readonly userId: string;
   readonly applicationId: string;
+  readonly agentId: string;
+  readonly threadId: string;
   readonly connectionIds: readonly string[];
   readonly selection: ModelSelection;
 }) =>
@@ -334,7 +336,35 @@ export interface FlaryOpenApiSource {
 
 export interface FlaryWorkspaceSource {
   readonly kind: "workspace";
-  readonly options: Record<string, unknown>;
+  readonly options: FlaryWorkspaceOptions;
+}
+
+/** Options for the durable workspace tool source. */
+export interface FlaryWorkspaceOptions {
+  /** Draft work is isolated and does not need approval for file writes. */
+  readonly mode?: "draft";
+  /** Create a durable checkpoint when the owning turn finishes. */
+  readonly checkpoint?: "turn";
+  readonly appId?: string;
+  readonly projectId?: string;
+  readonly workspaceId?: string;
+  readonly branch?: string;
+  readonly r2Binding?: string;
+  readonly requireR2ForLargeFiles?: boolean;
+  readonly tools?: readonly string[];
+}
+
+/** Tenant-scoped object storage exposed as lazy file tools. */
+export interface FlaryR2Source {
+  readonly kind: "r2";
+  readonly namespace: string;
+  /** Worker binding name for an R2 bucket, resolved only in the trusted host. */
+  readonly binding?: string;
+  /** Host-owned connection name for S3-compatible or remote object storage. */
+  readonly connection?: string;
+  /** Fixed prefix. Use `{tenantId}` for the authenticated tenant. */
+  readonly prefix?: string;
+  readonly access?: "read" | "read-write";
 }
 
 export interface FlarySandboxSource {
@@ -425,6 +455,7 @@ export type FlaryToolSource =
   | FlaryMcpSource
   | FlaryOpenApiSource
   | FlaryWorkspaceSource
+  | FlaryR2Source
   | FlarySandboxSource
   | FlaryBrowserSource;
 
@@ -519,6 +550,14 @@ export interface FlaryAppOptions<TBindings = unknown> {
   readonly auth?: FlaryAuthResolver<TBindings>;
   /** Resolve an authenticated provider connection for interactive turns. */
   readonly resolveModel?: FlaryModelGrantResolver;
+  /**
+   * Register thread-unique trusted provider aliases inside an interactive
+   * agent isolate before Flue resolves its runtime model.
+   */
+  readonly prepareThreadRuntime?: (input: {
+    readonly bindings: TBindings;
+    readonly runId: string;
+  }) => void | Promise<void>;
   /** Identity used only for trusted server-side calls with no HTTP request. */
   readonly defaultIdentity?: FlaryIdentity;
   /**
@@ -560,6 +599,10 @@ export interface FlaryAppOptions<TBindings = unknown> {
   ) => FlaryOpenApiRuntime | Promise<FlaryOpenApiRuntime>;
   readonly resolveWorkspace?: (
     source: FlaryWorkspaceSource,
+    input: { readonly bindings: TBindings; readonly context: FlaryStepContext<TBindings> },
+  ) => FlaryToolConnection | Promise<FlaryToolConnection>;
+  readonly resolveR2?: (
+    source: FlaryR2Source,
     input: { readonly bindings: TBindings; readonly context: FlaryStepContext<TBindings> },
   ) => FlaryToolConnection | Promise<FlaryToolConnection>;
   readonly resolveSandbox?: (

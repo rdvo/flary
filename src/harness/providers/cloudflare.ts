@@ -1,4 +1,7 @@
-import type { JsonObject } from "../contracts/common.js";
+import {
+  JsonObjectSchema,
+  type JsonObject,
+} from "../contracts/common.js";
 import { OpenAICompatibleAdapter } from "./openai-compatible.js";
 import {
   ModelRequestSchema,
@@ -7,6 +10,8 @@ import {
   type ModelRequest,
   type ModelResponse,
   type ModelStreamEvent,
+  type ProviderMessage,
+  type ProviderToolCall,
 } from "./contracts.js";
 import type { ModelAdapter, ProviderRequestOptions } from "./types.js";
 
@@ -84,13 +89,9 @@ export class CloudflareWorkersAIAdapter implements ModelAdapter {
 
   async complete(input: ModelRequest, options: ProviderRequestOptions = {}): Promise<ModelResponse> {
     const request = ModelRequestSchema.parse(input);
+    const responseId = `cf_${crypto.randomUUID()}`;
     const result = await this.binding.run(request.model, {
-      messages: request.messages.map((message) => ({
-        role: message.role,
-        content: typeof message.content === "string"
-          ? message.content
-          : message.content.map((part) => part.type === "text" ? part.text : `[image: ${part.url}]`).join("\n"),
-      })),
+      messages: request.messages.map(toWorkersAIMessage),
       ...(request.maxOutputTokens ? { max_tokens: request.maxOutputTokens } : {}),
       ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
       ...(request.tools ? { tools: request.tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.inputSchema })) } : {}),
@@ -102,12 +103,13 @@ export class CloudflareWorkersAIAdapter implements ModelAdapter {
         ? root.result
         : typeof result === "string" ? result : "";
     const usage = root.usage && typeof root.usage === "object" ? root.usage as Record<string, unknown> : undefined;
+    const toolCalls = readWorkersAIToolCalls(root.tool_calls, responseId);
     return ModelResponseSchema.parse({
-      id: typeof root.id === "string" ? root.id : `cf_${crypto.randomUUID()}`,
+      id: typeof root.id === "string" ? root.id : responseId,
       model: request.model,
       content,
-      toolCalls: [],
-      finishReason: "stop",
+      toolCalls,
+      finishReason: toolCalls.length > 0 ? "tool_call" : "stop",
       provider: "cloudflare",
       ...(usage ? { usage: {
         inputTokens: numeric(usage.prompt_tokens ?? usage.input_tokens),
@@ -124,6 +126,70 @@ export class CloudflareWorkersAIAdapter implements ModelAdapter {
     if (response.usage) yield ProviderStreamEventSchema.parse({ type: "usage", responseId: response.id, usage: response.usage });
     yield ProviderStreamEventSchema.parse({ type: "finish", responseId: response.id, response });
   }
+}
+
+function toWorkersAIMessage(message: ProviderMessage): Record<string, unknown> {
+  const content = typeof message.content === "string"
+    ? message.content
+    : message.content
+      .map((part) => part.type === "text" ? part.text : `[image: ${part.url}]`)
+      .join("\n");
+  return {
+    role: message.role,
+    content,
+    ...(message.name ? { name: message.name } : {}),
+    ...(message.toolCallId ? { tool_call_id: message.toolCallId } : {}),
+    ...(message.toolCalls
+      ? {
+          tool_calls: message.toolCalls.map((call) => ({
+            id: call.id,
+            type: "function",
+            function: {
+              name: call.name,
+              arguments: call.rawArguments ?? JSON.stringify(call.arguments),
+            },
+          })),
+        }
+      : {}),
+  };
+}
+
+function readWorkersAIToolCalls(value: unknown, responseId: string): ProviderToolCall[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate, index) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      return [];
+    }
+    const record = candidate as Record<string, unknown>;
+    const fn = record.function && typeof record.function === "object" && !Array.isArray(record.function)
+      ? record.function as Record<string, unknown>
+      : record;
+    const name = typeof fn.name === "string" ? fn.name : undefined;
+    if (!name) return [];
+    const raw = fn.arguments;
+    let args: JsonObject = {};
+    let rawArguments: string | undefined;
+    if (typeof raw === "string") {
+      rawArguments = raw;
+      try {
+        const parsed = JSON.parse(raw) as unknown;
+        const parsedArguments = JsonObjectSchema.safeParse(parsed);
+        if (parsedArguments.success) args = parsedArguments.data;
+      } catch {
+        args = {};
+      }
+    } else if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      const parsedArguments = JsonObjectSchema.safeParse(raw);
+      if (parsedArguments.success) args = parsedArguments.data;
+      rawArguments = JSON.stringify(raw);
+    }
+    return [{
+      id: typeof record.id === "string" ? record.id : `${responseId}_tool_${index}`,
+      name,
+      arguments: args,
+      ...(rawArguments ? { rawArguments } : {}),
+    }];
+  });
 }
 
 function numeric(value: unknown): number | undefined {

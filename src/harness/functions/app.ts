@@ -86,6 +86,7 @@ import type {
   FlaryMcpSource,
   FlaryOpenApiSource,
   FlaryPromptRequest,
+  FlaryR2Source,
   FlaryRun,
   FlaryRunOptions,
   FlarySandboxSource,
@@ -96,6 +97,7 @@ import type {
   FlaryToolDescriptor,
   FlaryToolSource,
   FlaryWorkspaceSource,
+  FlaryWorkspaceOptions,
   FlaryIdentity,
   FlarySkill,
 } from "./types.js";
@@ -103,6 +105,7 @@ import {
   createFlaryCodemodeExecutor,
   type FlaryCodemodeExecutorOptions,
   type FlaryCodemodeApprovalBridge,
+  type FlaryDurableObjectState,
 } from "./codemode.js";
 import {
   createOpenApiRuntime,
@@ -122,6 +125,7 @@ import { executeToolDescription } from "./tool-guidance.js";
 import { CloudflareSandboxWorkspaceBackend } from "../cloudflare/workspace-execution.js";
 import { parseThreadName } from "../storage/scopes.js";
 import { createCloudflareBrowserConnection } from "./browser.js";
+import { createR2FileConnection } from "./r2.js";
 
 const FUNCTION_STATE = Symbol("flary.function.state");
 const AGENT_STATE = Symbol("flary.agent.state");
@@ -614,8 +618,30 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     return Object.freeze({ kind: "openapi" as const, ...options });
   }
 
-  workspace(options: Record<string, unknown> = {}): FlaryWorkspaceSource {
+  workspace(options: FlaryWorkspaceOptions = {}): FlaryWorkspaceSource {
     return Object.freeze({ kind: "workspace" as const, options: { ...options } });
+  }
+
+  /** Register a tenant-scoped R2 or S3-compatible file source. */
+  r2(
+    options: Omit<FlaryR2Source, "kind"> & { namespace: string },
+  ): FlaryR2Source {
+    assertNamespace(options.namespace);
+    if (!options.binding && !options.connection) {
+      throw new FlaryFunctionError(
+        "r2_connection_missing",
+        `R2 source '${options.namespace}' needs a binding or connection.`,
+        400,
+      );
+    }
+    if (options.prefix !== undefined) {
+      validateR2Prefix(options.prefix);
+    }
+    return Object.freeze({
+      kind: "r2" as const,
+      ...options,
+      access: options.access ?? "read-write",
+    });
   }
 
   sandbox(options: Record<string, unknown> = {}): FlarySandboxSource {
@@ -2016,11 +2042,13 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     const record = isRecord(bindings) ? bindings : undefined;
     const loader = record?.LOADER ?? record?.WORKER_LOADER;
     if (!loader) return undefined;
-    let ctx: { readonly storage: unknown } | undefined;
+    let ctx: FlaryDurableObjectState | undefined;
     try {
       const cloudflare = await import("@flue/runtime/cloudflare");
-      const current = cloudflare.getCloudflareContext();
-      ctx = { storage: current.storage };
+      const current = cloudflare.getCloudflareContext() as ReturnType<
+        typeof cloudflare.getCloudflareContext
+      > & { readonly durableObjectState?: FlaryDurableObjectState };
+      ctx = current.durableObjectState;
     } catch {
       // Local calls do not have a Cloudflare context. They can still use a
       // supplied application code executor, but the default executor stays
@@ -2035,6 +2063,12 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
       resolveWorkspace:
         this.options.resolveWorkspace ??
         (ctx ? defaultWorkspaceResolver(this.options, bindings, ctx.storage) : undefined),
+      resolveR2:
+        this.options.resolveR2 ??
+        (ctx
+          ? async (source, input) =>
+              createR2FileConnection(source, input.bindings, input.context)
+          : undefined),
       resolveSandbox:
         this.options.resolveSandbox ??
         (ctx ? defaultSandboxResolver(this.options, bindings) : undefined),
@@ -2492,7 +2526,8 @@ function describeToolSource(
         : {}),
     };
   }
-  const operation = source.kind === "sandbox" || source.kind === "workspace" ? "write" : "read";
+  const operation = source.kind === "sandbox" || source.kind === "workspace" ||
+    (source.kind === "r2" && source.access !== "read") ? "write" : "read";
   const namespace = "namespace" in source ? source.namespace : name;
   return {
     id: name,
@@ -2506,6 +2541,9 @@ function describeToolSource(
       ? { connection: source.connection }
       : {}),
     ...(source.kind === "openapi" && source.connection
+      ? { connection: source.connection }
+      : {}),
+    ...(source.kind === "r2" && source.connection
       ? { connection: source.connection }
       : {}),
     ...(operation === "write" ? { idempotency: "required" as const } : {}),
@@ -2525,6 +2563,24 @@ function assertNamespace(value: string): void {
     throw new FlaryFunctionError(
       "unsafe_tool_namespace",
       `Tool namespace '${value}' is not safe.`,
+      400,
+    );
+  }
+}
+
+function validateR2Prefix(value: string): void {
+  if (value.length > 1_024 || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new FlaryFunctionError(
+      "r2_prefix_invalid",
+      "An R2 prefix must be a short path without control characters.",
+      400,
+    );
+  }
+  const normalized = value.replace(/^\/+|\/+$/g, "");
+  if (normalized.split("/").some((part) => part === ".." || part === ".")) {
+    throw new FlaryFunctionError(
+      "r2_prefix_invalid",
+      "An R2 prefix cannot contain . or .. path segments.",
       400,
     );
   }
@@ -2793,6 +2849,7 @@ function defaultWorkspaceResolver<TBindings>(
     const storageRecord = isRecord(storage) ? storage : undefined;
     const sql = storageRecord?.sql;
     const options = isRecord(source.options) ? source.options : {};
+    const draft = options.mode === "draft";
     const identity = input.context.identity;
     if (!identity?.tenantId) {
       throw new FlaryFunctionError(
@@ -2837,6 +2894,7 @@ function defaultWorkspaceResolver<TBindings>(
       return createCloudflareWorkspaceConnection(
         workspaceNamespace as never,
         scope,
+        { approveWrites: !draft },
       );
     }
     if (!sql) {
@@ -2876,7 +2934,7 @@ function defaultWorkspaceResolver<TBindings>(
           name,
           description,
           operation,
-          requiresApproval: operation === "write",
+          requiresApproval: operation === "write" && !draft,
           inputSchema: name === "stat"
             ? {
                 type: "object",

@@ -21,7 +21,12 @@ import {
 const LOCK_TTL_MS = 30_000;
 const LOCK_WAIT_MS = 10_000;
 const LOCK_POLL_MS = 100;
-const OAUTH_SECRET_NAMES = ["access_token", "refresh_token"] as const;
+const OAUTH_SECRET_NAMES = [
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "account_id",
+] as const;
 
 type SupportedSubscriptionProvider = "anthropic" | "openai-codex";
 
@@ -201,7 +206,10 @@ class CloudOAuthCredentialStore implements CredentialStore {
     );
     try {
       const current = await this.readUnlocked();
-      const next = await update(current);
+      const updated = await update(current);
+      const next = updated?.type === "oauth"
+        ? preserveCodexCredentialFields(current, updated)
+        : updated;
       if (next) {
         if (next.type !== "oauth") {
           throw new ProviderSubscriptionError(
@@ -262,18 +270,24 @@ class CloudOAuthCredentialStore implements CredentialStore {
     const rows = await loadSecrets(this.env, this.scope);
     const access = rows.find((row) => row.name === "access_token");
     const refresh = rows.find((row) => row.name === "refresh_token");
+    const idToken = rows.find((row) => row.name === "id_token");
+    const accountId = rows.find((row) => row.name === "account_id");
     if (!access || !refresh || !this.env.FLARY_TOKEN_ENCRYPTION_KEY_B64) {
       return undefined;
     }
-    const [accessValue, refreshValue] = await Promise.all([
+    const [accessValue, refreshValue, idTokenValue, accountIdValue] = await Promise.all([
       decryptSecret(this.env, this.scope, access),
       decryptSecret(this.env, this.scope, refresh),
+      idToken ? decryptSecret(this.env, this.scope, idToken) : undefined,
+      accountId ? decryptSecret(this.env, this.scope, accountId) : undefined,
     ]);
     return {
       type: "oauth",
       access: accessValue,
       refresh: refreshValue,
       expires: access.expiresAt?.getTime() ?? 0,
+      ...(idTokenValue ? { idToken: idTokenValue } : {}),
+      ...(accountIdValue ? { accountId: accountIdValue } : {}),
     };
   }
 
@@ -286,6 +300,8 @@ class CloudOAuthCredentialStore implements CredentialStore {
         "Token encryption is not configured",
       );
     }
+    const idToken = credentialString(credential, "idToken");
+    const accountId = credentialString(credential, "accountId");
     await Promise.all([
       saveSecret(this.env, this.scope, {
         name: "access_token",
@@ -297,6 +313,20 @@ class CloudOAuthCredentialStore implements CredentialStore {
         value: credential.refresh,
         expiresAt: null,
       }),
+      ...(idToken
+        ? [saveSecret(this.env, this.scope, {
+            name: "id_token",
+            value: idToken,
+            expiresAt: new Date(credential.expires),
+          })]
+        : []),
+      ...(accountId
+        ? [saveSecret(this.env, this.scope, {
+            name: "account_id",
+            value: accountId,
+            expiresAt: null,
+          })]
+        : []),
     ]);
     await createDb(this.env.DB)
       .update(flaryConnection)
@@ -314,6 +344,31 @@ class CloudOAuthCredentialStore implements CredentialStore {
         ),
       );
   }
+}
+
+/** Keep Codex identity fields when a refresh response omits optional values. */
+export function preserveCodexCredentialFields(
+  current: Credential | undefined,
+  next: Extract<Credential, { type: "oauth" }>,
+): Extract<Credential, { type: "oauth" }> {
+  if (current?.type !== "oauth") return next;
+  const idToken = credentialString(next, "idToken") ??
+    credentialString(current, "idToken");
+  const accountId = credentialString(next, "accountId") ??
+    credentialString(current, "accountId");
+  return {
+    ...next,
+    ...(idToken ? { idToken } : {}),
+    ...(accountId ? { accountId } : {}),
+  };
+}
+
+function credentialString(
+  credential: Extract<Credential, { type: "oauth" }>,
+  key: "idToken" | "accountId",
+): string | undefined {
+  const value = credential[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function parseProvider(value: string): SupportedSubscriptionProvider {

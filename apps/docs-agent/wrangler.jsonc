@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "flary-docs-agent",
+  "account_id": "26fadb0e7fb3b317bc68bd136f7e9329",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "worker_loaders": [
+    {
+      "binding": "LOADER"
+    }
+  ]
+}

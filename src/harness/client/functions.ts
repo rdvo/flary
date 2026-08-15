@@ -11,6 +11,7 @@ import type {
 import type {
   ThreadBinding,
   ThreadCreateRequest,
+  ThreadDeletion,
   ThreadForkRequest,
   ThreadHistoryDiffResponse,
   ThreadHistoryListResponse,
@@ -25,7 +26,9 @@ import type {
 import {
   createFlaryThreadClient,
   type FlaryRealtimeConnection,
+  type FlaryTerminalTicket,
   type FlaryRealtimeSocket,
+  type FlaryThreadClientCreateOptions,
   type FlaryThreadClient,
 } from "./flue.js";
 import type {
@@ -144,7 +147,7 @@ export interface FlaryAgentThreadHandle {
   unarchive(): Promise<ThreadBinding>;
   pin(pinned?: boolean): Promise<ThreadBinding>;
   markRead(throughSequence?: number): Promise<ThreadBinding>;
-  delete(): Promise<void>;
+  delete(): Promise<ThreadDeletion>;
   approvals(): Promise<unknown[]>;
   userInput(): Promise<readonly unknown[]>;
   setGoal(input: {
@@ -204,6 +207,9 @@ export interface FlaryAgentThreadHandle {
     sleep(input: { processId: string; requestId?: string }): Promise<unknown>;
     wake(input: { processId: string; requestId?: string }): Promise<unknown>;
   };
+  readonly terminal: {
+    connect(input?: { cols?: number; rows?: number }): Promise<FlaryTerminalTicket>;
+  };
   readonly browser: {
     status(): Promise<unknown>;
     takeover(): Promise<unknown>;
@@ -225,7 +231,7 @@ type AgentClient<A> = A extends FlaryAgent<any>
   ? {
       readonly threads: {
         create(
-          input: Omit<ThreadCreateRequest, "agentId">,
+          input: Omit<FlaryThreadClientCreateOptions, "agentId">,
         ): Promise<FlaryAgentThreadHandle>;
         list(): Promise<ThreadBinding[]>;
         open(ref: Omit<ThreadRef, "appId" | "agentId">): Promise<FlaryAgentThreadHandle>;
@@ -340,7 +346,7 @@ export const createFlaryFunctionClient = flary;
 function makeAgentThreads(client: FlaryThreadClient, agentName: string) {
   return {
     async create(
-      input: Omit<ThreadCreateRequest, "agentId">,
+      input: Omit<FlaryThreadClientCreateOptions, "agentId">,
     ): Promise<FlaryAgentThreadHandle> {
       const binding = await client.create({ ...input, agentId: agentName });
       return makeAgentThreadHandle(client, binding, agentName);
@@ -446,6 +452,9 @@ function makeAgentThreadHandle(
       resize: (input) => client.process(ref, "resize", input),
       sleep: (input) => client.process(ref, "sleep", input),
       wake: (input) => client.process(ref, "wake", input),
+    },
+    terminal: {
+      connect: (input) => client.terminalTicket(ref, input),
     },
     browser: {
       status: () => client.browser(ref, "status"),

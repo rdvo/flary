@@ -5,6 +5,547 @@
   background-size: min(12vw, 160px) 100%;
 }
 
+.flary-chat {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 80;
+  font-family: "Flary Sans", ui-sans-serif, system-ui, sans-serif;
+}
+
+.flary-chat__launcher {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  min-height: 46px;
+  padding: 7px 15px 7px 9px;
+  color: #fffaf3;
+  cursor: pointer;
+  background: #17130f;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  box-shadow: 0 14px 36px rgba(37, 21, 11, 0.23);
+}
+
+.flary-chat__cat {
+  position: relative;
+  display: block;
+  width: 31px;
+  height: 31px;
+  background: #c9672d;
+  border-radius: 48% 48% 43% 43%;
+}
+
+.flary-chat__cat::before,
+.flary-chat__cat::after {
+  position: absolute;
+  top: -3px;
+  width: 11px;
+  height: 11px;
+  content: "";
+  background: #c9672d;
+  border-radius: 2px;
+  transform: rotate(45deg);
+}
+
+.flary-chat__cat::before { left: 2px; }
+.flary-chat__cat::after { right: 2px; }
+
+.flary-chat__cat i,
+.flary-chat__cat i::before,
+.flary-chat__cat i::after {
+  position: absolute;
+  z-index: 1;
+  content: "";
+}
+
+.flary-chat__cat i {
+  top: 12px;
+  left: 9px;
+  width: 3px;
+  height: 3px;
+  background: #17130f;
+  border-radius: 50%;
+  box-shadow: 10px 0 #17130f;
+}
+
+.flary-chat__cat i::before {
+  top: 7px;
+  left: 4px;
+  width: 6px;
+  height: 3px;
+  border-bottom: 1.5px solid #17130f;
+  border-radius: 50%;
+}
+
+.flary-chat__panel {
+  position: absolute;
+  right: 0;
+  bottom: 58px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(760px, calc(100vw - 28px));
+  height: min(680px, calc(100vh - 110px));
+  overflow: hidden;
+  color: #17130f;
+  background: rgba(255, 252, 246, 0.98);
+  border: 1px solid rgba(45, 33, 22, 0.18);
+  border-radius: 18px;
+  box-shadow: 0 24px 70px rgba(37, 21, 11, 0.25);
+  backdrop-filter: blur(18px);
+}
+
+.flary-chat__panel[hidden] { display: none; }
+
+.flary-chat__panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 62px;
+  padding: 12px 14px 12px 18px;
+  border-bottom: 1px solid rgba(45, 33, 22, 0.12);
+}
+
+.flary-chat__identity { display: grid; gap: 2px; }
+.flary-chat__panel > header strong { font-size: 14px; }
+.flary-chat__panel > header span { color: var(--muted); font-size: 11px; }
+.flary-chat__header-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.flary-chat__panel > header button {
+  min-width: 34px;
+  height: 32px;
+  padding: 0 9px;
+  color: var(--muted);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.flary-chat__panel > header button:hover {
+  color: #17130f;
+  background: rgba(43, 34, 27, 0.045);
+  border-color: rgba(45, 33, 22, 0.1);
+}
+
+.flary-chat__panel > header [data-chat-close] {
+  padding: 0;
+  font-size: 22px;
+}
+
+.flary-chat__body {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  min-height: 0;
+}
+
+.flary-chat__body:has(> .flary-chat__sessions[hidden]) {
+  grid-template-columns: 1fr;
+}
+
+.flary-chat__sessions {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  background: #f4f0e9;
+  border-right: 1px solid rgba(45, 33, 22, 0.11);
+}
+
+.flary-chat__sessions[hidden] { display: none; }
+
+.flary-chat__sessions > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 12px 8px 14px;
+}
+
+.flary-chat__sessions > div:first-child strong {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.flary-chat__sessions > div:first-child button {
+  padding: 5px 7px;
+  color: #6f665e;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid rgba(45, 33, 22, 0.12);
+  border-radius: 7px;
+  font-size: 10px;
+}
+
+.flary-chat__session-list {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-height: 0;
+  padding: 3px 8px 10px;
+  overflow: auto;
+}
+
+.flary-chat__session {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  border: 1px solid transparent;
+  border-radius: 9px;
+}
+
+.flary-chat__session:hover,
+.flary-chat__session:focus-within,
+.flary-chat__session.is-active {
+  background: rgba(255, 253, 249, 0.82);
+  border-color: rgba(45, 33, 22, 0.1);
+}
+
+.flary-chat__session.is-active {
+  box-shadow: inset 2px 0 #c9672d;
+}
+
+.flary-chat__session-open {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px 38px 10px 10px;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.flary-chat__session-open strong {
+  overflow: hidden;
+  color: #29221c;
+  font-size: 11px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flary-chat__session-open span {
+  color: #92877d;
+  font-size: 9px;
+}
+
+.flary-chat__session-actions {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+}
+
+.flary-chat__session:hover .flary-chat__session-actions,
+.flary-chat__session:focus-within .flary-chat__session-actions {
+  opacity: 1;
+}
+
+.flary-chat__session-actions button {
+  width: 25px;
+  height: 25px;
+  overflow: hidden;
+  padding: 0;
+  color: transparent;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font-size: 0;
+}
+
+.flary-chat__session-actions button::before {
+  color: #796f66;
+  font-size: 12px;
+}
+
+.flary-chat__session-actions button:first-child::before { content: "✎"; }
+.flary-chat__session-actions button:last-child::before { content: "×"; font-size: 16px; }
+.flary-chat__session-actions button[data-confirm="true"] { width: auto; padding: 0 6px; color: #9c342b; font-size: 9px; }
+.flary-chat__session-actions button[data-confirm="true"]::before { content: none; }
+.flary-chat__session-actions button:hover { background: rgba(43, 34, 27, 0.07); }
+
+.flary-chat__session-rename {
+  width: calc(100% - 12px);
+  margin: 6px;
+  padding: 7px 8px;
+  border: 1px solid #c9672d;
+  border-radius: 7px;
+  outline: none;
+  font: inherit;
+  font-size: 11px;
+}
+
+.flary-chat__session-empty {
+  margin: 14px 8px;
+  color: #8c8178;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.flary-chat__sessions > p {
+  margin: 0;
+  padding: 12px 14px;
+  color: #8c8178;
+  border-top: 1px solid rgba(45, 33, 22, 0.08);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.flary-chat__conversation {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  min-width: 0;
+  min-height: 0;
+  background: #fffdf9;
+}
+
+.flary-chat__messages {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  min-height: 0;
+  padding: 22px 24px;
+  overflow-y: auto;
+}
+
+.flary-chat__message {
+  max-width: 92%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.flary-chat__message a { color: #8b431f; text-decoration: underline; }
+.flary-chat__message code {
+  padding: 1px 4px;
+  color: #5e351f;
+  background: #f1ebe3;
+  border: 1px solid rgba(45, 33, 22, 0.08);
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+.flary-chat__message--assistant {
+  align-self: flex-start;
+  max-width: 100%;
+  padding-left: 0;
+  background: transparent;
+}
+.flary-chat__message--user {
+  align-self: flex-end;
+  color: #2d241d;
+  background: #f1ebe3;
+  border: 1px solid rgba(45, 33, 22, 0.08);
+}
+
+.flary-chat__turn {
+  display: grid;
+  align-self: stretch;
+  gap: 8px;
+}
+
+.flary-chat__turn > .flary-chat__message {
+  max-width: 92%;
+}
+
+.flary-chat__activity {
+  max-width: 94%;
+  color: #6f665e;
+  font-size: 11px;
+}
+
+.flary-chat__activity > summary,
+.flary-chat__tool > summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 24px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.flary-chat__activity > summary::-webkit-details-marker,
+.flary-chat__tool > summary::-webkit-details-marker {
+  display: none;
+}
+
+.flary-chat__activity > summary::after,
+.flary-chat__tool > summary::after {
+  margin-left: 1px;
+  color: #a89d92;
+  content: "›";
+  font-size: 14px;
+  transform: rotate(90deg);
+  transition: transform 140ms ease;
+}
+
+.flary-chat__activity:not([open]) > summary::after,
+.flary-chat__tool:not([open]) > summary::after {
+  transform: rotate(0deg);
+}
+
+.flary-chat__activity-pulse,
+.flary-chat__tool-state {
+  display: inline-grid;
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+  place-items: center;
+  border: 1px solid #b9afa6;
+  border-radius: 50%;
+}
+
+.flary-chat__activity-pulse.is-running,
+.flary-chat__tool-state.is-running {
+  border-color: #c9672d;
+  border-top-color: transparent;
+  animation: flary-chat-spin 800ms linear infinite;
+}
+
+.flary-chat__activity-pulse.is-done::after,
+.flary-chat__tool-state.is-done::after {
+  width: 5px;
+  height: 3px;
+  content: "";
+  border-bottom: 1.5px solid #6f665e;
+  border-left: 1.5px solid #6f665e;
+  transform: translateY(-1px) rotate(-45deg);
+}
+
+.flary-chat__tool-state.is-error {
+  color: #9c342b;
+  border-color: #c98a84;
+}
+
+.flary-chat__tool-state.is-error::after {
+  content: "!";
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.flary-chat__activity-list {
+  display: grid;
+  gap: 5px;
+  margin: 4px 0 4px 6px;
+  padding: 2px 0 2px 13px;
+  border-left: 1px solid rgba(75, 63, 53, 0.16);
+}
+
+.flary-chat__reasoning {
+  color: #756b62;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.flary-chat__tool {
+  min-width: 0;
+}
+
+.flary-chat__tool pre {
+  max-height: 120px;
+  margin: 4px 0 6px 20px;
+  padding: 8px;
+  overflow: auto;
+  color: #5f554d;
+  background: rgba(43, 34, 27, 0.045);
+  border: 1px solid rgba(75, 63, 53, 0.1);
+  border-radius: 7px;
+  font-size: 9px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.flary-chat__tool-error {
+  margin: 3px 0 5px 20px;
+  color: #9c342b;
+  font-size: 10px;
+}
+
+@keyframes flary-chat-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flary-chat__activity-pulse.is-running,
+  .flary-chat__tool-state.is-running {
+    animation-duration: 1.8s;
+  }
+}
+
+.flary-chat__conversation form {
+  padding: 12px;
+  border-top: 1px solid rgba(45, 33, 22, 0.12);
+}
+
+.flary-chat__conversation form > label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.flary-chat__conversation form > div { display: flex; gap: 8px; align-items: flex-end; }
+.flary-chat__panel textarea {
+  flex: 1;
+  min-height: 44px;
+  max-height: 110px;
+  padding: 10px 11px;
+  resize: vertical;
+  color: #17130f;
+  background: #fffdf9;
+  border: 1px solid rgba(45, 33, 22, 0.2);
+  border-radius: 11px;
+  outline: none;
+}
+
+.flary-chat__panel textarea:focus { border-color: #a8552c; box-shadow: 0 0 0 3px rgba(201, 103, 45, 0.12); }
+.flary-chat__conversation form button {
+  min-height: 42px;
+  padding: 0 14px;
+  color: white;
+  cursor: pointer;
+  background: #17130f;
+  border: 0;
+  border-radius: 10px;
+}
+.flary-chat__conversation form button:disabled { cursor: wait; opacity: 0.55; }
+
+.flary-chat__conversation > footer {
+  padding: 0 13px 11px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.flary-chat__conversation > footer a { color: #8b431f; }
+
+@media (max-width: 700px) {
+  .flary-chat { right: 14px; bottom: 14px; }
+  .flary-chat__panel {
+    bottom: 56px;
+    width: calc(100vw - 28px);
+    height: min(650px, calc(100vh - 86px));
+  }
+  .flary-chat__body { grid-template-columns: 1fr; }
+  .flary-chat__sessions {
+    position: absolute;
+    z-index: 3;
+    inset: 62px 0 0;
+    border-right: 0;
+  }
+  .flary-chat__messages { padding: 18px 16px; }
+}
+
 .docs-body::before {
   inset: -35% -20% auto;
   height: 52rem;

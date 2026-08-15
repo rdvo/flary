@@ -4,6 +4,7 @@ export * from "./app.js";
 export * from "./codemode.js";
 export * from "./mcp.js";
 export * from "./openapi.js";
+export * from "./r2.js";
 export * from "./workflow.js";
 export {
   createModelOperations,

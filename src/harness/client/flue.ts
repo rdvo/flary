@@ -35,6 +35,8 @@ import {
   ThreadRollbackRequestSchema,
   ThreadRestoreRequestSchema,
   ThreadPortableArchiveSchema,
+  ThreadDeletionSchema,
+  type ThreadDeletion,
   UserInputAnswerRequestSchema,
   UserInputRecordSchema,
   ThreadOperationalStateSchema,
@@ -90,6 +92,11 @@ export interface FlaryRealtimeConnection extends AsyncIterable<RealtimeServerFra
   close(code?: number, reason?: string): void;
 }
 
+export interface FlaryTerminalTicket {
+  readonly url: string;
+  readonly expiresAt: string;
+}
+
 export interface FlaryThreadMessageOptions
   extends Omit<ThreadMessageRequest, "message"> {
   message: string;
@@ -97,7 +104,10 @@ export interface FlaryThreadMessageOptions
 
 export interface FlaryThreadClientCreateOptions
   extends Omit<ThreadCreateRequest, "workspace"> {
-  workspace: ThreadCreateRequest["workspace"];
+  /** Advanced callers can pin a workspace. Otherwise the host creates a
+   * tenant-safe blank workspace for this thread. */
+  workspace?: ThreadCreateRequest["workspace"];
+  title?: string;
 }
 
 export interface FlaryRecallSearchOptions {
@@ -191,9 +201,11 @@ export class FlaryThreadClient {
   }
 
   async create(options: FlaryThreadClientCreateOptions): Promise<ThreadBinding> {
-    const body = ThreadCreateRequestSchema.parse(options);
+    const body = { ...options };
     const value = await this.apiJson(
-      `${this.#apiPath}/apps/${encodeURIComponent(body.workspace.appId)}/threads`,
+      `${this.#apiPath}/apps/${encodeURIComponent(
+        body.workspace?.appId ?? body.agentId ?? "flary-thread",
+      )}/threads`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -548,12 +560,42 @@ export class FlaryThreadClient {
     );
   }
 
-  async delete(refInput: ThreadRef): Promise<void> {
+  async delete(refInput: ThreadRef): Promise<ThreadDeletion> {
     const ref = ThreadRefSchema.parse(refInput);
-    await this.apiJson(
+    const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(ref.appId)}/threads/${encodeURIComponent(ref.threadId)}`,
       { method: "DELETE" },
     );
+    return ThreadDeletionSchema.parse(value);
+  }
+
+  async deletion(refInput: ThreadRef, deletionId: string): Promise<ThreadDeletion> {
+    const ref = ThreadRefSchema.parse(refInput);
+    const value = await this.apiJson(
+      `${this.#apiPath}/apps/${encodeURIComponent(ref.appId)}/threads/${encodeURIComponent(ref.threadId)}/deletions/${encodeURIComponent(deletionId)}`,
+    );
+    return ThreadDeletionSchema.parse(value);
+  }
+
+  async terminalTicket(
+    refInput: ThreadRef,
+    input: { readonly cols?: number; readonly rows?: number } = {},
+  ): Promise<FlaryTerminalTicket> {
+    const ref = ThreadRefSchema.parse(refInput);
+    const value = await this.apiJson(
+      `${this.#apiPath}/apps/${encodeURIComponent(ref.appId)}/threads/${encodeURIComponent(ref.threadId)}/terminal-ticket`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(input),
+      },
+    );
+    if (!value || typeof value !== "object" ||
+        typeof (value as { url?: unknown }).url !== "string" ||
+        typeof (value as { expiresAt?: unknown }).expiresAt !== "string") {
+      throw new Error("The terminal service returned an invalid ticket");
+    }
+    return value as FlaryTerminalTicket;
   }
 
   async interrupt(refInput: ThreadRef): Promise<void> {
@@ -674,8 +716,13 @@ export class FlaryThreadClient {
     return this.observe(ref, options);
   }
 
-  history(ref: ThreadRef, options?: FlueConversationHistoryOptions, agentName = ref.agentId) {
-    return this.flue.agents.history(
+  async history(
+    refInput: ThreadRef,
+    options?: FlueConversationHistoryOptions,
+    agentName = refInput.agentId,
+  ) {
+    const ref = ThreadRefSchema.parse(refInput);
+    return this.scopedFlue(ref).agents.history(
       agentName,
       this.id(ref),
       options,
@@ -683,7 +730,7 @@ export class FlaryThreadClient {
   }
 
   observe(ref: ThreadRef, options?: AgentConversationObserveOptions, agentName = ref.agentId) {
-    return this.flue.agents.observe(
+    return this.scopedFlue(ThreadRefSchema.parse(ref)).agents.observe(
       agentName,
       this.id(ref),
       options,
@@ -691,15 +738,29 @@ export class FlaryThreadClient {
   }
 
   abort(ref: ThreadRef, options?: { signal?: AbortSignal }, agentName = ref.agentId) {
-    return this.flue.agents.abort(agentName, this.id(ref), options);
+    return this.scopedFlue(ThreadRefSchema.parse(ref)).agents.abort(
+      agentName,
+      this.id(ref),
+      options,
+    );
   }
 
   attachmentUrl(ref: ThreadRef, attachmentId: string, agentName = ref.agentId): string {
-    return this.flue.agents.attachmentUrl(
+    return this.scopedFlue(ThreadRefSchema.parse(ref)).agents.attachmentUrl(
       agentName,
       this.id(ref),
       attachmentId,
     );
+  }
+
+  private scopedFlue(ref: ThreadRef): FlueClient {
+    const path = `${this.#apiPath}/apps/${encodeURIComponent(ref.appId)}/threads/${encodeURIComponent(ref.threadId)}/flue`;
+    return createFlueClient({
+      baseUrl: joinBaseUrl(this.#baseUrl, path),
+      fetch: this.#request,
+      headers: this.#headers,
+      token: this.#token,
+    });
   }
 
   private async apiJson(path: string, init: RequestInit = {}): Promise<unknown> {

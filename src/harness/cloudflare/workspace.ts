@@ -9,6 +9,7 @@ import type {
 } from "../flue/toolset.js";
 import type { ShellWorkspace } from "../storage/shell-workspace.js";
 import type { WorkspaceToolTarget } from "../tools/workspace.js";
+import { tenantStoragePrefix } from "../storage/scopes.js";
 import { FlaryHistoryProjector } from "../history/index.js";
 import {
   R2ArtifactHistoryStore,
@@ -34,6 +35,95 @@ export interface CloudflareWorkspaceObjectStub {
 export interface CloudflareWorkspaceObjectNamespace {
   idFromName(name: string): CloudflareWorkspaceObjectId;
   get(id: CloudflareWorkspaceObjectId): CloudflareWorkspaceObjectStub;
+}
+
+export interface FlaryWorkspaceSeedInput {
+  readonly requestId: string;
+  readonly files: readonly {
+    readonly path: string;
+    readonly content: string;
+    readonly encoding?: "utf8" | "base64";
+    readonly mediaType?: string;
+    readonly expectedSha256?: string;
+  }[];
+}
+
+export interface FlaryWorkspaceAttachmentImportInput {
+  readonly requestId: string;
+  readonly attachmentId: string;
+  readonly path: string;
+  readonly content: string;
+  readonly encoding?: "utf8" | "base64";
+  readonly mediaType?: string;
+  readonly expectedSha256?: string;
+}
+
+/** Trusted host controls. These methods are not included in agent tool descriptors. */
+export interface FlaryWorkspaceHostControl {
+  read(input: {
+    readonly path: string;
+    readonly encoding?: "utf8" | "base64";
+  }): Promise<unknown>;
+  seed(input: FlaryWorkspaceSeedInput): Promise<{ seeded: true; files: unknown[] }>;
+  checkpoint(input: {
+    readonly requestId: string;
+    readonly id: string;
+    readonly metadata?: Readonly<Record<string, unknown>>;
+  }): Promise<{
+    commit: unknown;
+    reused: boolean;
+    treeHash: string;
+    changedFiles: string[];
+    diffReference: Readonly<Record<string, unknown>>;
+  }>;
+  importAttachment(
+    input: FlaryWorkspaceAttachmentImportInput,
+  ): Promise<{ imported: true; attachmentId: string; file: unknown }>;
+  destroy(input: { readonly requestId: string }): Promise<{ destroyed: true }>;
+}
+
+/** Create the retry-safe, host-only lifecycle API for one workspace. */
+export async function createCloudflareWorkspaceHostControl(
+  namespace: CloudflareWorkspaceObjectNamespace,
+  scopeInput: WorkspaceRef,
+): Promise<FlaryWorkspaceHostControl> {
+  const scope = WorkspaceRefSchema.parse(scopeInput);
+  const stub = namespace.get(
+    namespace.idFromName(await cloudflareWorkspaceObjectName(scope)),
+  );
+  const call = async <T>(method: string, input: unknown): Promise<T> => {
+    const response = await stub.fetch(new Request(
+      `https://flary.internal/workspace/${method}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ scope, input }),
+      },
+    ));
+    const body = await response.json().catch(() => undefined);
+    if (!response.ok || !isRecord(body) || !("output" in body)) {
+      throw new Error(
+        isRecord(body) && isRecord(body.error) && typeof body.error.message === "string"
+          ? body.error.message
+          : "The workspace host operation failed",
+      );
+    }
+    return body.output as T;
+  };
+  return {
+    read: (input) => call("read", input),
+    seed: (input) => call("__seed", input),
+    checkpoint: (input) => call("__checkpoint", {
+      id: input.id,
+      sessionId: scope.workspaceId,
+      metadata: {
+        ...(input.metadata ?? {}),
+        hostRequestId: input.requestId,
+      },
+    }),
+    importAttachment: (input) => call("__attachment_import", input),
+    destroy: (input) => call("__destroy", input),
+  };
 }
 
 export interface CloudflareWorkspaceBindingResolver {
@@ -98,7 +188,10 @@ export function createCloudflareWorkspaceTarget(
 }
 
 export interface FlaryWorkspaceObjectState {
-  readonly storage: { readonly sql: unknown };
+  readonly storage: {
+    readonly sql: unknown;
+    readonly deleteAll?: () => Promise<void>;
+  };
 }
 
 export interface HandleFlaryWorkspaceObjectRequestOptions<TEnv> {
@@ -171,6 +264,7 @@ export async function handleFlaryWorkspaceObjectRequest<TEnv>(
         },
         scope,
         blobs,
+        options.state.storage,
       );
     }
     const output = method.startsWith("git_")
@@ -179,10 +273,11 @@ export async function handleFlaryWorkspaceObjectRequest<TEnv>(
         ? await callWorkspaceControl(
             workspace,
             method,
-            body.input,
-            scope,
-            blobs,
-          )
+          body.input,
+          scope,
+          blobs,
+          options.state.storage,
+        )
         : method === "stat"
           ? await workspace.stat(String(body.input ?? ""))
           : await callWorkspace(workspace, method, body.input);
@@ -243,6 +338,9 @@ const WORKSPACE_METHODS = new Set([
   "__diff",
   "__restore",
   "__fork",
+  "__destroy",
+  "__seed",
+  "__attachment_import",
 ]);
 
 const GIT_METHODS = new Set([
@@ -266,6 +364,7 @@ const GIT_METHODS = new Set([
 export async function createCloudflareWorkspaceConnection(
   namespace: CloudflareWorkspaceObjectNamespace,
   scopeInput: WorkspaceRef,
+  options: { readonly approveWrites?: boolean } = {},
 ) {
   const scope = WorkspaceRefSchema.parse(scopeInput);
   const stub = namespace.get(
@@ -310,7 +409,7 @@ export async function createCloudflareWorkspaceConnection(
         name,
         description,
         operation,
-        requiresApproval: operation === "write",
+        requiresApproval: operation === "write" && options.approveWrites !== false,
         inputSchema: name === "stat"
           ? {
               type: "object",
@@ -432,9 +531,45 @@ async function callWorkspaceControl(
   inputValue: unknown,
   scope: WorkspaceRef,
   blobs: unknown,
+  storage?: { readonly sql?: unknown; readonly deleteAll?: () => Promise<void> },
 ): Promise<unknown> {
-  if (!blobs) throw new Error("Workspace history needs WORKSPACE_BLOBS");
   const input = isRecord(inputValue) ? inputValue : {};
+  if (method === "__seed") {
+    return retrySafeHostOperation(storage?.sql, method, input, async () => {
+      if (!Array.isArray(input.files)) throw new Error("Workspace seed needs files");
+      const files = [];
+      for (const value of input.files) {
+        if (!isRecord(value)) throw new Error("A workspace seed file is invalid");
+        files.push(await workspace.write({
+          path: value.path,
+          content: value.content,
+          encoding: value.encoding,
+          mediaType: value.mediaType,
+          expectedSha256: value.expectedSha256,
+        } as never));
+      }
+      return { seeded: true as const, files };
+    });
+  }
+  if (method === "__attachment_import") {
+    return retrySafeHostOperation(storage?.sql, method, input, async () => {
+      if (typeof input.attachmentId !== "string" || !input.attachmentId) {
+        throw new Error("Attachment import needs attachmentId");
+      }
+      const file = await workspace.write({
+        path: input.path,
+        content: input.content,
+        encoding: input.encoding,
+        mediaType: input.mediaType,
+        expectedSha256: input.expectedSha256,
+      } as never);
+      return {
+        imported: true as const,
+        attachmentId: input.attachmentId,
+        file,
+      };
+    });
+  }
   const repository = typeof input.repository === "string"
     ? input.repository
     : scope.projectId;
@@ -446,6 +581,13 @@ async function callWorkspaceControl(
     sessionId:
       typeof input.sessionId === "string" ? input.sessionId : scope.workspaceId,
   };
+  if (method === "__destroy") {
+    await workspace.delete({ path: "", recursive: true });
+    if (blobs) await deleteR2Prefix(blobs, tenantStoragePrefix(scope));
+    await storage?.deleteAll?.();
+    return { destroyed: true as const };
+  }
+  if (!blobs) throw new Error("Workspace history needs WORKSPACE_BLOBS");
   const store = new R2ArtifactHistoryStore({
     bucket: blobs as ArtifactR2Bucket,
     scope: {
@@ -726,6 +868,98 @@ async function sha256Text(value: string): Promise<string> {
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
+}
+
+async function deleteR2Prefix(bucket: unknown, prefix: string): Promise<void> {
+  if (!isRecord(bucket) || typeof bucket.list !== "function" || typeof bucket.delete !== "function") {
+    return;
+  }
+  let cursor: string | undefined;
+  do {
+    const page = await (bucket.list as (input: {
+      prefix: string;
+      cursor?: string;
+      limit?: number;
+    }) => Promise<{ objects?: Array<{ key?: unknown }>; truncated?: boolean; cursor?: string }>)(
+      { prefix, ...(cursor ? { cursor } : {}), limit: 1000 },
+    );
+    for (const object of page.objects ?? []) {
+      if (typeof object.key === "string") await (bucket.delete as (key: string) => Promise<unknown>)(object.key);
+    }
+    cursor = page.truncated && typeof page.cursor === "string" ? page.cursor : undefined;
+  } while (cursor);
+}
+
+type WorkspaceHostSql = {
+  exec(query: string, ...bindings: unknown[]): { toArray(): unknown[] };
+};
+
+async function retrySafeHostOperation<T>(
+  sqlValue: unknown,
+  operation: string,
+  input: Record<string, unknown>,
+  execute: () => Promise<T>,
+): Promise<T> {
+  const requestId = requireHostRequestId(input);
+  const sql = sqlValue as WorkspaceHostSql | undefined;
+  if (!sql || typeof sql.exec !== "function") {
+    throw new Error("Workspace host operations need Durable Object SQLite");
+  }
+  sql.exec(`CREATE TABLE IF NOT EXISTS flary_workspace_host_operation (
+    request_id TEXT PRIMARY KEY,
+    operation TEXT NOT NULL,
+    input_sha256 TEXT NOT NULL,
+    output_json TEXT,
+    created_at TEXT NOT NULL
+  )`);
+  const inputSha256 = await sha256Text(JSON.stringify(sortJson(input)));
+  const rows = sql.exec(
+    "SELECT operation, input_sha256, output_json FROM flary_workspace_host_operation WHERE request_id = ?",
+    requestId,
+  ).toArray() as Array<{
+    operation: string;
+    input_sha256: string;
+    output_json: string | null;
+  }>;
+  const prior = rows[0];
+  if (prior) {
+    if (prior.operation !== operation || prior.input_sha256 !== inputSha256) {
+      throw new Error("Workspace requestId was reused with different input");
+    }
+    if (prior.output_json !== null) return JSON.parse(prior.output_json) as T;
+  } else {
+    sql.exec(
+      `INSERT INTO flary_workspace_host_operation
+        (request_id, operation, input_sha256, output_json, created_at)
+       VALUES (?, ?, ?, NULL, ?)`,
+      requestId,
+      operation,
+      inputSha256,
+      new Date().toISOString(),
+    );
+  }
+  const output = await execute();
+  sql.exec(
+    "UPDATE flary_workspace_host_operation SET output_json = ? WHERE request_id = ?",
+    JSON.stringify(output),
+    requestId,
+  );
+  return output;
+}
+
+function requireHostRequestId(input: Record<string, unknown>): string {
+  if (typeof input.requestId !== "string" || !input.requestId.trim()) {
+    throw new Error("Workspace host operation needs requestId");
+  }
+  return input.requestId;
+}
+
+function sortJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortJson);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(
+    Object.keys(value).sort().map((key) => [key, sortJson(value[key])]),
+  );
 }
 
 export async function cloudflareWorkspaceObjectName(

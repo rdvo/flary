@@ -42,6 +42,10 @@ export function coreToolGuidance(
       groups.push(
         `${namespace}: navigation, page inspection, input, screenshots, downloads, and session control`
       );
+    } else if (source.kind === "r2") {
+      groups.push(
+        `${namespace}: tenant-scoped R2 file list, stat, glob, grep, read, diff, write, edit, move, and delete`
+      );
     }
   }
   if (groups.length === 0) {

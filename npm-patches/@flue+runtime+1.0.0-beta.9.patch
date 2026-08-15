@@ -512,3 +512,146 @@ index e41ab79..94f8abb 100644
    /** Working directory inside the initialized sandbox. */
    cwd?: string;
    /** Sandbox factory used to construct the initialized environment. */
+diff --git a/node_modules/@flue/runtime/dist/cloudflare/internal.mjs b/node_modules/@flue/runtime/dist/cloudflare/internal.mjs
+index c75dbe4..5615fc0 100644
+--- a/node_modules/@flue/runtime/dist/cloudflare/internal.mjs
++++ b/node_modules/@flue/runtime/dist/cloudflare/internal.mjs
+@@ -325,8 +325,12 @@ const WORKERS_AI_COMPAT = {
+ 	sendSessionAffinityHeaders: true,
+ 	supportsLongCacheRetention: false
+ };
+-function convertTools(tools) {
+-	return tools.map((tool) => ({
++function convertTools(tools, native) {
++	return tools.map((tool) => native ? {
++		name: tool.name,
++		description: tool.description,
++		parameters: tool.parameters
++	} : {
+ 		type: "function",
+ 		function: {
+ 			name: tool.name,
+@@ -334,7 +338,7 @@ function convertTools(tools) {
+ 			parameters: tool.parameters,
+ 			strict: false
+ 		}
+-	}));
++	});
+ }
+ function emptyUsage() {
+ 	return {
+@@ -486,7 +490,7 @@ const streamCloudflareWorkersAi = (model, context, options) => {
+ 				stream: true,
+ 				stream_options: { include_usage: true }
+ 			};
+-			if (context.tools && context.tools.length > 0) payload.tools = convertTools(context.tools);
++			if (context.tools && context.tools.length > 0) payload.tools = convertTools(context.tools, model.id.startsWith("@cf/"));
+ 			if (options?.maxTokens) payload.max_completion_tokens = options.maxTokens;
+ 			if (options?.temperature !== void 0) payload.temperature = options.temperature;
+ 			applyReasoningEffort(payload, model, options?.reasoning);
+@@ -513,6 +517,7 @@ const streamCloudflareWorkersAi = (model, context, options) => {
+ 			let textBlock = null;
+ 			let thinkingBlock = null;
+ 			let hasFinishReason = false;
++			let hasNativeChunk = false;
+ 			const toolCallBlocksByIndex = /* @__PURE__ */ new Map();
+ 			const toolCallBlocksById = /* @__PURE__ */ new Map();
+ 			const blocks = output.content;
+@@ -610,6 +615,41 @@ const streamCloudflareWorkersAi = (model, context, options) => {
+ 				output.responseId ||= chunk.id;
+ 				if (typeof chunk.model === "string" && chunk.model.length > 0 && chunk.model !== model.id) output.responseModel ||= chunk.model;
+ 				if (chunk.usage) output.usage = parseChunkUsage(chunk.usage);
++				if (typeof chunk.response === "string") {
++					hasNativeChunk = true;
++					if (chunk.response.length > 0) {
++						const block = ensureTextBlock();
++						block.text += chunk.response;
++						stream.push({
++							type: "text_delta",
++							contentIndex: indexOf(block),
++							delta: chunk.response,
++							partial: output
++						});
++					}
++				}
++				if (Array.isArray(chunk.tool_calls)) {
++					hasNativeChunk = true;
++					for (const [toolIndex, toolCall] of chunk.tool_calls.entries()) {
++						if (!toolCall || typeof toolCall !== "object") continue;
++						const name = typeof toolCall.name === "string" ? toolCall.name : toolCall.function?.name ?? "";
++						const rawArguments = toolCall.arguments ?? toolCall.function?.arguments ?? {};
++						const argumentText = typeof rawArguments === "string" ? rawArguments : JSON.stringify(rawArguments);
++						const block = ensureToolCallBlock({
++							id: typeof toolCall.id === "string" ? toolCall.id : `cf_tool_${toolIndex}`,
++							index: toolIndex,
++							function: { name }
++						});
++						block.partialArgs = argumentText;
++						block.arguments = parseStreamingJson(argumentText);
++						stream.push({
++							type: "toolcall_delta",
++							contentIndex: indexOf(block),
++							delta: argumentText,
++							partial: output
++						});
++					}
++				}
+ 				const choice = Array.isArray(chunk.choices) ? chunk.choices[0] : void 0;
+ 				if (!choice) continue;
+ 				if (!chunk.usage && choice.usage) output.usage = parseChunkUsage(choice.usage);
+@@ -666,7 +706,8 @@ const streamCloudflareWorkersAi = (model, context, options) => {
+ 			for (const block of blocks) finishBlock(block);
+ 			if (options?.signal?.aborted) throw new Error("Request was aborted");
+ 			if (output.stopReason === "error") throw new Error(output.errorMessage ?? "Provider returned an error stop reason");
+-			if (!hasFinishReason) throw new Error("Stream ended without finish_reason");
++			if (!hasFinishReason && !hasNativeChunk) throw new Error("Stream ended without finish_reason");
++			if (!hasFinishReason) output.stopReason = toolCallBlocksByIndex.size > 0 ? "toolUse" : "stop";
+ 			stream.push({
+ 				type: "done",
+ 				reason: output.stopReason,
+diff --git a/node_modules/@flue/runtime/dist/providers-DHepWsgE.d.mts b/node_modules/@flue/runtime/dist/providers-DHepWsgE.d.mts
+--- a/node_modules/@flue/runtime/dist/providers-DHepWsgE.d.mts
++++ b/node_modules/@flue/runtime/dist/providers-DHepWsgE.d.mts
+@@ -79,6 +79,11 @@ interface HttpProviderRegistration {
+    * registration's values win on conflict.
+    */
+   headers?: Record<string, string>;
++  /**
++   * Wire-compatibility overrides for OpenAI-compatible gateways and proxies.
++   * These values are merged over the catalog model compatibility settings.
++   */
++  compat?: Model<Api>["compat"];
+   /**
+    * Default `contextWindow` (in tokens) for every model resolved through
+    * this registration. Overridden per-model via {@link models}. Unset falls
+@@ -101,6 +106,7 @@ interface HttpProviderRegistration {
+   models?: Record<string, {
+     contextWindow?: number;
+     maxTokens?: number;
++    compat?: Model<Api>["compat"];
+   }>;
+   /**
+    * Sends `store: true` for OpenAI Responses API providers. Only enable when
+diff --git a/node_modules/@flue/runtime/dist/providers-CsCcTxMU.mjs b/node_modules/@flue/runtime/dist/providers-CsCcTxMU.mjs
+--- a/node_modules/@flue/runtime/dist/providers-CsCcTxMU.mjs
++++ b/node_modules/@flue/runtime/dist/providers-CsCcTxMU.mjs
+@@ -164,6 +164,11 @@ function buildModelFromRegistration(providerId, registration, modelId) {
+ 		...base.headers,
+ 		...registration.headers
+ 	} : void 0;
++	const compatibilityOverride = registration.models?.[modelId]?.compat ?? registration.compat;
++	const compat = base.compat || compatibilityOverride ? {
++		...base.compat,
++		...compatibilityOverride
++	} : void 0;
+ 	return {
+ 		...base,
+ 		api,
+@@ -171,6 +176,7 @@ function buildModelFromRegistration(providerId, registration, modelId) {
+ 		provider: providerId,
+ 		baseUrl,
+ 		headers,
++		compat,
+ 		contextWindow: registration.models?.[modelId]?.contextWindow ?? registration.contextWindow ?? base.contextWindow,
+ 		maxTokens: registration.models?.[modelId]?.maxTokens ?? registration.maxTokens ?? base.maxTokens
+ 	};

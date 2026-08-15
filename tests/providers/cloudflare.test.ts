@@ -76,6 +76,73 @@ test("Cloudflare Workers AI adapter uses the binding without a provider key", as
   assert.equal(response.provider, "cloudflare");
 });
 
+test("Cloudflare Workers AI adapter preserves tool calls and their round trip", async () => {
+  const calls: Record<string, unknown>[] = [];
+  const adapter = new CloudflareWorkersAIAdapter({
+    async run(_model, input) {
+      calls.push(input);
+      return {
+        response: "",
+        tool_calls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: {
+              name: "execute",
+              arguments: '{"code":"return tools.search(\\"threads\\")"}',
+            },
+          },
+        ],
+      };
+    },
+  });
+
+  const response = await adapter.complete({
+    ...request,
+    tools: [{
+      name: "execute",
+      description: "Use the lazy Flary tool catalog.",
+      inputSchema: {
+        type: "object",
+        properties: { code: { type: "string" } },
+        required: ["code"],
+      },
+    }],
+  });
+  assert.equal(response.finishReason, "tool_call");
+  assert.deepEqual(response.toolCalls, [{
+    id: "call_1",
+    name: "execute",
+    arguments: { code: 'return tools.search("threads")' },
+    rawArguments: '{"code":"return tools.search(\\"threads\\")"}',
+  }]);
+
+  await adapter.complete({
+    ...request,
+    messages: [
+      request.messages[0]!,
+      { role: "assistant", content: "", toolCalls: response.toolCalls },
+      { role: "tool", content: '{"items":[]}', toolCallId: "call_1" },
+    ],
+  });
+  assert.deepEqual(calls[1]?.messages, [
+    { role: "user", content: "Say hello." },
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [{
+        id: "call_1",
+        type: "function",
+        function: {
+          name: "execute",
+          arguments: '{"code":"return tools.search(\\"threads\\")"}',
+        },
+      }],
+    },
+    { role: "tool", content: '{"items":[]}', tool_call_id: "call_1" },
+  ]);
+});
+
 test("Cloudflare AI Gateway adapter validates account IDs", () => {
   assert.throws(
     () =>

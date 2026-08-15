@@ -226,3 +226,24 @@ test("durable subagents use their own provider and the root runtime binding", as
     model: "gpt-5.6-sol",
   });
 });
+
+test("interactive agents prepare trusted thread providers before model resolution", async () => {
+  const prepared: string[] = [];
+  const app = flary({
+    model: "runtime-alias/model",
+    prepareThreadRuntime({ runId }) {
+      prepared.push(runId);
+    },
+  });
+  const agent = app.agent({
+    name: "coder",
+    instructions: "Use the prepared provider.",
+  });
+  const runtime = defineFlaryInteractiveAgent(agent) as unknown as {
+    initialize(input: { env: object; id: string }): Promise<{ model: string }>;
+  };
+
+  const result = await runtime.initialize({ env: {}, id: "tenant:app:coder:thread_1" });
+  assert.deepEqual(prepared, ["tenant:app:coder:thread_1"]);
+  assert.equal(result.model, "runtime-alias/model");
+});

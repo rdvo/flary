@@ -1,6 +1,8 @@
 import {
   ThreadBindingSchema,
   type ThreadBinding,
+  ThreadDeletionSchema,
+  type ThreadDeletion,
 } from "../contracts/index.js";
 
 interface D1Statement {
@@ -35,6 +37,22 @@ export class D1ThreadCatalog {
         binding_json TEXT NOT NULL,
         PRIMARY KEY (tenant_id, application_id, thread_id)
       );
+    `).run();
+    await this.#database.prepare(`
+      CREATE TABLE IF NOT EXISTS flary_thread_deletions (
+        deletion_id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        application_id TEXT NOT NULL,
+        thread_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        accepted_at TEXT NOT NULL,
+        completed_at TEXT,
+        error_code TEXT
+      )
+    `).run();
+    await this.#database.prepare(`
+      CREATE INDEX IF NOT EXISTS flary_thread_deletions_owner
+      ON flary_thread_deletions (tenant_id, application_id, accepted_at DESC)
     `).run();
     await this.#database.prepare(`
       CREATE INDEX IF NOT EXISTS flary_thread_catalog_list
@@ -99,5 +117,73 @@ export class D1ThreadCatalog {
       `DELETE FROM flary_thread_catalog
        WHERE tenant_id = ? AND application_id = ? AND thread_id = ?`,
     ).bind(input.tenantId, input.applicationId, input.threadId).run();
+  }
+
+  async putDeletion(input: ThreadDeletion & {
+    readonly tenantId: string;
+    readonly applicationId: string;
+  }): Promise<ThreadDeletion> {
+    // The tenant and application fields are storage routing data, not part of
+    // the public deletion contract. Parse only the strict public shape so a
+    // D1 write cannot reject an otherwise valid deletion acknowledgement.
+    const deletion = ThreadDeletionSchema.parse({
+      id: input.id,
+      threadId: input.threadId,
+      status: input.status,
+      acceptedAt: input.acceptedAt,
+      ...(input.completedAt === undefined ? {} : { completedAt: input.completedAt }),
+      ...(input.errorCode === undefined ? {} : { errorCode: input.errorCode }),
+    });
+    await this.initialize();
+    await this.#database.prepare(
+      `INSERT INTO flary_thread_deletions
+        (deletion_id, tenant_id, application_id, thread_id, status,
+         accepted_at, completed_at, error_code)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(deletion_id) DO UPDATE SET
+         status = excluded.status,
+         completed_at = excluded.completed_at,
+         error_code = excluded.error_code`,
+    ).bind(
+      deletion.id,
+      input.tenantId,
+      input.applicationId,
+      deletion.threadId,
+      deletion.status,
+      deletion.acceptedAt,
+      deletion.completedAt ?? null,
+      deletion.errorCode ?? null,
+    ).run();
+    return deletion;
+  }
+
+  async getDeletion(input: {
+    readonly tenantId: string;
+    readonly applicationId: string;
+    readonly deletionId: string;
+  }): Promise<ThreadDeletion | undefined> {
+    await this.initialize();
+    const row = await this.#database.prepare(
+      `SELECT deletion_id, thread_id, status, accepted_at, completed_at, error_code
+       FROM flary_thread_deletions
+       WHERE tenant_id = ? AND application_id = ? AND deletion_id = ?`,
+    ).bind(input.tenantId, input.applicationId, input.deletionId)
+      .first<{
+        deletion_id: string;
+        thread_id: string;
+        status: string;
+        accepted_at: string;
+        completed_at: string | null;
+        error_code: string | null;
+      }>();
+    if (!row) return undefined;
+    return ThreadDeletionSchema.parse({
+      id: row.deletion_id,
+      threadId: row.thread_id,
+      status: row.status,
+      acceptedAt: row.accepted_at,
+      ...(row.completed_at ? { completedAt: row.completed_at } : {}),
+      ...(row.error_code ? { errorCode: row.error_code } : {}),
+    });
   }
 }

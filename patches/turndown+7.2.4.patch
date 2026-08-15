@@ -1,0 +1,18 @@
+diff --git a/lib/turndown.es.js b/lib/turndown.es.js
+index 3124e55..60fd2b1 100644
+--- a/lib/turndown.es.js
++++ b/lib/turndown.es.js
+@@ -1,3 +1,5 @@
++import * as domino from '@mixmark-io/domino';
++
+ function extend(destination) {
+   for (var i = 1; i < arguments.length; i++) {
+     var source = arguments[i];
+@@ -463,7 +465,6 @@ function canParseHTMLNatively() {
+ function createHTMLParser() {
+   var Parser = function () {};
+   {
+-    var domino = require('@mixmark-io/domino');
+     Parser.prototype.parseFromString = function (string) {
+       return domino.createDocument(string);
+     };

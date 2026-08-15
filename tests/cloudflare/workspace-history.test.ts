@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   createCloudflareWorkspaceConnection,
+  createCloudflareWorkspaceHostControl,
 } from "../../src/harness/cloudflare/workspace.ts";
 
 test("generated workspace connections share one durable object and expose Git", async () => {
@@ -55,4 +56,76 @@ test("generated workspace connections share one durable object and expose Git", 
   await child.call("read", { path: "src/index.ts" });
   assert.equal(calls[0]?.name, calls[1]?.name);
   assert.equal(calls[0]?.body.scope.workspaceId, "workspace");
+});
+
+test("draft workspace writes stay writes without approval", async () => {
+  const namespace = {
+    idFromName(name: string) { return name; },
+    get() {
+      return { fetch: async () => Response.json({ output: { ok: true } }) };
+    },
+  };
+  const scope = {
+    organizationId: "tenant",
+    appId: "coder",
+    projectId: "repo",
+    workspaceId: "draft",
+    branch: "main",
+  };
+  const draft = await createCloudflareWorkspaceConnection(namespace, scope, {
+    approveWrites: false,
+  });
+  const write = draft.descriptors.find((tool) => tool.name === "write");
+  assert.equal(write?.operation, "write");
+  assert.equal(write?.requiresApproval, false);
+});
+
+test("workspace lifecycle controls stay on the trusted host boundary", async () => {
+  const calls: Array<{ method: string; input: unknown }> = [];
+  const namespace = {
+    idFromName(name: string) { return name; },
+    get() {
+      return {
+        async fetch(request: Request) {
+          const body = await request.json() as { input: unknown };
+          calls.push({
+            method: new URL(request.url).pathname.split("/").at(-1) ?? "",
+            input: body.input,
+          });
+          return Response.json({ output: { seeded: true, files: [] } });
+        },
+      };
+    },
+  };
+  const scope = {
+    organizationId: "tenant",
+    appId: "coder",
+    projectId: "repo",
+    workspaceId: "draft",
+    branch: "main",
+  };
+  const host = await createCloudflareWorkspaceHostControl(namespace, scope);
+  await host.seed({
+    requestId: "seed_1",
+    files: [{ path: "README.md", content: "hello" }],
+  });
+  await host.read({ path: "README.md", encoding: "base64" });
+  await host.checkpoint({
+    requestId: "checkpoint_1",
+    id: "baseline_1",
+    metadata: { kind: "test" },
+  });
+  assert.equal(calls[0]?.method, "__seed");
+  assert.deepEqual(calls[1], {
+    method: "read",
+    input: { path: "README.md", encoding: "base64" },
+  });
+  assert.equal(calls[2]?.method, "__checkpoint");
+  assert.deepEqual(calls[2]?.input, {
+    id: "baseline_1",
+    sessionId: "draft",
+    metadata: { kind: "test", hostRequestId: "checkpoint_1" },
+  });
+  const tools = await createCloudflareWorkspaceConnection(namespace, scope);
+  assert.equal(tools.descriptors.some((tool) => tool.name.startsWith("__")), false);
 });

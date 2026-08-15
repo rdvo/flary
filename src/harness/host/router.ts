@@ -328,7 +328,34 @@ export function createFlaryHostRouter<TBindings extends object>(
       context.env,
       context.req.param("appId"),
     );
-    const input = ThreadCreateRequestSchema.parse(await context.req.json());
+    const raw = await context.req.json() as Record<string, unknown>;
+    const agentId = typeof raw.agentId === "string" ? raw.agentId : "flary-thread";
+    const threadId = typeof raw.threadId === "string"
+      ? raw.threadId
+      : `thread_${crypto.randomUUID().replaceAll("-", "")}`;
+    const title = typeof raw.title === "string"
+      ? raw.title.trim().replace(/\s+/g, " ").slice(0, 200)
+      : undefined;
+    const metadata = raw.metadata && typeof raw.metadata === "object" && !Array.isArray(raw.metadata)
+      ? { ...(raw.metadata as Record<string, unknown>) }
+      : {};
+    if (title) metadata.title = title;
+    const { title: _title, ...requestBody } = raw;
+    const input = ThreadCreateRequestSchema.parse({
+      ...requestBody,
+      agentId,
+      threadId,
+      ...(raw.workspace ? {} : {
+        workspace: {
+          organizationId: scope.authorization.organizationId,
+          appId: scope.appId,
+          projectId: agentId,
+          workspaceId: threadId,
+          branch: "main",
+        },
+      }),
+      ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
+    });
     assertWorkspaceScope(scope, input.workspace);
     const binding = await serviceFor(context.env).create(scope, input);
     return context.json({ binding }, 201);
@@ -404,8 +431,20 @@ export function createFlaryHostRouter<TBindings extends object>(
     );
     const service = serviceFor(context.env);
     if (!service.delete) throw featureUnavailable("Thread deletion");
-    await service.delete(target);
-    return context.json({ ok: true });
+    const deletion = await service.delete(target);
+    return context.json(deletion, 202);
+  });
+
+  router.get("/apps/:appId/threads/:threadId/deletions/:deletionId", async (context) => {
+    const target = await targetFor(
+      context.req.raw,
+      context.env,
+      context.req.param("appId"),
+      context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.deletion) throw featureUnavailable("Thread deletion status");
+    return context.json(await service.deletion(target, context.req.param("deletionId")));
   });
 
   router.post("/apps/:appId/threads/:threadId/fork", async (context) => {
@@ -433,6 +472,43 @@ export function createFlaryHostRouter<TBindings extends object>(
     return context.json(RealtimeTicketResponseSchema.parse(
       await service.realtimeTicket(target, input, context.req.url),
     ));
+  });
+
+  router.post("/apps/:appId/threads/:threadId/terminal-ticket", async (context) => {
+    const target = await targetFor(
+      context.req.raw,
+      context.env,
+      context.req.param("appId"),
+      context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.terminalTicket) throw featureUnavailable("Sandbox terminal");
+    const input = await context.req.json().catch(() => ({}));
+    const value = await service.terminalTicket(
+      target,
+      input && typeof input === "object" && !Array.isArray(input)
+        ? input as { cols?: number; rows?: number }
+        : {},
+      context.req.url,
+    );
+    return context.json(value);
+  });
+
+  router.get("/apps/:appId/threads/:threadId/terminal", async (context) => {
+    const target = await targetFor(
+      context.req.raw,
+      context.env,
+      context.req.param("appId"),
+      context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.terminalConnect) throw featureUnavailable("Sandbox terminal");
+    const ticket = context.req.query("ticket");
+    if (!ticket) throw new FlaryHostError(401, "terminal_ticket_required", "A terminal ticket is required");
+    if (context.req.header("upgrade")?.toLowerCase() !== "websocket") {
+      throw new FlaryHostError(426, "websocket_required", "A WebSocket upgrade is required");
+    }
+    return service.terminalConnect(target, ticket, context.req.raw);
   });
 
   router.get("/apps/:appId/threads/:threadId/processes", async (context) => {
@@ -589,6 +665,104 @@ export function createFlaryHostRouter<TBindings extends object>(
       await serviceFor(context.env).submit(target, input),
     );
     return context.json(admission, 202);
+  });
+
+  router.get("/apps/:appId/threads/:threadId/conversation", async (context) => {
+    const target = await targetFor(
+      context.req.raw,
+      context.env,
+      context.req.param("appId"),
+      context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    const view = context.req.query("view") ?? "history";
+    if (view === "updates") {
+      if (!service.conversationUpdates) {
+        throw featureUnavailable("Live thread conversation updates");
+      }
+      const offset = context.req.query("offset") ?? "-1";
+      if (offset !== "-1" && !/^\d+_\d+$/.test(offset)) {
+        throw new FlaryHostError(400, "invalid_offset", "The conversation cursor is invalid");
+      }
+      const live = context.req.query("live") ?? "long-poll";
+      if (live !== "long-poll" && live !== "sse") {
+        throw new FlaryHostError(400, "invalid_live_mode", "Use long-poll or sse for live conversation updates");
+      }
+      return service.conversationUpdates(target, {
+        offset,
+        live,
+        signal: context.req.raw.signal,
+      });
+    }
+    if (view !== "history") {
+      throw new FlaryHostError(400, "invalid_conversation_view", "Use history or updates for the conversation view");
+    }
+    if (!service.conversation) {
+      throw featureUnavailable("Thread conversation history");
+    }
+    return context.json({ conversation: await service.conversation(target) });
+  });
+
+  // Keep the Flue wire protocol behind the tenant-authorized thread target.
+  // The agent and instance path segments are protocol compatibility fields;
+  // the service resolves the canonical IDs from the authorized thread.
+  router.get("/apps/:appId/threads/:threadId/flue/agents/:agentName/:instanceId", async (context) => {
+    const target = await targetFor(
+      context.req.raw,
+      context.env,
+      context.req.param("appId"),
+      context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    const view = context.req.query("view") ?? "history";
+    if (view === "history") {
+      if (!service.conversation) throw featureUnavailable("Thread conversation history");
+      return context.json(await service.conversation(target));
+    }
+    if (view !== "updates") {
+      throw new FlaryHostError(400, "invalid_conversation_view", "Use history or updates for the conversation view");
+    }
+    if (!service.conversationUpdates) throw featureUnavailable("Live thread conversation updates");
+    const offset = context.req.query("offset") ?? "-1";
+    const live = context.req.query("live") ?? "long-poll";
+    if (offset !== "-1" && !/^\d+_\d+$/.test(offset)) {
+      throw new FlaryHostError(400, "invalid_offset", "The conversation cursor is invalid");
+    }
+    if (live !== "long-poll" && live !== "sse") {
+      throw new FlaryHostError(400, "invalid_live_mode", "Use long-poll or sse for live conversation updates");
+    }
+    return service.conversationUpdates(target, {
+      offset,
+      live,
+      signal: context.req.raw.signal,
+    });
+  });
+
+  router.post("/apps/:appId/threads/:threadId/flue/agents/:agentName/:instanceId/abort", async (context) => {
+    const target = await targetFor(
+      context.req.raw,
+      context.env,
+      context.req.param("appId"),
+      context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.interrupt) throw featureUnavailable("Thread interruption");
+    await service.interrupt(target);
+    return context.json({ aborted: true }, 202);
+  });
+
+  router.get("/apps/:appId/threads/:threadId/flue/agents/:agentName/:instanceId/attachments/:attachmentId", async (context) => {
+    const target = await targetFor(
+      context.req.raw,
+      context.env,
+      context.req.param("appId"),
+      context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.attachment) throw featureUnavailable("Thread attachments");
+    return service.attachment(target, context.req.param("attachmentId"), {
+      signal: context.req.raw.signal,
+    });
   });
 
   router.post("/apps/:appId/threads/:threadId/messages/edit", async (context) => {

@@ -123,6 +123,8 @@ export function normalizeModelInput(input: ModelInput): ModelSelection {
 export const ResolvedModelPinSchema = z
   .object({
     selection: ModelSelectionSchema,
+    /** Secret-free, thread-unique provider alias used only for runtime dispatch. */
+    runtimeSelection: ModelSelectionSchema.optional(),
     provider: IdentifierSchema,
     model: IdentifierSchema,
     deployment: IdentifierSchema.optional(),

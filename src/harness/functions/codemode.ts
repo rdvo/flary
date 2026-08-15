@@ -21,6 +21,7 @@ import type {
   FlaryMcpSource,
   FlaryOpenApiRuntime,
   FlaryOpenApiSource,
+  FlaryR2Source,
   FlarySandboxSource,
   FlaryStepContext,
   FlaryToolConnection,
@@ -34,6 +35,8 @@ import { createMcpConnection } from "./mcp.js";
 import { createOpenApiRuntime } from "./openapi.js";
 import { getFunctionState } from "./app.js";
 import { parseThreadName } from "../storage/scopes.js";
+import { normalizeFlaryCatalogCalls } from "./code-syntax.js";
+import { createR2FileConnection } from "./r2.js";
 
 /** Structural type so the public package does not import Cloudflare-only modules. */
 export interface FlaryDurableObjectState {
@@ -78,6 +81,10 @@ export interface FlaryCodemodeExecutorOptions<TBindings = unknown> {
   ) => FlaryOpenApiRuntime | Promise<FlaryOpenApiRuntime>;
   readonly resolveWorkspace?: (
     source: FlaryWorkspaceSource,
+    input: { readonly bindings: TBindings; readonly context: FlaryStepContext<TBindings> },
+  ) => FlaryToolConnection | Promise<FlaryToolConnection>;
+  readonly resolveR2?: (
+    source: FlaryR2Source,
     input: { readonly bindings: TBindings; readonly context: FlaryStepContext<TBindings> },
   ) => FlaryToolConnection | Promise<FlaryToolConnection>;
   readonly resolveSandbox?: (
@@ -182,11 +189,12 @@ class FlaryCodemodeExecutor<TBindings> implements CodeExecutor<TBindings> {
     if (!ctx) {
       const hasExternal = input.tools.names.some((name) => {
         const source = input.tools.entries[name]!;
-        return typeof source !== "function" && (source.kind === "mcp" || source.kind === "openapi");
+        return typeof source !== "function" &&
+          (source.kind === "mcp" || source.kind === "openapi" || source.kind === "r2");
       });
       if (extra.length > 0 || hasExternal) {
         throw new FlaryCodeExecutionError(
-          "MCP and OpenAPI connectors need a Durable Object state for host execution.",
+          "External Flary connectors need a Durable Object state for host execution.",
         );
       }
       const result = await executor.execute(input.code, [
@@ -227,7 +235,9 @@ class FlaryCodemodeExecutor<TBindings> implements CodeExecutor<TBindings> {
         ? { transformResult: this.options.redactResult }
         : {}),
     });
-    const result = await runtime.execute({ code: input.code });
+    const result = await runtime.execute({
+      code: normalizeFlaryCatalogCalls(input.code),
+    });
     if (result.status === "completed") return this.boundResult(result.result);
     if (result.status === "paused") {
       throw new FlaryCodeExecutionError(
@@ -498,8 +508,22 @@ async function createLocalConnector<TBindings>(
         ),
         ...(await sourceDescriptors(sourceConnectors)),
       ];
-      const needsApproval = descriptors.some((item) => item.requiresApproval);
       const sourceTargets = await sourceTargetMap(sourceConnectors);
+      const requiresApproval = (args: unknown): boolean => {
+        const calls = Array.isArray(args)
+          ? args
+          : Array.isArray((args as { calls?: unknown } | null)?.calls)
+            ? (args as { calls: unknown[] }).calls
+            : [args];
+        return calls.some((call) => {
+          const normalized = normalizeCall(call);
+          const id = normalized && typeof normalized === "object"
+            ? (normalized as { id?: unknown }).id
+            : undefined;
+          return typeof id === "string" &&
+            descriptors.some((item) => item.id === id && item.requiresApproval);
+        });
+      };
       return {
         search: {
           description: "Find tools by intent. Schemas are not loaded until describe is called.",
@@ -561,9 +585,9 @@ async function createLocalConnector<TBindings>(
             required: ["id", "input"],
             additionalProperties: false,
           },
-          // A mixed registry is conservative: Codemode pauses before the
-          // call, while read-only registries run without an approval pause.
-          ...(needsApproval ? { requiresApproval: true } : {}),
+          // The selected catalog item, not another item in the lazy catalog,
+          // decides if this call pauses.
+          requiresApproval,
           execute: async (args) =>
             invokeCatalogTool(
               input.tools,
@@ -581,7 +605,7 @@ async function createLocalConnector<TBindings>(
             required: ["calls"],
             additionalProperties: false,
           },
-          ...(needsApproval ? { requiresApproval: true } : {}),
+          requiresApproval,
           execute: async (args) => {
             const calls = Array.isArray(args)
               ? args
@@ -719,6 +743,22 @@ async function createSourceConnectors<TBindings>(
         options.env,
         name,
         workspace,
+      ));
+    }
+    if (source.kind === "r2" && (options.resolveR2 || source.binding || source.connection)) {
+      const r2Source = source;
+      const connection = options.resolveR2
+        ? await options.resolveR2(r2Source, {
+            bindings: input.bindings,
+            context: input.context,
+          })
+        : await createR2FileConnection(r2Source, input.bindings, input.context);
+      connectors.push(createHostToolConnector(
+        codemode,
+        ctx,
+        options.env,
+        name,
+        connection,
       ));
     }
     if (source.kind === "sandbox" && options.resolveSandbox) {
@@ -914,11 +954,16 @@ function describeRegistry(registry: FlaryToolRegistry): RegistryDescriptor[] {
       id: namespace,
       name: namespace,
       description: `${source.kind} tools`,
-      operation: source.kind === "sandbox" || source.kind === "workspace" || source.kind === "browser" ? "write" : "read",
+        operation:
+          source.kind === "sandbox" || source.kind === "workspace" || source.kind === "browser" ||
+          (source.kind === "r2" && source.access !== "read")
+            ? "write"
+            : "read",
       requiresApproval: source.kind !== "mcp",
       tags: [source.kind],
       capabilities: [],
-      ...(source.kind === "workspace" || source.kind === "sandbox" || source.kind === "browser"
+      ...(source.kind === "workspace" || source.kind === "sandbox" || source.kind === "browser" ||
+      (source.kind === "r2" && source.access !== "read")
         ? { idempotency: "required" as const }
         : {}),
     };

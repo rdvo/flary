@@ -14,6 +14,7 @@ import {
 } from "../docs";
 import "../docs.css";
 import SiteLayout from "./SiteLayout.astro";
+import DocsChat from "../components/DocsChat.astro";
 import packageManifest from "../../../../package.json";
 
 interface Heading {
@@ -233,6 +234,7 @@ function navigationGroups(): Array<{
         Report an issue <ArrowUpRight size={12} strokeWidth={1.7} />
       </a>
     </footer>
+    <DocsChat />
   </div>
 
   <script>

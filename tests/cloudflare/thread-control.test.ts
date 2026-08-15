@@ -129,6 +129,71 @@ test("generated Thread Control keeps ownership and append-only controls", async 
   );
 });
 
+test("thread deletion is idempotent and blocks new work", async () => {
+  const controls = namespace();
+  const service = createCloudflareThreadService({ env: {}, namespace: controls });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_delete",
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  await service.create(scope, {
+    threadId: "thread_delete",
+    agentId: "coder",
+    workspace: {
+      organizationId: "tenant_delete",
+      appId: "coder",
+      projectId: "project",
+      workspaceId: "workspace",
+      branch: "main",
+    },
+    mode: "build",
+  });
+  const storage = controls.stores.get(
+    "thread:tenant_delete:coder:thread_delete",
+  )!;
+  const send = (body: Record<string, unknown>) =>
+    handleFlaryThreadControlObjectRequest({
+      storage,
+      request: new Request("https://flary.internal/control", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    });
+  const first = await send({
+    method: "beginDelete",
+    tenantId: "tenant_delete",
+    applicationId: "coder",
+    deletionId: "delete_1",
+    acceptedAt: "2026-08-06T00:00:00.000Z",
+  });
+  const firstValue = await first.json() as { deletion: { id: string; status: string } };
+  assert.equal(firstValue.deletion.id, "delete_1");
+  assert.equal(firstValue.deletion.status, "accepted");
+
+  const replay = await send({
+    method: "beginDelete",
+    tenantId: "tenant_delete",
+    applicationId: "coder",
+    deletionId: "delete_2",
+    acceptedAt: "2026-08-06T00:01:00.000Z",
+  });
+  const replayValue = await replay.json() as { deletion: { id: string } };
+  assert.equal(replayValue.deletion.id, "delete_1");
+
+  const blocked = await send({
+    method: "record",
+    tenantId: "tenant_delete",
+    applicationId: "coder",
+    recordType: "message.user",
+    payload: { text: "must not be appended" },
+  });
+  assert.equal(blocked.ok, false);
+});
+
 test("thread model selection is durable, exact, and auditable", async () => {
   const service = createCloudflareThreadService({
     env: {},
@@ -199,6 +264,108 @@ test("thread model selection is durable, exact, and auditable", async () => {
     { after: 0, limit: 100 },
   );
   assert.ok(childRecords.some((record: any) => record.publicPayload?._forkedFrom));
+});
+
+test("trusted runtime model aliases are thread-unique, pinned, and sent to Flue", async () => {
+  const controls = namespace();
+  const sent: Array<{ instance: string; model: string; body: string }> = [];
+  const engine = {
+    idFromName(name: string) { return name; },
+    get(id: unknown) {
+      return {
+        async fetch(request: Request) {
+          const body = await request.text();
+          const parsed = JSON.parse(body) as { model: string };
+          sent.push({ instance: String(id), model: parsed.model, body });
+          return Response.json({
+            streamUrl: "https://flue.test/stream",
+            offset: "0",
+            submissionId: `submission_${sent.length}`,
+          }, { status: 202 });
+        },
+      };
+    },
+  };
+  const resolved: string[] = [];
+  const service = createCloudflareThreadService({
+    env: {
+      FLUE_CODER_AGENT: engine,
+      FLARY_SESSION_PROJECTION_QUEUE: { async send() {} },
+    },
+    namespace: controls,
+    resolveModel(input) {
+      resolved.push(`${input.tenantId}:${input.threadId}`);
+      return {
+        runtimeSelection: {
+          provider: `flary_${input.tenantId}_${input.threadId}`,
+          model: input.selection.model,
+        },
+        connectionReference: `ref-${input.threadId}`,
+        credentialGeneration: "generation-1",
+        billingMode: "subscription",
+      };
+    },
+  });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_alias",
+      actor: { id: "user_alias", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  for (const threadId of ["thread_a", "thread_b"]) {
+    await service.create(scope, {
+      threadId,
+      agentId: "coder",
+      workspace: {
+        organizationId: "tenant_alias",
+        appId: "coder",
+        projectId: "project",
+        workspaceId: threadId,
+        branch: "main",
+      },
+      mode: "build",
+      model: { provider: "openai-codex", model: "gpt-5.6-luna" },
+      metadata: {
+        flaryModelPolicy: {
+          allow: [{ provider: "openai-codex", model: "gpt-5.6-luna" }],
+          switching: "user",
+          fallback: "none",
+        },
+      },
+    });
+  }
+
+  await Promise.all(["thread_a", "thread_b"].map((threadId) =>
+    service.submit({ ...scope, threadId }, {
+      message: "Use my subscription.",
+      idempotencyKey: `request_${threadId}`,
+    })
+  ));
+
+  assert.deepEqual(resolved.sort(), [
+    "tenant_alias:thread_a",
+    "tenant_alias:thread_b",
+  ]);
+  assert.equal(new Set(sent.map(({ model }) => model)).size, 2);
+  assert.ok(sent.every(({ model }) => model.startsWith("flary_tenant_alias_thread_")));
+  assert.ok(sent.every(({ body }) => !body.includes("secret")));
+  for (const threadId of ["thread_a", "thread_b"]) {
+    const records = await service.auditList!({ ...scope, threadId }, { after: 0, limit: 100 });
+    const started = records.find((record: any) => record.recordType === "turn.started") as any;
+    assert.equal(
+      started.publicPayload.modelPin.runtimeSelection.provider,
+      `flary_tenant_alias_${threadId}`,
+    );
+    assert.deepEqual(started.publicPayload.modelPin.selection, {
+      provider: "openai-codex",
+      model: "gpt-5.6-luna",
+      cacheRetention: "short",
+    });
+    assert.equal(started.publicPayload.modelPin.provider, "openai-codex");
+    assert.equal(started.publicPayload.modelPin.model, "gpt-5.6-luna");
+    assert.equal(started.publicPayload.modelPin.connectionReference, `ref-${threadId}`);
+  }
 });
 
 test("an exact fork imports the canonical model transcript", async () => {

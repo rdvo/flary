@@ -7,6 +7,7 @@ import {
   loadOpenApiSpec,
   FlaryOpenApiSecurityError,
   FlaryOpenApiValidationError,
+  createR2FileConnection,
 } from "../../src/harness/functions/index.ts";
 
 test("MCP and OpenAPI sources are represented as lazy registry entries", () => {
@@ -29,6 +30,97 @@ test("MCP and OpenAPI sources are represented as lazy registry entries", () => {
   assert.deepEqual(tools.names, ["mcp", "api"]);
   assert.equal(tools.entries.mcp.kind, "mcp");
   assert.equal(tools.entries.api.kind, "openapi");
+});
+
+test("R2 file sources resolve a tenant prefix and never expose the bucket", async () => {
+  type Stored = {
+    bytes: Uint8Array;
+    contentType: string;
+    uploaded: Date;
+    customMetadata: Record<string, string>;
+  };
+  const objects = new Map<string, Stored>();
+  const bucket = {
+    async get(key: string) {
+      const value = objects.get(key);
+      if (!value) return null;
+      return {
+        key,
+        size: value.bytes.byteLength,
+        uploaded: value.uploaded,
+        customMetadata: value.customMetadata,
+        httpMetadata: { contentType: value.contentType },
+        arrayBuffer: async () => Uint8Array.from(value.bytes).buffer,
+      };
+    },
+    async put(key: string, value: unknown, options?: Record<string, unknown>) {
+      const bytes = value instanceof Uint8Array
+        ? Uint8Array.from(value)
+        : new Uint8Array(await new Response(value as BodyInit).arrayBuffer());
+      const httpMetadata = options?.httpMetadata as { contentType?: string } | undefined;
+      objects.set(key, {
+        bytes,
+        contentType: httpMetadata?.contentType ?? "application/octet-stream",
+        uploaded: new Date(),
+        customMetadata: (options?.customMetadata ?? {}) as Record<string, string>,
+      });
+    },
+    async delete(keys: string | readonly string[]) {
+      for (const key of Array.isArray(keys) ? keys : [keys]) objects.delete(key);
+    },
+    async list(options?: Record<string, unknown>) {
+      const prefix = typeof options?.prefix === "string" ? options.prefix : "";
+      return {
+        objects: [...objects.entries()]
+          .filter(([key]) => key.startsWith(prefix))
+          .map(([key, value]) => ({
+            key,
+            size: value.bytes.byteLength,
+            uploaded: value.uploaded,
+            customMetadata: value.customMetadata,
+            httpMetadata: { contentType: value.contentType },
+            arrayBuffer: async () => Uint8Array.from(value.bytes).buffer,
+          })),
+      };
+    },
+  };
+  objects.set("customers/acme/html/forge/index.html", {
+    bytes: new TextEncoder().encode("<h1>Old</h1>"),
+    contentType: "text/html",
+    uploaded: new Date("2026-01-01T00:00:00.000Z"),
+    customMetadata: {},
+  });
+  objects.set("customers/other/html/forge/private.html", {
+    bytes: new TextEncoder().encode("secret"),
+    contentType: "text/html",
+    uploaded: new Date("2026-01-01T00:00:00.000Z"),
+    customMetadata: {},
+  });
+  const app = flary();
+  const source = app.r2({
+    namespace: "customerFiles",
+    binding: "CUSTOMER_FILES",
+    prefix: "customers/{tenantId}/html/forge",
+    access: "read-write",
+  });
+  assert.equal(source.kind, "r2");
+  const connection = await createR2FileConnection(
+    source,
+    { CUSTOMER_FILES: bucket },
+    { identity: { tenantId: "acme", userId: "editor" } } as never,
+  );
+  const listed = await connection.call("list", { prefix: "" });
+  assert.deepEqual((listed as { files: Array<{ path: string }> }).files.map((file) => file.path), ["index.html"]);
+  const before = await connection.call("read", { path: "index.html", encoding: "utf8" });
+  assert.equal((before as { content: string }).content, "<h1>Old</h1>");
+  await connection.call("edit", {
+    path: "index.html",
+    edits: [{ oldText: "Old", newText: "New" }],
+  });
+  const after = await connection.call("read", { path: "index.html", encoding: "utf8" });
+  assert.equal((after as { content: string }).content, "<h1>New</h1>");
+  assert.equal(objects.has("customers/other/html/forge/private.html"), true);
+  await assert.rejects(() => connection.call("read", { path: "../private.html" }));
 });
 
 test("OpenAPI runtime uses a host request closure", async () => {

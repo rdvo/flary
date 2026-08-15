@@ -1,0 +1,1346 @@
+<div class="flary-chat" data-flary-chat>
+  <button
+    class="flary-chat__launcher"
+    type="button"
+    aria-label="Ask the Flary documentation agent"
+    aria-expanded="false"
+    data-chat-open
+  >
+    <span class="flary-chat__cat" aria-hidden="true"><i></i></span>
+    <span>Ask Flary</span>
+  </button>
+
+  <section class="flary-chat__panel" aria-label="Flary documentation agent" hidden data-chat-panel>
+    <header>
+      <div class="flary-chat__identity">
+        <strong>Flary docs agent</strong>
+        <span data-chat-status>Durable, read-only session</span>
+      </div>
+      <div class="flary-chat__header-actions">
+        <button type="button" aria-expanded="true" data-chat-session-toggle>Chats</button>
+        <button type="button" data-chat-new>New</button>
+        <button type="button" aria-label="Close chat" data-chat-close>&times;</button>
+      </div>
+    </header>
+    <div class="flary-chat__body">
+      <aside class="flary-chat__sessions" data-chat-sessions>
+        <div>
+          <strong>Your chats</strong>
+          <button type="button" data-chat-new>New chat</button>
+        </div>
+        <div class="flary-chat__session-list" data-chat-session-list></div>
+        <p>This browser owns these chats. No account or fingerprint.</p>
+      </aside>
+      <div class="flary-chat__conversation">
+        <div class="flary-chat__messages" aria-live="polite" data-chat-messages>
+          <div class="flary-chat__message flary-chat__message--assistant">
+            Ask about Flary. I search the real documentation and starter source.
+          </div>
+        </div>
+        <form data-chat-form>
+          <label for="flary-chat-message">Ask about Flary</label>
+          <div>
+            <textarea
+              id="flary-chat-message"
+              name="message"
+              maxlength="2000"
+              rows="2"
+              placeholder="Ask about Flary…"
+              required
+              data-chat-input
+            ></textarea>
+            <button type="submit" data-chat-send>Send</button>
+          </div>
+        </form>
+        <footer>
+          Durable anonymous threads powered by <code>app.agent()</code>.
+          <a href="https://github.com/rdvo/flary/tree/main/apps/docs-agent" target="_blank" rel="noreferrer">Source</a>
+        </footer>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+  type ChatTextPart = {
+    type: "text" | "reasoning";
+    text: string;
+    state: "streaming" | "done";
+  };
+  type ChatToolPart = {
+    type: "dynamic-tool";
+    toolName: string;
+    toolCallId: string;
+    state: "input-available" | "output-available" | "output-error";
+    input?: unknown;
+    errorText?: string;
+  };
+  type ChatPart = ChatTextPart | ChatToolPart;
+  type ChatMessage = {
+    id?: string;
+    submissionId?: string;
+    role: "user" | "assistant";
+    text: string;
+    parts?: ChatPart[];
+  };
+  type ChatSnapshot = {
+    messages?: ChatMessage[];
+    settlements?: Array<{ submissionId?: string; outcome?: string; error?: { message?: unknown } | string }>;
+    cursor?: string;
+    session?: ChatSessionIdentity;
+  };
+  type ChatSessionIdentity = {
+    id: string;
+    reference: string;
+  };
+  type StoredChatSession = ChatSessionIdentity & {
+    title: string;
+    updatedAt: string;
+  };
+  type StoredChatIndex = {
+    current?: string;
+    sessions: StoredChatSession[];
+  };
+  type ServerChatSession = ChatSessionIdentity & {
+    title?: string;
+    updatedAt: string;
+  };
+  type StreamChunk = Record<string, unknown> & {
+    type?: string;
+    messageId?: string;
+    submissionId?: string;
+    toolCallId?: string;
+    toolName?: string;
+    kind?: "text" | "reasoning";
+    delta?: string;
+    outcome?: string;
+    input?: unknown;
+    output?: unknown;
+    errorText?: string;
+    message?: ChatMessage;
+    snapshot?: ChatSnapshot;
+    position?: { batch?: number; index?: number };
+  };
+  type RealtimeRecord = Record<string, unknown> & {
+    sequence?: number;
+    sourceCursor?: string;
+    recordType?: string;
+    publicPayload?: Record<string, unknown>;
+  };
+  type RealtimeFrame = {
+    version?: number;
+    type?: string;
+    cursor?: number;
+    records?: RealtimeRecord[];
+    code?: string;
+    message?: string;
+  };
+  type LiveTool = {
+    root: HTMLDetailsElement;
+    label: HTMLElement;
+    indicator: HTMLElement;
+    name: string;
+    input?: unknown;
+  };
+  type LiveTurn = {
+    root: HTMLElement;
+    activity: HTMLDetailsElement;
+    activityLabel: HTMLElement;
+    activityList: HTMLElement;
+    answer: HTMLElement;
+    reasoning?: HTMLElement;
+    reasoningText: string;
+    answerText: string;
+    pendingAnswerText: string;
+    answerFrame?: number;
+    startedAt: number;
+    tools: Map<string, LiveTool>;
+  };
+
+  for (const root of document.querySelectorAll<HTMLElement>("[data-flary-chat]")) {
+    if (root.dataset.ready === "true") continue;
+    root.dataset.ready = "true";
+    const launcher = root.querySelector<HTMLButtonElement>("[data-chat-open]")!;
+    const closer = root.querySelector<HTMLButtonElement>("[data-chat-close]")!;
+    const panel = root.querySelector<HTMLElement>("[data-chat-panel]")!;
+    const messages = root.querySelector<HTMLElement>("[data-chat-messages]")!;
+    const status = root.querySelector<HTMLElement>("[data-chat-status]")!;
+    const form = root.querySelector<HTMLFormElement>("[data-chat-form]")!;
+    const input = root.querySelector<HTMLTextAreaElement>("[data-chat-input]")!;
+    const send = root.querySelector<HTMLButtonElement>("[data-chat-send]")!;
+    const sessionsPanel = root.querySelector<HTMLElement>("[data-chat-sessions]")!;
+    const sessionList = root.querySelector<HTMLElement>("[data-chat-session-list]")!;
+    const sessionToggle = root.querySelector<HTMLButtonElement>("[data-chat-session-toggle]")!;
+    const newButtons = [...root.querySelectorAll<HTMLButtonElement>("[data-chat-new]")];
+    const turns = new Map<string, LiveTurn>();
+    const turnsBySubmission = new Map<string, LiveTurn>();
+    const settlementWaiters = new Map<string, {
+      resolve(): void;
+      reject(error: Error): void;
+    }>();
+    const settledSubmissions = new Set<string>();
+    const settlementErrors = new Map<string, Error>();
+    const intentionallyClosedSockets = new WeakSet<WebSocket>();
+    const storageKey = "flary.docs.sessions.v1";
+    let chatIndex = readChatIndex(storageKey);
+    let currentSession: StoredChatSession | undefined = chatIndex.sessions.find((session) => session.reference === chatIndex.current)
+      ?? chatIndex.sessions[0];
+    let currentSessionReference: string | undefined = currentSession?.reference;
+    let started = false;
+    let activeStream: EventSource | undefined;
+    let realtimeSocket: WebSocket | undefined;
+    let realtimeCursor = 0;
+    let reconnectTimer: number | undefined;
+    let sessionGeneration = 0;
+
+    const persistChatIndex = () => {
+      chatIndex.current = currentSessionReference;
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(chatIndex));
+      } catch {
+        // The active chat still works when browser storage is unavailable.
+      }
+      renderSessionList();
+    };
+
+    const rememberSession = (
+      session: ChatSessionIdentity,
+      options: { title?: string; touch?: boolean } = {},
+    ) => {
+      const existing = chatIndex.sessions.find((item) => item.reference === session.reference);
+      const updated: StoredChatSession = {
+        id: session.id,
+        reference: session.reference,
+        title: existing?.title ?? options.title ?? "New chat",
+        updatedAt: options.touch === false
+          ? existing?.updatedAt ?? new Date().toISOString()
+          : new Date().toISOString(),
+      };
+      chatIndex.sessions = [
+        updated,
+        ...chatIndex.sessions.filter((item) => item.reference !== session.reference),
+      ];
+      currentSession = updated;
+      currentSessionReference = updated.reference;
+      persistChatIndex();
+    };
+
+    const renameSession = (session: StoredChatSession, title: string) => {
+      const clean = title.trim().replace(/\s+/g, " ").slice(0, 64);
+      if (!clean) return;
+      chatIndex.sessions = chatIndex.sessions.map((item) =>
+        item.reference === session.reference ? { ...item, title: clean } : item
+      );
+      if (currentSessionReference === session.reference) {
+        currentSession = chatIndex.sessions.find((item) => item.reference === session.reference);
+      }
+      persistChatIndex();
+      void persistSessionTitle(session.reference, clean);
+    };
+
+    const persistSessionTitle = async (reference: string, title: string) => {
+      try {
+        await chatRequest<{ ok: boolean }>(
+          "/api/docs-chat/session/title",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ title }),
+          },
+          reference,
+        );
+      } catch (error) {
+        status.textContent = error instanceof Error ? error.message : "Could not rename the chat";
+      }
+    };
+
+    const syncSessionList = async () => {
+      const remote = await request<{ sessions?: ServerChatSession[] }>(
+        "/api/docs-chat/sessions",
+      );
+      const localByReference = new Map(
+        chatIndex.sessions.map((session) => [session.reference, session]),
+      );
+      const durable = (remote.sessions ?? []).map((session) => ({
+        ...session,
+        title: session.title ?? localByReference.get(session.reference)?.title ?? "New chat",
+      }));
+      const legacy = chatIndex.sessions.filter((session) =>
+        session.reference.startsWith("legacy.") &&
+        !durable.some((candidate) => candidate.reference === session.reference)
+      );
+      chatIndex.sessions = [...durable, ...legacy].sort((left, right) =>
+        right.updatedAt.localeCompare(left.updatedAt)
+      );
+      if (!chatIndex.sessions.some((session) => session.reference === currentSessionReference)) {
+        currentSession = chatIndex.sessions[0];
+        currentSessionReference = currentSession?.reference;
+      } else {
+        currentSession = chatIndex.sessions.find((session) =>
+          session.reference === currentSessionReference
+        );
+      }
+      persistChatIndex();
+    };
+
+    const renderSessionList = () => {
+      sessionList.replaceChildren();
+      if (chatIndex.sessions.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "flary-chat__session-empty";
+        empty.textContent = "Start a chat to see it here.";
+        sessionList.appendChild(empty);
+        return;
+      }
+      for (const session of chatIndex.sessions) {
+        const row = document.createElement("div");
+        row.className = "flary-chat__session";
+        if (session.reference === currentSessionReference) row.classList.add("is-active");
+
+        const open = document.createElement("button");
+        open.type = "button";
+        open.className = "flary-chat__session-open";
+        const title = document.createElement("strong");
+        title.textContent = session.title;
+        const time = document.createElement("span");
+        time.textContent = sessionTime(session.updatedAt);
+        open.appendChild(title);
+        open.appendChild(time);
+        open.addEventListener("click", () => void switchSession(session));
+
+        const actions = document.createElement("div");
+        actions.className = "flary-chat__session-actions";
+        const rename = document.createElement("button");
+        rename.type = "button";
+        rename.title = "Rename chat";
+        rename.setAttribute("aria-label", `Rename ${session.title}`);
+        rename.textContent = "Rename";
+        rename.addEventListener("click", () => startSessionRename(row, session));
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.title = "Delete chat";
+        remove.setAttribute("aria-label", `Delete ${session.title}`);
+        remove.textContent = "Delete";
+        let confirmationTimer: number | undefined;
+        remove.addEventListener("click", () => {
+          if (remove.dataset.confirm !== "true") {
+            remove.dataset.confirm = "true";
+            remove.textContent = "Confirm";
+            confirmationTimer = window.setTimeout(() => {
+              remove.dataset.confirm = "false";
+              remove.textContent = "Delete";
+            }, 4_000);
+            return;
+          }
+          if (confirmationTimer !== undefined) window.clearTimeout(confirmationTimer);
+          void deleteSession(session);
+        });
+        actions.appendChild(rename);
+        actions.appendChild(remove);
+        row.appendChild(open);
+        row.appendChild(actions);
+        sessionList.appendChild(row);
+      }
+    };
+
+    const startSessionRename = (row: HTMLElement, session: StoredChatSession) => {
+      const field = document.createElement("input");
+      field.className = "flary-chat__session-rename";
+      field.value = session.title;
+      field.maxLength = 64;
+      field.setAttribute("aria-label", "Chat name");
+      row.replaceChildren(field);
+      let saved = false;
+      const save = () => {
+        if (saved) return;
+        saved = true;
+        renameSession(session, field.value);
+      };
+      field.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") save();
+        if (event.key === "Escape") {
+          saved = true;
+          renderSessionList();
+        }
+      });
+      field.addEventListener("blur", save);
+      field.focus();
+      field.select();
+    };
+
+    const stopSessionConnections = () => {
+      sessionGeneration += 1;
+      cancelAnswerAnimations();
+      activeStream?.close();
+      activeStream = undefined;
+      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
+      reconnectTimer = undefined;
+      if (realtimeSocket) {
+        intentionallyClosedSockets.add(realtimeSocket);
+        realtimeSocket.close(1000, "session changed");
+        realtimeSocket = undefined;
+      }
+      realtimeCursor = 0;
+      for (const waiter of settlementWaiters.values()) {
+        waiter.reject(new Error("The active chat changed."));
+      }
+      settlementWaiters.clear();
+      settledSubmissions.clear();
+      settlementErrors.clear();
+    };
+
+    const switchSession = async (session: StoredChatSession) => {
+      if (session.reference === currentSessionReference) return;
+      stopSessionConnections();
+      currentSession = session;
+      currentSessionReference = session.reference;
+      persistChatIndex();
+      await loadSession(session.reference);
+      if (window.matchMedia("(max-width: 700px)").matches) {
+        sessionsPanel.hidden = true;
+        sessionToggle.setAttribute("aria-expanded", "false");
+      }
+    };
+
+    const createSession = async () => {
+      stopSessionConnections();
+      currentSession = undefined;
+      currentSessionReference = undefined;
+      persistChatIndex();
+      render([]);
+      input.disabled = false;
+      send.disabled = false;
+      status.textContent = "New chat";
+      if (window.matchMedia("(max-width: 700px)").matches) {
+        sessionsPanel.hidden = true;
+        sessionToggle.setAttribute("aria-expanded", "false");
+      }
+      input.focus();
+    };
+
+    const deleteSession = async (session: StoredChatSession) => {
+      const wasCurrent = session.reference === currentSessionReference;
+      const previousSessions = [...chatIndex.sessions];
+      // Remove the row before the remote purge. The server marks the thread
+      // deleting before this request returns, so it cannot reappear on sync.
+      chatIndex.sessions = chatIndex.sessions.filter((item) => item.reference !== session.reference);
+      if (wasCurrent) {
+        stopSessionConnections();
+        currentSession = chatIndex.sessions[0];
+        currentSessionReference = currentSession?.reference;
+      }
+      persistChatIndex();
+      if (wasCurrent && !currentSession) {
+        render([]);
+        input.disabled = false;
+        send.disabled = false;
+        status.textContent = "New chat";
+      }
+      try {
+        await chatRequest<{ id: string; status: string }>(
+          "/api/docs-chat/session",
+          { method: "DELETE" },
+          session.reference,
+        );
+        if (wasCurrent) {
+          if (currentSession) void loadSession(currentSession.reference);
+        }
+      } catch (error) {
+        chatIndex.sessions = previousSessions;
+        currentSession = wasCurrent ? session : currentSession;
+        currentSessionReference = wasCurrent ? session.reference : currentSessionReference;
+        persistChatIndex();
+        status.textContent = error instanceof Error ? error.message : "Could not delete the chat";
+      }
+    };
+
+    const chatRequest = <T,>(
+      url: string,
+      init: RequestInit = {},
+      reference = currentSessionReference,
+    ): Promise<T> => {
+      const headers = new Headers(init.headers);
+      if (reference) headers.set("x-flary-docs-session-ref", reference);
+      return request<T>(url, { ...init, headers });
+    };
+
+    const setOpen = async (open: boolean) => {
+      panel.hidden = !open;
+      launcher.setAttribute("aria-expanded", String(open));
+      if (open && !started) {
+        started = true;
+        await syncSessionList().catch(() => undefined);
+        renderSessionList();
+        if (currentSessionReference) await loadSession(currentSessionReference);
+        else {
+          render([]);
+          input.disabled = false;
+          send.disabled = false;
+          status.textContent = "New chat";
+        }
+      }
+      if (open) input.focus();
+    };
+
+    const loadSession = async (reference?: string, forceNew = false) => {
+      const generation = sessionGeneration;
+      input.disabled = true;
+      send.disabled = true;
+      status.textContent = "Connecting…";
+      try {
+        const headers = new Headers();
+        if (forceNew) headers.set("x-flary-docs-new-session", "1");
+        const snapshot = await chatRequest<ChatSnapshot>(
+          "/api/docs-chat/session",
+          { method: "POST", headers },
+          reference,
+        );
+        if (generation !== sessionGeneration) return;
+        if (!snapshot.session) throw new Error("The chat service returned an invalid session.");
+        const firstQuestion = snapshot.messages?.find((message) => message.role === "user")?.text;
+        rememberSession(snapshot.session, {
+          title: firstQuestion ? sessionTitle(firstQuestion) : undefined,
+          touch: forceNew,
+        });
+        render(snapshot.messages ?? []);
+        const realtime = await connectRealtime({ fresh: true, generation });
+        if (generation !== sessionGeneration) return;
+        status.textContent = realtime
+          ? "Live durable session connected"
+          : "Durable session connected";
+        const active = [...(snapshot.messages ?? [])].reverse().find((message: ChatMessage) =>
+          message.role === "assistant" &&
+          Boolean(message.submissionId) &&
+          (message.parts ?? []).some((part: ChatPart) => part.type !== "dynamic-tool" && part.state === "streaming") &&
+          !(snapshot.settlements ?? []).some((settlement) => settlement.submissionId === message.submissionId),
+        );
+        if (active?.submissionId && snapshot.cursor) {
+          void continueSubmission(active.submissionId, snapshot.cursor);
+        } else {
+          input.disabled = false;
+          send.disabled = false;
+        }
+      } catch (error) {
+        if (generation !== sessionGeneration) return;
+        status.textContent = error instanceof Error ? error.message : "Chat is unavailable";
+        input.disabled = false;
+        send.disabled = false;
+      }
+    };
+
+    const render = (items: ChatMessage[]) => {
+      cancelAnswerAnimations();
+      messages.replaceChildren();
+      turns.clear();
+      turnsBySubmission.clear();
+      if (items.length === 0) {
+        appendMessage("assistant", "Ask me about agents, tools, threads, deployment, or storage. I answer from the real Flary docs and starter source.");
+        return;
+      }
+      let historyTurnKey: string | undefined;
+      let historyTurnOrdinal = 0;
+      for (const item of items) {
+        if (item.role === "user") {
+          appendMessage("user", item.text);
+          historyTurnOrdinal += 1;
+          historyTurnKey = `history-${historyTurnOrdinal}`;
+          continue;
+        }
+        renderAssistant({
+          ...item,
+          submissionId: item.submissionId ?? historyTurnKey,
+        });
+      }
+      messages.scrollTop = messages.scrollHeight;
+    };
+
+    const appendMessage = (role: "user" | "assistant", text: string) => {
+      const element = document.createElement("div");
+      element.className = `flary-chat__message flary-chat__message--${role}`;
+      addLinkedText(element, text);
+      messages.appendChild(element);
+      messages.scrollTop = messages.scrollHeight;
+    };
+
+    const renderAssistant = (message: ChatMessage, animate = false) => {
+      const parts = message.parts ?? [];
+      if (parts.length === 0) {
+        if (message.text && animate) {
+          const turn = ensureTurn(message.id ?? crypto.randomUUID(), message.submissionId);
+          queueAnswerText(turn, message.text, true);
+        } else if (message.text) {
+          appendMessage("assistant", message.text);
+        }
+        return;
+      }
+      const turn = ensureTurn(message.id ?? crypto.randomUUID(), message.submissionId);
+      for (const part of parts) {
+        if (part.type === "reasoning") updateReasoning(turn, `${turn.reasoningText}${part.text}`);
+        if (part.type === "dynamic-tool") updateTool(turn, part);
+      }
+      if (message.text) {
+        if (animate) {
+          queueAnswerText(turn, message.text, true);
+        } else {
+          turn.answerText += `${turn.answerText ? "\n\n" : ""}${message.text}`;
+        }
+      }
+      if (!animate) renderAnswer(turn);
+      const running = parts.some((part) =>
+        part.type === "dynamic-tool"
+          ? part.state === "input-available"
+          : part.state === "streaming",
+      );
+      if (running) {
+        turn.activity.open = true;
+      } else {
+        completeActivity(turn, false);
+      }
+    };
+
+    const ensureTurn = (messageId: string, submissionId?: string): LiveTurn => {
+      const existing = turns.get(messageId);
+      if (existing) return existing;
+      const submissionTurn = submissionId
+        ? turnsBySubmission.get(submissionId)
+        : undefined;
+      if (submissionTurn) {
+        turns.set(messageId, submissionTurn);
+        return submissionTurn;
+      }
+      const element = document.createElement("article");
+      element.className = "flary-chat__turn";
+      if (submissionId) element.dataset.submissionId = submissionId;
+
+      const activity = document.createElement("details");
+      activity.className = "flary-chat__activity";
+      activity.open = true;
+      const summary = document.createElement("summary");
+      const pulse = document.createElement("span");
+      pulse.className = "flary-chat__activity-pulse is-running";
+      const activityLabel = document.createElement("span");
+      activityLabel.textContent = "Thinking";
+      summary.appendChild(pulse);
+      summary.appendChild(activityLabel);
+      const activityList = document.createElement("div");
+      activityList.className = "flary-chat__activity-list";
+      activity.appendChild(summary);
+      activity.appendChild(activityList);
+
+      const answer = document.createElement("div");
+      answer.className = "flary-chat__message flary-chat__message--assistant";
+      answer.hidden = true;
+      element.appendChild(activity);
+      element.appendChild(answer);
+      messages.appendChild(element);
+      const turn: LiveTurn = {
+        root: element,
+        activity,
+        activityLabel,
+        activityList,
+        answer,
+        reasoningText: "",
+        answerText: "",
+        pendingAnswerText: "",
+        startedAt: Date.now(),
+        tools: new Map(),
+      };
+      turns.set(messageId, turn);
+      if (submissionId) turnsBySubmission.set(submissionId, turn);
+      scrollToLatest();
+      return turn;
+    };
+
+    const updateReasoning = (turn: LiveTurn, text: string) => {
+      turn.reasoningText = text;
+      if (!turn.reasoning) {
+        turn.reasoning = document.createElement("div");
+        turn.reasoning.className = "flary-chat__reasoning";
+        turn.activityList.insertBefore(turn.reasoning, turn.activityList.firstChild);
+      }
+      turn.reasoning.textContent = text || "Working through the request…";
+      turn.activity.hidden = false;
+      turn.activity.open = true;
+      turn.activityLabel.textContent = "Thinking";
+      scrollToLatest();
+    };
+
+    const updateTool = (turn: LiveTurn, part: ChatToolPart) => {
+      let tool = turn.tools.get(part.toolCallId);
+      if (!tool) {
+        const detail = document.createElement("details");
+        detail.className = "flary-chat__tool";
+        const summary = document.createElement("summary");
+        const indicator = document.createElement("span");
+        indicator.className = "flary-chat__tool-state is-running";
+        const label = document.createElement("span");
+        label.textContent = toolLabel(part.toolName, part.input, false);
+        summary.appendChild(indicator);
+        summary.appendChild(label);
+        const inputText = toolInput(part.input);
+        if (inputText) {
+          const pre = document.createElement("pre");
+          pre.textContent = inputText;
+          detail.appendChild(summary);
+          detail.appendChild(pre);
+        } else {
+          detail.appendChild(summary);
+        }
+        turn.activityList.appendChild(detail);
+        tool = { root: detail, label, indicator, name: part.toolName, input: part.input };
+        turn.tools.set(part.toolCallId, tool);
+      }
+      const failed = part.state === "output-error";
+      const done = part.state === "output-available" || failed;
+      tool.label.textContent = failed
+        ? `${toolLabel(part.toolName, part.input, true)} failed`
+        : toolLabel(part.toolName, part.input, done);
+      tool.indicator.className = `flary-chat__tool-state ${failed ? "is-error" : done ? "is-done" : "is-running"}`;
+      if (failed && part.errorText && !tool.root.querySelector(".flary-chat__tool-error")) {
+        const error = document.createElement("p");
+        error.className = "flary-chat__tool-error";
+        error.textContent = part.errorText.slice(0, 500);
+        tool.root.appendChild(error);
+      }
+      turn.activity.hidden = false;
+      turn.activity.open = true;
+      turn.activityLabel.textContent = done ? "Working" : "Using tools";
+      scrollToLatest();
+    };
+
+    const renderAnswer = (turn: LiveTurn) => {
+      turn.answer.hidden = turn.answerText.length === 0;
+      turn.answer.replaceChildren();
+      if (turn.answerText) addLinkedText(turn.answer, turn.answerText);
+      scrollToLatest();
+    };
+
+    const queueAnswerText = (turn: LiveTurn, text: string, completeText = false) => {
+      if (!text) return;
+      if (completeText) {
+        const current = `${turn.answerText}${turn.pendingAnswerText}`;
+        if (current.endsWith(text)) return;
+        const overlap = suffixPrefixOverlap(current, text);
+        turn.pendingAnswerText += overlap > 0
+          ? text.slice(overlap)
+          : `${current ? "\n\n" : ""}${text}`;
+      } else {
+        turn.pendingAnswerText += text;
+      }
+      if (turn.answerFrame !== undefined) return;
+      const paint = () => {
+        turn.answerFrame = undefined;
+        if (!turn.pendingAnswerText) return;
+        const take = revealChunkSize(turn.pendingAnswerText.length);
+        turn.answerText += turn.pendingAnswerText.slice(0, take);
+        turn.pendingAnswerText = turn.pendingAnswerText.slice(take);
+        renderAnswer(turn);
+        if (turn.pendingAnswerText) turn.answerFrame = window.requestAnimationFrame(paint);
+      };
+      turn.answerFrame = window.requestAnimationFrame(paint);
+    };
+
+    const waitForAnswerAnimations = async () => {
+      const deadline = Date.now() + 2_500;
+      while ([...turns.values()].some((turn) => turn.pendingAnswerText.length > 0)) {
+        if (Date.now() >= deadline) {
+          for (const turn of new Set(turns.values())) {
+            if (turn.answerFrame !== undefined) window.cancelAnimationFrame(turn.answerFrame);
+            turn.answerFrame = undefined;
+            turn.answerText += turn.pendingAnswerText;
+            turn.pendingAnswerText = "";
+            renderAnswer(turn);
+          }
+          return;
+        }
+        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+      }
+    };
+
+    const cancelAnswerAnimations = () => {
+      for (const turn of new Set(turns.values())) {
+        if (turn.answerFrame !== undefined) window.cancelAnimationFrame(turn.answerFrame);
+        turn.answerFrame = undefined;
+        turn.pendingAnswerText = "";
+      }
+    };
+
+    const completeActivity = (turn: LiveTurn, includeDuration = true) => {
+      const pulse = turn.activity.querySelector<HTMLElement>(".flary-chat__activity-pulse");
+      if (pulse) pulse.className = "flary-chat__activity-pulse is-done";
+      const toolCount = turn.tools.size;
+      const duration = Math.max(1, Math.round((Date.now() - turn.startedAt) / 1_000));
+      turn.activityLabel.textContent = includeDuration
+        ? `Worked for ${duration}s${toolCount ? ` · ${toolCount} tool ${toolCount === 1 ? "call" : "calls"}` : ""}`
+        : `Work details${toolCount ? ` · ${toolCount} tool ${toolCount === 1 ? "call" : "calls"}` : ""}`;
+      turn.activity.open = false;
+    };
+
+    const applyChunk = (chunk: StreamChunk, activeSubmissionId?: string) => {
+      if (chunk.type === "conversation-reset" && chunk.snapshot?.messages) {
+        render(chunk.snapshot.messages);
+        return;
+      }
+      if (chunk.type === "message-appended" && chunk.message?.role === "assistant") {
+        renderAssistant({
+          ...chunk.message,
+          submissionId: chunk.message.submissionId ?? activeSubmissionId,
+        }, true);
+        return;
+      }
+      if (chunk.type === "message-started" && chunk.messageId) {
+        ensureTurn(chunk.messageId, chunk.submissionId ?? activeSubmissionId);
+        status.textContent = "Thinking…";
+        return;
+      }
+      if (chunk.type === "message-delta" && chunk.messageId && typeof chunk.delta === "string") {
+        const turn = ensureTurn(chunk.messageId, chunk.submissionId ?? activeSubmissionId);
+        if (chunk.kind === "reasoning") {
+          updateReasoning(turn, `${turn.reasoningText}${chunk.delta}`);
+          status.textContent = "Thinking…";
+        } else {
+          queueAnswerText(turn, chunk.delta);
+          status.textContent = "Writing…";
+        }
+        return;
+      }
+      if (chunk.type === "tool-input" && chunk.messageId && chunk.toolCallId && chunk.toolName) {
+        const turn = ensureTurn(chunk.messageId, chunk.submissionId ?? activeSubmissionId);
+        updateTool(turn, {
+          type: "dynamic-tool",
+          toolName: chunk.toolName,
+          toolCallId: chunk.toolCallId,
+          state: "input-available",
+          input: chunk.input,
+        });
+        status.textContent = "Using tools…";
+        return;
+      }
+      if ((chunk.type === "tool-output" || chunk.type === "tool-output-error") && chunk.toolCallId) {
+        for (const turn of turns.values()) {
+          const current = turn.tools.get(chunk.toolCallId);
+          if (!current) continue;
+          updateTool(turn, {
+            type: "dynamic-tool",
+            toolName: current.name,
+            toolCallId: chunk.toolCallId,
+            state: chunk.type === "tool-output" ? "output-available" : "output-error",
+            input: current.input,
+            ...(chunk.type === "tool-output-error" && chunk.errorText ? { errorText: chunk.errorText } : {}),
+          });
+          break;
+        }
+        return;
+      }
+      if (chunk.type === "message-completed" && chunk.messageId) {
+        const turn = turns.get(chunk.messageId);
+        if (turn) completeActivity(turn);
+        return;
+      }
+      if (chunk.type === "submission-settled" && chunk.submissionId) {
+        const turn = turnsBySubmission.get(chunk.submissionId);
+        if (turn) completeActivity(turn);
+        settleRealtimeSubmission(
+          chunk.submissionId,
+          chunk.outcome === "completed"
+            ? undefined
+            : new Error(eventError(chunk.error) ?? "The agent could not finish this answer."),
+        );
+      }
+    };
+
+    const settleRealtimeSubmission = (submissionId: string, error?: Error) => {
+      settledSubmissions.add(submissionId);
+      if (error) settlementErrors.set(submissionId, error);
+      const waiter = settlementWaiters.get(submissionId);
+      if (!waiter) return;
+      settlementWaiters.delete(submissionId);
+      error ? waiter.reject(error) : waiter.resolve();
+    };
+
+    const waitForRealtimeSubmission = (submissionId: string) => {
+      if (settledSubmissions.has(submissionId)) {
+        const error = settlementErrors.get(submissionId);
+        return error ? Promise.reject(error) : Promise.resolve();
+      }
+      return new Promise<void>((resolve, reject) => {
+        const timeout = window.setTimeout(() => {
+          settlementWaiters.delete(submissionId);
+          reject(new Error("The live connection did not receive the final event."));
+        }, 100_000);
+        settlementWaiters.set(submissionId, {
+          resolve() {
+            window.clearTimeout(timeout);
+            resolve();
+          },
+          reject(error) {
+            window.clearTimeout(timeout);
+            reject(error);
+          },
+        });
+      });
+    };
+
+    const applyRealtimeRecord = (record: RealtimeRecord) => {
+      const payload = record.publicPayload;
+      if (!payload || typeof payload !== "object") return;
+      const sourceSubmission = typeof record.sourceCursor === "string"
+        ? /^flue:([^:]+):/.exec(record.sourceCursor)?.[1]
+        : undefined;
+      const submissionId = typeof payload.submissionId === "string"
+        ? payload.submissionId
+        : sourceSubmission;
+      if (typeof payload.type === "string") {
+        const chunk = { ...payload, submissionId: payload.submissionId ?? submissionId } as StreamChunk;
+        if (chunk.type === "message-delta" && chunk.kind === "reasoning") {
+          chunk.delta = "";
+        }
+        applyChunk(chunk, submissionId);
+        return;
+      }
+      if (record.recordType === "turn.started" && submissionId) {
+        ensureTurn(`turn-${submissionId}`, submissionId);
+        status.textContent = "Thinking…";
+      }
+    };
+
+    const scheduleRealtimeReconnect = () => {
+      if (reconnectTimer !== undefined || panel.hidden) return;
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = undefined;
+        void connectRealtime({ fresh: false, generation: sessionGeneration }).then((connected) => {
+          if (connected) status.textContent = "Live durable session connected";
+        });
+      }, 750);
+    };
+
+    const connectRealtime = async ({
+      fresh,
+      generation = sessionGeneration,
+    }: {
+      fresh: boolean;
+      generation?: number;
+    }): Promise<boolean> => {
+      if (realtimeSocket?.readyState === WebSocket.OPEN) return true;
+      try {
+        const ticket = await chatRequest<{ url: string; expiresAt: string }>(
+          "/api/docs-chat/realtime-ticket",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ after: fresh ? 0 : realtimeCursor }),
+          },
+        );
+        if (generation !== sessionGeneration) return false;
+        const socket = new WebSocket(ticket.url);
+        realtimeSocket = socket;
+        return await new Promise<boolean>((resolve) => {
+          let ready = false;
+          const timeout = window.setTimeout(() => {
+            if (!ready) resolve(false);
+            socket.close();
+          }, 10_000);
+          socket.addEventListener("message", (event) => {
+            let frame: RealtimeFrame;
+            try {
+              frame = JSON.parse(String(event.data)) as RealtimeFrame;
+            } catch {
+              return;
+            }
+            if (frame.type === "ready" && typeof frame.cursor === "number") {
+              if (generation !== sessionGeneration) {
+                intentionallyClosedSockets.add(socket);
+                socket.close(1000, "session changed");
+                resolve(false);
+                return;
+              }
+              ready = true;
+              window.clearTimeout(timeout);
+              if (fresh) realtimeCursor = Math.max(realtimeCursor, frame.cursor);
+              resolve(true);
+              return;
+            }
+            if (frame.type === "events" && Array.isArray(frame.records)) {
+              const previousCursor = realtimeCursor;
+              for (const record of frame.records) {
+                if (typeof record.sequence === "number" && record.sequence <= previousCursor) continue;
+                applyRealtimeRecord(record);
+              }
+              if (typeof frame.cursor === "number") {
+                realtimeCursor = Math.max(realtimeCursor, frame.cursor);
+                socket.send(JSON.stringify({ version: 1, type: "ack", cursor: realtimeCursor }));
+              }
+              return;
+            }
+            if (frame.type === "resync_required") {
+              intentionallyClosedSockets.add(socket);
+              socket.close(1012, "resync");
+              void chatRequest<ChatSnapshot>("/api/docs-chat/history").then((snapshot) => {
+                render(snapshot.messages ?? []);
+                return connectRealtime({ fresh: true, generation });
+              });
+              return;
+            }
+            if (frame.type === "error") {
+              status.textContent = frame.message ?? "The live connection reported an error";
+            }
+          });
+          socket.addEventListener("error", () => {
+            if (!ready) {
+              window.clearTimeout(timeout);
+              resolve(false);
+            }
+          });
+          socket.addEventListener("close", () => {
+            if (realtimeSocket === socket) realtimeSocket = undefined;
+            if (intentionallyClosedSockets.has(socket)) {
+              window.clearTimeout(timeout);
+              if (!ready) resolve(false);
+              return;
+            }
+            if (!ready) {
+              window.clearTimeout(timeout);
+              resolve(false);
+            } else {
+              status.textContent = "Reconnecting to durable session…";
+              scheduleRealtimeReconnect();
+            }
+          });
+        });
+      } catch {
+        return false;
+      }
+    };
+
+    const streamSubmission = (
+      submissionId: string,
+      offset: string,
+      generation = sessionGeneration,
+      reference = currentSessionReference,
+    ) =>
+      new Promise<void>((resolve, reject) => {
+        activeStream?.close();
+        const session = reference
+          ? `&session=${encodeURIComponent(reference)}`
+          : "";
+        const source = new EventSource(`/api/docs-chat/events?offset=${encodeURIComponent(offset)}${session}`);
+        activeStream = source;
+        const seen = new Set<string>();
+        const timeout = window.setTimeout(() => {
+          source.close();
+          reject(new Error("The answer is still running. Reopen chat to reconnect."));
+        }, 100_000);
+        const finish = (error?: Error) => {
+          window.clearTimeout(timeout);
+          source.close();
+          if (activeStream === source) activeStream = undefined;
+          error ? reject(error) : resolve();
+        };
+        source.addEventListener("data", (event) => {
+          if (generation !== sessionGeneration) {
+            finish(new Error("The active chat changed."));
+            return;
+          }
+          let value: unknown;
+          try {
+            value = JSON.parse((event as MessageEvent<string>).data);
+          } catch {
+            return;
+          }
+          const chunks = Array.isArray(value) ? value : [value];
+          for (const candidate of chunks) {
+            if (!candidate || typeof candidate !== "object") continue;
+            const chunk = candidate as StreamChunk;
+            const key = `${chunk.position?.batch ?? "x"}:${chunk.position?.index ?? "x"}:${chunk.type ?? "unknown"}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            applyChunk(chunk, submissionId);
+            if (chunk.type !== "submission-settled" || chunk.submissionId !== submissionId) continue;
+            if (chunk.outcome === "completed") {
+              finish();
+            } else {
+              finish(new Error(eventError(chunk.error) ?? "The agent could not finish this answer."));
+            }
+          }
+        });
+        source.addEventListener("error", () => {
+          status.textContent = "Reconnecting to durable session…";
+        });
+      });
+
+    const waitFor = async (
+      submissionId: string,
+      generation = sessionGeneration,
+      reference = currentSessionReference,
+    ) => {
+      const deadline = Date.now() + 100_000;
+      while (Date.now() < deadline) {
+        if (generation !== sessionGeneration) throw new Error("The active chat changed.");
+        await new Promise((resolve) => window.setTimeout(resolve, 800));
+        const snapshot = await chatRequest<ChatSnapshot>("/api/docs-chat/history", {}, reference);
+        const settlement = snapshot.settlements?.find((item) => item.submissionId === submissionId);
+        render(snapshot.messages ?? []);
+        if (!settlement) continue;
+        if (settlement.outcome !== "completed") {
+          const detail = typeof settlement.error === "string"
+            ? settlement.error
+            : typeof settlement.error?.message === "string"
+              ? settlement.error.message
+              : "The agent could not finish this answer.";
+          throw new Error(detail.slice(0, 500));
+        }
+        return;
+      }
+      throw new Error("The answer is still running. Reopen chat to reconnect.");
+    };
+
+    const observeSubmission = async (
+      submissionId: string,
+      offset: string,
+      generation = sessionGeneration,
+      reference = currentSessionReference,
+    ) => {
+      const connected = realtimeSocket?.readyState === WebSocket.OPEN
+        ? true
+        : await connectRealtime({ fresh: true, generation });
+      if (connected) {
+        await waitForRealtimeSubmission(submissionId).catch((error) => {
+          if (generation !== sessionGeneration) throw error;
+          return waitFor(submissionId, generation, reference);
+        });
+        return;
+      }
+      await streamSubmission(submissionId, offset, generation, reference).catch((error) => {
+        if (generation !== sessionGeneration) throw error;
+        return waitFor(submissionId, generation, reference);
+      });
+    };
+
+    const continueSubmission = async (submissionId: string, offset: string) => {
+      const generation = sessionGeneration;
+      let reference = currentSessionReference;
+      input.disabled = true;
+      send.disabled = true;
+      try {
+        await observeSubmission(submissionId, offset, generation, reference);
+        if (generation !== sessionGeneration) return;
+        await waitForAnswerAnimations();
+        if (generation !== sessionGeneration) return;
+        const snapshot = await chatRequest<ChatSnapshot>("/api/docs-chat/history", {}, reference);
+        render(snapshot.messages ?? []);
+        status.textContent = realtimeSocket?.readyState === WebSocket.OPEN
+          ? "Live durable session connected"
+          : "Durable session connected";
+      } catch (error) {
+        if (generation !== sessionGeneration) return;
+        appendMessage("assistant", error instanceof Error ? error.message : "Chat is unavailable.");
+        status.textContent = "Could not complete the answer";
+      } finally {
+        input.disabled = false;
+        send.disabled = false;
+        input.focus();
+      }
+    };
+
+    launcher.addEventListener("click", () => void setOpen(panel.hidden));
+    closer.addEventListener("click", () => void setOpen(false));
+    sessionToggle.addEventListener("click", () => {
+      sessionsPanel.hidden = !sessionsPanel.hidden;
+      sessionToggle.setAttribute("aria-expanded", String(!sessionsPanel.hidden));
+    });
+    for (const button of newButtons) {
+      button.addEventListener("click", () => void createSession());
+    }
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const message = input.value.trim();
+      if (!message || send.disabled) return;
+      appendMessage("user", message);
+      input.value = "";
+      input.disabled = true;
+      send.disabled = true;
+      status.textContent = "Thinking…";
+      const generation = sessionGeneration;
+      let reference = currentSessionReference;
+      try {
+        if (currentSession && currentSession.title === "New chat") {
+          renameSession(currentSession, sessionTitle(message));
+        }
+        if (currentSession) rememberSession(currentSession);
+        const admission = await chatRequest<{
+          submissionId: string;
+          offset: string;
+          session?: ChatSessionIdentity;
+        }>(
+          "/api/docs-chat/messages",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ message }),
+          },
+          reference,
+        );
+        if (generation !== sessionGeneration) return;
+        if (admission.session) {
+          reference = admission.session.reference;
+          rememberSession(admission.session, {
+            title: sessionTitle(message),
+            touch: true,
+          });
+        }
+        await observeSubmission(admission.submissionId, admission.offset, generation, reference);
+        if (generation !== sessionGeneration) return;
+        await waitForAnswerAnimations();
+        if (generation !== sessionGeneration) return;
+        const snapshot = await chatRequest<ChatSnapshot>("/api/docs-chat/history", {}, reference);
+        render(snapshot.messages ?? []);
+        status.textContent = realtimeSocket?.readyState === WebSocket.OPEN
+          ? "Live durable session connected"
+          : "Durable session connected";
+      } catch (error) {
+        if (generation !== sessionGeneration) return;
+        appendMessage("assistant", error instanceof Error ? error.message : "Chat is unavailable.");
+        status.textContent = "Could not complete the answer";
+      } finally {
+        input.disabled = false;
+        send.disabled = false;
+        input.focus();
+      }
+    });
+
+    function scrollToLatest(): void {
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    if (window.matchMedia("(max-width: 700px)").matches) {
+      sessionsPanel.hidden = true;
+      sessionToggle.setAttribute("aria-expanded", "false");
+    }
+    renderSessionList();
+  }
+
+  async function request<T>(url: string, init?: RequestInit): Promise<T> {
+    const response = await fetch(url, init);
+    const value = await response.json().catch(() => ({})) as {
+      error?: { message?: string };
+    };
+    if (!response.ok) throw new Error(value.error?.message ?? "Chat is unavailable.");
+    return value as T;
+  }
+
+  function addLinkedText(target: HTMLElement, text: string): void {
+    const pattern = /\[([^\]]+)]\((https:\/\/[^)\s]+)\)|`([^`\n]+)`|(https:\/\/[^\s]+)/g;
+    let offset = 0;
+    for (const match of text.matchAll(pattern)) {
+      const index = match.index ?? 0;
+      target.appendChild(document.createTextNode(text.slice(offset, index)));
+      if (match[3]) {
+        const code = document.createElement("code");
+        code.textContent = match[3];
+        target.appendChild(code);
+        offset = index + match[0].length;
+        continue;
+      }
+      const link = document.createElement("a");
+      link.href = match[2] ?? match[4]!;
+      link.textContent = match[1] ?? match[4]!;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      target.appendChild(link);
+      offset = index + match[0].length;
+    }
+    target.appendChild(document.createTextNode(text.slice(offset)));
+  }
+
+  function toolLabel(name: string, input: unknown, completed: boolean): string {
+    if (name === "execute") {
+      const code = toolCode(input);
+      if (/openFlarySource|tools\.call/.test(code)) return completed ? "Read Flary documentation" : "Reading Flary documentation";
+      if (/searchFlary|tools\.search/.test(code)) return completed ? "Searched Flary documentation" : "Searching Flary documentation";
+      return completed ? "Ran documentation tools" : "Running documentation tools";
+    }
+    return `${completed ? "Used" : "Using"} ${name}`;
+  }
+
+  function toolCode(input: unknown): string {
+    if (!input || typeof input !== "object") return "";
+    const code = (input as { code?: unknown }).code;
+    return typeof code === "string" ? code : "";
+  }
+
+  function toolInput(input: unknown): string | undefined {
+    const code = toolCode(input);
+    if (code) return code.slice(0, 2_000);
+    if (input === undefined) return undefined;
+    try {
+      return JSON.stringify(input, null, 2).slice(0, 2_000);
+    } catch {
+      return undefined;
+    }
+  }
+
+  function eventError(value: unknown): string | undefined {
+    if (typeof value === "string") return value;
+    if (!value || typeof value !== "object") return undefined;
+    const message = (value as { message?: unknown }).message;
+    return typeof message === "string" ? message : undefined;
+  }
+
+  function readChatIndex(key: string): StoredChatIndex {
+    try {
+      const value = JSON.parse(localStorage.getItem(key) ?? "null") as Partial<StoredChatIndex> | null;
+      const sessions = Array.isArray(value?.sessions)
+        ? value.sessions.filter(isStoredChatSession).slice(0, 50)
+        : [];
+      return {
+        current: typeof value?.current === "string" ? value.current : undefined,
+        sessions,
+      };
+    } catch {
+      return { sessions: [] };
+    }
+  }
+
+  function isStoredChatSession(value: unknown): value is StoredChatSession {
+    if (!value || typeof value !== "object") return false;
+    const session = value as Partial<StoredChatSession>;
+    return typeof session.id === "string" &&
+      /^[a-f0-9]{36}$/.test(session.id) &&
+      typeof session.reference === "string" &&
+      /^(?:v1|legacy)\.[a-f0-9]{36}\.[A-Za-z0-9_-]{32,64}$/.test(session.reference) &&
+      typeof session.title === "string" &&
+      session.title.length > 0 &&
+      session.title.length <= 64 &&
+      typeof session.updatedAt === "string";
+  }
+
+  function sessionTitle(message: string): string {
+    const compact = message.trim().replace(/\s+/g, " ");
+    return compact.length > 44 ? `${compact.slice(0, 43).trimEnd()}…` : compact || "New chat";
+  }
+
+  function sessionTime(value: string): string {
+    const timestamp = Date.parse(value);
+    if (!Number.isFinite(timestamp)) return "Saved";
+    const elapsed = Date.now() - timestamp;
+    if (elapsed < 60_000) return "Now";
+    if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)}m`;
+    if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)}h`;
+    return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(timestamp);
+  }
+
+  function suffixPrefixOverlap(current: string, next: string): number {
+    const limit = Math.min(current.length, next.length);
+    for (let length = limit; length > 0; length -= 1) {
+      if (current.endsWith(next.slice(0, length))) return length;
+    }
+    return 0;
+  }
+
+  function revealChunkSize(backlog: number): number {
+    if (backlog > 600) return 18;
+    if (backlog > 250) return 10;
+    if (backlog > 80) return 5;
+    return 2;
+  }
+</script>

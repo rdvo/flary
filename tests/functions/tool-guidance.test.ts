@@ -39,3 +39,8 @@ test("core tool guidance names built-ins but keeps external catalogs lazy", () =
   assert.match(description, /tools\.search/);
   assert.match(description, /files\.read/);
 });
+
+test("workspace draft options are retained as typed policy", () => {
+  const source = flary().workspace({ mode: "draft", checkpoint: "turn" });
+  assert.deepEqual(source.options, { mode: "draft", checkpoint: "turn" });
+});

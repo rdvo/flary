@@ -264,6 +264,8 @@ export interface FlueAgentGateway {
     agentName: string,
     instanceId: string,
   ): Promise<unknown>;
+  /** Permanently erase one generated agent instance and its transcript. */
+  delete?(agentName: string, instanceId: string): Promise<void>;
   abort(agentName: string, instanceId: string): Promise<{ aborted: boolean }>;
   /** Start a generated Flue workflow for a native function. */
   invokeWorkflow?(

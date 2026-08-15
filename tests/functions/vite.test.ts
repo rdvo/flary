@@ -93,6 +93,29 @@ test("the Vite plugin emits populated Flue runtime entries", () => {
   ]);
 });
 
+test("the Vite plugin keeps Worker entries out of the client environment", () => {
+  const app = createApp({ model: "openai/gpt-5" });
+  const support = app.fn({
+    name: "support",
+    input: z.object({ question: z.string() }),
+    output: z.object({ answer: z.string() }),
+    prompt: ({ question }) => question,
+  });
+  const plugin = flaryVite({ functions: { support }, root: "/project" });
+  const emitted: string[] = [];
+  const clientContext = {
+    environment: { name: "client" },
+    emitFile(value: { fileName: string }) {
+      emitted.push(value.fileName);
+    },
+  };
+
+  plugin.buildStart?.call(clientContext);
+  plugin.generateBundle.call(clientContext);
+
+  assert.deepEqual(emitted, []);
+});
+
 test("the Vite plugin emits persistent app.agent entries", () => {
   const app = createApp({
     model: "openai/gpt-5",
@@ -326,6 +349,8 @@ test("the Vite plugin generates Flue Durable Object entry and bindings", (t) => 
   const plugin = flaryVite({
     root,
     functionsEntry: "src/index.ts",
+    workerEntry: "src/worker.ts",
+    apiPrefix: "/custom-api/",
     flueCli: cli,
   });
   plugin.config?.({ root });
@@ -335,13 +360,25 @@ test("the Vite plugin generates Flue Durable Object entry and bindings", (t) => 
   assert.match(wrapper, /flaryInternalRoute\(flaryFunction\)/);
   const authoredHost = fs.readFileSync(path.join(root, ".flue/app.ts"), "utf8");
   assert.match(authoredHost, /getFunctionApp\(firstExport\)/);
-  assert.match(authoredHost, /import authoredWorker, \{ functions \}/);
+  assert.match(authoredHost, /import \{ functions \} from/);
+  assert.match(authoredHost, /import authoredWorker from/);
+  assert.match(authoredHost, /src\/worker\.ts/);
   assert.match(authoredHost, /const authoredResponse = await publicWorker\.fetch\(request, env, ctx\)/);
   assert.match(authoredHost, /authoredResponse\.status !== 404/);
   assert.match(authoredHost, /attachThreadService/);
   assert.match(authoredHost, /resolveModel: userApp\.options\.resolveModel/);
   assert.match(authoredHost, /\.serve\(functions\)/);
-  assert.match(authoredHost, /flueRequest\(request, "\/api\/flue"\)/);
+  assert.match(authoredHost, /const apiPrefix = "\/custom-api"/);
+  assert.doesNotMatch(authoredHost, /flueApp|\/api\/flue/);
+  assert.match(authoredHost, /batch\.queue === "flary-thread-purge"/);
+  assert.match(authoredHost, /batch\.queue === "flary-session-projection"/);
+  assert.doesNotMatch(authoredHost, /batch\.queue\?\.includes/);
+  const cloudflareHost = fs.readFileSync(path.join(root, ".flue/cloudflare.ts"), "utf8");
+  assert.match(cloudflareHost, /export \{ CodemodeRuntime \} from "@cloudflare\/codemode"/);
+  assert.match(
+    cloudflareHost,
+    /async alarm\(\): Promise<void> \{[\s\S]*?handleFlaryThreadControlAlarm\(\{[\s\S]*?webSockets:/,
+  );
   assert.ok(fs.existsSync(path.join(root, ".flue-vite/_entry.ts")));
   const generatedEntry = fs.readFileSync(
     path.join(root, ".flue-vite/_entry.ts"),
@@ -352,7 +389,11 @@ test("the Vite plugin generates Flue Durable Object entry and bindings", (t) => 
   assert.match(generatedEntry, /flaryInternalRequest/);
   assert.match(generatedEntry, /cloudflareAgents\.compact\(this\)/);
   assert.match(generatedEntry, /cloudflareAgents\.rollback\(this/);
+  assert.match(generatedEntry, /flaryAction === 'delete'/);
+  assert.match(generatedEntry, /await this\.destroy\(\)/);
   assert.match(generatedEntry, /body\.excludeTarget === true/);
+  assert.match(generatedEntry, /export \{ CodemodeRuntime \} from "@cloudflare\/codemode"/);
+  assert.match(generatedEntry, /durableObjectState: doInstance\.ctx/);
   const wrangler = JSON.parse(
     fs.readFileSync(path.join(root, ".flue-vite.wrangler.jsonc"), "utf8"),
   ) as {

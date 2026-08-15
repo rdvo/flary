@@ -77,3 +77,60 @@ test("the prompt alias also uses Flary admission", async () => {
   assert.equal(result.submissionId, "submission_456");
   assert.match(requestUrl, /\/api\/apps\/app_123\/threads\/thread_123\/messages$/);
 });
+
+test("reads conversation history through the authenticated Flary thread API", async () => {
+  let requestUrl = "";
+  const snapshot = {
+    v: 1 as const,
+    conversationId: "conversation_123",
+    offset: "4",
+    messages: [],
+    settlements: [],
+  };
+  const client = createFlaryThreadClient({
+    baseUrl: "https://cloud.flary.test",
+    token: "application_token",
+    fetch: async (input) => {
+      requestUrl = String(input);
+      return Response.json(snapshot);
+    },
+  });
+
+  const result = await client.history({
+    organizationId: "org_123",
+    appId: "app_123",
+    agentId: "support",
+    threadId: "thread_123",
+  });
+
+  assert.equal(
+    requestUrl,
+    "https://cloud.flary.test/api/apps/app_123/threads/thread_123/flue/agents/support/org_123%3Aapp_123%3Asupport%3Athread_123?view=history",
+  );
+  assert.deepEqual(result, snapshot);
+});
+
+test("routes aborts and attachments through the authenticated thread proxy", async () => {
+  const requests: string[] = [];
+  const client = createFlaryThreadClient({
+    baseUrl: "https://cloud.flary.test",
+    token: "application_token",
+    fetch: async (input) => {
+      requests.push(String(input));
+      return Response.json({ aborted: true }, { status: 202 });
+    },
+  });
+  const ref = {
+    organizationId: "org_123",
+    appId: "app_123",
+    agentId: "support",
+    threadId: "thread_123",
+  };
+
+  await client.abort(ref);
+  assert.match(requests[0]!, /\/api\/apps\/app_123\/threads\/thread_123\/flue\/agents\/support\/.+\/abort$/);
+  assert.match(
+    client.attachmentUrl(ref, "file_123"),
+    /\/api\/apps\/app_123\/threads\/thread_123\/flue\/agents\/support\/.+\/attachments\/file_123$/,
+  );
+});

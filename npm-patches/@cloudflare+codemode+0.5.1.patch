@@ -1,0 +1,51 @@
+diff --git a/node_modules/@cloudflare/codemode/dist/base-BqhlNCSH.js b/node_modules/@cloudflare/codemode/dist/base-BqhlNCSH.js
+index c13dd22..76479c3 100644
+--- a/node_modules/@cloudflare/codemode/dist/base-BqhlNCSH.js
++++ b/node_modules/@cloudflare/codemode/dist/base-BqhlNCSH.js
+@@ -78,7 +78,7 @@ var CodemodeConnector = class extends WorkerEntrypoint {
+ 				outputSchema: t.outputSchema
+ 			};
+ 			if (t.requiresApproval || t.replay === "reexecute") annotations[name] = {
+-				...t.requiresApproval ? { requiresApproval: true } : {},
++				...t.requiresApproval ? { requiresApproval: t.requiresApproval } : {},
+ 				...t.replay === "reexecute" ? { replay: "reexecute" } : {}
+ 			};
+ 		}
+diff --git a/node_modules/@cloudflare/codemode/dist/base-DiFD41JY.d.ts b/node_modules/@cloudflare/codemode/dist/base-DiFD41JY.d.ts
+index 4a32be4..7b532bf 100644
+--- a/node_modules/@cloudflare/codemode/dist/base-DiFD41JY.d.ts
++++ b/node_modules/@cloudflare/codemode/dist/base-DiFD41JY.d.ts
+@@ -4,7 +4,7 @@ import { JSONSchema7 } from "json-schema";
+ 
+ //#region src/connectors/types.d.ts
+ type ToolAnnotations = {
+-  /** Requires user approval before executing. Unannotated methods execute immediately. */ requiresApproval?: boolean;
++  /** Requires user approval before executing. Unannotated methods execute immediately. */ requiresApproval?: boolean | ((args: unknown) => boolean);
+   /**
+    * Replay policy for the durable log. `"reexecute"` marks the call ephemeral:
+    * its result is never stored, and a replay re-executes the call instead of
+@@ -84,7 +84,7 @@ type ConnectorTool = {
+   description?: string /** JSON Schema for the tool input. Defaults to an open object. */;
+   inputSchema?: JSONSchema7;
+   outputSchema?: JSONSchema7 /** Pause for user approval before executing. Omit to execute immediately. */;
+-  requiresApproval?: boolean;
++  requiresApproval?: boolean | ((args: unknown) => boolean);
+   /**
+    * Replay policy for the durable log. `"reexecute"` marks the call ephemeral:
+    * its result is never stored durably, and a replay re-executes the call
+diff --git a/node_modules/@cloudflare/codemode/dist/index.js b/node_modules/@cloudflare/codemode/dist/index.js
+index a6132ff..7a46a1a 100644
+--- a/node_modules/@cloudflare/codemode/dist/index.js
++++ b/node_modules/@cloudflare/codemode/dist/index.js
+@@ -1576,7 +1576,10 @@ function buildConnectorBindings(setup, runtime, executionId, cursor) {
+ 			try {
+ 				const seq = cursor.next();
+ 				const annotation = setup.annotations[`${desc.name}.${method}`];
+-				const requiresApproval = annotation?.requiresApproval ?? false;
++				const configuredApproval = annotation?.requiresApproval ?? false;
++				const requiresApproval = typeof configuredApproval === "function"
++					? configuredApproval(args)
++					: configuredApproval;
+ 				const ephemeral = annotation?.replay === "reexecute";
+ 				const decision = await runtime.decide(executionId, seq, desc.name, method, args, requiresApproval, ephemeral);
+ 				if (decision.kind === "replay") return decision.result;

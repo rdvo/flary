@@ -18,6 +18,10 @@ export interface FlaryVitePluginOptions {
   readonly functions?: Readonly<Record<string, unknown>>;
   /** Module that exports the same `functions` registry. */
   readonly functionsEntry?: string;
+  /** Module that exports the application Worker. Defaults to `functionsEntry`. */
+  readonly workerEntry?: string;
+  /** Public Flary API mount. Defaults to `/api`. */
+  readonly apiPrefix?: string;
   readonly root?: string;
   readonly tools?: readonly FlaryToolRegistry[];
   readonly manifestFileName?: string;
@@ -66,6 +70,7 @@ export interface FlaryManifest {
     readonly canonicalSessionArchivePrefix: "canonical-sessions/";
     readonly threadCatalogBinding: "FLARY_THREAD_CATALOG";
     readonly projectionQueueBinding: "FLARY_SESSION_PROJECTION_QUEUE";
+    readonly purgeQueueBinding: "FLARY_THREAD_PURGE_QUEUE";
     readonly browserRunBinding?: "BROWSER";
     readonly sandboxBinding?: "SANDBOX";
     readonly flueRegistryBinding: "FLUE_REGISTRY";
@@ -83,6 +88,7 @@ interface FlaryVitePlugin {
   config?(config: { readonly root?: string }): void;
   buildStart?(
     this: {
+      readonly environment?: { readonly name?: string };
       emitFile(input: {
         type: "chunk";
         id: string;
@@ -94,6 +100,7 @@ interface FlaryVitePlugin {
   load?(id: string): string | undefined;
   generateBundle(
     this: {
+      readonly environment?: { readonly name?: string };
       emitFile(input: {
         type: "asset";
         fileName: string;
@@ -155,17 +162,25 @@ export function flary(options: FlaryVitePluginOptions = {}): {
     config(config) {
       resolvedRoot = path.resolve(config.root ?? options.root ?? process.cwd());
       if (options.generateRuntime === false || !options.functionsEntry) return;
-      const entry = path.resolve(resolvedRoot, options.functionsEntry);
-      if (!fs.existsSync(entry)) return;
+      const functionsEntry = path.resolve(resolvedRoot, options.functionsEntry);
+      if (!fs.existsSync(functionsEntry)) return;
       generateFlueRuntime({
         root: resolvedRoot,
-        entry,
+        functionsEntry,
+        workerEntry: path.resolve(
+          resolvedRoot,
+          options.workerEntry ?? options.functionsEntry,
+        ),
+        apiPrefix: normalizeApiPrefix(options.apiPrefix),
         functions: functionEntries(),
         cli: options.flueCli,
         runtimeEntry: options.runtimeEntry,
       });
     },
     buildStart() {
+      // Vite runs plugins once for each environment. Function entry chunks are
+      // Worker-only and must never enter a browser bundle.
+      if (this.environment?.name === "client") return;
       for (const entry of functionEntries()) {
         if (!entry.state && !entry.agentState && !entry.mode) {
           throw new Error(`Flary export '${entry.name}' is not registered`);
@@ -207,6 +222,7 @@ export function flary(options: FlaryVitePluginOptions = {}): {
       ].join("\n");
     },
     generateBundle() {
+      if (this.environment?.name === "client") return;
       const entries = functionEntries();
       const functions = entries
         .filter(({ mode }) => mode !== "interactive")
@@ -275,6 +291,7 @@ export function flary(options: FlaryVitePluginOptions = {}): {
         "FlaryThreadControl",
         "FlaryWorkspace",
         "FlueRegistry",
+        "CodemodeRuntime",
         ...runtimeClasses,
         ...(needsSandbox ? ["Sandbox"] : []),
       ];
@@ -295,6 +312,7 @@ export function flary(options: FlaryVitePluginOptions = {}): {
           canonicalSessionArchivePrefix: "canonical-sessions/",
           threadCatalogBinding: "FLARY_THREAD_CATALOG",
           projectionQueueBinding: "FLARY_SESSION_PROJECTION_QUEUE",
+          purgeQueueBinding: "FLARY_THREAD_PURGE_QUEUE",
           ...(needsBrowser ? { browserRunBinding: "BROWSER" as const } : {}),
           ...(needsSandbox ? { sandboxBinding: "SANDBOX" as const } : {}),
           flueRegistryBinding: "FLUE_REGISTRY",
@@ -460,6 +478,7 @@ function mergeWranglerConfig(
     "FlaryThreadControl",
     "FlaryWorkspace",
     "FlueRegistry",
+    "CodemodeRuntime",
     ...runtimeClasses,
     ...(features.needsSandbox ? ["Sandbox"] : []),
   ]) {
@@ -498,6 +517,7 @@ function mergeWranglerConfig(
   }
   const authoredQueues = isRecord(base.queues) ? base.queues : {};
   const queueName = `${resourcePrefix}-session-projection`;
+  const purgeQueueName = `${resourcePrefix}-thread-purge`;
   const queueProducers = Array.isArray(authoredQueues.producers)
     ? authoredQueues.producers.filter(isRecord).map((value) => ({ ...value }))
     : [];
@@ -505,6 +525,12 @@ function mergeWranglerConfig(
     queueProducers.push({
       binding: "FLARY_SESSION_PROJECTION_QUEUE",
       queue: queueName,
+    });
+  }
+  if (!queueProducers.some((value) => value.binding === "FLARY_THREAD_PURGE_QUEUE")) {
+    queueProducers.push({
+      binding: "FLARY_THREAD_PURGE_QUEUE",
+      queue: purgeQueueName,
     });
   }
   const queueConsumers = Array.isArray(authoredQueues.consumers)
@@ -517,6 +543,15 @@ function mergeWranglerConfig(
       max_batch_timeout: 5,
       max_retries: 10,
       dead_letter_queue: `${queueName}-dead-letter`,
+    });
+  }
+  if (!queueConsumers.some((value) => value.queue === purgeQueueName)) {
+    queueConsumers.push({
+      queue: purgeQueueName,
+      max_batch_size: 5,
+      max_batch_timeout: 1,
+      max_retries: 10,
+      dead_letter_queue: `${purgeQueueName}-dead-letter`,
     });
   }
   const {
@@ -635,7 +670,9 @@ interface GeneratedFunctionEntry {
  */
 function generateFlueRuntime(input: {
   readonly root: string;
-  readonly entry: string;
+  readonly functionsEntry: string;
+  readonly workerEntry: string;
+  readonly apiPrefix: string;
   readonly functions: readonly GeneratedFunctionEntry[];
   readonly cli?: string;
   readonly runtimeEntry?: string;
@@ -669,7 +706,7 @@ function generateFlueRuntime(input: {
   clearGeneratedModules(agentsRoot);
   clearGeneratedModules(workflowsRoot);
 
-  const importPath = relativeImport(agentsRoot, input.entry);
+  const importPath = relativeImport(agentsRoot, input.functionsEntry);
   const generatedImport = JSON.stringify(importPath);
   for (const entry of input.functions) {
     const directory = entry.mode === "run" ? workflowsRoot : agentsRoot;
@@ -724,6 +761,8 @@ function generateFlueRuntime(input: {
 
   patchGeneratedWorkflowRecovery(input.root);
   patchGeneratedFlueInternalRoutes(input.root, input.functions);
+  patchGeneratedCodemodeRuntimeExport(input.root);
+  patchGeneratedCloudflareDurableObjectState(input.root);
 
   const generatedWrangler = path.join(input.root, ".flue-vite.wrangler.jsonc");
   if (fs.existsSync(generatedWrangler)) {
@@ -749,6 +788,7 @@ function generateFlueRuntime(input: {
       "FlaryThreadControl",
       "FlaryWorkspace",
       "FlueRegistry",
+      "CodemodeRuntime",
       ...runtimeClasses,
     ];
     const sourceKinds = input.functions.flatMap((entry) => entry.sourceKinds ?? []);
@@ -770,6 +810,38 @@ function generateFlueRuntime(input: {
       "utf8",
     );
   }
+}
+
+/** Export Code Mode from the actual Flue Worker entry consumed by Vite. */
+function patchGeneratedCodemodeRuntimeExport(root: string): void {
+  const entry = path.join(root, ".flue-vite", "_entry.ts");
+  if (!fs.existsSync(entry)) return;
+  const source = fs.readFileSync(entry, "utf8");
+  const statement = 'export { CodemodeRuntime } from "@cloudflare/codemode";';
+  if (source.includes(statement)) return;
+  fs.writeFileSync(entry, `${source.trimEnd()}\n${statement}\n`, "utf8");
+}
+
+/** Make the active Durable Object state available to Flary Code Mode. */
+function patchGeneratedCloudflareDurableObjectState(root: string): void {
+  const entry = path.join(root, ".flue-vite", "_entry.ts");
+  if (!fs.existsSync(entry)) return;
+  const source = fs.readFileSync(entry, "utf8");
+  if (source.includes("durableObjectState: doInstance.ctx")) return;
+  const marker = "      storage: doInstance.ctx.storage,\n      durableObjectIdentity:";
+  if (!source.includes(marker)) {
+    throw new Error(
+      "Flary Vite could not expose the Durable Object state to Code Mode.",
+    );
+  }
+  fs.writeFileSync(
+    entry,
+    source.replace(
+      marker,
+      "      storage: doInstance.ctx.storage,\n      durableObjectState: doInstance.ctx,\n      durableObjectIdentity:",
+    ),
+    "utf8",
+  );
 }
 
 function toolSourceKinds(registry: FlaryToolRegistry | undefined): string[] {
@@ -868,7 +940,7 @@ function patchGeneratedFlueInternalRoutes(
       : `  async onRequest(request) {\n    return dispatchWorkflow(request, this, ${JSON.stringify(functionEntry.name)});\n  }`;
     if (!source.includes(`const ${className} =`) || !source.includes(old)) continue;
     const replacement = kind === "agent"
-      ? `  async onRequest(request) {\n    const flaryAction = new URL(request.url).searchParams.get('flary');\n    if (['compact', 'rollback', 'export', 'import'].includes(flaryAction ?? '') && request.method === 'POST') {\n      const token = this.env.FLARY_INTERNAL_TOKEN;\n      if (typeof token !== 'string' || token.length < 32 || request.headers.get('authorization') !== \`Bearer \${token}\`) return new Response(null, { status: 404 });\n      if (flaryAction === 'compact') {\n        await cloudflareAgents.compact(this);\n        return Response.json({ ok: true });\n      }\n      const body = await request.json();\n      if (flaryAction === 'export') return Response.json(await cloudflareAgents.exportCanonical(this, body.turnId));\n      if (flaryAction === 'import') return Response.json(await cloudflareAgents.importCanonical(this, body.archive, body.turnId));\n      const result = await cloudflareAgents.rollback(this, body.turnId, body.reason);\n      return Response.json(result);\n    }\n    const internal = await ${variable}.flaryInternalRequest?.(request, this.env);\n    if (internal) return internal;\n    return cloudflareAgents.onRequest(this, request);\n  }`
+      ? `  async onRequest(request) {\n    const flaryAction = new URL(request.url).searchParams.get('flary');\n    if (['compact', 'rollback', 'export', 'import', 'delete'].includes(flaryAction ?? '') && request.method === 'POST') {\n      const token = this.env.FLARY_INTERNAL_TOKEN;\n      if (typeof token !== 'string' || token.length < 32 || request.headers.get('authorization') !== \`Bearer \${token}\`) return new Response(null, { status: 404 });\n      if (flaryAction === 'compact') {\n        await cloudflareAgents.compact(this);\n        return Response.json({ ok: true });\n      }\n      if (flaryAction === 'delete') {\n        await this.destroy();\n        return Response.json({ ok: true });\n      }\n      const body = await request.json();\n      if (flaryAction === 'export') return Response.json(await cloudflareAgents.exportCanonical(this, body.turnId));\n      if (flaryAction === 'import') return Response.json(await cloudflareAgents.importCanonical(this, body.archive, body.turnId));\n      const result = await cloudflareAgents.rollback(this, body.turnId, body.reason);\n      return Response.json(result);\n    }\n    const internal = await ${variable}.flaryInternalRequest?.(request, this.env);\n    if (internal) return internal;\n    return cloudflareAgents.onRequest(this, request);\n  }`
       : `  async onRequest(request) {\n    if (new URL(request.url).searchParams.get('flary') === 'wake' && request.method === 'GET') {\n      await cloudflareAgents.wakeSubmissions(this);\n      return Response.json({ ok: true });\n    }\n    const internal = await ${variable}.flaryInternalRequest?.(request, this.env);\n    if (internal) return internal;\n    return dispatchWorkflow(request, this, ${JSON.stringify(functionEntry.name)});\n  }`;
     source = source.replace(old, replacement).replace(
       "cloudflareAgents.rollback(this, body.turnId, body.reason)",
@@ -920,14 +992,17 @@ function generatedCloudflareSource(input: {
     return [
       GENERATED_MARKER,
       `export * from ${JSON.stringify(relativeImport(path.join(input.root, ".flue"), path.resolve(input.root, input.runtimeEntry)))};`,
+      'export { CodemodeRuntime } from "@cloudflare/codemode";',
       "",
     ].join("\n");
   }
+  const queueNames = flaryQueueNames(readWranglerConfig(input.root));
   return [
     GENERATED_MARKER,
     'import { DurableObject } from "cloudflare:workers";',
-    'import { createCloudflareFlueGateway, createFlaryCodemodeApprovalHooks, handleFlaryDurableRunObjectRequest, handleFlarySessionProjectionQueue, handleFlaryThreadControlAlarm, handleFlaryThreadControlObjectRequest, handleFlaryThreadControlWebSocketClose, handleFlaryThreadControlWebSocketMessage, handleFlaryWorkspaceObjectRequest } from "flary/cloudflare";',
+    'import { createCloudflareFlueGateway, createFlaryCodemodeApprovalHooks, handleFlaryDurableRunObjectRequest, handleFlarySessionProjectionQueue, handleFlaryThreadPurgeQueue, handleFlaryThreadControlAlarm, handleFlaryThreadControlObjectRequest, handleFlaryThreadControlWebSocketClose, handleFlaryThreadControlWebSocketMessage, handleFlaryWorkspaceObjectRequest } from "flary/cloudflare";',
     'export { Sandbox } from "@cloudflare/sandbox";',
+    'export { CodemodeRuntime } from "@cloudflare/codemode";',
     "",
     "export class FlaryRuntime extends DurableObject {",
     "  async fetch(request: Request): Promise<Response> {",
@@ -970,6 +1045,7 @@ function generatedCloudflareSource(input: {
     "      storage: this.ctx.storage as never,",
     "      env: this.env as Record<string, unknown>,",
     "      execution: { waitUntil: (work) => this.ctx.waitUntil(work) },",
+    "      webSockets: { acceptWebSocket: (socket, tags) => this.ctx.acceptWebSocket(socket as WebSocket, tags), getWebSockets: (tag) => this.ctx.getWebSockets(tag) },",
     "    });",
     "  }",
     "  async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {",
@@ -990,7 +1066,8 @@ function generatedCloudflareSource(input: {
     "",
     "export default {",
     "  queue(batch, env) {",
-    "    return handleFlarySessionProjectionQueue({ messages: batch.messages, env });",
+    `    if (batch.queue === ${JSON.stringify(queueNames.purge)}) return handleFlaryThreadPurgeQueue({ messages: batch.messages, env });`,
+    `    if (batch.queue === ${JSON.stringify(queueNames.projection)}) return handleFlarySessionProjectionQueue({ messages: batch.messages, env });`,
     "  },",
     "};",
     "",
@@ -999,14 +1076,17 @@ function generatedCloudflareSource(input: {
 
 function generatedAppSource(input: {
   readonly root: string;
-  readonly entry: string;
+  readonly functionsEntry: string;
+  readonly workerEntry: string;
+  readonly apiPrefix: string;
 }): string {
+  const queueNames = flaryQueueNames(readWranglerConfig(input.root));
   return [
     GENERATED_MARKER,
-    `import authoredWorker, { functions } from ${JSON.stringify(relativeImport(path.join(input.root, ".flue"), input.entry))};`,
+    `import { functions } from ${JSON.stringify(relativeImport(path.join(input.root, ".flue"), input.functionsEntry))};`,
+    `import authoredWorker from ${JSON.stringify(relativeImport(path.join(input.root, ".flue"), input.workerEntry))};`,
     'import { getAgentApp, getFunctionApp } from "flary/functions";',
-    'import { flue } from "@flue/runtime/routing";',
-    'import { createCloudflareThreadService, createFlaryDurableRunService, handleFlarySessionProjectionQueue } from "flary/cloudflare";',
+    'import { createCloudflareThreadService, createFlaryDurableRunService, handleFlarySessionProjectionQueue, handleFlaryThreadPurgeQueue } from "flary/cloudflare";',
     "const firstExport = Object.values(functions)[0];",
     "const userApp = getFunctionApp(firstExport) ?? getAgentApp(firstExport);",
     'if (!userApp) throw new Error("Flary Vite needs exports created by one flary() application");',
@@ -1023,26 +1103,20 @@ function generatedAppSource(input: {
     "  }),",
     ");",
     "const handler = userApp.serve(functions);",
-    "const apiHandler = userApp.serve(functions, { prefix: \"/api\" });",
+    `const apiPrefix = ${JSON.stringify(input.apiPrefix)};`,
+    "const apiHandler = userApp.serve(functions, { prefix: apiPrefix });",
     "const customWorker = authoredWorker as any;",
     "const publicWorker = customWorker && typeof customWorker.fetch === \"function\" ? customWorker : handler;",
-    "const flueApp = flue();",
-    "function flueRequest(request, prefix) {",
-    "  const url = new URL(request.url);",
-    "  url.pathname = url.pathname.slice(prefix.length) || '/';",
-    "  return new Request(url, request);",
-    "}",
     "export default {",
     "  async fetch(request, env, ctx) {",
     "    const pathname = new URL(request.url).pathname;",
-    "    if (pathname === \"/flue\" || pathname.startsWith(\"/flue/\")) return flueApp.fetch(flueRequest(request, \"/flue\"), env, ctx);",
-    "    if (pathname === \"/api/flue\" || pathname.startsWith(\"/api/flue/\")) return flueApp.fetch(flueRequest(request, \"/api/flue\"), env, ctx);",
     "    const authoredResponse = await publicWorker.fetch(request, env, ctx);",
-    "    if (authoredResponse.status !== 404 || (pathname !== \"/api\" && !pathname.startsWith(\"/api/\"))) return authoredResponse;",
+    "    if (authoredResponse.status !== 404 || (pathname !== apiPrefix && !pathname.startsWith(apiPrefix + \"/\"))) return authoredResponse;",
     "    return apiHandler.fetch(request, env, ctx);",
     "  },",
     "  async queue(batch, env, ctx) {",
-    "    await handleFlarySessionProjectionQueue({ messages: batch.messages, env });",
+    `    if (batch.queue === ${JSON.stringify(queueNames.purge)}) await handleFlaryThreadPurgeQueue({ messages: batch.messages, env });`,
+    `    else if (batch.queue === ${JSON.stringify(queueNames.projection)}) await handleFlarySessionProjectionQueue({ messages: batch.messages, env });`,
     "    if (typeof customWorker?.queue === \"function\") await customWorker.queue(batch, env, ctx);",
     "  },",
     "  scheduled: typeof customWorker?.scheduled === \"function\"",
@@ -1051,6 +1125,40 @@ function generatedAppSource(input: {
     "};",
     "",
   ].join("\n");
+}
+
+function normalizeApiPrefix(value = "/api"): string {
+  const normalized = `/${value}`.replace(/\/+/g, "/").replace(/\/$/, "");
+  return normalized || "/";
+}
+
+function flaryQueueNames(base: Record<string, any>): {
+  projection: string;
+  purge: string;
+} {
+  const resourcePrefix =
+    typeof base.name === "string" && base.name.length > 0
+      ? base.name.replaceAll(/[^a-zA-Z0-9-]/g, "-").toLowerCase()
+      : "flary";
+  const producers = isRecord(base.queues) && Array.isArray(base.queues.producers)
+    ? base.queues.producers.filter(isRecord)
+    : [];
+  const queueFor = (binding: string, fallback: string): string => {
+    const producer = producers.find((entry) => entry.binding === binding);
+    return producer && typeof producer.queue === "string" && producer.queue.length > 0
+      ? producer.queue
+      : fallback;
+  };
+  return {
+    projection: queueFor(
+      "FLARY_SESSION_PROJECTION_QUEUE",
+      `${resourcePrefix}-session-projection`,
+    ),
+    purge: queueFor(
+      "FLARY_THREAD_PURGE_QUEUE",
+      `${resourcePrefix}-thread-purge`,
+    ),
+  };
 }
 
 function relativeImport(from: string, to: string): string {

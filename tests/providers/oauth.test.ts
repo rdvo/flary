@@ -84,6 +84,39 @@ test("supports local browser callbacks and rejects a mismatched OAuth state", as
   );
 });
 
+test("keeps the Codex ID token and account identity after login", async () => {
+  const originalFetch = globalThis.fetch;
+  const access = testJwt({
+    "https://api.openai.com/auth": { chatgpt_account_id: "account-123" },
+  });
+  globalThis.fetch = async (input) => {
+    assert.equal(String(input), "https://auth.openai.com/oauth/token");
+    return Response.json({
+      access_token: access,
+      refresh_token: "refresh-secret",
+      id_token: "id-token-secret",
+      expires_in: 3_600,
+    });
+  };
+  try {
+    const started = await startProviderOAuth({
+      provider: "openai-codex",
+      method: "browser_callback",
+    });
+    const credential = await completeProviderOAuth({
+      privateState: started.privateState,
+      authorizationResult: `code-123#${started.privateState.state}`,
+    });
+    assert.equal(credential.access, access);
+    assert.equal(credential.refresh, "refresh-secret");
+    assert.equal(credential.idToken, "id-token-secret");
+    assert.equal(credential.accountId, "account-123");
+    assert.equal(typeof credential.expires, "number");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("public OAuth sessions reject token fields", () => {
   const session = {
     id: "oauth-session-1",
@@ -131,3 +164,9 @@ test("reports requested and effective native cache policies", () => {
     { requested: "none", effective: "none" },
   );
 });
+
+function testJwt(payload: Record<string, unknown>): string {
+  const encode = (value: unknown) => Buffer.from(JSON.stringify(value))
+    .toString("base64url");
+  return `${encode({ alg: "none" })}.${encode(payload)}.signature`;
+}

@@ -39,6 +39,20 @@
         {
           "binding": "FLARY_RUNTIME",
           "service": "flary-cloud"
+        },
+        {
+          "binding": "FLARY_DOCS_AGENT",
+          "service": "flary-docs-agent"
+        }
+      ],
+      "ratelimits": [
+        {
+          "name": "DOCS_CHAT_RATE_LIMITER",
+          "namespace_id": "88001",
+          "simple": {
+            "limit": 12,
+            "period": 60
+          }
         }
       ]
     }

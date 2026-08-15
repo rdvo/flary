@@ -68,6 +68,46 @@ See the [complete Codex-style coding agent](/docs/examples/coding-agent/) for
 the real starter files, every tool name, the isolated executor flow, a durable
 reviewer subagent, checkpoints, and reconnect code.
 
+## Customer files in your own R2 bucket
+
+Use `app.r2()` when an agent must work on files that already live in an R2
+bucket. Bind the bucket to the Worker, then pin a tenant prefix in the source:
+
+```ts
+const customerFiles = app.r2({
+  namespace: "customerFiles",
+  binding: "CUSTOMER_FILES",
+  prefix: "customers/{tenantId}/html/forge",
+  access: "read-write",
+});
+
+export const siteEditor = app.agent({
+  name: "site-editor",
+  instructions: "Edit only the customer's site files. Explain changes before writing.",
+  tools: app.tools({ files: customerFiles }),
+});
+```
+
+`{tenantId}` is replaced by the authenticated tenant on the server. The
+browser sends only the thread ID. It never sends a bucket name, prefix, or
+R2 credential. Reads are lazy; writes require approval and pass through the
+normal Flary journal.
+
+Add the binding to the Worker's Wrangler configuration:
+
+```jsonc
+{
+  "r2_buckets": [
+    { "binding": "CUSTOMER_FILES", "bucket_name": "my-app-files" }
+  ]
+}
+```
+
+For separate customer buckets or AWS S3, keep the same `app.r2()` source but
+set `connection` and provide a trusted `resolveR2` adapter. Do not expose
+S3 credentials to the model or the browser. The adapter must enforce the
+tenant, bucket, and prefix before it returns file tools.
+
 ## Small core, lazy extensions
 
 The model sees one bounded `execute` tool. The tool instructions include the

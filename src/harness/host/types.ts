@@ -31,6 +31,7 @@ import {
   ThreadMessageRequestSchema,
   ThreadModelSetRequestSchema,
   type ThreadBinding,
+  type ThreadDeletion,
   type ThreadCreateRequest,
   type ThreadForkRequest,
   type ThreadHistoryDiffResponse,
@@ -198,6 +199,16 @@ export interface FlaryThreadHostService {
     threadId: string,
     ticket: string,
   ): Promise<Response>;
+  terminalTicket?(
+    target: FlaryThreadTarget,
+    input: { readonly cols?: number; readonly rows?: number },
+    requestUrl: string,
+  ): Promise<{ readonly url: string; readonly expiresAt: string }>;
+  terminalConnect?(
+    target: FlaryThreadTarget,
+    ticket: string,
+    request: Request,
+  ): Promise<Response>;
   archive(target: FlaryThreadTarget): Promise<ThreadBinding>;
   unarchive?(target: FlaryThreadTarget): Promise<ThreadBinding>;
   rename?(
@@ -212,7 +223,10 @@ export interface FlaryThreadHostService {
     target: FlaryThreadTarget,
     input: ThreadReadRequest,
   ): Promise<ThreadBinding>;
-  delete?(target: FlaryThreadTarget): Promise<void>;
+  delete?(target: FlaryThreadTarget): Promise<ThreadDeletion>;
+  deletion?(target: FlaryThreadTarget, deletionId: string): Promise<ThreadDeletion>;
+  /** Internal queue consumer hook. It is not exposed as a public route. */
+  purge?(target: FlaryThreadTarget, deletionId: string): Promise<void>;
   fork(
     target: FlaryThreadTarget,
     input: ThreadForkRequest,
@@ -237,6 +251,23 @@ export interface FlaryThreadHostService {
     target: FlaryThreadTarget,
     input: ThreadMessageRequest,
   ): Promise<FlaryThreadAdmission>;
+  /** Read the safe, provider-neutral conversation through tenant authorization. */
+  conversation?(target: FlaryThreadTarget): Promise<unknown>;
+  /** Stream the same safe conversation projection from a durable cursor. */
+  conversationUpdates?(
+    target: FlaryThreadTarget,
+    input: {
+      readonly offset: string;
+      readonly live: "long-poll" | "sse";
+      readonly signal?: AbortSignal;
+    },
+  ): Promise<Response>;
+  /** Read one Flue attachment after the host resolves tenant ownership. */
+  attachment?(
+    target: FlaryThreadTarget,
+    attachmentId: string,
+    input: { readonly signal?: AbortSignal },
+  ): Promise<Response>;
   edit?(
     target: FlaryThreadTarget,
     input: import("../contracts/threads.js").ThreadEditRequest,

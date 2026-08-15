@@ -251,3 +251,42 @@ test("Cloudflare Flue gateway preserves the pinned direct model payload", async 
     cacheRetention: "none",
   });
 });
+
+test("Cloudflare Flue gateway sends authenticated canonical deletion", async () => {
+  const token = "d".repeat(32);
+  let requestSeen: Request | undefined;
+  const namespace: FlaryDurableObjectNamespace = {
+    idFromName: (name) => ({ toString: () => name }),
+    get: () => ({
+      async fetch(request) {
+        requestSeen = request;
+        return Response.json({ ok: true });
+      },
+    }),
+  };
+  const gateway = createCloudflareFlueGateway({
+    FLUE_SUPPORT_AGENT: namespace,
+  }, { token });
+
+  await gateway.delete!("support", "thread_1");
+
+  assert.equal(requestSeen?.method, "POST");
+  assert.equal(new URL(requestSeen!.url).searchParams.get("flary"), "delete");
+  assert.equal(requestSeen?.headers.get("authorization"), `Bearer ${token}`);
+});
+
+test("Cloudflare Flue gateway accepts the terminal destroy exception", async () => {
+  const namespace: FlaryDurableObjectNamespace = {
+    idFromName: (name) => ({ toString: () => name }),
+    get: () => ({
+      async fetch() {
+        throw { message: "destroyed" };
+      },
+    }),
+  };
+  const gateway = createCloudflareFlueGateway({
+    FLUE_SUPPORT_AGENT: namespace,
+  });
+
+  await gateway.delete!("support", "thread_1");
+});

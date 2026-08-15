@@ -360,6 +360,27 @@ export const ThreadMutationResponseSchema = z
   })
   .strict();
 
+/** A delete is accepted before its durable data is removed. */
+export const ThreadDeletionStatusSchema = z.enum([
+  "accepted",
+  "purging",
+  "complete",
+  "failed",
+]);
+export type ThreadDeletionStatus = z.infer<typeof ThreadDeletionStatusSchema>;
+
+export const ThreadDeletionSchema = z
+  .object({
+    id: IdentifierSchema,
+    threadId: IdentifierSchema,
+    status: ThreadDeletionStatusSchema,
+    acceptedAt: TimestampSchema,
+    completedAt: TimestampSchema.optional(),
+    errorCode: IdentifierSchema.optional(),
+  })
+  .strict();
+export type ThreadDeletion = z.infer<typeof ThreadDeletionSchema>;
+
 export const ThreadCursorQuerySchema = z
   .object({
     flueOffset: z.string().max(1_024).optional(),

@@ -349,6 +349,45 @@ export function createCloudflareFlueGateway<TEnv extends Record<string, unknown>
       }
       return FlueAdmissionSchema.parse(value);
     },
+    async delete(agentName, instanceId) {
+      const headers = new Headers({ "content-type": "application/json" });
+      if (options.token) headers.set("authorization", `Bearer ${options.token}`);
+      let response: Response;
+      try {
+        response = await directFetch(
+          `https://flue.internal/agents/${encodeURIComponent(agentName)}/${encodeURIComponent(instanceId)}?flary=delete`,
+          {
+            method: "POST",
+            headers,
+            body: "{}",
+          },
+        );
+      } catch (cause) {
+        // Agent.destroy() erases durable state and then aborts its isolate. A
+        // service binding reports that successful terminal action as this
+        // exact exception instead of delivering the JSON response.
+        const message = cause instanceof Error
+          ? cause.message
+          : isRecord(cause) && typeof cause.message === "string"
+            ? cause.message
+            : typeof cause === "string"
+              ? cause
+              : "";
+        if (message === "destroyed" || message === "Error: destroyed") return;
+        throw cause;
+      }
+      if (!response.ok) {
+        const value = await response.json().catch(() => undefined);
+        const detail = isRecord(value) && isRecord(value.error)
+          ? value.error.message
+          : undefined;
+        throw new Error(
+          typeof detail === "string"
+            ? detail
+            : `Flue agent deletion failed (${response.status})`,
+        );
+      }
+    },
     async waitWorkflow(admission, onEvent, workflowName) {
       workflowForRun = workflowName;
       try {

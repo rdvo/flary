@@ -19,6 +19,22 @@ for await (const event of thread.stream({ after: cursor })) {
 The cursor is durable. Reconnect after a tab closes, a network break, or a
 Worker restart without resending the full conversation.
 
+An agent with `app.workspace()` starts with a private blank workspace when the
+caller does not provide a workspace reference. File changes, Git checkpoints,
+and Sandbox state stay attached to this thread.
+
+Delete returns after the thread is hidden and cleanup is queued. Flary then
+stops active work and removes the transcript, workspace, artifacts, processes,
+and indexes in the background:
+
+```ts
+const deletion = await thread.delete();
+console.log(deletion.status); // "accepted"
+```
+
+Interactive terminals use a separate WebSocket. This keeps terminal bytes from
+blocking chat events and supports reconnect and resize.
+
 ## Realtime control
 
 `thread.connect()` uses a hibernating WebSocket for events and commands. SSE
