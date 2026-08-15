@@ -376,6 +376,9 @@ test("the Vite plugin generates Flue Durable Object entry and bindings", (t) => 
   assert.doesNotMatch(authoredHost, /batch\.queue\?\.includes/);
   const cloudflareHost = fs.readFileSync(path.join(root, ".flue/cloudflare.ts"), "utf8");
   assert.match(cloudflareHost, /export \{ CodemodeRuntime \} from "@cloudflare\/codemode"/);
+  assert.match(cloudflareHost, /import \{ functions \} from/);
+  assert.match(cloudflareHost, /const userApp = getFunctionApp\(firstExport\) \?\? getAgentApp\(firstExport\)/);
+  assert.match(cloudflareHost, /handleFlarySessionProjectionQueue\(\{ messages: batch\.messages, env, resolveModel: userApp\.options\.resolveModel \}\)/);
   assert.match(
     cloudflareHost,
     /async alarm\(\): Promise<void> \{[\s\S]*?handleFlaryThreadControlAlarm\(\{[\s\S]*?webSockets:/,

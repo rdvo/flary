@@ -1000,6 +1000,7 @@ function writeGeneratedFile(file: string, source: string): void {
 
 function generatedCloudflareSource(input: {
   readonly root: string;
+  readonly functionsEntry: string;
   readonly runtimeEntry?: string;
 }): string {
   if (input.runtimeEntry) {
@@ -1014,9 +1015,15 @@ function generatedCloudflareSource(input: {
   return [
     GENERATED_MARKER,
     'import { DurableObject } from "cloudflare:workers";',
+    `import { functions } from ${JSON.stringify(relativeImport(path.join(input.root, ".flue"), input.functionsEntry))};`,
+    'import { getAgentApp, getFunctionApp } from "flary/functions";',
     'import { createCloudflareFlueGateway, createFlaryCodemodeApprovalHooks, handleFlaryDurableRunObjectRequest, handleFlarySessionProjectionQueue, handleFlaryThreadPurgeQueue, handleFlaryThreadControlAlarm, handleFlaryThreadControlObjectRequest, handleFlaryThreadControlWebSocketClose, handleFlaryThreadControlWebSocketMessage, handleFlaryWorkspaceObjectRequest } from "flary/cloudflare";',
     'export { Sandbox } from "@cloudflare/sandbox";',
     'export { CodemodeRuntime } from "@cloudflare/codemode";',
+    "",
+    "const firstExport = Object.values(functions)[0];",
+    "const userApp = getFunctionApp(firstExport) ?? getAgentApp(firstExport);",
+    'if (!userApp) throw new Error("Flary Vite needs exports created by one flary() application");',
     "",
     "export class FlaryRuntime extends DurableObject {",
     "  async fetch(request: Request): Promise<Response> {",
@@ -1081,7 +1088,7 @@ function generatedCloudflareSource(input: {
     "export default {",
     "  queue(batch, env) {",
     `    if (batch.queue === ${JSON.stringify(queueNames.purge)}) return handleFlaryThreadPurgeQueue({ messages: batch.messages, env });`,
-    `    if (batch.queue === ${JSON.stringify(queueNames.projection)}) return handleFlarySessionProjectionQueue({ messages: batch.messages, env });`,
+    `    if (batch.queue === ${JSON.stringify(queueNames.projection)}) return handleFlarySessionProjectionQueue({ messages: batch.messages, env, resolveModel: userApp.options.resolveModel });`,
     "  },",
     "};",
     "",
