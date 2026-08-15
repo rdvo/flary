@@ -762,6 +762,7 @@ function generateFlueRuntime(input: {
   patchGeneratedWorkflowRecovery(input.root);
   patchGeneratedFlueInternalRoutes(input.root, input.functions);
   patchGeneratedCodemodeRuntimeExport(input.root);
+  patchGeneratedAuthoredWorkerExports(input.root, input.workerEntry);
   patchGeneratedCloudflareDurableObjectState(input.root);
 
   const generatedWrangler = path.join(input.root, ".flue-vite.wrangler.jsonc");
@@ -810,6 +811,16 @@ function generateFlueRuntime(input: {
       "utf8",
     );
   }
+}
+
+/** Keep authored WorkerEntrypoint and service exports in the final Worker module. */
+function patchGeneratedAuthoredWorkerExports(root: string, workerEntry: string): void {
+  const entry = path.join(root, ".flue-vite", "_entry.ts");
+  if (!fs.existsSync(entry)) return;
+  const source = fs.readFileSync(entry, "utf8");
+  const statement = `export * from ${JSON.stringify(workerEntry)};`;
+  if (source.includes(statement)) return;
+  fs.writeFileSync(entry, `${source.trimEnd()}\n${statement}\n`, "utf8");
 }
 
 /** Export Code Mode from the actual Flue Worker entry consumed by Vite. */

@@ -393,6 +393,7 @@ test("the Vite plugin generates Flue Durable Object entry and bindings", (t) => 
   assert.match(generatedEntry, /await this\.destroy\(\)/);
   assert.match(generatedEntry, /body\.excludeTarget === true/);
   assert.match(generatedEntry, /export \{ CodemodeRuntime \} from "@cloudflare\/codemode"/);
+  assert.match(generatedEntry, /export \* from ".*src\/worker\.ts"/);
   assert.match(generatedEntry, /durableObjectState: doInstance\.ctx/);
   const wrangler = JSON.parse(
     fs.readFileSync(path.join(root, ".flue-vite.wrangler.jsonc"), "utf8"),
