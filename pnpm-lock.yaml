@@ -71,6 +71,9 @@ importers:
       hono:
         specifier: 4.12.34
         version: 4.12.34
+      jsonc-parser:
+        specifier: ^3.3.1
+        version: 3.3.1
       patch-package:
         specifier: 8.0.1
         version: 8.0.1
@@ -6372,7 +6375,6 @@ packages:
 
   /jsonc-parser@3.3.1:
     resolution: {integrity: sha512-HUgH65KyejrUFPvHFPbqOY0rsFip3Bo5wb4ngvdi1EpCYWUQDC5V+Y7mZws+DLkr4M//zQJoanu1SP+87Dv1oQ==}
-    dev: true
 
   /jsonfile@6.2.1:
     resolution: {integrity: sha512-zwOTdL3rFQ/lRdBnntKVOX6k5cKJwEc1HdilT71BWEu7J41gXIB2MRp+vxduPSwZJPWBxEzv4yH1wYLJGUHX4Q==}

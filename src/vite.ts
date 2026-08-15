@@ -5,8 +5,8 @@ import {
 import type { FlaryToolRegistry } from "./harness/functions/types.js";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import { parse as parseJsonc } from "jsonc-parser";
 import path from "node:path";
-import YAML from "yaml";
 import { z } from "zod";
 
 export interface FlaryVitePluginOptions {
@@ -399,7 +399,7 @@ function readWranglerConfig(root: string): Record<string, any> {
     const file = path.resolve(root, candidate);
     if (!fs.existsSync(file)) continue;
     try {
-      const parsed = YAML.parse(fs.readFileSync(file, "utf8")) as unknown;
+      const parsed = parseJsonc(fs.readFileSync(file, "utf8")) as unknown;
       if (isRecord(parsed)) return parsed;
     } catch {
       // Keep a minimal generated config when the authored file is invalid.
@@ -1182,7 +1182,7 @@ function relativeImport(from: string, to: string): string {
 
 function readJsoncFile(file: string): Record<string, any> {
   try {
-    const parsed = YAML.parse(fs.readFileSync(file, "utf8")) as unknown;
+    const parsed = parseJsonc(fs.readFileSync(file, "utf8")) as unknown;
     return isRecord(parsed) ? parsed : {};
   } catch {
     return {};

@@ -1,6 +1,6 @@
 {
   "name": "flary",
-  "version": "0.8.0-rc.6",
+  "version": "0.8.0-rc.7",
   "description": "Durable, provider-neutral AI agent harness for Cloudflare Workers",
   "main": "dist/index.js",
   "module": "dist/index.js",
@@ -54,6 +54,7 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "acorn": "^8.18.0",
     "hono": "4.12.34",
+    "jsonc-parser": "^3.3.1",
     "patch-package": "8.0.1",
     "valibot": "^1.4.0",
     "yaml": "^2.8.1",

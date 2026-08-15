@@ -435,11 +435,13 @@ test("explicit root controls generated queue names in a monorepo", (t) => {
   fs.mkdirSync(path.join(workerRoot, "src"), { recursive: true });
   fs.writeFileSync(
     path.join(workerRoot, "wrangler.jsonc"),
-    JSON.stringify({
-      name: "tracked-app",
-      compatibility_date: "2026-05-01",
-      compatibility_flags: ["nodejs_compat"],
-    }),
+    [
+      "{",
+      '  "name": "tracked-app", // Worker name',
+      '  "compatibility_date": "2026-05-01",',
+      '  "compatibility_flags": ["nodejs_compat"],',
+      "}",
+    ].join("\n"),
   );
   fs.writeFileSync(
     path.join(workerRoot, "src", "index.ts"),
