@@ -428,3 +428,54 @@ test("the Vite plugin generates Flue Durable Object entry and bindings", (t) => 
   );
   assert.equal("migrations" in wrangler, false);
 });
+
+test("explicit root controls generated queue names in a monorepo", (t) => {
+  const monorepoRoot = fs.mkdtempSync(path.join(path.resolve("tests"), ".flary-vite-monorepo-"));
+  const workerRoot = path.join(monorepoRoot, "workers", "app");
+  fs.mkdirSync(path.join(workerRoot, "src"), { recursive: true });
+  fs.writeFileSync(
+    path.join(workerRoot, "wrangler.jsonc"),
+    JSON.stringify({
+      name: "tracked-app",
+      compatibility_date: "2026-05-01",
+      compatibility_flags: ["nodejs_compat"],
+    }),
+  );
+  fs.writeFileSync(
+    path.join(workerRoot, "src", "index.ts"),
+    [
+      `import { flary, z } from ${JSON.stringify(path.resolve("src/index.ts"))};`,
+      'const app = flary({ name: "fixture", runtime: "local" });',
+      'export const support = app.fn({ name: "support", input: z.string(), output: z.string(), prompt: (input) => input });',
+      "export const functions = { support };",
+      "",
+    ].join("\n"),
+  );
+  fs.writeFileSync(
+    path.join(workerRoot, "src", "worker.ts"),
+    "export default { fetch() { return new Response(null, { status: 404 }); } };\n",
+  );
+  t.after(() => fs.rmSync(monorepoRoot, { recursive: true, force: true }));
+
+  const cli = path.resolve("apps/cloud/node_modules/.bin/flue");
+  const agents = path.resolve("apps/cloud/node_modules/agents");
+  if (!fs.existsSync(cli) || !fs.existsSync(agents)) {
+    t.skip("the Cloudflare Flue build dependencies are not installed in the workspace");
+    return;
+  }
+  const fixtureNodeModules = path.join(workerRoot, "node_modules");
+  fs.mkdirSync(fixtureNodeModules, { recursive: true });
+  fs.symlinkSync(agents, path.join(fixtureNodeModules, "agents"), "dir");
+
+  const plugin = flaryVite({
+    root: workerRoot,
+    functionsEntry: "src/index.ts",
+    workerEntry: "src/worker.ts",
+    flueCli: cli,
+  });
+  plugin.config?.({ root: monorepoRoot });
+
+  const authoredHost = fs.readFileSync(path.join(workerRoot, ".flue", "app.ts"), "utf8");
+  assert.match(authoredHost, /batch\.queue === "tracked-app-thread-purge"/);
+  assert.match(authoredHost, /batch\.queue === "tracked-app-session-projection"/);
+});

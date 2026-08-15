@@ -160,7 +160,10 @@ export function flary(options: FlaryVitePluginOptions = {}): {
     name: "flary-functions",
     enforce: "pre",
     config(config) {
-      resolvedRoot = path.resolve(config.root ?? options.root ?? process.cwd());
+      // An explicit Flary root identifies the Worker project inside a
+      // monorepo. Vite's root can be the repository root, so it must not
+      // override this value when Flary reads the authored Wrangler config.
+      resolvedRoot = path.resolve(options.root ?? config.root ?? process.cwd());
       if (options.generateRuntime === false || !options.functionsEntry) return;
       const functionsEntry = path.resolve(resolvedRoot, options.functionsEntry);
       if (!fs.existsSync(functionsEntry)) return;
