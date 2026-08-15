@@ -7,6 +7,7 @@ import {
   handleFlarySessionProjectionQueue,
   handleFlaryThreadControlObjectRequest,
   handleFlaryThreadControlWebSocketMessage,
+  publicAgentFailureMessage,
 } from "../../src/harness/cloudflare/thread-control.ts";
 
 function namespace() {
@@ -72,6 +73,18 @@ function sqlStorage() {
     },
   };
 }
+
+test("provider failures become short safe public messages", () => {
+  assert.equal(
+    publicAgentFailureMessage(new Error("direct failed: <html><body>Unable to load site</body></html> Ray ID: 123")),
+    "The provider blocked the request before generation started. Try another connection or provider.",
+  );
+  assert.equal(
+    publicAgentFailureMessage(new Error("authorization=Bearer secret-value upstream timed out")),
+    "authorization=<redacted> upstream timed out",
+  );
+  assert.equal(publicAgentFailureMessage(new Error("x".repeat(2_000))).length, 1_000);
+});
 
 test("generated Thread Control keeps ownership and append-only controls", async () => {
   const service = createCloudflareThreadService({

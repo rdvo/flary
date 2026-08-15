@@ -64,6 +64,7 @@ import {
 } from "../session/index.js";
 import type { FlueAdmission, FlueAgentGateway } from "../flue/service.js";
 import { FlaryHostError } from "../host/errors.js";
+import { redactErrorMessage } from "../execution/redaction.js";
 import {
   assertPublicBrowserUrl,
   browserStateObjectKey,
@@ -3415,6 +3416,17 @@ async function projectAdmission(input: {
         completionReason: "failed",
       }).catch(() => undefined);
     }
+    await appendLedger(input.sql, input.binding, "terminal", {
+      status: "failed",
+      outcome: "failed",
+      submissionId: input.admission.submissionId,
+      ...(input.admissionId ? { admissionId: input.admissionId } : {}),
+      error: {
+        code: "provider_execution_failed",
+        message: publicAgentFailureMessage(error),
+      },
+    }).catch(() => undefined);
+    await broadcastThreadRecords(input.sql, input.webSockets).catch(() => undefined);
     await settleSubagent(input, "fail", {
       error: {
         code: "subagent_execution_failed",
@@ -3424,6 +3436,18 @@ async function projectAdmission(input: {
     }).catch(() => undefined);
     throw error;
   }
+}
+
+/** Keep provider HTML, credentials, and oversized transport errors out of public session records. */
+export function publicAgentFailureMessage(error: unknown): string {
+  const message = redactErrorMessage(error, "The provider request failed.").trim();
+  if (
+    /<\/?(?:html|head|body|style|svg)\b/i.test(message) ||
+    /unable to load site|ray id:/i.test(message)
+  ) {
+    return "The provider blocked the request before generation started. Try another connection or provider.";
+  }
+  return message.slice(0, 1_000) || "The provider request failed.";
 }
 
 async function mirrorChildProjection(
