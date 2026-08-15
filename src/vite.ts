@@ -1130,7 +1130,7 @@ function generatedAppSource(input: {
     "  },",
     "  async queue(batch, env, ctx) {",
     `    if (batch.queue === ${JSON.stringify(queueNames.purge)}) await handleFlaryThreadPurgeQueue({ messages: batch.messages, env });`,
-    `    else if (batch.queue === ${JSON.stringify(queueNames.projection)}) await handleFlarySessionProjectionQueue({ messages: batch.messages, env });`,
+    `    else if (batch.queue === ${JSON.stringify(queueNames.projection)}) await handleFlarySessionProjectionQueue({ messages: batch.messages, env, resolveModel: userApp.options.resolveModel });`,
     "    if (typeof customWorker?.queue === \"function\") await customWorker.queue(batch, env, ctx);",
     "  },",
     "  scheduled: typeof customWorker?.scheduled === \"function\"",

@@ -2680,6 +2680,8 @@ async function storeRealtimeCommandFailure(
 export async function handleFlarySessionProjectionQueue(input: {
   readonly messages: readonly ProjectionQueueMessage[];
   readonly env: Record<string, unknown>;
+  /** Preserve trusted provider resolution for commands admitted by WebSocket. */
+  readonly resolveModel?: CreateCloudflareThreadServiceOptions<Record<string, unknown>>["resolveModel"];
 }): Promise<void> {
   const namespace = input.env.FLARY_THREAD_CONTROL as
     | DurableObjectNamespace
@@ -2695,7 +2697,7 @@ export async function handleFlarySessionProjectionQueue(input: {
       }
       try {
         if (body.kind === "realtime.command") {
-          await executeRealtimeCommand(input.env, body, controlName);
+          await executeRealtimeCommand(input.env, body, controlName, input.resolveModel);
           message.ack();
           return;
         }
@@ -2773,6 +2775,7 @@ async function executeRealtimeCommand(
   env: Record<string, unknown>,
   body: Record<string, unknown>,
   controlName: string,
+  resolveModel?: CreateCloudflareThreadServiceOptions<Record<string, unknown>>["resolveModel"],
 ): Promise<void> {
   const target = body.target as FlaryThreadTarget | undefined;
   const parsed = RealtimeClientFrameSchema.safeParse(body.frame);
@@ -2780,7 +2783,7 @@ async function executeRealtimeCommand(
     throw new Error("The queued realtime command is invalid");
   }
   const frame = parsed.data;
-  const service = createCloudflareThreadService({ env });
+  const service = createCloudflareThreadService({ env, resolveModel });
   let result: unknown;
   let error: { code: string; message: string } | undefined;
   try {

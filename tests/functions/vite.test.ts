@@ -367,6 +367,7 @@ test("the Vite plugin generates Flue Durable Object entry and bindings", (t) => 
   assert.match(authoredHost, /authoredResponse\.status !== 404/);
   assert.match(authoredHost, /attachThreadService/);
   assert.match(authoredHost, /resolveModel: userApp\.options\.resolveModel/);
+  assert.match(authoredHost, /handleFlarySessionProjectionQueue\(\{ messages: batch\.messages, env, resolveModel: userApp\.options\.resolveModel \}\)/);
   assert.match(authoredHost, /\.serve\(functions\)/);
   assert.match(authoredHost, /const apiPrefix = "\/custom-api"/);
   assert.doesNotMatch(authoredHost, /flueApp|\/api\/flue/);

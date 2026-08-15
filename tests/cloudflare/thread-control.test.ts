@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import {
   createCloudflareThreadService,
+  handleFlarySessionProjectionQueue,
   handleFlaryThreadControlObjectRequest,
   handleFlaryThreadControlWebSocketMessage,
 } from "../../src/harness/cloudflare/thread-control.ts";
@@ -757,6 +758,87 @@ test("hibernating realtime commands resume from socket attachments and deduplica
   );
   assert.equal(attachment.acknowledged, 9);
   assert.equal(attachment.sent, 4);
+});
+
+test("queued realtime commands keep the trusted model resolver", async () => {
+  const controls = namespace();
+  const sentModels: string[] = [];
+  const engine = {
+    idFromName(name: string) { return name; },
+    get() {
+      return {
+        async fetch(request: Request) {
+          const body = await request.json() as { model: string };
+          sentModels.push(body.model);
+          return Response.json({
+            streamUrl: "https://flue.test/stream",
+            offset: "0",
+            submissionId: "submission_realtime",
+          }, { status: 202 });
+        },
+      };
+    },
+  };
+  const env = {
+    FLARY_THREAD_CONTROL: controls,
+    FLUE_CODER_AGENT: engine,
+    FLARY_SESSION_PROJECTION_QUEUE: { async send() {} },
+  };
+  const service = createCloudflareThreadService({ env, namespace: controls });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_realtime_alias",
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  await service.create(scope, {
+    threadId: "thread_realtime_alias",
+    agentId: "coder",
+    workspace: {
+      organizationId: "tenant_realtime_alias",
+      appId: "coder",
+      projectId: "project",
+      workspaceId: "workspace",
+      branch: "main",
+    },
+    model: { provider: "openai-codex", model: "gpt-5.6-luna" },
+    metadata: {
+      flaryModelPolicy: {
+        allow: [{ provider: "openai-codex", model: "gpt-5.6-luna" }],
+        switching: "user",
+        fallback: "none",
+      },
+    },
+  });
+  let acknowledged = false;
+  await handleFlarySessionProjectionQueue({
+    env,
+    resolveModel(input) {
+      return {
+        runtimeSelection: { provider: "trusted-thread-alias", model: input.selection.model },
+      };
+    },
+    messages: [{
+      body: {
+        kind: "realtime.command",
+        controlName: "thread:tenant_realtime_alias:coder:thread_realtime_alias",
+        target: { ...scope, threadId: "thread_realtime_alias" },
+        frame: {
+          version: 1,
+          type: "command",
+          requestId: "request_realtime_alias",
+          idempotencyKey: "request_realtime_alias",
+          command: "send",
+          input: { message: "Continue." },
+        },
+      },
+      ack() { acknowledged = true; },
+      retry() { throw new Error("The realtime command was retried"); },
+    }],
+  });
+  assert.equal(acknowledged, true);
+  assert.deepEqual(sentModels, ["trusted-thread-alias/gpt-5.6-luna"]);
 });
 
 test("root realtime replay includes child events only when requested", async () => {
