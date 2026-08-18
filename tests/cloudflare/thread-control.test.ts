@@ -10,6 +10,7 @@ import {
   providerFailureFromFlueEvent,
   publicAgentFailureMessage,
 } from "../../src/harness/cloudflare/thread-control.ts";
+import { D1ThreadCatalog } from "../../src/harness/cloudflare/d1-thread-catalog.ts";
 
 function namespace() {
   const stores = new Map<string, ReturnType<typeof sqlStorage>>();
@@ -71,6 +72,35 @@ function sqlStorage() {
           transactionDepth -= 1;
         }
       },
+    },
+  };
+}
+
+function d1Database() {
+  const database = new DatabaseSync(":memory:");
+  return {
+    async exec(query: string) {
+      database.exec(query);
+      return {};
+    },
+    prepare(query: string) {
+      let bindings: unknown[] = [];
+      return {
+        bind(...values: unknown[]) {
+          bindings = values;
+          return this;
+        },
+        async run() {
+          database.prepare(query).run(...bindings);
+          return {};
+        },
+        async all<T>() {
+          return { results: database.prepare(query).all(...bindings) as T[] };
+        },
+        async first<T>() {
+          return (database.prepare(query).get(...bindings) as T) ?? null;
+        },
+      };
     },
   };
 }
@@ -229,6 +259,41 @@ test("thread deletion is idempotent and blocks new work", async () => {
     payload: { text: "must not be appended" },
   });
   assert.equal(blocked.ok, false);
+});
+
+test("purge recovery completes after Thread Control was already erased", async () => {
+  const database = d1Database();
+  const catalog = new D1ThreadCatalog(database);
+  const deletionId = "delete_after_control_erased";
+  await catalog.putDeletion({
+    id: deletionId,
+    threadId: "thread_erased",
+    status: "accepted",
+    acceptedAt: "2026-08-18T00:00:00.000Z",
+    tenantId: "tenant_erased",
+    applicationId: "coder",
+  });
+  const service = createCloudflareThreadService({
+    env: { FLARY_THREAD_CATALOG: database },
+    namespace: namespace(),
+  });
+
+  await service.purge!({
+    authorization: {
+      organizationId: "tenant_erased",
+      actor: { id: "system", kind: "system" },
+    },
+    appId: "coder",
+    threadId: "thread_erased",
+  }, deletionId);
+
+  const deletion = await catalog.getDeletion({
+    tenantId: "tenant_erased",
+    applicationId: "coder",
+    deletionId,
+  });
+  assert.equal(deletion?.status, "complete");
+  assert.ok(deletion?.completedAt);
 });
 
 test("thread model selection is durable, exact, and auditable", async () => {

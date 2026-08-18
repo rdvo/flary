@@ -244,6 +244,25 @@ export function createCloudflareThreadService<
     | ProjectionQueue
     | undefined;
   const purgeQueue = options.env.FLARY_THREAD_PURGE_QUEUE as PurgeQueue | undefined;
+  const completeDeletion = async (
+    target: FlaryThreadTarget,
+    deletionId: string,
+  ): Promise<void> => {
+    const existing = await d1?.getDeletion({
+      tenantId: target.authorization.organizationId,
+      applicationId: target.appId,
+      deletionId,
+    });
+    await d1?.putDeletion({
+      id: deletionId,
+      threadId: target.threadId,
+      status: "complete",
+      acceptedAt: existing?.acceptedAt ?? new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      tenantId: target.authorization.organizationId,
+      applicationId: target.appId,
+    });
+  };
   const trackAdmission = async (
     name: string,
     body: Record<string, unknown>,
@@ -460,7 +479,20 @@ export function createCloudflareThreadService<
       return deletion;
     },
     async purge(target, deletionId) {
-      const binding = await service.inspect(target);
+      let binding: ThreadBinding;
+      try {
+        binding = await service.inspect(target);
+      } catch (error) {
+        // Thread Control is the final durable resource removed by a purge.
+        // A retry can arrive after deleteAll() succeeded but before D1 stored
+        // the completion receipt. In that state all thread resources are
+        // already gone, so complete the receipt instead of retrying forever.
+        if (error instanceof Error && error.message === "The thread was not found") {
+          await completeDeletion(target, deletionId);
+          return;
+        }
+        throw error;
+      }
       const agentName = runtimeAgentId(binding);
       const instanceId = threadName(binding.thread);
       await gateway.abort(agentName, instanceId).catch(() => undefined);
@@ -486,20 +518,7 @@ export function createCloudflareThreadService<
         ...ownership(target),
         deletionId,
       });
-      const existing = await d1?.getDeletion({
-        tenantId: target.authorization.organizationId,
-        applicationId: target.appId,
-        deletionId,
-      });
-      await d1?.putDeletion({
-        id: deletionId,
-        threadId: target.threadId,
-        status: "complete",
-        acceptedAt: existing?.acceptedAt ?? new Date().toISOString(),
-        completedAt: new Date().toISOString(),
-        tenantId: target.authorization.organizationId,
-        applicationId: target.appId,
-      });
+      await completeDeletion(target, deletionId);
     },
     async deletion(target, deletionId) {
       const stored = await d1?.getDeletion({
