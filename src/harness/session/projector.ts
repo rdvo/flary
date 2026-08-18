@@ -83,7 +83,7 @@ function redactProviderPrivate(
   eventType: string,
   value: Record<string, unknown>,
 ): Record<string, unknown> {
-  const privateKey = /^(?:response|previousResponse|nativeSession|cache|continuation|credential|apiKey|secret|encryptedReasoning)/i;
+  const privateKey = /^(?:responseId|previousResponse|nativeSession|cache|continuation|credential|apiKey|secret|encryptedReasoning)/i;
   const reasoningEvent =
     eventType === "message-delta" && value.kind === "reasoning";
   const walk = (candidate: unknown, key = ""): unknown => {

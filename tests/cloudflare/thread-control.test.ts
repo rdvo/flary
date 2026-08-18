@@ -7,6 +7,7 @@ import {
   handleFlarySessionProjectionQueue,
   handleFlaryThreadControlObjectRequest,
   handleFlaryThreadControlWebSocketMessage,
+  providerFailureFromFlueEvent,
   publicAgentFailureMessage,
 } from "../../src/harness/cloudflare/thread-control.ts";
 
@@ -84,6 +85,28 @@ test("provider failures become short safe public messages", () => {
     "authorization=<redacted> upstream timed out",
   );
   assert.equal(publicAgentFailureMessage(new Error("x".repeat(2_000))).length, 1_000);
+});
+
+test("Flue model-turn failures are retained when the direct result is empty", () => {
+  assert.equal(
+    providerFailureFromFlueEvent({
+      type: "turn",
+      response: {
+        error: {
+          type: "authentication_error",
+          message: "The API key cannot use this model",
+        },
+      },
+    }),
+    "The API key cannot use this model",
+  );
+  assert.equal(
+    providerFailureFromFlueEvent({
+      type: "message-completed",
+      message: { errorMessage: "The provider stream failed" },
+    }),
+    "The provider stream failed",
+  );
 });
 
 test("generated Thread Control keeps ownership and append-only controls", async () => {

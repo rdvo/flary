@@ -123,3 +123,67 @@ test("the session projector keeps provider-private state out of public records",
   assert.equal(record.publicPayload.cacheKey, "[REDACTED]");
   assert.equal(record.publicPayload.text, "[PROVIDER_PRIVATE_REASONING]");
 });
+
+test("the session projector retains safe model-turn failures", async () => {
+  const database = new DatabaseSync(":memory:");
+  const sql = {
+    exec<T>(query: string, ...bindings: unknown[]) {
+      const trimmed = query.trim().toLowerCase();
+      if (bindings.length === 0 && !trimmed.startsWith("select")) {
+        database.exec(query);
+        return { toArray: () => [] as T[] };
+      }
+      const statement = database.prepare(query);
+      if (trimmed.startsWith("select")) {
+        return { toArray: () => statement.all(...bindings) as T[] };
+      }
+      statement.run(...bindings);
+      return { toArray: () => [] as T[] };
+    },
+    transactionSync<T>(closure: () => T): T {
+      database.exec("BEGIN IMMEDIATE");
+      try {
+        const result = closure();
+        database.exec("COMMIT");
+        return result;
+      } catch (error) {
+        database.exec("ROLLBACK");
+        throw error;
+      }
+    },
+  };
+  const projector = new FlarySessionProjector(
+    new SqliteSessionLedger(sql, { hotRecordLimit: 10 }),
+    {
+      tenantId: "tenant",
+      applicationId: "app",
+      sessionId: "thread_failure",
+      threadId: "thread_failure",
+      sourceRevision: "rev_1",
+    },
+  );
+  const record = await projector.project({
+    sourceCursor: "cursor_failure",
+    event: {
+      type: "turn",
+      response: {
+        responseId: "resp_private",
+        error: {
+          type: "authentication_error",
+          message: "The API key cannot use this model",
+        },
+      },
+    },
+  });
+  assert.equal(
+    (record.publicPayload.response as Record<string, unknown>).responseId,
+    "[REDACTED]",
+  );
+  assert.deepEqual(
+    (record.publicPayload.response as Record<string, unknown>).error,
+    {
+      type: "authentication_error",
+      message: "The API key cannot use this model",
+    },
+  );
+});

@@ -3260,8 +3260,10 @@ async function projectAdmission(input: {
         : "flary-thread-control-v1",
   });
   let providerStepSettled = false;
+  let providerFailure: string | undefined;
   try {
     const result = await gateway.wait(input.admission, async (event) => {
+      providerFailure = providerFailureFromFlueEvent(event) ?? providerFailure;
       const sourceCursor = canonicalEventCursor(
         input.admission.submissionId,
         event as unknown as Record<string, unknown>,
@@ -3364,6 +3366,16 @@ async function projectAdmission(input: {
         input.binding.thread.threadId,
       );
     });
+    const resultValue = objectValue(result);
+    if (
+      typeof resultValue.text !== "string" ||
+      resultValue.text.trim().length === 0
+    ) {
+      throw new Error(
+        providerFailure ??
+          "The model completed without returning an assistant message.",
+      );
+    }
     if (input.modelPin) {
       await appendLedger(input.sql, input.binding, "provider.segment.completed", {
         ...(input.segmentId ? { segmentId: input.segmentId } : {}),
@@ -3436,6 +3448,22 @@ async function projectAdmission(input: {
     }).catch(() => undefined);
     throw error;
   }
+}
+
+export function providerFailureFromFlueEvent(event: unknown): string | undefined {
+  const value = objectValue(event);
+  const response = objectValue(value.response);
+  const candidates = [
+    objectValue(response.error).message,
+    objectValue(response.error).details,
+    objectValue(value.error).message,
+    objectValue(value.message).errorMessage,
+    value.errorMessage,
+  ];
+  return candidates.find(
+    (candidate): candidate is string =>
+      typeof candidate === "string" && candidate.trim().length > 0,
+  );
 }
 
 /** Keep provider HTML, credentials, and oversized transport errors out of public session records. */
