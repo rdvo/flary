@@ -1,6 +1,13 @@
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
+// pnpm applies the declared patchedDependencies during installation. Running
+// patch-package again is redundant and can fail when an optional transitive
+// package is not hoisted into the repository root.
+if ((process.env.npm_config_user_agent || "").startsWith("pnpm/")) {
+  process.exit(0);
+}
+
 const installRoot = process.env.INIT_CWD || process.cwd();
 let patchPackageCli;
 try {
