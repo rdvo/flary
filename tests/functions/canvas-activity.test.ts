@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { projectPublicToolActivityInput } from "../../src/harness/functions/codemode.js";
+import {
+  interactiveToolFailureState,
+  projectPublicToolActivityInput,
+} from "../../src/harness/functions/codemode.js";
 
 test("draw_canvas projects a bounded redacted UI artifact", () => {
   const canvas = {
@@ -17,4 +20,10 @@ test("normal tools do not project arbitrary structured inputs", () => {
   assert.deepEqual(projectPublicToolActivityInput({ query: "secret", range: "7d" }, "stats"), {
     range: "7d",
   });
+});
+
+test("read failures settle while uncertain writes stay blocked", () => {
+  assert.equal(interactiveToolFailureState("read"), "failed");
+  assert.equal(interactiveToolFailureState(undefined), "failed");
+  assert.equal(interactiveToolFailureState("write"), "outcome_unknown");
 });

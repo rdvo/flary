@@ -2011,11 +2011,18 @@ async function dispatchThreadControl(
         },
       });
     } else {
+      const failure = typeof body.error === "string"
+        ? publicAgentFailureMessage(body.error)
+        : undefined;
       await appendLedger(sql, binding, "tool.result", {
         result: {
           callId: toolCallId,
           toolId,
           status: state === "completed" ? "succeeded" : "failed",
+          ...(body.outcome === "outcome_unknown"
+            ? { outcome: "outcome_unknown" }
+            : {}),
+          ...(failure ? { error: { message: failure } } : {}),
         },
       });
     }

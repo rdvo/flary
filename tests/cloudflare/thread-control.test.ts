@@ -812,7 +812,10 @@ test("nested Code Mode tool activity is projected once for realtime clients", as
   const control = controls.get(controls.idFromName(
     "thread:tenant_tools:coder:thread_tools",
   ));
-  const record = (state: "started" | "completed") => control.fetch(
+  const record = (
+    state: "started" | "completed" | "failed",
+    extra: Record<string, unknown> = {},
+  ) => control.fetch(
     new Request("https://flary.internal/usage-reservation", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -825,6 +828,7 @@ test("nested Code Mode tool activity is projected once for realtime clients", as
         toolId: "stats",
         ordinal: 1,
         inputSummary: { range: "7d" },
+        ...extra,
       }),
     }),
   );
@@ -843,6 +847,25 @@ test("nested Code Mode tool activity is projected once for realtime clients", as
   assert.equal((activities[0] as any).publicPayload.call.toolId, "stats");
   assert.deepEqual((activities[0] as any).publicPayload.call.arguments, { range: "7d" });
   assert.equal((activities[1] as any).publicPayload.result.status, "succeeded");
+
+  assert.equal((await record("failed", {
+    toolCallId: "tool_call_2",
+    outcome: "failed",
+    error: "The analytics date range is invalid",
+  })).ok, true);
+  const failures = await service.auditList!({ ...scope, threadId: "thread_tools" }, {
+    after: 0,
+    limit: 100,
+  });
+  const failure = failures.find((item: any) =>
+    item.recordType === "tool.result" &&
+    item.publicPayload.result.callId === "tool_call_2"
+  ) as any;
+  assert.equal(failure.publicPayload.result.status, "failed");
+  assert.equal(
+    failure.publicPayload.result.error.message,
+    "The analytics date range is invalid",
+  );
 });
 
 test("hibernating realtime commands resume from socket attachments and deduplicate", async () => {

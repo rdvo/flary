@@ -30,7 +30,7 @@ import type {
 } from "./types.js";
 import { ApprovalRequestSchema } from "../contracts/index.js";
 import { JsonObjectSchema } from "../contracts/common.js";
-import { redactSecrets } from "../execution/redaction.js";
+import { redactErrorMessage, redactSecrets } from "../execution/redaction.js";
 import { createMcpConnection } from "./mcp.js";
 import { createOpenApiRuntime } from "./openapi.js";
 import { getFunctionState } from "./app.js";
@@ -826,12 +826,26 @@ function createHostToolConnector(
       }));
     }
   }
-  return new HostConnector(ctx, env);
+  const connector = new HostConnector(ctx, env);
+  hostConnectorOperations.set(
+    connector,
+    new Map(connection.descriptors.map((descriptor) => [
+      descriptor.name,
+      descriptor.operation ?? "read",
+    ])),
+  );
+  return connector;
 }
+
+const hostConnectorOperations = new WeakMap<
+  object,
+  ReadonlyMap<string, "read" | "write">
+>();
 
 interface SourceTarget {
   readonly id: string;
   readonly method: string;
+  readonly operation: "read" | "write";
   readonly connector: {
     name(): string;
     executeTool(method: string, args: unknown): Promise<unknown>;
@@ -872,9 +886,16 @@ async function sourceTargetMap(
   const targets = new Map<string, SourceTarget>();
   for (const connector of connectors) {
     const description = await connector.describe();
+    const operations = hostConnectorOperations.get(connector);
     for (const method of Object.keys(description.descriptors)) {
       const id = `${description.name}.${method}`;
-      targets.set(id, { id, method, connector });
+      targets.set(id, {
+        id,
+        method,
+        operation: operations?.get(method) ??
+          (description.annotations?.[method]?.requiresApproval ? "write" : "read"),
+        connector,
+      });
     }
   }
   return targets;
@@ -1044,21 +1065,38 @@ async function invokeCatalogTool(
     input,
     callCounter.count + 1,
   );
+  const source = sourceTargets.get(id);
+  const registrySource = registry.entries[id];
+  const operation = source?.operation ??
+    (typeof registrySource === "function"
+      ? registrySource.definition.policy?.operation ?? "read"
+      : undefined);
+  let result: unknown;
   try {
-    const source = sourceTargets.get(id);
     if (source) {
       callCounter.count += 1;
-      const result = await source.connector.executeTool(source.method, input ?? {});
-      await reservation?.settle();
-      return result;
+      result = await source.connector.executeTool(source.method, input ?? {});
+    } else {
+      result = await invokeRegistryTool(registry, normalized, context, callCounter);
     }
-    const result = await invokeRegistryTool(registry, normalized, context, callCounter);
-    await reservation?.settle();
-    return result;
   } catch (error) {
-    await reservation?.unknown().catch(() => undefined);
+    if (interactiveToolFailureState(operation) === "outcome_unknown") {
+      await reservation?.unknown(error).catch(() => undefined);
+    } else {
+      await reservation?.fail(error).catch(() => undefined);
+    }
     throw error;
   }
+  // Settle outside the execution catch. If audit storage is unavailable after
+  // a known result, do not rewrite that known result as an uncertain tool call.
+  await reservation?.settle();
+  return result;
+}
+
+export function interactiveToolFailureState(
+  operation: "read" | "write" | undefined,
+): "failed" | "outcome_unknown" {
+  return operation === "write" ? "outcome_unknown" : "failed";
 }
 
 async function reserveInteractiveToolCall(
@@ -1068,7 +1106,8 @@ async function reserveInteractiveToolCall(
   ordinal: number,
 ): Promise<{
   settle(): Promise<void>;
-  unknown(): Promise<void>;
+  fail(error: unknown): Promise<void>;
+  unknown(error: unknown): Promise<void>;
 } | undefined> {
   if (!context?.runId || !context.bindings || typeof context.bindings !== "object") {
     return undefined;
@@ -1152,13 +1191,35 @@ async function reserveInteractiveToolCall(
         ordinal,
       });
     },
-    unknown: async () => {
-      await call("unknownUsage");
+    fail: async (error) => {
+      await call("settleUsage", {
+        actual: {
+          steps: 0,
+          toolCalls: 1,
+          tokens: 0,
+          costUsd: 0,
+          sandboxSeconds: 0,
+          browserSeconds: 0,
+        },
+      });
       await call("recordToolActivity", {
         state: "failed",
+        outcome: "failed",
         toolCallId: reservationId,
         toolId,
         ordinal,
+        error: redactErrorMessage(error, "The tool call failed.").slice(0, 1_000),
+      });
+    },
+    unknown: async (error) => {
+      await call("unknownUsage");
+      await call("recordToolActivity", {
+        state: "failed",
+        outcome: "outcome_unknown",
+        toolCallId: reservationId,
+        toolId,
+        ordinal,
+        error: redactErrorMessage(error, "The write outcome is unknown.").slice(0, 1_000),
       });
     },
   };
