@@ -1009,6 +1009,11 @@ async function invokeRegistryTool(
     }
   }
   const source = registry.entries[id];
+  if (source === undefined) {
+    throw new Error(
+      `Tool is not available: '${id}'. Use tools.search and pass the selected item's id value.`,
+    );
+  }
   if (typeof source === "function") {
     if (
       !allowWrites &&

@@ -25,9 +25,14 @@ export function coreToolGuidance(
 ): string {
   if (!registry) return "";
   const groups: string[] = [];
+  const localToolIds: string[] = [];
   for (const namespace of registry.names) {
     const source = registry.entries[namespace];
-    if (!source || typeof source === "function") continue;
+    if (!source) continue;
+    if (typeof source === "function") {
+      localToolIds.push(namespace);
+      continue;
+    }
     if (source.kind === "workspace") {
       groups.push(
         `${namespace}: ${[...WORKSPACE_READS, ...WORKSPACE_WRITES]
@@ -48,12 +53,16 @@ export function coreToolGuidance(
       );
     }
   }
+  if (localToolIds.length > 0) {
+    groups.push(`application tools: ${localToolIds.join(", ")}`);
+  }
   if (groups.length === 0) {
     return "Search the private catalog for available tools. Load a selected tool schema with tools.describe before you call it.";
   }
   return [
     `Core tool names and purposes are already known: ${groups.join("; ")}.`,
     "Load a selected input schema with tools.describe before you call it.",
+    "Pass the exact catalog id or a selected item's id value to tools.call. Never pass a variable name as a quoted id.",
     "Use tools.search for MCP, OpenAPI, local, skill, and uncommon tools.",
   ].join(" ");
 }

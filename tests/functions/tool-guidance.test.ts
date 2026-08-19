@@ -44,3 +44,18 @@ test("workspace draft options are retained as typed policy", () => {
   const source = flary().workspace({ mode: "draft", checkpoint: "turn" });
   assert.deepEqual(source.options, { mode: "draft", checkpoint: "turn" });
 });
+
+test("core tool guidance gives exact local ids without loading schemas", () => {
+  const app = flary();
+  const stats = app.fn({
+    input: undefined,
+    output: undefined,
+    run: () => ({ ok: true }),
+  });
+  const registry = app.tools({ stats });
+
+  const guidance = coreToolGuidance(registry);
+  assert.match(guidance, /application tools: stats/);
+  assert.match(guidance, /exact catalog id/);
+  assert.match(guidance, /selected item's id value/);
+});
