@@ -196,6 +196,7 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
   readonly stepStore;
   #runServiceOverride: FlaryAppOptions<TBindings>["runService"];
   #threadServiceOverride: FlaryAppOptions<TBindings>["threadService"];
+  #defaultCodeExecutors = new WeakMap<object, FlaryCodeExecutor<TBindings>>();
 
   constructor(options: FlaryAppOptions<TBindings> = {}) {
     this.options = options;
@@ -1154,6 +1155,7 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
       readonly runId: string;
       readonly bindings: TBindings;
       readonly signal?: AbortSignal;
+      readonly executionId?: string;
     },
   ): Promise<unknown> {
     const state = getAgentState(value);
@@ -1173,6 +1175,9 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
       identity,
       signal: input.signal ?? new AbortController().signal,
       runId: input.runId,
+      idempotencyKey: input.executionId
+        ? `${input.runId}:execute:${input.executionId}`
+        : undefined,
       stepCache: new Map(),
     });
     const executor =
@@ -2066,7 +2071,16 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
       // supplied application code executor, but the default executor stays
       // fail-closed for durable external tools.
     }
-    return createFlaryCodemodeExecutor({
+    const cacheKey = ctx && typeof ctx === "object"
+      ? ctx as object
+      : typeof loader === "object" && loader !== null
+        ? loader as object
+        : undefined;
+    if (cacheKey) {
+      const cached = this.#defaultCodeExecutors.get(cacheKey);
+      if (cached) return cached;
+    }
+    const executor = createFlaryCodemodeExecutor({
       loader: loader as never,
       ...(ctx ? { ctx } : {}),
       env: bindings,
@@ -2094,6 +2108,8 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
             })
           : undefined),
     });
+    if (cacheKey) this.#defaultCodeExecutors.set(cacheKey, executor);
+    return executor;
   }
 
   /** Resolve the current Flue Durable Object as the default named-step store. */

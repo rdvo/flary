@@ -2030,6 +2030,9 @@ async function dispatchThreadControl(
       });
     }
     put(sql, activityKey, { state, toolCallId, toolId });
+    const broadcast = broadcastThreadRecords(sql, host?.webSockets).catch(() => undefined);
+    if (host?.execution) host.execution.waitUntil(broadcast);
+    else await broadcast;
     return { recorded: true, replay: false };
   }
   if (method === "track") {

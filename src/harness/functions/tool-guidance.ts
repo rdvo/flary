@@ -61,9 +61,11 @@ export function coreToolGuidance(
   }
   return [
     `Core tool names and purposes are already known: ${groups.join("; ")}.`,
-    "Load a selected input schema with tools.describe before you call it.",
+    "Use a known catalog ID directly. Load its schema with tools.describe only when the input is not known.",
     "Pass the exact catalog id or a selected item's id value to tools.call. Never pass a variable name as a quoted id.",
-    "Use tools.search for MCP, OpenAPI, local, skill, and uncommon tools.",
+    "Use tools.search only for an unknown MCP, OpenAPI, skill, or uncommon capability.",
+    "Use one tools.batch request for independent reads. The batch runs them concurrently with stable replay order.",
+    "Never use Promise.all with tools.call, and never batch writes or approval-required calls.",
   ].join(" ");
 }
 
@@ -73,7 +75,7 @@ export function executeToolDescription(
 ): string {
   return [
     "Run bounded TypeScript in Flary's isolated tool runtime.",
-    "Use tools.search, tools.describe, tools.call, and tools.batch.",
+    "Use tools.call for one operation. Use tools.batch for bounded parallel reads.",
     coreToolGuidance(registry),
   ]
     .filter(Boolean)

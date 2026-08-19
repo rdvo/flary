@@ -251,6 +251,7 @@ export function defineFlaryInteractiveAgent(
                 code: input.code,
                 bindings: env,
                 runId: id,
+                executionId: crypto.randomUUID(),
                 signal,
               }));
             },

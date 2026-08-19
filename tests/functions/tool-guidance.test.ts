@@ -37,6 +37,9 @@ test("core tool guidance names built-ins but keeps external catalogs lazy", () =
   const description = executeToolDescription(registry);
   assert.match(description, /one|Run bounded TypeScript/i);
   assert.match(description, /tools\.search/);
+  assert.match(description, /bounded parallel reads/);
+  assert.match(description, /Never use Promise\.all/);
+  assert.match(description, /never batch writes/i);
   assert.match(description, /files\.read/);
 });
 
@@ -58,4 +61,6 @@ test("core tool guidance gives exact local ids without loading schemas", () => {
   assert.match(guidance, /application tools: stats/);
   assert.match(guidance, /exact catalog id/);
   assert.match(guidance, /selected item's id value/);
+  assert.match(guidance, /tools\.batch/);
+  assert.match(guidance, /search only/i);
 });

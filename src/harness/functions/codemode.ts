@@ -55,6 +55,10 @@ export interface FlaryCodemodeExecutorOptions<TBindings = unknown> {
   readonly maxCodeBytes?: number;
   readonly maxOutputBytes?: number;
   readonly maxToolCalls?: number;
+  /** Maximum calls admitted by one tools.batch request. Defaults to 16. */
+  readonly maxBatchCalls?: number;
+  /** Maximum concurrent calls inside one tools.batch request. Defaults to 6. */
+  readonly maxParallelToolCalls?: number;
   readonly redactResult?: (value: unknown) => unknown | Promise<unknown>;
   /** Defaults to null. The generated Worker cannot use fetch or connect. */
   readonly globalOutbound?: DynamicWorkerExecutorOptions["globalOutbound"];
@@ -498,7 +502,7 @@ async function createLocalConnector<TBindings>(
     }
 
     protected instructions(): string {
-      return "Search the Flary catalog before you describe or call a tool.";
+      return "Use known catalog IDs directly. Search only for an unknown capability. Batch independent read calls. Issue writes sequentially.";
     }
 
     protected async tools(): Promise<ConnectorTools> {
@@ -575,7 +579,7 @@ async function createLocalConnector<TBindings>(
           },
         },
         call: {
-          description: "Call one selected tool after describe has loaded its schema.",
+          description: "Call one selected tool. Keep calls sequential when approval or replay can occur.",
           inputSchema: {
             type: "object",
             properties: {
@@ -588,39 +592,58 @@ async function createLocalConnector<TBindings>(
           // The selected catalog item, not another item in the lazy catalog,
           // decides if this call pauses.
           requiresApproval,
-          execute: async (args) =>
-            invokeCatalogTool(
+          execute: async (args) => {
+            const ordinal = claimToolCallOrdinal(callCounter);
+            return invokeCatalogTool(
               input.tools,
               args,
               input.context,
-              callCounter,
+              ordinal,
               sourceTargets,
-            ),
+            );
+          },
         },
         batch: {
-          description: "Call several selected tools with one bounded request.",
+          description: "Run independent read tools concurrently in one replay-safe bounded request. Do not batch writes.",
           inputSchema: {
             type: "object",
             properties: { calls: { type: "array" } },
             required: ["calls"],
             additionalProperties: false,
           },
-          requiresApproval,
           execute: async (args) => {
             const calls = Array.isArray(args)
               ? args
               : (args as { calls?: unknown })?.calls;
             if (!Array.isArray(calls)) throw new Error("calls must be an array");
-            return Promise.all(
-              calls.map((call) =>
-                invokeCatalogTool(
+            if (calls.length > (options.maxBatchCalls ?? 16)) {
+              throw new Error(`A tools.batch request can contain at most ${options.maxBatchCalls ?? 16} calls.`);
+            }
+            for (const call of calls) {
+              const normalized = normalizeCall(call);
+              const id = normalized && typeof normalized === "object"
+                ? (normalized as { id?: unknown }).id
+                : undefined;
+              const descriptor = descriptors.find((item) => item.id === id);
+              if (!descriptor) throw new Error(`Tool is not available: ${String(id)}`);
+              if (descriptor.operation !== "read" || descriptor.requiresApproval) {
+                throw new Error(`tools.batch only accepts read tools. Call '${String(id)}' sequentially.`);
+              }
+            }
+            const admitted = calls.map((call) => ({
+              call,
+              ordinal: claimToolCallOrdinal(callCounter),
+            }));
+            return concurrentMap(
+              admitted,
+              options.maxParallelToolCalls ?? 6,
+              ({ call, ordinal }) => invokeCatalogTool(
                   input.tools,
                   call,
                   input.context,
-                  callCounter,
+                  ordinal,
                   sourceTargets,
                 ),
-              ),
             );
           },
         },
@@ -1032,8 +1055,8 @@ async function invokeRegistryTool(
         identity: context.identity,
         signal: context.signal,
         runId: context.runId,
-        idempotencyKey: context.runId
-          ? `flary_${context.runId}_${id}_${shortHash(stableJson(input))}`
+        idempotencyKey: (context.idempotencyKey ?? context.runId)
+          ? `flary_${context.idempotencyKey ?? context.runId}_${id}_${shortHash(stableJson(input))}`
           : undefined,
       });
     }
@@ -1048,7 +1071,7 @@ async function invokeCatalogTool(
   registry: FlaryToolRegistry,
   value: unknown,
   context: FlaryStepContext<unknown> | undefined,
-  callCounter: { count: number; max?: number },
+  ordinal: number,
   sourceTargets: ReadonlyMap<string, SourceTarget>,
 ): Promise<unknown> {
   const normalized = normalizeCall(value);
@@ -1058,17 +1081,11 @@ async function invokeCatalogTool(
   const id = (normalized as { id?: unknown }).id;
   const input = (normalized as { input?: unknown }).input;
   if (typeof id !== "string") throw new Error("A tool call needs an id");
-  if (
-    callCounter.max !== undefined &&
-    callCounter.count + 1 > callCounter.max
-  ) {
-    throw new Error("The Flary tool-call limit was exceeded.");
-  }
   const reservation = await reserveInteractiveToolCall(
     context,
     id,
     input,
-    callCounter.count + 1,
+    ordinal,
   );
   const source = sourceTargets.get(id);
   const registrySource = registry.entries[id];
@@ -1079,10 +1096,9 @@ async function invokeCatalogTool(
   let result: unknown;
   try {
     if (source) {
-      callCounter.count += 1;
       result = await source.connector.executeTool(source.method, input ?? {});
     } else {
-      result = await invokeRegistryTool(registry, normalized, context, callCounter);
+      result = await invokeRegistryTool(registry, normalized, context);
     }
   } catch (error) {
     if (interactiveToolFailureState(operation) === "outcome_unknown") {
@@ -1096,6 +1112,32 @@ async function invokeCatalogTool(
   // a known result, do not rewrite that known result as an uncertain tool call.
   await reservation?.settle(result);
   return result;
+}
+
+function claimToolCallOrdinal(counter: { count: number; max?: number }): number {
+  if (counter.max !== undefined && counter.count + 1 > counter.max) {
+    throw new Error("The Flary tool-call limit was exceeded.");
+  }
+  counter.count += 1;
+  return counter.count;
+}
+
+async function concurrentMap<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  run: (value: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const limit = Math.max(1, Math.min(values.length || 1, Math.floor(concurrency)));
+  const results = new Array<R>(values.length);
+  let cursor = 0;
+  await Promise.all(Array.from({ length: limit }, async () => {
+    while (cursor < values.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await run(values[index]!, index);
+    }
+  }));
+  return results;
 }
 
 export function interactiveToolFailureState(
