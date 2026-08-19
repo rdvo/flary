@@ -1003,6 +1003,8 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
                 id: identity.userId ?? identity.tenantId,
                 kind: identity.userId ? "user" : "service",
               },
+              roles: [...(identity.roles ?? [])],
+              scopes: [...(identity.scopes ?? [])],
             };
           },
           service: (env) => {
@@ -1332,6 +1334,16 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     return {
       tenantId: binding.thread.organizationId,
       userId: binding.createdBy.id,
+      roles: Array.isArray(binding.metadata?.flaryAdmittedRoles)
+        ? binding.metadata.flaryAdmittedRoles.filter(
+            (role): role is string => typeof role === "string",
+          )
+        : [],
+      scopes: Array.isArray(binding.metadata?.flaryAdmittedScopes)
+        ? binding.metadata.flaryAdmittedScopes.filter(
+            (scope): scope is string => typeof scope === "string",
+          )
+        : [],
       applicationId: binding.workspace.appId,
       projectId: binding.workspace.projectId,
       workspaceId: binding.workspace.workspaceId,
@@ -2222,6 +2234,8 @@ function agentAwareThreadService(
             ),
             metadata: {
               ...(input.metadata ?? {}),
+              flaryAdmittedRoles: [...(scope.authorization.roles ?? [])],
+              flaryAdmittedScopes: [...(scope.authorization.scopes ?? [])],
               flaryRuntimeAgentId: agent.name,
               flaryAgentRevision: agent.revision,
               flaryModelPolicy: modelPolicyMetadata(agent) as never,

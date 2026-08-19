@@ -3402,6 +3402,10 @@ async function projectAdmission(input: {
         pin: input.modelPin,
         completionReason: "completed",
       });
+      // A provider segment completion is a public turn boundary for realtime
+      // clients. Broadcast it now instead of waiting for the next model or
+      // tool event to wake the socket.
+      await broadcastThreadRecords(input.sql, input.webSockets);
     }
     await captureCanonicalSnapshot(input, gateway);
     const checkpoint = await checkpointWorkspace(input);

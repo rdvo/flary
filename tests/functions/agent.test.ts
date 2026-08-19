@@ -247,3 +247,73 @@ test("interactive agents prepare trusted thread providers before model resolutio
   assert.deepEqual(prepared, ["tenant:app:coder:thread_1"]);
   assert.equal(result.model, "runtime-alias/model");
 });
+
+test("durable agent tools restore admitted roles and scopes", async () => {
+  let stored = binding();
+  let observedIdentity: unknown;
+  const service: FlaryThreadHostService = {
+    async list() { return [stored]; },
+    async create(_scope, input) {
+      stored = { ...binding(), metadata: input.metadata };
+      return stored;
+    },
+    async inspect() { return stored; },
+    async archive() { return stored; },
+    async fork() { return stored; },
+    async setMode() { return stored; },
+    async setConnections() { return stored; },
+    async submit() {
+      return { streamUrl: "https://local/stream", offset: "1", submissionId: "submission" };
+    },
+    async listApprovals() { return []; },
+    async decideApproval() {},
+  };
+  const app = flary({
+    defaultIdentity: {
+      tenantId: "tenant",
+      userId: "user",
+      roles: ["admin"],
+      scopes: ["analytics.read"],
+    },
+    threadService: service,
+    code: {
+      async execute(input) {
+        observedIdentity = input.context.identity;
+        return null;
+      },
+    },
+  });
+  const probe = app.fn({
+    name: "probe",
+    run: async () => ({ ok: true }),
+  });
+  const coder = app.agent({ name: "coder", tools: app.tools({ probe }) });
+  const worker = app.serve({ coder }, { prefix: "/api/flary" });
+  const created = await worker.request("http://local/api/flary/apps/coder/threads", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      threadId: "thread_1",
+      workspace: binding().workspace,
+    }),
+  });
+  assert.equal(created.status, 201, await created.clone().text());
+  assert.deepEqual(stored.metadata?.flaryAdmittedRoles, ["admin"]);
+  assert.deepEqual(stored.metadata?.flaryAdmittedScopes, ["analytics.read"]);
+
+  await app.executeAgentCode(coder, {
+    code: "return null",
+    runId: "tenant:coder:coder:thread_1",
+    bindings: undefined,
+  });
+  assert.deepEqual(observedIdentity, {
+    tenantId: "tenant",
+    userId: "user",
+    roles: ["admin"],
+    scopes: ["analytics.read"],
+    applicationId: "coder",
+    projectId: "project",
+    workspaceId: "workspace",
+    branch: "main",
+  });
+});

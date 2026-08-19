@@ -73,6 +73,8 @@ export const FlaryHostAuthorizationSchema = z
   .object({
     organizationId: z.string().min(1),
     actor: IdentityReferenceSchema,
+    roles: z.array(z.string().min(1)).max(128).optional(),
+    scopes: z.array(z.string().min(1)).max(256).optional(),
   })
   .strict();
 export type FlaryHostAuthorization = z.infer<
