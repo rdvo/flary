@@ -1131,7 +1131,7 @@ async function reserveInteractiveToolCall(
     toolCallId: reservationId,
     toolId,
     ordinal,
-    inputSummary: publicToolActivityInput(input),
+    inputSummary: projectPublicToolActivityInput(input, toolId),
   });
   return {
     settle: async () => {
@@ -1164,7 +1164,7 @@ async function reserveInteractiveToolCall(
   };
 }
 
-function publicToolActivityInput(value: unknown): Record<string, unknown> {
+export function projectPublicToolActivityInput(value: unknown, toolId: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const source = value as Record<string, unknown>;
   const output: Record<string, unknown> = {};
@@ -1173,7 +1173,89 @@ function publicToolActivityInput(value: unknown): Record<string, unknown> {
     if (typeof candidate === "string") output[key] = candidate.slice(0, 200);
     else if (typeof candidate === "number" || typeof candidate === "boolean") output[key] = candidate;
   }
+  // UI artifact tools are an explicit public-display boundary. This strict
+  // allowlist runs before tool execution, so untrusted model input cannot put
+  // arbitrary fields into the public session projection.
+  if (/(?:^|[._-])draw[_-]?canvas$/i.test(toolId)) {
+    const artifact = publicCanvasArtifact(source);
+    const encoded = JSON.stringify(artifact ?? {});
+    if (artifact && encoded.length <= 64_000) {
+      output.canvas = artifact;
+    }
+  }
   return output;
+}
+
+function publicCanvasArtifact(source: Record<string, unknown>): Record<string, unknown> | undefined {
+  const text = (value: unknown, max: number) => typeof value === "string" && value.trim()
+    ? value.trim().slice(0, max)
+    : undefined;
+  const title = text(source.title, 120);
+  if (!title) return undefined;
+  const artifact: Record<string, unknown> = { title };
+  for (const [key, max] of [["id", 80], ["subtitle", 240], ["eyebrow", 60], ["insight", 500], ["source", 160]] as const) {
+    const value = text(source[key], max);
+    if (value) artifact[key] = value;
+  }
+  artifact.metrics = Array.isArray(source.metrics) ? source.metrics.slice(0, 8).flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const metric = value as Record<string, unknown>;
+    const label = text(metric.label, 80);
+    const metricValue = text(metric.value, 80);
+    if (!label || !metricValue) return [];
+    return [{
+      label,
+      value: metricValue,
+      ...(text(metric.detail, 120) ? { detail: text(metric.detail, 120) } : {}),
+      ...(typeof metric.change === "number" && Number.isFinite(metric.change) ? { change: metric.change } : {}),
+      ...(["neutral", "blue", "green", "amber", "red", "violet"].includes(String(metric.tone)) ? { tone: metric.tone } : {}),
+    }];
+  }) : [];
+  if (source.chart && typeof source.chart === "object" && !Array.isArray(source.chart)) {
+    const chart = source.chart as Record<string, unknown>;
+    const points = Array.isArray(chart.points) ? chart.points.slice(0, 120).flatMap((value) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+      const point = value as Record<string, unknown>;
+      const label = text(point.label, 80);
+      if (!label || typeof point.value !== "number" || !Number.isFinite(point.value)) return [];
+      return [{
+        label,
+        value: point.value,
+        ...(typeof point.secondary === "number" && Number.isFinite(point.secondary) ? { secondary: point.secondary } : {}),
+      }];
+    }) : [];
+    if (points.length >= 2) artifact.chart = {
+      type: ["line", "area", "bar"].includes(String(chart.type)) ? chart.type : "line",
+      ...(text(chart.title, 120) ? { title: text(chart.title, 120) } : {}),
+      primaryLabel: text(chart.primaryLabel, 60) ?? "Current",
+      ...(text(chart.secondaryLabel, 60) ? { secondaryLabel: text(chart.secondaryLabel, 60) } : {}),
+      valueFormat: ["number", "currency", "percent"].includes(String(chart.valueFormat)) ? chart.valueFormat : "number",
+      points,
+    };
+  }
+  if (source.table && typeof source.table === "object" && !Array.isArray(source.table)) {
+    const table = source.table as Record<string, unknown>;
+    const columns = Array.isArray(table.columns) ? table.columns.slice(0, 8).flatMap((value) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+      const column = value as Record<string, unknown>;
+      const key = text(column.key, 40);
+      const label = text(column.label, 60);
+      return key && label ? [{ key, label }] : [];
+    }) : [];
+    if (columns.length > 0) artifact.table = {
+      ...(text(table.title, 120) ? { title: text(table.title, 120) } : {}),
+      columns,
+      rows: Array.isArray(table.rows) ? table.rows.slice(0, 30).flatMap((value) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+        const row = value as Record<string, unknown>;
+        return [Object.fromEntries(columns.map(({ key }) => {
+          const cell = row[key];
+          return [key, typeof cell === "string" ? cell.slice(0, 160) : typeof cell === "number" || typeof cell === "boolean" || cell === null ? cell : ""];
+        }))];
+      }) : [],
+    };
+  }
+  return redactSecrets(artifact) as Record<string, unknown>;
 }
 
 function toSchema(schema: unknown): Record<string, unknown> | undefined {
