@@ -1258,6 +1258,14 @@ function publicCanvasArtifact(source: Record<string, unknown>): Record<string, u
     const value = text(source[key], max);
     if (value) artifact[key] = value;
   }
+  const html = text(source.html, 60_000);
+  if (html) {
+    artifact.html = html;
+    artifact.height = typeof source.height === "number" && Number.isInteger(source.height)
+      ? Math.min(720, Math.max(240, source.height))
+      : 420;
+    return redactSecrets(artifact) as Record<string, unknown>;
+  }
   artifact.metrics = Array.isArray(source.metrics) ? source.metrics.slice(0, 8).flatMap((value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return [];
     const metric = value as Record<string, unknown>;
