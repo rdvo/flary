@@ -741,7 +741,10 @@ function openAIResponsesBody(request: ModelRequest): Record<string, unknown> {
   }
   if (request.toolChoice) body.tool_choice = request.toolChoice;
   if (request.reasoningEffort) {
-    body.reasoning = { effort: request.reasoningEffort };
+    body.reasoning = {
+      effort: request.reasoningEffort,
+      summary: "auto",
+    };
   }
   if (request.verbosity) body.text = { verbosity: request.verbosity };
   return body;

@@ -106,6 +106,51 @@ test("OpenAI Responses resumes by response ID and sequence", async () => {
   assert.equal(complete?.usage?.cachedInputTokens, 4);
 });
 
+test("OpenAI Responses requests a streamable reasoning summary", async () => {
+  let requestBody: Record<string, unknown> | undefined;
+  const adapter = new OpenAIResponsesRecoveryAdapter({
+    apiKey: "test-key",
+    fetch: async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return sse([
+        {
+          type: "response.created",
+          sequence_number: 0,
+          response: { id: "resp-summary", model: "gpt-5" },
+        },
+        {
+          type: "response.completed",
+          sequence_number: 1,
+          response: {
+            id: "resp-summary",
+            model: "gpt-5",
+            output: [{ type: "message", content: [{ type: "output_text", text: "Done" }] }],
+          },
+        },
+      ]);
+    },
+  });
+  const context: ProviderRecoveryContext = {
+    runId: "run-summary",
+    operationId: "model-summary",
+    idempotencyKey: "model-request-summary",
+    checkpoints: new InMemoryProviderCheckpointStore(),
+  };
+
+  for await (const _event of adapter.start({
+    model: "gpt-5",
+    messages: [{ role: "user", content: "hello" }],
+    reasoningEffort: "high",
+  }, context)) {
+    // Consume the complete response.
+  }
+
+  assert.deepEqual(requestBody?.reasoning, {
+    effort: "high",
+    summary: "auto",
+  });
+});
+
 test("continuation keeps persisted assistant output before tool results", () => {
   const request = {
     model: "claude-test",
