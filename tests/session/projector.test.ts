@@ -187,3 +187,60 @@ test("the session projector retains safe model-turn failures", async () => {
     },
   );
 });
+
+test("the session projector closes a turn only when the submission settles", async () => {
+  const database = new DatabaseSync(":memory:");
+  const sql = {
+    exec<T>(query: string, ...bindings: unknown[]) {
+      const trimmed = query.trim().toLowerCase();
+      if (bindings.length === 0 && !trimmed.startsWith("select")) {
+        database.exec(query);
+        return { toArray: () => [] as T[] };
+      }
+      const statement = database.prepare(query);
+      if (trimmed.startsWith("select")) {
+        return { toArray: () => statement.all(...bindings) as T[] };
+      }
+      statement.run(...bindings);
+      return { toArray: () => [] as T[] };
+    },
+    transactionSync<T>(closure: () => T): T {
+      database.exec("BEGIN IMMEDIATE");
+      try {
+        const result = closure();
+        database.exec("COMMIT");
+        return result;
+      } catch (error) {
+        database.exec("ROLLBACK");
+        throw error;
+      }
+    },
+  };
+  const projector = new FlarySessionProjector(
+    new SqliteSessionLedger(sql, { hotRecordLimit: 10 }),
+    {
+      tenantId: "tenant",
+      applicationId: "app",
+      sessionId: "thread_tools",
+      threadId: "thread_tools",
+      sourceRevision: "rev_1",
+    },
+  );
+
+  const message = await projector.project({
+    sourceCursor: "message_done",
+    event: { type: "message-completed", messageId: "assistant_tool_message" },
+  });
+  const submission = await projector.project({
+    sourceCursor: "submission_done",
+    event: {
+      type: "submission-settled",
+      submissionId: "submission_1",
+      outcome: "completed",
+    },
+  });
+
+  assert.equal(message.recordType, "message.assistant");
+  assert.equal(submission.recordType, "turn.completed");
+  assert.equal(submission.turnId, "submission_1");
+});

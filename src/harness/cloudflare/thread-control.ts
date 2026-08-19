@@ -2340,7 +2340,7 @@ export async function handleFlaryThreadControlAlarm(input: {
     `SELECT value_json FROM flary_thread_control
      WHERE key LIKE 'projection:%'`,
   ).toArray().map((row) => objectValue(JSON.parse(row.value_json)))
-    .filter((projection) => projection.status !== "completed");
+    .filter(projectionNeedsRecovery);
   for (const projection of projections) {
     const admission = projection.admission as FlueAdmission | undefined;
     if (!admission) continue;
@@ -2466,6 +2466,11 @@ export async function handleFlaryThreadControlAlarm(input: {
   if (projections.length > 0 && storage.setAlarm) {
     await storage.setAlarm(Date.now() + 30_000);
   }
+}
+
+/** Only an interrupted active projection is safe to resume after eviction. */
+export function projectionNeedsRecovery(projection: Record<string, unknown>): boolean {
+  return projection.status === "active";
 }
 
 interface RealtimeSocketAttachment {
@@ -4678,7 +4683,9 @@ function resolveForkBoundary(
   requestedTurnId?: string,
 ): ForkBoundary {
   const completed = records.filter((record) =>
-    record.recordType === "turn.completed" && recordTurnId(record),
+    record.recordType === "turn.completed" &&
+    objectValue(record.publicPayload).type !== "message-completed" &&
+    recordTurnId(record),
   );
   const latest = completed.at(-1);
   const selected = requestedTurnId

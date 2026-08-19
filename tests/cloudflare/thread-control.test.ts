@@ -7,6 +7,7 @@ import {
   handleFlarySessionProjectionQueue,
   handleFlaryThreadControlObjectRequest,
   handleFlaryThreadControlWebSocketMessage,
+  projectionNeedsRecovery,
   providerFailureFromFlueEvent,
   publicAgentFailureMessage,
 } from "../../src/harness/cloudflare/thread-control.ts";
@@ -115,6 +116,12 @@ test("provider failures become short safe public messages", () => {
     "authorization=<redacted> upstream timed out",
   );
   assert.equal(publicAgentFailureMessage(new Error("x".repeat(2_000))).length, 1_000);
+});
+
+test("only interrupted active projections resume after eviction", () => {
+  assert.equal(projectionNeedsRecovery({ status: "active" }), true);
+  assert.equal(projectionNeedsRecovery({ status: "completed" }), false);
+  assert.equal(projectionNeedsRecovery({ status: "failed" }), false);
 });
 
 test("Flue model-turn failures are retained when the direct result is empty", () => {

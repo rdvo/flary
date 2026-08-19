@@ -49,6 +49,10 @@ export class FlarySessionProjector {
         : typeof event.occurredAt === "string"
           ? event.occurredAt
           : new Date().toISOString();
+    const turnId = stringValue(event.turnId) ??
+      (eventType === "submission-settled"
+        ? stringValue(event.submissionId)
+        : undefined);
     const payload = SessionJsonObjectSchema.parse(
       redactProviderPrivate(
         eventType,
@@ -66,7 +70,7 @@ export class FlarySessionProjector {
       attempt: input.attempt ?? numeric(event.attempt) ?? 0,
       publicPayload: payload,
       ...(producerForEvent(event) ? { producer: producerForEvent(event) } : {}),
-      ...(stringValue(event.turnId) ? { turnId: stringValue(event.turnId) } : {}),
+      ...(turnId ? { turnId } : {}),
       ...(stringValue(event.runId) ? { runId: stringValue(event.runId) } : {}),
       ...(stringValue(event.toolCallId ?? event.callId)
         ? { toolCallId: stringValue(event.toolCallId ?? event.callId) }
@@ -138,8 +142,12 @@ function recordTypeForProjectedEvent(
 ): SessionRecordType {
   const type = typeof event.type === "string" ? event.type : "unknown";
   if (type === "conversation-reset") return "compaction.window";
-  if (type === "message-started") return "turn.started";
-  if (type === "message-completed") return "turn.completed";
+  // Flue can start and complete more than one assistant message inside one
+  // submission when the model calls tools. These are message boundaries, not
+  // user-turn boundaries. Only submission-settled closes the logical turn.
+  if (type === "message-started" || type === "message-completed") {
+    return "message.assistant";
+  }
   if (type === "message-delta") {
     return event.kind === "reasoning"
       ? "message.reasoning"
@@ -158,6 +166,7 @@ function recordTypeForProjectedEvent(
     return "tool.result";
   }
   if (type === "submission-settled") {
+    if (event.outcome === "completed") return "turn.completed";
     return event.outcome === "aborted" ? "turn.aborted" : "terminal";
   }
   return recordTypeForEvent(type);
