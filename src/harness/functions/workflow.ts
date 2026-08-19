@@ -422,6 +422,9 @@ function interactiveAgentInstructions(value: FlaryAgent<any>): string {
     definition.tools
       ? `You have one execute tool. ${coreToolGuidance(definition.tools)}`
       : "",
+    definition.tools
+      ? "After tool work, always finish the turn with a user-facing assistant message. Never end a turn with only tool calls or reasoning."
+      : "",
     definition.delegation?.mode === "disabled"
       ? "Do not delegate work."
       : Object.keys(definition.subagents ?? {}).length > 0

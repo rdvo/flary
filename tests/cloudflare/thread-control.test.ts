@@ -787,6 +787,64 @@ test("root usage reservations reject excess work before it starts", async () => 
   assert.equal((await usage("reserveUsage", "tool_3")).ok, false);
 });
 
+test("nested Code Mode tool activity is projected once for realtime clients", async () => {
+  const controls = namespace();
+  const service = createCloudflareThreadService({ env: {}, namespace: controls });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_tools",
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  await service.create(scope, {
+    threadId: "thread_tools",
+    agentId: "coder",
+    workspace: {
+      organizationId: "tenant_tools",
+      appId: "coder",
+      projectId: "project",
+      workspaceId: "workspace",
+      branch: "main",
+    },
+    mode: "build",
+  });
+  const control = controls.get(controls.idFromName(
+    "thread:tenant_tools:coder:thread_tools",
+  ));
+  const record = (state: "started" | "completed") => control.fetch(
+    new Request("https://flary.internal/usage-reservation", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "recordToolActivity",
+        tenantId: "tenant_tools",
+        applicationId: "coder",
+        state,
+        toolCallId: "tool_call_1",
+        toolId: "stats",
+        ordinal: 1,
+        inputSummary: { range: "7d" },
+      }),
+    }),
+  );
+
+  assert.equal((await record("started")).ok, true);
+  assert.equal((await record("started")).ok, true);
+  assert.equal((await record("completed")).ok, true);
+  const records = await service.auditList!({ ...scope, threadId: "thread_tools" }, {
+    after: 0,
+    limit: 100,
+  });
+  const activities = records.filter((item: any) =>
+    item.recordType === "tool.call" || item.recordType === "tool.result"
+  );
+  assert.equal(activities.length, 2);
+  assert.equal((activities[0] as any).publicPayload.call.toolId, "stats");
+  assert.deepEqual((activities[0] as any).publicPayload.call.arguments, { range: "7d" });
+  assert.equal((activities[1] as any).publicPayload.result.status, "succeeded");
+});
+
 test("hibernating realtime commands resume from socket attachments and deduplicate", async () => {
   const controls = namespace();
   const service = createCloudflareThreadService({ env: {}, namespace: controls });

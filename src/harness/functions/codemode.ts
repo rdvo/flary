@@ -1090,7 +1090,7 @@ async function reserveInteractiveToolCall(
   )}`;
   const name = `thread:${ref.organizationId}:${ref.appId}:${ref.threadId}`;
   const call = async (
-    method: "reserveUsage" | "settleUsage" | "unknownUsage",
+    method: "reserveUsage" | "settleUsage" | "unknownUsage" | "recordToolActivity",
     extra: Record<string, unknown> = {},
   ): Promise<void> => {
     const response = await namespace.get(namespace.idFromName(name)).fetch(
@@ -1126,19 +1126,54 @@ async function reserveInteractiveToolCall(
       browserSeconds: 0,
     },
   });
+  await call("recordToolActivity", {
+    state: "started",
+    toolCallId: reservationId,
+    toolId,
+    ordinal,
+    inputSummary: publicToolActivityInput(input),
+  });
   return {
-    settle: () => call("settleUsage", {
-      actual: {
-        steps: 0,
-        toolCalls: 1,
-        tokens: 0,
-        costUsd: 0,
-        sandboxSeconds: 0,
-        browserSeconds: 0,
-      },
-    }),
-    unknown: () => call("unknownUsage"),
+    settle: async () => {
+      await call("settleUsage", {
+        actual: {
+          steps: 0,
+          toolCalls: 1,
+          tokens: 0,
+          costUsd: 0,
+          sandboxSeconds: 0,
+          browserSeconds: 0,
+        },
+      });
+      await call("recordToolActivity", {
+        state: "completed",
+        toolCallId: reservationId,
+        toolId,
+        ordinal,
+      });
+    },
+    unknown: async () => {
+      await call("unknownUsage");
+      await call("recordToolActivity", {
+        state: "failed",
+        toolCallId: reservationId,
+        toolId,
+        ordinal,
+      });
+    },
   };
+}
+
+function publicToolActivityInput(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const source = value as Record<string, unknown>;
+  const output: Record<string, unknown> = {};
+  for (const key of ["path", "file", "target", "range", "campaign", "site", "dimension"]) {
+    const candidate = source[key];
+    if (typeof candidate === "string") output[key] = candidate.slice(0, 200);
+    else if (typeof candidate === "number" || typeof candidate === "boolean") output[key] = candidate;
+  }
+  return output;
 }
 
 function toSchema(schema: unknown): Record<string, unknown> | undefined {

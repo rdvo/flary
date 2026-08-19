@@ -1982,6 +1982,46 @@ async function dispatchThreadControl(
       body,
     );
   }
+  if (method === "recordToolActivity") {
+    assertOwner(sql, body);
+    const binding = requireBinding(sql);
+    const state = String(body.state ?? "");
+    if (state !== "started" && state !== "completed" && state !== "failed") {
+      throw new Error("A valid tool activity state is required");
+    }
+    const toolCallId = String(body.toolCallId ?? "");
+    const toolId = String(body.toolId ?? "");
+    if (!toolCallId || !toolId) throw new Error("Tool activity needs call and tool IDs");
+    const activityKey = `tool-activity:${toolCallId}:${state}`;
+    const existing = sql.exec<{ value_json: string }>(
+      "SELECT value_json FROM flary_thread_control WHERE key = ?",
+      activityKey,
+    ).toArray()[0];
+    if (existing) return { recorded: true, replay: true };
+    const inputSummary = body.inputSummary && typeof body.inputSummary === "object" && !Array.isArray(body.inputSummary)
+      ? body.inputSummary as Record<string, unknown>
+      : {};
+    if (state === "started") {
+      await appendLedger(sql, binding, "tool.call", {
+        call: {
+          id: toolCallId,
+          toolId,
+          arguments: inputSummary,
+          ...(Number.isInteger(body.ordinal) ? { ordinal: Number(body.ordinal) } : {}),
+        },
+      });
+    } else {
+      await appendLedger(sql, binding, "tool.result", {
+        result: {
+          callId: toolCallId,
+          toolId,
+          status: state === "completed" ? "succeeded" : "failed",
+        },
+      });
+    }
+    put(sql, activityKey, { state, toolCallId, toolId });
+    return { recorded: true, replay: false };
+  }
   if (method === "track") {
     const binding = requireBinding(sql);
     const admission = body.admission as FlueAdmission;
