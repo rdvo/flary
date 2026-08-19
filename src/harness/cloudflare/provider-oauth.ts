@@ -345,6 +345,7 @@ export function registerTrustedProviderAlias(input: TrustedProviderAliasInput): 
   if (input.provider === "openai-codex") {
     if (!input.accessToken) throw new Error("The OpenAI Codex access token is missing");
     registerProvider(input.providerAlias, {
+      catalogProvider: "openai-codex",
       api: "openai-codex-responses",
       baseUrl: "https://chatgpt.com/backend-api",
       apiKey: input.accessToken,
@@ -353,6 +354,7 @@ export function registerTrustedProviderAlias(input: TrustedProviderAliasInput): 
   }
   if (!input.apiKey) throw new Error("The OpenAI API key is missing");
   registerProvider(input.providerAlias, {
+    catalogProvider: "openai",
     api: "openai-responses",
     baseUrl: "https://api.openai.com/v1",
     apiKey: input.apiKey,

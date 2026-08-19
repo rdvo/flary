@@ -137,6 +137,13 @@ test("Flue model-turn failures are retained when the direct result is empty", ()
     }),
     "The provider stream failed",
   );
+  assert.equal(
+    providerFailureFromFlueEvent({
+      type: "assistant_message_completed",
+      error: "The provider rejected the request",
+    }),
+    "The provider rejected the request",
+  );
 });
 
 test("generated Thread Control keeps ownership and append-only controls", async () => {

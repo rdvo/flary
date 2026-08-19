@@ -1,5 +1,102 @@
+diff --git a/dist/cloudflare/internal.mjs b/dist/cloudflare/internal.mjs
+index de97a5a..bd697fd 100644
+--- a/dist/cloudflare/internal.mjs
++++ b/dist/cloudflare/internal.mjs
+@@ -325,8 +325,12 @@ const WORKERS_AI_COMPAT = {
+ 	sendSessionAffinityHeaders: true,
+ 	supportsLongCacheRetention: false
+ };
+-function convertTools(tools) {
+-	return tools.map((tool) => ({
++function convertTools(tools, native) {
++	return tools.map((tool) => native ? {
++		name: tool.name,
++		description: tool.description,
++		parameters: tool.parameters
++	} : {
+ 		type: "function",
+ 		function: {
+ 			name: tool.name,
+@@ -334,7 +338,7 @@ function convertTools(tools) {
+ 			parameters: tool.parameters,
+ 			strict: false
+ 		}
+-	}));
++	});
+ }
+ function emptyUsage() {
+ 	return {
+@@ -486,7 +490,7 @@ const streamCloudflareWorkersAi = (model, context, options) => {
+ 				stream: true,
+ 				stream_options: { include_usage: true }
+ 			};
+-			if (context.tools && context.tools.length > 0) payload.tools = convertTools(context.tools);
++			if (context.tools && context.tools.length > 0) payload.tools = convertTools(context.tools, model.id.startsWith("@cf/"));
+ 			if (options?.maxTokens) payload.max_completion_tokens = options.maxTokens;
+ 			if (options?.temperature !== void 0) payload.temperature = options.temperature;
+ 			applyReasoningEffort(payload, model, options?.reasoning);
+@@ -513,6 +517,7 @@ const streamCloudflareWorkersAi = (model, context, options) => {
+ 			let textBlock = null;
+ 			let thinkingBlock = null;
+ 			let hasFinishReason = false;
++			let hasNativeChunk = false;
+ 			const toolCallBlocksByIndex = /* @__PURE__ */ new Map();
+ 			const toolCallBlocksById = /* @__PURE__ */ new Map();
+ 			const blocks = output.content;
+@@ -610,6 +615,41 @@ const streamCloudflareWorkersAi = (model, context, options) => {
+ 				output.responseId ||= chunk.id;
+ 				if (typeof chunk.model === "string" && chunk.model.length > 0 && chunk.model !== model.id) output.responseModel ||= chunk.model;
+ 				if (chunk.usage) output.usage = parseChunkUsage(chunk.usage);
++				if (typeof chunk.response === "string") {
++					hasNativeChunk = true;
++					if (chunk.response.length > 0) {
++						const block = ensureTextBlock();
++						block.text += chunk.response;
++						stream.push({
++							type: "text_delta",
++							contentIndex: indexOf(block),
++							delta: chunk.response,
++							partial: output
++						});
++					}
++				}
++				if (Array.isArray(chunk.tool_calls)) {
++					hasNativeChunk = true;
++					for (const [toolIndex, toolCall] of chunk.tool_calls.entries()) {
++						if (!toolCall || typeof toolCall !== "object") continue;
++						const name = typeof toolCall.name === "string" ? toolCall.name : toolCall.function?.name ?? "";
++						const rawArguments = toolCall.arguments ?? toolCall.function?.arguments ?? {};
++						const argumentText = typeof rawArguments === "string" ? rawArguments : JSON.stringify(rawArguments);
++						const block = ensureToolCallBlock({
++							id: typeof toolCall.id === "string" ? toolCall.id : `cf_tool_${toolIndex}`,
++							index: toolIndex,
++							function: { name }
++						});
++						block.partialArgs = argumentText;
++						block.arguments = parseStreamingJson(argumentText);
++						stream.push({
++							type: "toolcall_delta",
++							contentIndex: indexOf(block),
++							delta: argumentText,
++							partial: output
++						});
++					}
++				}
+ 				const choice = Array.isArray(chunk.choices) ? chunk.choices[0] : void 0;
+ 				if (!choice) continue;
+ 				if (!chunk.usage && choice.usage) output.usage = parseChunkUsage(choice.usage);
+@@ -666,7 +706,8 @@ const streamCloudflareWorkersAi = (model, context, options) => {
+ 			for (const block of blocks) finishBlock(block);
+ 			if (options?.signal?.aborted) throw new Error("Request was aborted");
+ 			if (output.stopReason === "error") throw new Error(output.errorMessage ?? "Provider returned an error stop reason");
+-			if (!hasFinishReason) throw new Error("Stream ended without finish_reason");
++			if (!hasFinishReason && !hasNativeChunk) throw new Error("Stream ended without finish_reason");
++			if (!hasFinishReason) output.stopReason = toolCallBlocksByIndex.size > 0 ? "toolUse" : "stop";
+ 			stream.push({
+ 				type: "done",
+ 				reason: output.stopReason,
 diff --git a/dist/conversation-projections-XMug3C6A.mjs b/dist/conversation-projections-XMug3C6A.mjs
-index d052200..247924a 100644
+index d052200..6233650 100644
 --- a/dist/conversation-projections-XMug3C6A.mjs
 +++ b/dist/conversation-projections-XMug3C6A.mjs
 @@ -99,7 +99,8 @@ const AgentProfileSchema = v.strictObject({
@@ -40,7 +137,7 @@ index d052200..247924a 100644
  	if (latestCompactionIndex === -1) return pathToContextEntries(path, options);
  	const compaction = path[latestCompactionIndex];
 diff --git a/dist/conversation-stream-store-Bitz7UoW.mjs b/dist/conversation-stream-store-Bitz7UoW.mjs
-index 9403255..94471b3 100644
+index 9403255..853fa46 100644
 --- a/dist/conversation-stream-store-Bitz7UoW.mjs
 +++ b/dist/conversation-stream-store-Bitz7UoW.mjs
 @@ -15,6 +15,16 @@ const DURABILITY_DEFAULT_MAX_ATTEMPTS = 10;
@@ -221,7 +318,8 @@ index 9403255..94471b3 100644
  		}, async ({ resolvedModel }) => {
  			this.activeSubmissionId = options.submissionAttempt?.submissionId;
  			this.activeSubmissionAttemptId = options.submissionAttempt?.attemptId;
-@@ -3025,10 +3112,10 @@ function createDirectAgentSubmissionInput(options) {
+@@ -3025,7 +3112,7 @@ function createDispatchAgentSubmissionInput(input) {
+ function createDirectAgentSubmissionInput(options) {
  	return {
  		kind: "direct",
 -		submissionId: crypto.randomUUID(),
@@ -229,10 +327,6 @@ index 9403255..94471b3 100644
  		agent: options.agent,
  		id: options.id,
  		payload: options.payload,
- 		acceptedAt: (/* @__PURE__ */ new Date()).toISOString(),
- 		...options.traceCarrier ? { traceCarrier: options.traceCarrier } : {}
- 	};
- }
 @@ -3126,7 +3213,8 @@ async function reconcileInterruptedSubmission(submissions, submission, agent, cr
  		const state = await s.inspectSubmissionInput(input);
  		return {
@@ -260,7 +354,7 @@ index 9403255..94471b3 100644
  				if (submission.kind === "direct") observers.fail(submission.submissionId, error);
  				throw error;
 diff --git a/dist/internal.d.mts b/dist/internal.d.mts
-index c785e22..714ff51 100644
+index c785e22..38f58a4 100644
 --- a/dist/internal.d.mts
 +++ b/dist/internal.d.mts
 @@ -84,6 +84,14 @@ interface CloudflareAgentRuntime {
@@ -279,7 +373,7 @@ index c785e22..714ff51 100644
    onFiberRecovered(instance: CloudflareAgentInstance, ctx: CloudflareAgentRecoveredFiberContext, inherited: () => Promise<unknown> | unknown): Promise<unknown>;
  }
 diff --git a/dist/internal.mjs b/dist/internal.mjs
-index 1147b97..03531c4 100644
+index 1147b97..ca0ce77 100644
 --- a/dist/internal.mjs
 +++ b/dist/internal.mjs
 @@ -703,7 +703,8 @@ async function initializeRootHarness(agent, config, emitEvent) {
@@ -423,8 +517,80 @@ index 1147b97..03531c4 100644
  		if (isAbortRequest(request, this.agentName, this.instance.name)) {
  			const aborted = await this.abortInstance();
  			return Response.json({ aborted });
+diff --git a/dist/providers-CsCcTxMU.mjs b/dist/providers-CsCcTxMU.mjs
+index 529cb1b..073e65b 100644
+--- a/dist/providers-CsCcTxMU.mjs
++++ b/dist/providers-CsCcTxMU.mjs
+@@ -157,8 +157,9 @@ function buildModelFromRegistration(providerId, registration, modelId) {
+ 		const gateway = registration.gateway === false ? void 0 : registration.gateway ?? { id: "default" };
+ 		return attachModelBinding(base, registration.binding, gateway);
+ 	}
+-	const catalog = getModel(providerId, modelId);
+-	const providerDefaults = catalog ?? getModels(providerId)[0];
++	const catalogProviderId = registration.catalogProvider ?? providerId;
++	const catalog = getModel(catalogProviderId, modelId);
++	const providerDefaults = catalog ?? getModels(catalogProviderId)[0];
+ 	const api = registration.api ?? providerDefaults?.api;
+ 	const baseUrl = registration.baseUrl ?? providerDefaults?.baseUrl;
+ 	if (api === void 0 || baseUrl === void 0) throw new ProviderRegistrationError({ providerId });
+@@ -167,12 +168,18 @@ function buildModelFromRegistration(providerId, registration, modelId) {
+ 		...base.headers,
+ 		...registration.headers
+ 	} : void 0;
++	const compatibilityOverride = registration.models?.[modelId]?.compat ?? registration.compat;
++	const compat = base.compat || compatibilityOverride ? {
++		...base.compat,
++		...compatibilityOverride
++	} : void 0;
+ 	return {
+ 		...base,
+ 		api,
+ 		provider: providerId,
+ 		baseUrl,
+ 		headers,
++		compat,
+ 		contextWindow: registration.models?.[modelId]?.contextWindow ?? registration.contextWindow ?? base.contextWindow,
+ 		maxTokens: registration.models?.[modelId]?.maxTokens ?? registration.maxTokens ?? base.maxTokens
+ 	};
+diff --git a/dist/providers-DHepWsgE.d.mts b/dist/providers-DHepWsgE.d.mts
+index 668c44f..db439bd 100644
+--- a/dist/providers-DHepWsgE.d.mts
++++ b/dist/providers-DHepWsgE.d.mts
+@@ -56,6 +56,12 @@ interface ProviderTelemetryRegistration {
+ }
+ /** Register an HTTP-backed provider ID with {@link registerProvider}. */
+ interface HttpProviderRegistration {
++  /**
++   * Catalog provider used only to hydrate model metadata for a private
++   * runtime alias. Requests still use the registered provider ID, endpoint,
++   * and credential.
++   */
++  catalogProvider?: string;
+   /**
+    * Wire protocol used for requests. Required for provider IDs the catalog
+    * doesn't know; defaults to the catalog protocol for catalog provider IDs.
+@@ -79,6 +85,11 @@ interface HttpProviderRegistration {
+    * registration's values win on conflict.
+    */
+   headers?: Record<string, string>;
++  /**
++   * Wire-compatibility overrides for OpenAI-compatible gateways and proxies.
++   * These values are merged over the catalog model compatibility settings.
++   */
++  compat?: Model<Api>["compat"];
+   /**
+    * Default `contextWindow` (in tokens) for every model resolved through
+    * this registration. Overridden per-model via {@link models}. Unset falls
+@@ -96,6 +107,7 @@ interface HttpProviderRegistration {
+   models?: Record<string, {
+     contextWindow?: number;
+     maxTokens?: number;
++    compat?: Model<Api>["compat"];
+   }>;
+   /**
+    * Sends `store: true` for OpenAI Responses API providers. Only enable when
 diff --git a/dist/run-store-CYeXjR-d.mjs b/dist/run-store-CYeXjR-d.mjs
-index 7aad15d..c3f38a8 100644
+index 7aad15d..306d2ad 100644
 --- a/dist/run-store-CYeXjR-d.mjs
 +++ b/dist/run-store-CYeXjR-d.mjs
 @@ -10,7 +10,11 @@ const DirectAgentImageSchema = v.object({
@@ -441,7 +607,7 @@ index 7aad15d..c3f38a8 100644
  const WorkflowRouteParamSchema = v.object({ name: v.string() });
  /** Shared `?wait` query contract for agent and workflow invocation routes. */
 diff --git a/dist/types-USSZhfC6.d.mts b/dist/types-USSZhfC6.d.mts
-index e41ab79..94f8abb 100644
+index e41ab79..5c99fc7 100644
 --- a/dist/types-USSZhfC6.d.mts
 +++ b/dist/types-USSZhfC6.d.mts
 @@ -83,6 +83,14 @@ type DirectAgentImage = PromptImage & {
@@ -459,7 +625,7 @@ index e41ab79..94f8abb 100644
  }
  /** Context passed to a {@link defineAgent} initializer. */
  interface AgentInitializerContext<TEnv = Record<string, any>> {
-@@ -287,6 +293,25 @@ interface DurabilityConfig {
+@@ -287,6 +295,25 @@ interface DurabilityConfig {
     */
    timeoutMs?: number;
  }
@@ -485,7 +651,7 @@ index e41ab79..94f8abb 100644
  interface AgentConfig {
    /** Discovered at runtime from AGENTS.md + .agents/skills/ in the session's cwd. */
    systemPrompt: string;
-@@ -316,6 +341,8 @@ interface AgentConfig {
+@@ -316,6 +343,8 @@ interface AgentConfig {
    compaction?: false | CompactionConfig;
    /** Durability settings resolved from the agent profile. */
    durability?: DurabilityConfig;
@@ -494,7 +660,7 @@ index e41ab79..94f8abb 100644
  }
  /** Reusable agent behavior accepted by {@link defineAgentProfile}. */
  interface AgentProfile {
-@@ -350,6 +377,8 @@ interface AgentProfile {
+@@ -350,6 +379,8 @@ interface AgentProfile {
     * independent durability configuration of its own.
     */
    durability?: DurabilityConfig;
@@ -503,7 +669,7 @@ index e41ab79..94f8abb 100644
  }
  /** Configuration returned by a {@link defineAgent} initializer. */
  interface AgentRuntimeConfig {
-@@ -381,6 +410,8 @@ interface AgentRuntimeConfig {
+@@ -381,6 +412,8 @@ interface AgentRuntimeConfig {
     * recovery attempt limits and submission timeouts.
     */
    durability?: DurabilityConfig;
@@ -512,146 +678,3 @@ index e41ab79..94f8abb 100644
    /** Working directory inside the initialized sandbox. */
    cwd?: string;
    /** Sandbox factory used to construct the initialized environment. */
-diff --git a/dist/cloudflare/internal.mjs b/dist/cloudflare/internal.mjs
-index c75dbe4..5615fc0 100644
---- a/dist/cloudflare/internal.mjs
-+++ b/dist/cloudflare/internal.mjs
-@@ -325,8 +325,12 @@ const WORKERS_AI_COMPAT = {
- 	sendSessionAffinityHeaders: true,
- 	supportsLongCacheRetention: false
- };
--function convertTools(tools) {
--	return tools.map((tool) => ({
-+function convertTools(tools, native) {
-+	return tools.map((tool) => native ? {
-+		name: tool.name,
-+		description: tool.description,
-+		parameters: tool.parameters
-+	} : {
- 		type: "function",
- 		function: {
- 			name: tool.name,
-@@ -334,7 +338,7 @@ function convertTools(tools) {
- 			parameters: tool.parameters,
- 			strict: false
- 		}
--	}));
-+	});
- }
- function emptyUsage() {
- 	return {
-@@ -486,7 +490,7 @@ const streamCloudflareWorkersAi = (model, context, options) => {
- 				stream: true,
- 				stream_options: { include_usage: true }
- 			};
--			if (context.tools && context.tools.length > 0) payload.tools = convertTools(context.tools);
-+			if (context.tools && context.tools.length > 0) payload.tools = convertTools(context.tools, model.id.startsWith("@cf/"));
- 			if (options?.maxTokens) payload.max_completion_tokens = options.maxTokens;
- 			if (options?.temperature !== void 0) payload.temperature = options.temperature;
- 			applyReasoningEffort(payload, model, options?.reasoning);
-@@ -513,6 +517,7 @@ const streamCloudflareWorkersAi = (model, context, options) => {
- 			let textBlock = null;
- 			let thinkingBlock = null;
- 			let hasFinishReason = false;
-+			let hasNativeChunk = false;
- 			const toolCallBlocksByIndex = /* @__PURE__ */ new Map();
- 			const toolCallBlocksById = /* @__PURE__ */ new Map();
- 			const blocks = output.content;
-@@ -610,6 +615,41 @@ const streamCloudflareWorkersAi = (model, context, options) => {
- 				output.responseId ||= chunk.id;
- 				if (typeof chunk.model === "string" && chunk.model.length > 0 && chunk.model !== model.id) output.responseModel ||= chunk.model;
- 				if (chunk.usage) output.usage = parseChunkUsage(chunk.usage);
-+				if (typeof chunk.response === "string") {
-+					hasNativeChunk = true;
-+					if (chunk.response.length > 0) {
-+						const block = ensureTextBlock();
-+						block.text += chunk.response;
-+						stream.push({
-+							type: "text_delta",
-+							contentIndex: indexOf(block),
-+							delta: chunk.response,
-+							partial: output
-+						});
-+					}
-+				}
-+				if (Array.isArray(chunk.tool_calls)) {
-+					hasNativeChunk = true;
-+					for (const [toolIndex, toolCall] of chunk.tool_calls.entries()) {
-+						if (!toolCall || typeof toolCall !== "object") continue;
-+						const name = typeof toolCall.name === "string" ? toolCall.name : toolCall.function?.name ?? "";
-+						const rawArguments = toolCall.arguments ?? toolCall.function?.arguments ?? {};
-+						const argumentText = typeof rawArguments === "string" ? rawArguments : JSON.stringify(rawArguments);
-+						const block = ensureToolCallBlock({
-+							id: typeof toolCall.id === "string" ? toolCall.id : `cf_tool_${toolIndex}`,
-+							index: toolIndex,
-+							function: { name }
-+						});
-+						block.partialArgs = argumentText;
-+						block.arguments = parseStreamingJson(argumentText);
-+						stream.push({
-+							type: "toolcall_delta",
-+							contentIndex: indexOf(block),
-+							delta: argumentText,
-+							partial: output
-+						});
-+					}
-+				}
- 				const choice = Array.isArray(chunk.choices) ? chunk.choices[0] : void 0;
- 				if (!choice) continue;
- 				if (!chunk.usage && choice.usage) output.usage = parseChunkUsage(choice.usage);
-@@ -666,7 +706,8 @@ const streamCloudflareWorkersAi = (model, context, options) => {
- 			for (const block of blocks) finishBlock(block);
- 			if (options?.signal?.aborted) throw new Error("Request was aborted");
- 			if (output.stopReason === "error") throw new Error(output.errorMessage ?? "Provider returned an error stop reason");
--			if (!hasFinishReason) throw new Error("Stream ended without finish_reason");
-+			if (!hasFinishReason && !hasNativeChunk) throw new Error("Stream ended without finish_reason");
-+			if (!hasFinishReason) output.stopReason = toolCallBlocksByIndex.size > 0 ? "toolUse" : "stop";
- 			stream.push({
- 				type: "done",
- 				reason: output.stopReason,
-diff --git a/dist/providers-DHepWsgE.d.mts b/dist/providers-DHepWsgE.d.mts
---- a/dist/providers-DHepWsgE.d.mts
-+++ b/dist/providers-DHepWsgE.d.mts
-@@ -79,6 +79,11 @@ interface HttpProviderRegistration {
-    * registration's values win on conflict.
-    */
-   headers?: Record<string, string>;
-+  /**
-+   * Wire-compatibility overrides for OpenAI-compatible gateways and proxies.
-+   * These values are merged over the catalog model compatibility settings.
-+   */
-+  compat?: Model<Api>["compat"];
-   /**
-    * Default `contextWindow` (in tokens) for every model resolved through
-    * this registration. Overridden per-model via {@link models}. Unset falls
-@@ -101,6 +106,7 @@ interface HttpProviderRegistration {
-   models?: Record<string, {
-     contextWindow?: number;
-     maxTokens?: number;
-+    compat?: Model<Api>["compat"];
-   }>;
-   /**
-    * Sends `store: true` for OpenAI Responses API providers. Only enable when
-diff --git a/dist/providers-CsCcTxMU.mjs b/dist/providers-CsCcTxMU.mjs
---- a/dist/providers-CsCcTxMU.mjs
-+++ b/dist/providers-CsCcTxMU.mjs
-@@ -164,6 +164,11 @@ function buildModelFromRegistration(providerId, registration, modelId) {
- 		...base.headers,
- 		...registration.headers
- 	} : void 0;
-+	const compatibilityOverride = registration.models?.[modelId]?.compat ?? registration.compat;
-+	const compat = base.compat || compatibilityOverride ? {
-+		...base.compat,
-+		...compatibilityOverride
-+	} : void 0;
- 	return {
- 		...base,
- 		api,
-@@ -171,6 +176,7 @@ function buildModelFromRegistration(providerId, registration, modelId) {
- 		provider: providerId,
- 		baseUrl,
- 		headers,
-+		compat,
- 		contextWindow: registration.models?.[modelId]?.contextWindow ?? registration.contextWindow ?? base.contextWindow,
- 		maxTokens: registration.models?.[modelId]?.maxTokens ?? registration.maxTokens ?? base.maxTokens
- 	};

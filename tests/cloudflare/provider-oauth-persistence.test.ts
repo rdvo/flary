@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { resolveModel } from "@flue/runtime/internal";
 
 import {
   CloudflareProviderOAuthPersistence,
@@ -75,6 +76,16 @@ test("trusted aliases accept isolated OpenAI and Codex registrations", () => {
     providerAlias: "flary-runtime-bbbbbbbbbbbbbbbb",
     accessToken: "test-codex-token",
   });
+  const openai = resolveModel("flary-runtime-aaaaaaaaaaaaaaaa/gpt-5.6-luna");
+  const codex = resolveModel("flary-runtime-bbbbbbbbbbbbbbbb/gpt-5.6-sol");
+  assert.equal(openai.reasoning, true);
+  assert.equal(openai.contextWindow > 0, true);
+  assert.equal(openai.maxTokens, 128_000);
+  assert.equal(openai.api, "openai-responses");
+  assert.equal(codex.reasoning, true);
+  assert.equal(codex.contextWindow > 0, true);
+  assert.equal(codex.maxTokens, 128_000);
+  assert.equal(codex.api, "openai-codex-responses");
   assert.throws(() => registerTrustedProviderAlias({
     provider: "openai",
     providerAlias: "shared",

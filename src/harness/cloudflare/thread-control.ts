@@ -3473,9 +3473,14 @@ export function providerFailureFromFlueEvent(event: unknown): string | undefined
   const value = objectValue(event);
   const response = objectValue(value.response);
   const candidates = [
+    typeof response.error === "string" ? response.error : undefined,
     objectValue(response.error).message,
     objectValue(response.error).details,
+    typeof value.error === "string" ? value.error : undefined,
     objectValue(value.error).message,
+    typeof objectValue(value.message).error === "string"
+      ? objectValue(value.message).error
+      : undefined,
     objectValue(value.message).errorMessage,
     value.errorMessage,
   ];
