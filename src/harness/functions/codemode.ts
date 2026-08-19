@@ -1094,7 +1094,7 @@ async function invokeCatalogTool(
   }
   // Settle outside the execution catch. If audit storage is unavailable after
   // a known result, do not rewrite that known result as an uncertain tool call.
-  await reservation?.settle();
+  await reservation?.settle(result);
   return result;
 }
 
@@ -1110,7 +1110,7 @@ async function reserveInteractiveToolCall(
   input: unknown,
   ordinal: number,
 ): Promise<{
-  settle(): Promise<void>;
+  settle(result?: unknown): Promise<void>;
   fail(error: unknown): Promise<void>;
   unknown(error: unknown): Promise<void>;
 } | undefined> {
@@ -1178,7 +1178,7 @@ async function reserveInteractiveToolCall(
     inputSummary: projectPublicToolActivityInput(input, toolId),
   });
   return {
-    settle: async () => {
+    settle: async (result) => {
       await call("settleUsage", {
         actual: {
           steps: 0,
@@ -1194,6 +1194,7 @@ async function reserveInteractiveToolCall(
         toolCallId: reservationId,
         toolId,
         ordinal,
+        outputSummary: projectPublicToolActivityResult(result),
       });
     },
     fail: async (error) => {
@@ -1250,6 +1251,27 @@ export function projectPublicToolActivityInput(value: unknown, toolId: string): 
     }
   }
   return output;
+}
+
+/**
+ * Keep a small, redacted result in the public activity ledger so clients can
+ * inspect a completed tool call. Large results remain available through the
+ * encrypted audit path and are not copied into the live event stream.
+ */
+export function projectPublicToolActivityResult(value: unknown): unknown {
+  const redacted = redactSecrets(value);
+  let encoded: string;
+  try {
+    encoded = JSON.stringify(redacted) ?? "null";
+  } catch {
+    return { summary: "The tool returned a non-serializable result." };
+  }
+  const sizeBytes = new TextEncoder().encode(encoded).byteLength;
+  if (sizeBytes <= 16 * 1024) return redacted;
+  return {
+    summary: "The tool result is too large for the live activity stream.",
+    sizeBytes,
+  };
 }
 
 function publicCanvasArtifact(source: Record<string, unknown>): Record<string, unknown> | undefined {

@@ -2019,6 +2019,9 @@ async function dispatchThreadControl(
           callId: toolCallId,
           toolId,
           status: state === "completed" ? "succeeded" : "failed",
+          ...(body.outputSummary !== undefined
+            ? { output: body.outputSummary }
+            : {}),
           ...(body.outcome === "outcome_unknown"
             ? { outcome: "outcome_unknown" }
             : {}),

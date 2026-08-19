@@ -842,7 +842,7 @@ test("nested Code Mode tool activity is projected once for realtime clients", as
 
   assert.equal((await record("started")).ok, true);
   assert.equal((await record("started")).ok, true);
-  assert.equal((await record("completed")).ok, true);
+  assert.equal((await record("completed", { outputSummary: { total: 42 } })).ok, true);
   const records = await service.auditList!({ ...scope, threadId: "thread_tools" }, {
     after: 0,
     limit: 100,
@@ -854,6 +854,7 @@ test("nested Code Mode tool activity is projected once for realtime clients", as
   assert.equal((activities[0] as any).publicPayload.call.toolId, "stats");
   assert.deepEqual((activities[0] as any).publicPayload.call.arguments, { range: "7d" });
   assert.equal((activities[1] as any).publicPayload.result.status, "succeeded");
+  assert.deepEqual((activities[1] as any).publicPayload.result.output, { total: 42 });
 
   assert.equal((await record("failed", {
     toolCallId: "tool_call_2",

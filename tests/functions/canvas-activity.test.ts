@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   interactiveToolFailureState,
   projectPublicToolActivityInput,
+  projectPublicToolActivityResult,
 } from "../../src/harness/functions/codemode.js";
 
 test("draw_canvas projects a bounded redacted UI artifact", () => {
@@ -33,6 +34,17 @@ test("draw_canvas bounds public HTML and iframe height", () => {
 test("normal tools do not project arbitrary structured inputs", () => {
   assert.deepEqual(projectPublicToolActivityInput({ query: "secret", range: "7d" }, "stats"), {
     range: "7d",
+  });
+});
+
+test("tool activity projects a bounded redacted result for live inspection", () => {
+  assert.deepEqual(projectPublicToolActivityResult({ total: 42, apiKey: "secret-value" }), {
+    total: 42,
+    apiKey: "<redacted>",
+  });
+  assert.deepEqual(projectPublicToolActivityResult({ content: "x".repeat(20_000) }), {
+    summary: "The tool result is too large for the live activity stream.",
+    sizeBytes: 20_014,
   });
 });
 
