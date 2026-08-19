@@ -542,8 +542,11 @@ function mergeWranglerConfig(
   if (!queueConsumers.some((value) => value.queue === queueName)) {
     queueConsumers.push({
       queue: queueName,
-      max_batch_size: 10,
-      max_batch_timeout: 5,
+      // This queue carries user-facing realtime commands. Deliver each
+      // command immediately. A batching window adds visible latency before
+      // model admission and makes an otherwise live WebSocket feel stalled.
+      max_batch_size: 1,
+      max_batch_timeout: 0,
       max_retries: 10,
       dead_letter_queue: `${queueName}-dead-letter`,
     });

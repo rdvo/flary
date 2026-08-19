@@ -175,6 +175,18 @@ test("the Vite plugin emits persistent app.agent entries", () => {
         binding.binding === "FLARY_SESSION_PROJECTION_QUEUE",
     ),
   );
+  assert.deepEqual(
+    wrangler.queues.consumers.find(
+      (consumer: { queue: string }) => consumer.queue === "flary-session-projection",
+    ),
+    {
+      queue: "flary-session-projection",
+      max_batch_size: 1,
+      max_batch_timeout: 0,
+      max_retries: 10,
+      dead_letter_queue: "flary-session-projection-dead-letter",
+    },
+  );
   assert.ok(
     wrangler.durable_objects.bindings.some(
       (binding: { name: string }) =>
