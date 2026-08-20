@@ -37,6 +37,27 @@ test("generated workspace connections share one durable object and expose Git", 
     assert.equal(descriptor?.operation, "read", `${name} is a built-in read tool`);
     assert.equal(descriptor?.requiresApproval, false);
   }
+  assert.deepEqual(
+    parent.descriptors.find((tool) => tool.name === "read")?.inputSchema.required,
+    ["path"],
+  );
+  assert.deepEqual(
+    parent.descriptors.find((tool) => tool.name === "stat")?.inputSchema.required,
+    ["path"],
+  );
+  assert.ok(
+    parent.descriptors.find((tool) => tool.name === "glob")?.inputSchema.required
+      ?.includes("pattern"),
+  );
+  assert.ok(
+    parent.descriptors.find((tool) => tool.name === "grep")?.inputSchema.required
+      ?.includes("query"),
+  );
+  assert.equal(
+    parent.descriptors.find((tool) => tool.name === "grep")?.inputSchema
+      .additionalProperties,
+    false,
+  );
   for (const name of ["write", "edit", "batchEdit", "move", "delete"]) {
     const descriptor = parent.descriptors.find((tool) => tool.name === name);
     assert.equal(descriptor?.operation, "write", `${name} is a built-in write tool`);
@@ -78,6 +99,38 @@ test("draft workspace writes stay writes without approval", async () => {
   const write = draft.descriptors.find((tool) => tool.name === "write");
   assert.equal(write?.operation, "write");
   assert.equal(write?.requiresApproval, false);
+});
+
+test("model workspace connections hide trusted host metadata", async () => {
+  const namespace = {
+    idFromName(name: string) { return name; },
+    get() {
+      return {
+        fetch: async () => Response.json({
+          output: {
+            files: [
+              { path: ".tracked/context.json" },
+              { path: "index.html" },
+            ],
+          },
+        }),
+      };
+    },
+  };
+  const tools = await createCloudflareWorkspaceConnection(namespace, {
+    organizationId: "tenant",
+    appId: "coder",
+    projectId: "repo",
+    workspaceId: "draft",
+    branch: "main",
+  }, { hiddenPaths: [".tracked"] });
+  assert.deepEqual(await tools.call("list", {}), {
+    files: [{ path: "index.html" }],
+  });
+  await assert.rejects(
+    tools.call("read", { path: ".tracked/context.json" }),
+    /not available/,
+  );
 });
 
 test("workspace lifecycle controls stay on the trusted host boundary", async () => {

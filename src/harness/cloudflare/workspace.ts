@@ -2,7 +2,21 @@ import {
   WorkspaceRefSchema,
   type WorkspaceRef,
 } from "../contracts/tenancy.js";
-import { redactSecrets } from "../execution/redaction.js";
+import {
+  ProjectFileDeleteRequestSchema,
+  ProjectFileEditRequestSchema,
+  ProjectFileListRequestSchema,
+  ProjectFileMoveRequestSchema,
+  ProjectFileReadRequestSchema,
+  ProjectFileWriteRequestSchema,
+} from "../contracts/filesystem.js";
+import {
+  WorkspaceBatchEditRequestSchema,
+  WorkspaceDiffRequestSchema,
+  WorkspaceGlobRequestSchema,
+  WorkspaceGrepRequestSchema,
+} from "../contracts/workspace-tools.js";
+import { redactErrorMessage, redactSecrets } from "../execution/redaction.js";
 import type {
   FlaryToolScope,
   FlaryWorkspaceTargetResolver,
@@ -16,6 +30,7 @@ import {
   type ArtifactR2Bucket,
 } from "../storage/r2-artifacts.js";
 import { summarizeArtifactCommit } from "../storage/artifacts.js";
+import { z } from "zod";
 
 type ResolvedWorkspaceScope = Required<
   Pick<
@@ -278,16 +293,17 @@ export async function handleFlaryWorkspaceObjectRequest<TEnv>(
           blobs,
           options.state.storage,
         )
-        : method === "stat"
-          ? await workspace.stat(String(body.input ?? ""))
-          : await callWorkspace(workspace, method, body.input);
+        : await callWorkspace(workspace, method, body.input);
     return workspaceJson({ output: redactSecrets(output) });
-  } catch {
+  } catch (error) {
     return workspaceJson(
       {
         error: {
           code: "workspace_operation_failed",
-          message: "The workspace operation failed",
+          message: redactErrorMessage(
+            error,
+            "The workspace operation failed",
+          ).slice(0, 500),
         },
       },
       400,
@@ -364,13 +380,30 @@ const GIT_METHODS = new Set([
 export async function createCloudflareWorkspaceConnection(
   namespace: CloudflareWorkspaceObjectNamespace,
   scopeInput: WorkspaceRef,
-  options: { readonly approveWrites?: boolean } = {},
+  options: {
+    readonly approveWrites?: boolean;
+    readonly hiddenPaths?: readonly string[];
+  } = {},
 ) {
   const scope = WorkspaceRefSchema.parse(scopeInput);
   const stub = namespace.get(
     namespace.idFromName(await cloudflareWorkspaceObjectName(scope)),
   );
+  const hiddenPaths = (options.hiddenPaths ?? []).map((path) => path.replace(/^\/+|\/+$/g, ""));
+  const hidden = (path: unknown): boolean =>
+    typeof path === "string" && hiddenPaths.some(
+      (prefix) => path === prefix || path.startsWith(`${prefix}/`),
+    );
   const call = async (name: string, input: unknown): Promise<unknown> => {
+    if (isRecord(input)) {
+      const directPaths = [input.path, input.from, input.to, input.compareToPath];
+      const editPaths = Array.isArray(input.edits)
+        ? input.edits.flatMap((edit) => isRecord(edit) ? [edit.path] : [])
+        : [];
+      if ([...directPaths, ...editPaths].some(hidden)) {
+        throw new Error("The workspace file is not available");
+      }
+    }
     const response = await stub.fetch(
       new Request(`https://flary.internal/workspace/${encodeURIComponent(name)}`, {
         method: "POST",
@@ -387,7 +420,17 @@ export async function createCloudflareWorkspaceConnection(
           : "The workspace operation failed",
       );
     }
-    return body.output;
+    const output = body.output;
+    if (name === "list" && isRecord(output) && Array.isArray(output.files)) {
+      return { ...output, files: output.files.filter((file) => !isRecord(file) || !hidden(file.path)) };
+    }
+    if (name === "glob" && isRecord(output) && Array.isArray(output.paths)) {
+      return { ...output, paths: output.paths.filter((path) => !hidden(path)) };
+    }
+    if (name === "grep" && isRecord(output) && Array.isArray(output.files)) {
+      return { ...output, files: output.files.filter((file) => !isRecord(file) || !hidden(file.path)) };
+    }
+    return output;
   };
   const fileTools = [
     ["read", "Read one workspace file", "read"],
@@ -402,6 +445,19 @@ export async function createCloudflareWorkspaceConnection(
     ["move", "Move a workspace file", "write"],
     ["delete", "Delete a workspace file", "write"],
   ] as const;
+  const fileInputSchemas = {
+    read: ProjectFileReadRequestSchema,
+    list: ProjectFileListRequestSchema,
+    stat: ProjectFileReadRequestSchema.pick({ path: true }),
+    glob: WorkspaceGlobRequestSchema,
+    grep: WorkspaceGrepRequestSchema,
+    diff: WorkspaceDiffRequestSchema,
+    write: ProjectFileWriteRequestSchema,
+    edit: ProjectFileEditRequestSchema,
+    batchEdit: WorkspaceBatchEditRequestSchema,
+    move: ProjectFileMoveRequestSchema,
+    delete: ProjectFileDeleteRequestSchema,
+  } as const;
   const readGit = new Set(["status", "log", "diff", "remote"]);
   return {
     descriptors: [
@@ -410,14 +466,7 @@ export async function createCloudflareWorkspaceConnection(
         description,
         operation,
         requiresApproval: operation === "write" && options.approveWrites !== false,
-        inputSchema: name === "stat"
-          ? {
-              type: "object",
-              properties: { path: { type: "string" } },
-              required: ["path"],
-              additionalProperties: false,
-            }
-          : { type: "object", additionalProperties: true },
+        inputSchema: z.toJSONSchema(fileInputSchemas[name]),
       })),
       ...[...GIT_METHODS].map((name) => ({
         name: `git_${name}`,

@@ -352,6 +352,8 @@ export interface FlaryWorkspaceOptions {
   readonly r2Binding?: string;
   readonly requireR2ForLargeFiles?: boolean;
   readonly tools?: readonly string[];
+  /** Hide trusted host metadata from model-visible workspace tools. */
+  readonly hiddenPaths?: readonly string[];
 }
 
 /** Tenant-scoped object storage exposed as lazy file tools. */

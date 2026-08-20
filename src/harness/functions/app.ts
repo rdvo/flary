@@ -2916,6 +2916,9 @@ function defaultWorkspaceResolver<TBindings>(
     const workspaceNamespace = isRecord(bindings)
       ? bindings.FLARY_WORKSPACE
       : undefined;
+    const hiddenPaths = Array.isArray(options.hiddenPaths)
+      ? options.hiddenPaths.filter((path): path is string => typeof path === "string")
+      : undefined;
     if (
       isRecord(workspaceNamespace) &&
       typeof workspaceNamespace.idFromName === "function" &&
@@ -2924,7 +2927,7 @@ function defaultWorkspaceResolver<TBindings>(
       return createCloudflareWorkspaceConnection(
         workspaceNamespace as never,
         scope,
-        { approveWrites: !draft },
+        { approveWrites: !draft, hiddenPaths },
       );
     }
     if (!sql) {
