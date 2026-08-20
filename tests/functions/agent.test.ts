@@ -287,7 +287,14 @@ test("durable agent tools restore admitted roles and scopes", async () => {
     name: "probe",
     run: async () => ({ ok: true }),
   });
-  const coder = app.agent({ name: "coder", tools: app.tools({ probe }) });
+  const tools = app.tools({ probe });
+  const coder = app.agent({ name: "coder", tools, eagerTools: ["probe"] });
+  const lazyCoder = app.agent({ name: "lazy_coder", tools });
+  assert.notEqual(coder.revision, lazyCoder.revision);
+  assert.throws(
+    () => app.agent({ name: "invalid", tools, eagerTools: ["missing"] }),
+    /unknown catalog id/i,
+  );
   const worker = app.serve({ coder }, { prefix: "/api/flary" });
   const created = await worker.request("http://local/api/flary/apps/coder/threads", {
     method: "POST",

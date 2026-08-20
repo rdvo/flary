@@ -30,7 +30,7 @@ import type {
 } from "./types.js";
 import { ApprovalRequestSchema } from "../contracts/index.js";
 import { JsonObjectSchema } from "../contracts/common.js";
-import { redactErrorMessage, redactSecrets } from "../execution/redaction.js";
+import { redactErrorMessage, redactSecrets, redactText } from "../execution/redaction.js";
 import { createMcpConnection } from "./mcp.js";
 import { createOpenApiRuntime } from "./openapi.js";
 import { getFunctionState } from "./app.js";
@@ -178,7 +178,8 @@ class FlaryCodemodeExecutor<TBindings> implements CodeExecutor<TBindings> {
     readonly context: FlaryStepContext<TBindings>;
     readonly limits?: { readonly toolCalls?: number };
   }): Promise<unknown> {
-    if (new TextEncoder().encode(input.code).byteLength > (this.options.maxCodeBytes ?? 256 * 1024)) {
+    const codeBytes = new TextEncoder().encode(input.code).byteLength;
+    if (codeBytes > (this.options.maxCodeBytes ?? 256 * 1024)) {
       throw new FlaryCodeExecutionError("The generated code exceeds the Flary code size limit.");
     }
     const codemode = await import("@cloudflare/codemode");
@@ -212,50 +213,82 @@ class FlaryCodemodeExecutor<TBindings> implements CodeExecutor<TBindings> {
       }
       return this.boundResult(result.result);
     }
-
-    const sourceConnectors = await createSourceConnectors(
-      codemode,
-      input,
-      this.options,
-      ctx,
+    const activity = createInteractiveCodeModeActivity(
+      input.context,
+      input.code,
+      maxToolCalls,
     );
-    const local = await createLocalConnector(
-      codemode,
-      input,
-      this.options,
-      ctx,
-      callCounter,
-      sourceConnectors,
-    );
-    const runtime = codemode.createCodemodeRuntime({
-      ctx: ctx as never,
-      executor,
-      // All Flary-owned sources use the one `tools` catalog. Custom
-      // low-level connectors remain available as additional namespaces.
-      connectors: [local, ...extra],
-      name: this.options.name ?? "flary",
-      maxExecutions: this.options.maxExecutions,
-      ...(this.options.redactResult
-        ? { transformResult: this.options.redactResult }
-        : {}),
+    const startedAt = Date.now();
+    await activity?.record("codemode.started", 0, {
+      codeBytes,
+      ...(maxToolCalls !== undefined ? { maxToolCalls } : {}),
     });
-    const result = await runtime.execute({
-      code: normalizeFlaryCatalogCalls(input.code),
-    });
-    if (result.status === "completed") return this.boundResult(result.result);
-    if (result.status === "paused") {
-      throw new FlaryCodeExecutionError(
-        "Tool approval is required before the code can continue.",
-        {
-          executionId: result.executionId,
-          pending: result.pending,
-          // Flue treats this code as a durable waiting state. The previous
-          // code-only error made the parent agent fail instead of waiting.
-          code: "approval_pending",
-        },
+    try {
+      const sourceConnectors = await createSourceConnectors(
+        codemode,
+        input,
+        this.options,
+        ctx,
       );
+      const local = await createLocalConnector(
+        codemode,
+        input,
+        this.options,
+        ctx,
+        callCounter,
+        sourceConnectors,
+        activity,
+      );
+      const runtime = codemode.createCodemodeRuntime({
+        ctx: ctx as never,
+        executor,
+        // All Flary-owned sources use the one `tools` catalog. Custom
+        // low-level connectors remain available as additional namespaces.
+        connectors: [local, ...extra],
+        name: this.options.name ?? "flary",
+        maxExecutions: this.options.maxExecutions,
+        ...(this.options.redactResult
+          ? { transformResult: this.options.redactResult }
+          : {}),
+      });
+      const result = await runtime.execute({
+        code: normalizeFlaryCatalogCalls(input.code),
+      });
+      if (result.status === "completed") {
+        const bounded = await this.boundResult(result.result);
+        await activity?.record("codemode.completed", 0, {
+          durationMs: Date.now() - startedAt,
+          usage: activity.usage(callCounter.count, encodedSize(bounded)),
+        });
+        return bounded;
+      }
+      if (result.status === "paused") {
+        await activity?.record("codemode.paused", 0, {
+          durationMs: Date.now() - startedAt,
+          usage: activity.usage(callCounter.count, 0),
+        });
+        throw new FlaryCodeExecutionError(
+          "Tool approval is required before the code can continue.",
+          {
+            executionId: result.executionId,
+            pending: result.pending,
+            // Flue treats this code as a durable waiting state. The previous
+            // code-only error made the parent agent fail instead of waiting.
+            code: "approval_pending",
+          },
+        );
+      }
+      throw new FlaryCodeExecutionError(result.error ?? "The Dynamic Worker execution failed.");
+    } catch (error) {
+      if (!(error instanceof FlaryCodeExecutionError && error.code === "approval_pending")) {
+        await activity?.record("codemode.failed", 0, {
+          durationMs: Date.now() - startedAt,
+          usage: activity.usage(callCounter.count, 0),
+          error: redactErrorMessage(error, "The Code Mode execution failed."),
+        }).catch(() => undefined);
+      }
+      throw error;
     }
-    throw new FlaryCodeExecutionError(result.error ?? "The Dynamic Worker execution failed.");
   }
 
   approvalContinuation(input: {
@@ -494,6 +527,7 @@ async function createLocalConnector<TBindings>(
   ctx: FlaryDurableObjectState,
   callCounter: { count: number; max?: number },
   sourceConnectors: readonly import("@cloudflare/codemode").CodemodeConnector[],
+  activity?: InteractiveCodeModeActivity,
 ): Promise<import("@cloudflare/codemode").CodemodeConnector> {
   const { CodemodeConnector } = codemode;
   class LocalConnector extends CodemodeConnector<unknown, unknown> {
@@ -544,6 +578,8 @@ async function createLocalConnector<TBindings>(
             additionalProperties: false,
           },
           execute: async (args) => {
+            const ordinal = activity?.claim("search") ?? 0;
+            const startedAt = Date.now();
             const queryValue = typeof args === "string"
               ? args
               : (args as { query?: unknown })?.query;
@@ -558,6 +594,12 @@ async function createLocalConnector<TBindings>(
               .filter((item) => !query || item.score > 0)
               .sort((left, right) => right.score - left.score || left.id.localeCompare(right.id))
               .map(({ score: _score, ...item }) => summarizeDescriptor(item));
+            await activity?.record("tool.search", ordinal, {
+              query,
+              resultCount: items.length,
+              resultIds: items.map((item) => item.id),
+              durationMs: Date.now() - startedAt,
+            });
             return { items };
           },
         },
@@ -570,10 +612,27 @@ async function createLocalConnector<TBindings>(
             additionalProperties: false,
           },
           execute: async (args) => {
+            const ordinal = activity?.claim("describe") ?? 0;
+            const startedAt = Date.now();
             const id = typeof args === "string"
               ? args
               : (args as { id?: unknown })?.id;
             const descriptor = descriptors.find((item) => item.id === id);
+            await activity?.record("tool.describe", ordinal, {
+              toolId: String(id),
+              found: Boolean(descriptor),
+              ...(descriptor
+                ? {
+                    operation: descriptor.operation,
+                    requiresApproval: descriptor.requiresApproval,
+                    schemaBytes: encodedSize({
+                      inputSchema: descriptor.inputSchema,
+                      outputSchema: descriptor.outputSchema,
+                    }),
+                  }
+                : {}),
+              durationMs: Date.now() - startedAt,
+            });
             if (!descriptor) throw new Error(`Tool is not available: ${String(id)}`);
             return descriptor;
           },
@@ -612,6 +671,8 @@ async function createLocalConnector<TBindings>(
             additionalProperties: false,
           },
           execute: async (args) => {
+            const batchOrdinal = activity?.claim("batch") ?? 0;
+            const startedAt = Date.now();
             const calls = Array.isArray(args)
               ? args
               : (args as { calls?: unknown })?.calls;
@@ -634,17 +695,35 @@ async function createLocalConnector<TBindings>(
               call,
               ordinal: claimToolCallOrdinal(callCounter),
             }));
-            return concurrentMap(
-              admitted,
-              options.maxParallelToolCalls ?? 6,
-              ({ call, ordinal }) => invokeCatalogTool(
-                  input.tools,
-                  call,
-                  input.context,
-                  ordinal,
-                  sourceTargets,
-                ),
-            );
+            try {
+              const result = await concurrentMap(
+                admitted,
+                options.maxParallelToolCalls ?? 6,
+                ({ call, ordinal }) => invokeCatalogTool(
+                    input.tools,
+                    call,
+                    input.context,
+                    ordinal,
+                    sourceTargets,
+                  ),
+              );
+              await activity?.record("tool.batch", batchOrdinal, {
+                callCount: calls.length,
+                maxParallel: options.maxParallelToolCalls ?? 6,
+                durationMs: Date.now() - startedAt,
+                state: "completed",
+              });
+              return result;
+            } catch (error) {
+              await activity?.record("tool.batch", batchOrdinal, {
+                callCount: calls.length,
+                maxParallel: options.maxParallelToolCalls ?? 6,
+                durationMs: Date.now() - startedAt,
+                state: "failed",
+                error: redactErrorMessage(error, "The tool batch failed."),
+              }).catch(() => undefined);
+              throw error;
+            }
           },
         },
       };
@@ -1122,6 +1201,124 @@ function claimToolCallOrdinal(counter: { count: number; max?: number }): number 
   return counter.count;
 }
 
+type CodeModeActivityRecordType =
+  | "tool.search"
+  | "tool.describe"
+  | "tool.batch"
+  | "codemode.started"
+  | "codemode.paused"
+  | "codemode.completed"
+  | "codemode.failed";
+
+interface InteractiveCodeModeActivity {
+  readonly executionId: string;
+  claim(kind: "search" | "describe" | "batch"): number;
+  record(
+    recordType: CodeModeActivityRecordType,
+    ordinal: number,
+    payload: Record<string, unknown>,
+  ): Promise<void>;
+  usage(toolCalls: number, resultBytes: number): Record<string, number>;
+}
+
+function createInteractiveCodeModeActivity(
+  context: FlaryStepContext<unknown> | undefined,
+  code: string,
+  maxToolCalls: number | undefined,
+): InteractiveCodeModeActivity | undefined {
+  const client = interactiveThreadControlClient(context);
+  if (!client) return undefined;
+  const codeBytes = encodedSize(code);
+  const executionId = `code_${shortHash(
+    `${context?.idempotencyKey ?? context?.runId}:${shortHash(code)}`,
+  )}`;
+  const counters = { search: 0, describe: 0, batch: 0 };
+  return {
+    executionId,
+    claim(kind) {
+      counters[kind] += 1;
+      return counters[kind];
+    },
+    async record(recordType, ordinal, payload) {
+      await client.call("recordRuntimeActivity", {
+        activityId: `${executionId}:${recordType}:${ordinal}`,
+        recordType,
+        payload: {
+          executionId,
+          ...payload,
+        },
+      });
+    },
+    usage(toolCalls, resultBytes) {
+      return {
+        toolCalls,
+        searches: counters.search,
+        describes: counters.describe,
+        batches: counters.batch,
+        codeBytes,
+        resultBytes,
+        ...(maxToolCalls !== undefined ? { maxToolCalls } : {}),
+      };
+    },
+  };
+}
+
+function interactiveThreadControlClient(
+  context: FlaryStepContext<unknown> | undefined,
+): {
+  call(method: string, extra?: Record<string, unknown>): Promise<void>;
+} | undefined {
+  if (!context?.runId || !context.bindings || typeof context.bindings !== "object") {
+    return undefined;
+  }
+  let ref: ReturnType<typeof parseThreadName>;
+  try {
+    ref = parseThreadName(context.runId);
+  } catch {
+    return undefined;
+  }
+  const namespace = (context.bindings as Record<string, unknown>)
+    .FLARY_THREAD_CONTROL as {
+      idFromName(name: string): unknown;
+      get(id: unknown): { fetch(request: Request): Promise<Response> };
+    } | undefined;
+  if (!namespace) return undefined;
+  const name = `thread:${ref.organizationId}:${ref.appId}:${ref.threadId}`;
+  return {
+    async call(method, extra = {}) {
+      const response = await namespace.get(namespace.idFromName(name)).fetch(
+        new Request("https://flary.internal/usage-reservation", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            method,
+            tenantId: ref.organizationId,
+            applicationId: ref.appId,
+            ...extra,
+          }),
+        }),
+      );
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(
+          typeof (body as { error?: unknown }).error === "string"
+            ? String((body as { error: string }).error)
+            : "The thread activity update failed",
+        );
+      }
+    },
+  };
+}
+
+function encodedSize(value: unknown): number {
+  try {
+    const encoded = typeof value === "string" ? value : JSON.stringify(value) ?? "null";
+    return new TextEncoder().encode(encoded).byteLength;
+  } catch {
+    return 0;
+  }
+}
+
 async function concurrentMap<T, R>(
   values: readonly T[],
   concurrency: number,
@@ -1156,50 +1353,16 @@ async function reserveInteractiveToolCall(
   fail(error: unknown): Promise<void>;
   unknown(error: unknown): Promise<void>;
 } | undefined> {
-  if (!context?.runId || !context.bindings || typeof context.bindings !== "object") {
-    return undefined;
-  }
-  let ref: ReturnType<typeof parseThreadName>;
-  try {
-    ref = parseThreadName(context.runId);
-  } catch {
-    return undefined;
-  }
-  const namespace = (context.bindings as Record<string, unknown>)
-    .FLARY_THREAD_CONTROL as {
-      idFromName(name: string): unknown;
-      get(id: unknown): { fetch(request: Request): Promise<Response> };
-    } | undefined;
-  if (!namespace) return undefined;
+  const client = interactiveThreadControlClient(context);
+  if (!client) return undefined;
   const reservationId = `tool_${shortHash(
-    `${context.idempotencyKey ?? context.runId}:${ordinal}:${toolId}:${stableJson(input)}`,
+    `${context?.idempotencyKey ?? context?.runId}:${ordinal}:${toolId}:${stableJson(input)}`,
   )}`;
-  const name = `thread:${ref.organizationId}:${ref.appId}:${ref.threadId}`;
   const call = async (
     method: "reserveUsage" | "settleUsage" | "unknownUsage" | "recordToolActivity",
     extra: Record<string, unknown> = {},
   ): Promise<void> => {
-    const response = await namespace.get(namespace.idFromName(name)).fetch(
-      new Request("https://flary.internal/usage-reservation", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          method,
-          tenantId: ref.organizationId,
-          applicationId: ref.appId,
-          reservationId,
-          ...extra,
-        }),
-      }),
-    );
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({}));
-      throw new Error(
-        typeof (body as { error?: unknown }).error === "string"
-          ? String((body as { error: string }).error)
-          : "The root tool-call limit reservation failed",
-      );
-    }
+    await client.call(method, { reservationId, ...extra });
   };
   await call("reserveUsage", {
     kind: "tool-call",
@@ -1219,6 +1382,7 @@ async function reserveInteractiveToolCall(
     ordinal,
     inputSummary: projectPublicToolActivityInput(input, toolId),
   });
+  const startedAt = Date.now();
   return {
     settle: async (result) => {
       await call("settleUsage", {
@@ -1237,6 +1401,7 @@ async function reserveInteractiveToolCall(
         toolId,
         ordinal,
         outputSummary: projectPublicToolActivityResult(result),
+        durationMs: Date.now() - startedAt,
       });
     },
     fail: async (error) => {
@@ -1256,6 +1421,7 @@ async function reserveInteractiveToolCall(
         toolCallId: reservationId,
         toolId,
         ordinal,
+        durationMs: Date.now() - startedAt,
         error: redactErrorMessage(error, "The tool call failed.").slice(0, 1_000),
       });
     },
@@ -1267,6 +1433,7 @@ async function reserveInteractiveToolCall(
         toolCallId: reservationId,
         toolId,
         ordinal,
+        durationMs: Date.now() - startedAt,
         error: redactErrorMessage(error, "The write outcome is unknown.").slice(0, 1_000),
       });
     },
@@ -1279,7 +1446,7 @@ export function projectPublicToolActivityInput(value: unknown, toolId: string): 
   const output: Record<string, unknown> = {};
   for (const key of ["path", "file", "target", "range", "campaign", "site", "dimension"]) {
     const candidate = source[key];
-    if (typeof candidate === "string") output[key] = candidate.slice(0, 200);
+    if (typeof candidate === "string") output[key] = redactText(candidate).slice(0, 200);
     else if (typeof candidate === "number" || typeof candidate === "boolean") output[key] = candidate;
   }
   // UI artifact tools are an explicit public-display boundary. This strict

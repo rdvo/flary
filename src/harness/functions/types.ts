@@ -296,6 +296,11 @@ export interface FlaryAgentOptions<TBindings = unknown> {
   readonly thinking?: string;
   readonly mode?: string;
   readonly tools?: FlaryToolRegistry;
+  /**
+   * Small catalog IDs that the model may know before tool search.
+   * Schemas remain lazy and load only through tools.describe.
+   */
+  readonly eagerTools?: readonly string[];
   readonly skills?: readonly FlarySkill[];
   readonly subagents?: Readonly<Record<string, FlaryAgent<any>>>;
   readonly delegation?: FlaryDelegationPolicy;

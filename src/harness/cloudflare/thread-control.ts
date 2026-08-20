@@ -64,7 +64,7 @@ import {
 } from "../session/index.js";
 import type { FlueAdmission, FlueAgentGateway } from "../flue/service.js";
 import { FlaryHostError } from "../host/errors.js";
-import { redactErrorMessage } from "../execution/redaction.js";
+import { redactErrorMessage, redactText } from "../execution/redaction.js";
 import {
   assertPublicBrowserUrl,
   browserStateObjectKey,
@@ -2019,6 +2019,9 @@ async function dispatchThreadControl(
           callId: toolCallId,
           toolId,
           status: state === "completed" ? "succeeded" : "failed",
+          ...(typeof body.durationMs === "number" && Number.isFinite(body.durationMs)
+            ? { durationMs: Math.min(24 * 60 * 60 * 1_000, Math.max(0, Math.round(body.durationMs))) }
+            : {}),
           ...(body.outputSummary !== undefined
             ? { output: body.outputSummary }
             : {}),
@@ -2030,6 +2033,38 @@ async function dispatchThreadControl(
       });
     }
     put(sql, activityKey, { state, toolCallId, toolId });
+    const broadcast = broadcastThreadRecords(sql, host?.webSockets).catch(() => undefined);
+    if (host?.execution) host.execution.waitUntil(broadcast);
+    else await broadcast;
+    return { recorded: true, replay: false };
+  }
+  if (method === "recordRuntimeActivity") {
+    assertOwner(sql, body);
+    const binding = requireBinding(sql);
+    const recordType = String(body.recordType ?? "") as SessionRecordType;
+    const allowed = new Set<SessionRecordType>([
+      "tool.search",
+      "tool.describe",
+      "tool.batch",
+      "codemode.started",
+      "codemode.paused",
+      "codemode.completed",
+      "codemode.failed",
+    ]);
+    if (!allowed.has(recordType)) {
+      throw new Error("A valid runtime activity type is required");
+    }
+    const activityId = String(body.activityId ?? "").slice(0, 512);
+    if (!activityId) throw new Error("Runtime activity needs an activity ID");
+    const activityKey = `runtime-activity:${activityId}`;
+    const existing = sql.exec<{ value_json: string }>(
+      "SELECT value_json FROM flary_thread_control WHERE key = ?",
+      activityKey,
+    ).toArray()[0];
+    if (existing) return { recorded: true, replay: true };
+    const payload = safeRuntimeActivityPayload(recordType, body.payload);
+    await appendLedger(sql, binding, recordType, payload);
+    put(sql, activityKey, { recordType, activityId });
     const broadcast = broadcastThreadRecords(sql, host?.webSockets).catch(() => undefined);
     if (host?.execution) host.execution.waitUntil(broadcast);
     else await broadcast;
@@ -4458,6 +4493,89 @@ async function appendLedger(
     ...(options.producer ? { producer: options.producer } : {}),
     publicPayload: JSON.parse(JSON.stringify(payload)),
   });
+}
+
+function safeRuntimeActivityPayload(
+  recordType: SessionRecordType,
+  value: unknown,
+): Record<string, unknown> {
+  const input = objectValue(value);
+  const text = (candidate: unknown, max = 512) =>
+    typeof candidate === "string" && candidate.trim()
+      ? candidate.trim().slice(0, max)
+      : undefined;
+  const integer = (candidate: unknown, max = Number.MAX_SAFE_INTEGER) =>
+    typeof candidate === "number" && Number.isFinite(candidate)
+      ? Math.min(max, Math.max(0, Math.round(candidate)))
+      : undefined;
+  const executionId = text(input.executionId, 512);
+  const durationMs = integer(input.durationMs, 24 * 60 * 60 * 1_000);
+  const base: Record<string, unknown> = {
+    ...(executionId ? { executionId } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
+  };
+  if (recordType === "tool.search") {
+    const resultIds = Array.isArray(input.resultIds)
+      ? input.resultIds.flatMap((item) => {
+          const id = text(item, 256);
+          return id ? [id] : [];
+        }).slice(0, 50)
+      : [];
+    return {
+      ...base,
+      query: redactText(text(input.query, 200) ?? ""),
+      resultCount: integer(input.resultCount, 100_000) ?? resultIds.length,
+      resultIds,
+    };
+  }
+  if (recordType === "tool.describe") {
+    return {
+      ...base,
+      toolId: redactText(text(input.toolId, 256) ?? "unknown"),
+      found: input.found === true,
+      ...(input.operation === "read" || input.operation === "write"
+        ? { operation: input.operation }
+        : {}),
+      ...(typeof input.requiresApproval === "boolean"
+        ? { requiresApproval: input.requiresApproval }
+        : {}),
+      ...(integer(input.schemaBytes, 10 * 1024 * 1024) !== undefined
+        ? { schemaBytes: integer(input.schemaBytes, 10 * 1024 * 1024) }
+        : {}),
+    };
+  }
+  if (recordType === "tool.batch") {
+    return {
+      ...base,
+      callCount: integer(input.callCount, 10_000) ?? 0,
+      maxParallel: integer(input.maxParallel, 1_000) ?? 1,
+      state: input.state === "failed" ? "failed" : "completed",
+      ...(input.state === "failed" && input.error
+        ? { error: { message: publicAgentFailureMessage(input.error) } }
+        : {}),
+    };
+  }
+  const usage = objectValue(input.usage);
+  return {
+    ...base,
+    ...(integer(input.codeBytes, 10 * 1024 * 1024) !== undefined
+      ? { codeBytes: integer(input.codeBytes, 10 * 1024 * 1024) }
+      : {}),
+    ...(integer(input.maxToolCalls, 100_000) !== undefined
+      ? { maxToolCalls: integer(input.maxToolCalls, 100_000) }
+      : {}),
+    usage: {
+      toolCalls: integer(usage.toolCalls, 100_000) ?? 0,
+      searches: integer(usage.searches, 100_000) ?? 0,
+      describes: integer(usage.describes, 100_000) ?? 0,
+      batches: integer(usage.batches, 100_000) ?? 0,
+      codeBytes: integer(usage.codeBytes, 10 * 1024 * 1024) ?? 0,
+      resultBytes: integer(usage.resultBytes, 100 * 1024 * 1024) ?? 0,
+    },
+    ...(recordType === "codemode.failed" && input.error
+      ? { error: { message: publicAgentFailureMessage(input.error) } }
+      : {}),
+  };
 }
 
 function safeProducer(

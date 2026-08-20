@@ -104,7 +104,7 @@ export function defineFlaryFunctionWorkflow(
             ...(definition.tools
                 ? [defineTool({
                   name: "execute",
-                  description: executeToolDescription(definition.tools),
+                  description: executeToolDescription(definition.tools, definition.eagerTools),
                   input: v.object({ code: v.string() }),
                   async run({ input, signal }) {
                     return toJson(
@@ -189,7 +189,7 @@ export function defineFlaryFunctionAgent(
             ...(definition.tools
                 ? [defineTool({
                   name: "execute",
-                  description: executeToolDescription(definition.tools),
+                  description: executeToolDescription(definition.tools, definition.eagerTools),
                   input: v.object({ code: v.string() }),
                   async run({ input, signal }) {
                     return toJson(
@@ -244,7 +244,7 @@ export function defineFlaryInteractiveAgent(
       ...(definition.tools
         ? [defineTool({
             name: "execute",
-            description: executeToolDescription(definition.tools),
+            description: executeToolDescription(definition.tools, definition.eagerTools),
             input: v.object({ code: v.string() }),
             async run({ input, signal }) {
               return toJson(await state.app.executeAgentCode(active, {
@@ -421,7 +421,7 @@ function interactiveAgentInstructions(value: FlaryAgent<any>): string {
       `Act as the ${definition.name} agent.`,
     definition.mode ? `Operating mode: ${definition.mode}.` : "",
     definition.tools
-      ? `You have one execute tool. ${coreToolGuidance(definition.tools)}`
+      ? `You have one execute tool. ${coreToolGuidance(definition.tools, definition.eagerTools)}`
       : "",
     definition.tools
       ? "After tool work, always finish the turn with a user-facing assistant message. Never end a turn with only tool calls or reasoning."
@@ -620,7 +620,7 @@ function functionInstructions(
     definition.description ?? "Complete the Flary function.",
     definition.mode ? `Operating mode: ${definition.mode}.` : "",
     definition.tools
-      ? `You have one execute tool. ${coreToolGuidance(definition.tools)}`
+      ? `You have one execute tool. ${coreToolGuidance(definition.tools, definition.eagerTools)}`
       : "",
     definition.delegation?.mode === "disabled"
       ? "Do not delegate work to subagents."
@@ -659,7 +659,7 @@ async function functionSubagents(
     const tools = definition.tools
       ? [defineTool({
           name: "execute",
-          description: executeToolDescription(definition.tools),
+          description: executeToolDescription(definition.tools, definition.eagerTools),
           input: v.object({ code: v.string() }),
           async run({ input, signal }) {
             return toJson(await child.app.executeCodeFromWorkflow(candidate, {

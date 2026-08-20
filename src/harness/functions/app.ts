@@ -502,6 +502,7 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
         thinking: definition.thinking,
         mode: definition.mode,
         tools: definition.tools?.descriptors ?? [],
+        eagerTools: definition.eagerTools ?? [],
         skills: definition.skills?.map((skill) => ({
           name: skill.name,
           revision: skill.revision,
@@ -1943,7 +1944,7 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     const executeTool = definition.tools
       ? {
           name: "execute",
-          description: executeToolDescription(definition.tools),
+          description: executeToolDescription(definition.tools, definition.eagerTools),
           inputSchema: {
             type: "object",
             properties: { code: { type: "string" } },
@@ -2407,6 +2408,7 @@ function validateFunctionDefinition(
   positiveInteger(definition.delegation?.maxConcurrent, "delegation.maxConcurrent");
   positiveInteger(definition.delegation?.maxTotal, "delegation.maxTotal");
   positiveInteger(definition.delegation?.maxDepth, "delegation.maxDepth");
+  validateEagerTools(definition.tools, definition.eagerTools);
   if (
     definition.delegation?.maxConcurrent !== undefined &&
     definition.delegation.maxTotal !== undefined &&
@@ -2440,6 +2442,7 @@ function validateAgentDefinition(
   positiveInteger(definition.limits?.steps, "limits.steps");
   positiveInteger(definition.limits?.toolCalls, "limits.toolCalls");
   positiveInteger(definition.limits?.timeoutMs, "limits.timeoutMs");
+  validateEagerTools(definition.tools, definition.eagerTools);
   if (
     definition.delegation?.maxConcurrent !== undefined &&
     definition.delegation.maxTotal !== undefined &&
@@ -2522,6 +2525,31 @@ function validateAgentDefinition(
         );
       }
     }
+  }
+}
+
+function validateEagerTools(
+  tools: FlaryToolRegistry | undefined,
+  eagerTools: readonly string[] | undefined,
+): void {
+  if (!eagerTools) return;
+  const seen = new Set<string>();
+  for (const id of eagerTools) {
+    if (!tools?.entries[id]) {
+      throw new FlaryFunctionError(
+        "invalid_eager_tool",
+        `eagerTools contains an unknown catalog id: '${id}'.`,
+        400,
+      );
+    }
+    if (seen.has(id)) {
+      throw new FlaryFunctionError(
+        "invalid_eager_tool",
+        `eagerTools contains a duplicate catalog id: '${id}'.`,
+        400,
+      );
+    }
+    seen.add(id);
   }
 }
 

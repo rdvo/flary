@@ -876,6 +876,117 @@ test("nested Code Mode tool activity is projected once for realtime clients", as
   );
 });
 
+test("lazy catalog and Code Mode lifecycle events are durable and safe", async () => {
+  const controls = namespace();
+  const service = createCloudflareThreadService({ env: {}, namespace: controls });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_runtime",
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  await service.create(scope, {
+    threadId: "thread_runtime",
+    agentId: "coder",
+    workspace: {
+      organizationId: "tenant_runtime",
+      appId: "coder",
+      projectId: "project",
+      workspaceId: "workspace",
+      branch: "main",
+    },
+    mode: "build",
+  });
+  const control = controls.get(controls.idFromName(
+    "thread:tenant_runtime:coder:thread_runtime",
+  ));
+  const record = (activityId: string, recordType: string, payload: unknown) =>
+    control.fetch(new Request("https://flary.internal/usage-reservation", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "recordRuntimeActivity",
+        tenantId: "tenant_runtime",
+        applicationId: "coder",
+        activityId,
+        recordType,
+        payload,
+      }),
+    }));
+
+  assert.equal((await record("exec:start", "codemode.started", {
+    executionId: "exec_1",
+    code: "return process.env.SECRET",
+    codeBytes: 29,
+    maxToolCalls: 20,
+  })).ok, true);
+  assert.equal((await record("exec:search:1", "tool.search", {
+    executionId: "exec_1",
+    query: "find analytics token=secret",
+    resultIds: ["stats", "trend"],
+    resultCount: 2,
+    durationMs: 8.4,
+  })).ok, true);
+  assert.equal((await record("exec:describe:1", "tool.describe", {
+    executionId: "exec_1",
+    toolId: "stats",
+    found: true,
+    operation: "read",
+    requiresApproval: false,
+    schema: { secret: "must not persist" },
+    schemaBytes: 512,
+    durationMs: 2,
+  })).ok, true);
+  assert.equal((await record("exec:done", "codemode.completed", {
+    executionId: "exec_1",
+    durationMs: 15,
+    usage: {
+      toolCalls: 1,
+      searches: 1,
+      describes: 1,
+      batches: 0,
+      codeBytes: 29,
+      resultBytes: 32,
+    },
+  })).ok, true);
+  assert.equal((await record("exec:done", "codemode.completed", {
+    executionId: "exec_1",
+    durationMs: 999,
+  })).ok, true);
+
+  const records = await service.auditList!({ ...scope, threadId: "thread_runtime" }, {
+    after: 0,
+    limit: 100,
+  });
+  const runtime = records.filter((item: any) =>
+    item.recordType.startsWith("codemode.") ||
+    item.recordType === "tool.search" ||
+    item.recordType === "tool.describe"
+  ) as any[];
+  assert.deepEqual(runtime.map((item) => item.recordType), [
+    "codemode.started",
+    "tool.search",
+    "tool.describe",
+    "codemode.completed",
+  ]);
+  assert.equal(runtime[0].publicPayload.code, undefined);
+  assert.equal(runtime[1].publicPayload.query, "find analytics token=<redacted>");
+  assert.equal(runtime[1].publicPayload.resultCount, 2);
+  assert.deepEqual(runtime[1].publicPayload.resultIds, ["stats", "trend"]);
+  assert.equal(runtime[2].publicPayload.schema, undefined);
+  assert.equal(runtime[2].publicPayload.schemaBytes, 512);
+  assert.equal(runtime[3].publicPayload.durationMs, 15);
+  assert.deepEqual(runtime[3].publicPayload.usage, {
+    toolCalls: 1,
+    searches: 1,
+    describes: 1,
+    batches: 0,
+    codeBytes: 29,
+    resultBytes: 32,
+  });
+});
+
 test("hibernating realtime commands resume from socket attachments and deduplicate", async () => {
   const controls = namespace();
   const service = createCloudflareThreadService({ env: {}, namespace: controls });

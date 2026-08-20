@@ -117,9 +117,27 @@ The agent therefore knows that actions such as `workspace.grep`,
 
 The exact action schemas are still lazy. Generated code describes a selected
 action before it calls it. MCP, OpenAPI, local functions, skills, and large or
-changing catalogs stay fully lazy. This keeps the stable coding surface easy
-to use and prevents hundreds of external schemas from entering every model
-request.
+changing catalogs stay lazy by default. Flary does not list every local tool
+name in each model request.
+
+Use `eagerTools` for a very small set of frequent local tools:
+
+```ts
+export const analyst = app.agent({
+  name: "analyst",
+  tools,
+  eagerTools: ["stats", "trend"],
+});
+```
+
+Only these IDs enter the core instructions. Their schemas stay lazy. The
+agent uses `tools.search` and `tools.describe` for all other catalog items.
+This keeps the prompt small when an application has many tools.
+
+Search, describe, batch, tool-call, and Code Mode lifecycle records are
+durable session events. Public records include bounded duration and usage
+data. Flary redacts secrets and does not store generated Code Mode source in
+the public ledger.
 
 Every call passes through capability checks, policy, approval, input
 validation, redaction, limits, and durable replay. Provider, MCP, and API

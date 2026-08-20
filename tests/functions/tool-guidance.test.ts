@@ -48,7 +48,7 @@ test("workspace draft options are retained as typed policy", () => {
   assert.deepEqual(source.options, { mode: "draft", checkpoint: "turn" });
 });
 
-test("core tool guidance gives exact local ids without loading schemas", () => {
+test("local tools stay unnamed unless they are eager", () => {
   const app = flary();
   const stats = app.fn({
     input: undefined,
@@ -57,10 +57,15 @@ test("core tool guidance gives exact local ids without loading schemas", () => {
   });
   const registry = app.tools({ stats });
 
-  const guidance = coreToolGuidance(registry);
-  assert.match(guidance, /application tools: stats/);
+  const lazyGuidance = coreToolGuidance(registry);
+  assert.doesNotMatch(lazyGuidance, /application tools: stats/);
+  assert.match(lazyGuidance, /application tools are available through tools\.search/);
+
+  const guidance = coreToolGuidance(registry, ["stats"]);
+  assert.match(guidance, /eager application tools: stats/);
   assert.match(guidance, /exact catalog id/);
   assert.match(guidance, /selected item's id value/);
   assert.match(guidance, /tools\.batch/);
-  assert.match(guidance, /search only/i);
+  assert.match(guidance, /tools\.search for an unknown application/i);
+  assert.doesNotMatch(guidance, /inputSchema|outputSchema/);
 });

@@ -190,6 +190,10 @@ export function recordTypeForEvent(type: string): SessionRecordType {
   if (type === "tool_start" || type === "tool.call") return "tool.call";
   if (type === "tool" || type === "tool.result") return "tool.result";
   if (type === "tool.batch") return "tool.batch";
+  if (type === "codemode.started") return "codemode.started";
+  if (type === "codemode.paused") return "codemode.paused";
+  if (type === "codemode.completed") return "codemode.completed";
+  if (type === "codemode.failed") return "codemode.failed";
   if (type.includes("approval") && type.includes("request")) {
     return "approval.requested";
   }

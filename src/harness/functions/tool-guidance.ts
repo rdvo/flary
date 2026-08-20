@@ -21,16 +21,17 @@ const WORKSPACE_WRITES = [
  * loading their full JSON Schemas into every provider request.
  */
 export function coreToolGuidance(
-  registry: FlaryToolRegistry | undefined
+  registry: FlaryToolRegistry | undefined,
+  eagerTools: readonly string[] = [],
 ): string {
   if (!registry) return "";
   const groups: string[] = [];
-  const localToolIds: string[] = [];
+  const localToolIds = new Set<string>();
   for (const namespace of registry.names) {
     const source = registry.entries[namespace];
     if (!source) continue;
     if (typeof source === "function") {
-      localToolIds.push(namespace);
+      localToolIds.add(namespace);
       continue;
     }
     if (source.kind === "workspace") {
@@ -53,8 +54,12 @@ export function coreToolGuidance(
       );
     }
   }
-  if (localToolIds.length > 0) {
-    groups.push(`application tools: ${localToolIds.join(", ")}`);
+  const eagerLocalToolIds = eagerTools.filter((id) => localToolIds.has(id));
+  if (eagerLocalToolIds.length > 0) {
+    groups.push(`eager application tools: ${eagerLocalToolIds.join(", ")}`);
+  }
+  if (localToolIds.size > eagerLocalToolIds.length) {
+    groups.push("other application tools are available through tools.search");
   }
   if (groups.length === 0) {
     return "Search the private catalog for available tools. Load a selected tool schema with tools.describe before you call it.";
@@ -63,7 +68,7 @@ export function coreToolGuidance(
     `Core tool names and purposes are already known: ${groups.join("; ")}.`,
     "Use a known catalog ID directly. Load its schema with tools.describe only when the input is not known.",
     "Pass the exact catalog id or a selected item's id value to tools.call. Never pass a variable name as a quoted id.",
-    "Use tools.search only for an unknown MCP, OpenAPI, skill, or uncommon capability.",
+    "Use tools.search for an unknown application, MCP, OpenAPI, skill, or uncommon capability.",
     "Use one tools.batch request for independent reads. The batch runs them concurrently with stable replay order.",
     "Never use Promise.all with tools.call, and never batch writes or approval-required calls.",
   ].join(" ");
@@ -71,12 +76,13 @@ export function coreToolGuidance(
 
 /** Description for the one provider-visible tool. */
 export function executeToolDescription(
-  registry: FlaryToolRegistry | undefined
+  registry: FlaryToolRegistry | undefined,
+  eagerTools: readonly string[] = [],
 ): string {
   return [
     "Run bounded TypeScript in Flary's isolated tool runtime.",
     "Use tools.call for one operation. Use tools.batch for bounded parallel reads.",
-    coreToolGuidance(registry),
+    coreToolGuidance(registry, eagerTools),
   ]
     .filter(Boolean)
     .join(" ");
