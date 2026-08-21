@@ -6,6 +6,40 @@ import {
   type FlaryThreadHostService,
 } from "../../src/harness/host/index.js";
 
+test("message admission exposes safe server timing", async () => {
+  const service = {
+    async submit() {
+      return {
+        streamUrl: "/flue",
+        offset: "0",
+        submissionId: "submission_timing",
+      };
+    },
+  } as Pick<FlaryThreadHostService, "submit"> as FlaryThreadHostService;
+  const router = createFlaryHostRouter<object>({
+    authorize: () => ({
+      organizationId: "tenant_1",
+      actor: { id: "user_1", kind: "user", version: "1" },
+    }),
+    service,
+  });
+
+  const response = await router.request(
+    "/apps/docs/threads/thread_1/messages",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: "Hello" }),
+    },
+  );
+
+  assert.equal(response.status, 202);
+  assert.match(
+    response.headers.get("server-timing") ?? "",
+    /flary-auth;dur=[\d.]+, flary-admit;dur=[\d.]+, flary-total;dur=[\d.]+/,
+  );
+});
+
 test("the host reads a conversation only after tenant authorization", async () => {
   const calls: string[] = [];
   const service = {

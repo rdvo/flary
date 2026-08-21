@@ -654,15 +654,26 @@ export function createFlaryHostRouter<TBindings extends object>(
   });
 
   router.post("/apps/:appId/threads/:threadId/messages", async (context) => {
+    const startedAt = performance.now();
     const target = await targetFor(
       context.req.raw,
       context.env,
       context.req.param("appId"),
       context.req.param("threadId"),
     );
+    const authorizedAt = performance.now();
     const input = ThreadMessageRequestSchema.parse(await context.req.json());
     const admission = FlaryThreadAdmissionSchema.parse(
       await serviceFor(context.env).submit(target, input),
+    );
+    const admittedAt = performance.now();
+    context.header(
+      "Server-Timing",
+      [
+        `flary-auth;dur=${Math.max(0, authorizedAt - startedAt).toFixed(1)}`,
+        `flary-admit;dur=${Math.max(0, admittedAt - authorizedAt).toFixed(1)}`,
+        `flary-total;dur=${Math.max(0, admittedAt - startedAt).toFixed(1)}`,
+      ].join(", "),
     );
     return context.json(admission, 202);
   });

@@ -484,6 +484,80 @@ test("trusted runtime model aliases are thread-unique, pinned, and sent to Flue"
   }
 });
 
+test("message admission starts projection directly and keeps the queue as fallback", async () => {
+  const controls = namespace();
+  let directTracks = 0;
+  let queuedTracks = 0;
+  const directNamespace = {
+    stores: controls.stores,
+    idFromName(name: string) { return controls.idFromName(name); },
+    get(id: unknown) {
+      const delegate = controls.get(id);
+      return {
+        async fetch(request: Request) {
+          const body = await request.clone().json().catch(() => ({})) as { method?: string };
+          if (body.method === "track") {
+            directTracks += 1;
+            return Response.json({ tracked: true });
+          }
+          return delegate.fetch(request);
+        },
+      };
+    },
+  };
+  const engine = {
+    idFromName(name: string) { return name; },
+    get() {
+      return {
+        async fetch() {
+          return Response.json({
+            streamUrl: "https://flue.test/stream",
+            offset: "0",
+            submissionId: "submission_direct_projection",
+          }, { status: 202 });
+        },
+      };
+    },
+  };
+  const service = createCloudflareThreadService({
+    env: {
+      FLARY_THREAD_CONTROL: directNamespace,
+      FLUE_CODER_AGENT: engine,
+      FLARY_SESSION_PROJECTION_QUEUE: {
+        async send() { queuedTracks += 1; },
+      },
+    },
+    namespace: directNamespace,
+  });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_direct_projection",
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  await service.create(scope, {
+    threadId: "thread_direct_projection",
+    agentId: "coder",
+    workspace: {
+      organizationId: "tenant_direct_projection",
+      appId: "coder",
+      projectId: "project",
+      workspaceId: "workspace",
+      branch: "main",
+    },
+    model: { provider: "openai", model: "gpt-5.6-luna" },
+  });
+
+  await service.submit(
+    { ...scope, threadId: "thread_direct_projection" },
+    { message: "Hello", idempotencyKey: "direct_projection_1" },
+  );
+
+  assert.equal(directTracks, 1);
+  assert.equal(queuedTracks, 0);
+});
+
 test("an exact fork imports the canonical model transcript", async () => {
   const controls = namespace();
   const engineCalls: Array<{ instance: string; action: string; body: any }> = [];
@@ -1066,6 +1140,110 @@ test("hibernating realtime commands resume from socket attachments and deduplica
   );
   assert.equal(attachment.acknowledged, 9);
   assert.equal(attachment.sent, 4);
+});
+
+test("plain realtime messages bypass the Queue when the generated host is available", async () => {
+  const controls = namespace();
+  const service = createCloudflareThreadService({ env: {}, namespace: controls });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_realtime_direct",
+      actor: { id: "user_direct", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  await service.create(scope, {
+    threadId: "thread_realtime_direct",
+    agentId: "coder",
+    workspace: {
+      organizationId: "tenant_realtime_direct",
+      appId: "coder",
+      projectId: "project",
+      workspaceId: "workspace",
+      branch: "main",
+    },
+    model: { provider: "openai", model: "gpt-5.6-luna" },
+  });
+  const name = "thread:tenant_realtime_direct:coder:thread_realtime_direct";
+  const storage = controls.stores.get(name)!;
+  let attachment: Record<string, unknown> = {
+    tenantId: "tenant_realtime_direct",
+    applicationId: "coder",
+    threadId: "thread_realtime_direct",
+    includeChildren: false,
+    actor: { id: "user_direct", kind: "user" },
+    sent: 0,
+    acknowledged: 0,
+  };
+  const sent: Array<Record<string, unknown>> = [];
+  const socket = {
+    send(value: string) { sent.push(JSON.parse(value)); },
+    close() {},
+    serializeAttachment(value: unknown) { attachment = value as Record<string, unknown>; },
+    deserializeAttachment() { return attachment; },
+  };
+  let queued = 0;
+  let providerAdmissions = 0;
+  const engine = {
+    idFromName(value: string) { return value; },
+    get() {
+      return {
+        async fetch(request: Request) {
+          providerAdmissions += 1;
+          if (request.method !== "POST") {
+            return Response.json([{
+              type: "submission-settled",
+              position: { batch: 1, index: 0 },
+              conversationId: "thread_realtime_direct",
+              submissionId: "submission_realtime_direct",
+              outcome: "completed",
+              timestamp: new Date().toISOString(),
+            }], {
+              headers: {
+                "Stream-Next-Offset": "1",
+                "Stream-Up-To-Date": "true",
+                "Stream-Closed": "true",
+              },
+            });
+          }
+          return Response.json({
+            streamUrl: "https://flue.internal/agents/coder/thread_realtime_direct",
+            offset: "0",
+            submissionId: "submission_realtime_direct",
+          }, { status: 202 });
+        },
+      };
+    },
+  };
+  const background: Promise<unknown>[] = [];
+  await handleFlaryThreadControlWebSocketMessage({
+    storage,
+    env: {
+      FLARY_THREAD_CONTROL: controls,
+      FLUE_CODER_AGENT: engine,
+      FLARY_SESSION_PROJECTION_QUEUE: { async send() { queued += 1; } },
+    },
+    socket,
+    message: JSON.stringify({
+      version: 1,
+      type: "command",
+      requestId: "request_direct",
+      idempotencyKey: "command_direct",
+      command: "send",
+      input: { message: "Hello" },
+    }),
+    execution: { waitUntil(work) { background.push(work); } },
+    webSockets: {
+      acceptWebSocket() {},
+      getWebSockets() { return [socket]; },
+    },
+  });
+
+  assert.equal(queued, 0);
+  assert.ok(providerAdmissions >= 1);
+  assert.ok(sent.some((frame) => frame.type === "accepted"));
+  assert.ok(sent.some((frame) => frame.type === "result"));
+  await Promise.allSettled(background);
 });
 
 test("queued realtime commands keep the trusted model resolver", async () => {

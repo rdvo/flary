@@ -267,11 +267,15 @@ export function createCloudflareThreadService<
     name: string,
     body: Record<string, unknown>,
   ): Promise<void> => {
-    if (projectionQueue) {
-      await projectionQueue.send({ controlName: name, ...body });
+    try {
+      // Start the live projection in the Thread Control object immediately.
+      // The Queue is a recovery path, not the latency-sensitive delivery path.
+      await rpc(name, "track", body);
       return;
+    } catch (error) {
+      if (!projectionQueue) throw error;
+      await projectionQueue.send({ controlName: name, ...body });
     }
-    await rpc(name, "track", body);
   };
 
   const service: FlaryThreadHostService = {
@@ -2613,6 +2617,9 @@ export async function handleFlaryThreadControlWebSocketMessage(input: {
   readonly env: Record<string, unknown>;
   readonly socket: ThreadControlWebSocket;
   readonly message: string | ArrayBuffer;
+  readonly execution?: ThreadControlExecutionContext;
+  readonly webSockets?: ThreadControlWebSocketHost;
+  readonly resolveModel?: CreateCloudflareThreadServiceOptions<Record<string, unknown>>["resolveModel"];
 }): Promise<void> {
   const storage = normalizeThreadControlStorage(input.storage);
   const attachment = realtimeAttachment(input.socket);
@@ -2689,6 +2696,42 @@ export async function handleFlaryThreadControlWebSocketMessage(input: {
     requestId: frame.requestId,
     duplicate: false,
   } satisfies RealtimeServerFrame));
+  if (
+    (frame.command === "send" || frame.command === "steer") &&
+    input.execution
+  ) {
+    try {
+      const result = await submitRealtimeMessageDirect({
+        sql: storage.sql,
+        storage,
+        env: input.env,
+        execution: input.execution,
+        webSockets: input.webSockets,
+        attachment,
+        frame,
+        resolveModel: input.resolveModel,
+      });
+      storeRealtimeCommandSuccess(storage.sql, frame, result);
+      input.socket.send(JSON.stringify({
+        version: 1,
+        type: "result",
+        requestId: frame.requestId,
+        result,
+      } satisfies RealtimeServerFrame));
+    } catch (cause) {
+      const code = cause instanceof FlaryHostError ? cause.code : "command_failed";
+      const message = cause instanceof Error ? cause.message : "The realtime command failed";
+      await storeRealtimeCommandFailure(storage.sql, frame, code, message);
+      input.socket.send(JSON.stringify({
+        version: 1,
+        type: "error",
+        requestId: frame.requestId,
+        code,
+        message,
+      } satisfies RealtimeServerFrame));
+    }
+    return;
+  }
   const queue = input.env.FLARY_SESSION_PROJECTION_QUEUE as ProjectionQueue | undefined;
   if (!queue) {
     await storeRealtimeCommandFailure(storage.sql, frame, "realtime_queue_missing", "The realtime command queue is not configured");
@@ -2714,6 +2757,123 @@ export async function handleFlaryThreadControlWebSocketMessage(input: {
     },
     frame,
   });
+}
+
+async function submitRealtimeMessageDirect(input: {
+  readonly sql: ThreadControlStorage["sql"];
+  readonly storage: ThreadControlStorage;
+  readonly env: Record<string, unknown>;
+  readonly execution: ThreadControlExecutionContext;
+  readonly webSockets?: ThreadControlWebSocketHost;
+  readonly attachment: RealtimeSocketAttachment;
+  readonly frame: Extract<RealtimeClientFrame, { type: "command" }>;
+  readonly resolveModel?: CreateCloudflareThreadServiceOptions<Record<string, unknown>>["resolveModel"];
+}): Promise<FlueAdmission> {
+  const binding = requireBinding(input.sql);
+  const request = ThreadMessageRequestSchema.parse({
+    ...input.frame.input,
+    mode: input.frame.command === "steer" ? "steer" : "queue",
+    idempotencyKey: input.frame.idempotencyKey,
+  });
+  const admissionId = request.idempotencyKey ?? crypto.randomUUID();
+  const selectedModel = request.model === undefined
+    ? undefined
+    : normalizeModelInput(request.model);
+  const configured = selectedModel ?? binding.defaultModel ?? currentModel(input.sql, binding);
+  const baseSelection = configured ? normalizeModelInput(configured) : undefined;
+  const selection = baseSelection
+    ? {
+        ...baseSelection,
+        ...(request.thinkingLevel ? { reasoningEffort: request.thinkingLevel } : {}),
+        ...(request.cacheRetention ? { cacheRetention: request.cacheRetention } : {}),
+      }
+    : undefined;
+  const grant = selection
+    ? await input.resolveModel?.({
+        tenantId: input.attachment.tenantId,
+        userId: String(input.attachment.actor.id ?? "realtime-user"),
+        applicationId: input.attachment.applicationId,
+        agentId: binding.thread.agentId,
+        threadId: binding.thread.threadId,
+        connectionIds: binding.connectionIds,
+        selection,
+      })
+    : undefined;
+  const pinnedValue = objectValue(await dispatchThreadControl(
+    input.sql,
+    "pinModel",
+    {
+      tenantId: input.attachment.tenantId,
+      applicationId: input.attachment.applicationId,
+      admissionId,
+      ...(selection ? { model: selection } : {}),
+      ...(grant ? { grant } : {}),
+    },
+    { env: input.env, execution: input.execution, storage: input.storage, webSockets: input.webSockets },
+  ));
+  const pin = ResolvedModelPinSchema.parse(pinnedValue.pin);
+  const segmentId = String(pinnedValue.segmentId ?? `segment_${admissionId}`);
+  await dispatchThreadControl(
+    input.sql,
+    "admitTurn",
+    {
+      tenantId: input.attachment.tenantId,
+      applicationId: input.attachment.applicationId,
+      admissionId,
+    },
+    { env: input.env, execution: input.execution, storage: input.storage, webSockets: input.webSockets },
+  );
+  const gateway = createCloudflareFlueGateway(input.env, {
+    token: typeof input.env.FLARY_INTERNAL_TOKEN === "string"
+      ? input.env.FLARY_INTERNAL_TOKEN
+      : undefined,
+  });
+  if (request.mode === "steer") {
+    await appendLedger(input.sql, binding, "turn.aborted", {
+      replacementAdmissionId: admissionId,
+      reason: "steered",
+      recordedAt: new Date().toISOString(),
+    });
+    await gateway.abort(runtimeAgentId(binding), threadName(binding.thread)).catch(() => undefined);
+  }
+  const runtimeSelection = pin.runtimeSelection ?? pin.selection;
+  const admission = await gateway.send(
+    runtimeAgentId(binding),
+    threadName(binding.thread),
+    request.message,
+    {
+      idempotencyKey: admissionId,
+      model: toFlueModelSpecifier(runtimeSelection),
+      ...(request.images ? { images: request.images } : {}),
+      ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
+      ...(request.cacheRetention ? { cacheRetention: request.cacheRetention } : {}),
+    },
+  );
+  await appendLedger(input.sql, binding, "turn.started", {
+    admissionId,
+    submissionId: admission.submissionId,
+    mode: request.mode ?? "queue",
+    modelPin: pin,
+    segmentId,
+  });
+  await appendLedger(input.sql, binding, "turn.settings", { modelPin: pin, admissionId });
+  await dispatchThreadControl(
+    input.sql,
+    "track",
+    {
+      tenantId: input.attachment.tenantId,
+      applicationId: input.attachment.applicationId,
+      admission,
+      admissionId,
+      agentId: binding.agentId,
+      instanceId: threadName(binding.thread),
+      modelPin: pin,
+      segmentId,
+      turnMessage: request.message,
+    },
+    { env: input.env, execution: input.execution, storage: input.storage, webSockets: input.webSockets },
+  );
+  return admission;
 }
 
 /** Close hook for generated hibernating WebSocket Durable Objects. */
@@ -2784,6 +2944,20 @@ async function storeRealtimeCommandFailure(
     `UPDATE flary_realtime_commands SET status = 'failed', result_json = ?, updated_at = ?
      WHERE idempotency_key = ?`,
     JSON.stringify({ error: { code, message } }),
+    new Date().toISOString(),
+    frame.idempotencyKey,
+  );
+}
+
+function storeRealtimeCommandSuccess(
+  sql: ThreadControlStorage["sql"],
+  frame: Extract<RealtimeClientFrame, { type: "command" }>,
+  result: unknown,
+): void {
+  sql.exec(
+    `UPDATE flary_realtime_commands SET status = 'completed', result_json = ?, updated_at = ?
+     WHERE idempotency_key = ?`,
+    JSON.stringify({ result }),
     new Date().toISOString(),
     frame.idempotencyKey,
   );
