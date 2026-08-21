@@ -497,6 +497,11 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
       definition: Object.freeze({ ...definition }),
       revision: stableRevision({
         name: definition.name,
+        instructions: typeof definition.instructions === "string"
+          ? definition.instructions
+          : definition.instructions
+            ? "dynamic"
+            : undefined,
         model: definition.model ?? this.options.model,
         models: definition.models,
         thinking: definition.thinking,
@@ -2423,7 +2428,7 @@ function validateFunctionDefinition(
 }
 
 function validateAgentDefinition(
-  definition: FlaryAgentOptions<unknown>,
+  definition: FlaryAgentOptions<any>,
 ): void {
   const positiveInteger = (value: number | undefined, label: string): void => {
     if (value !== undefined && (!Number.isSafeInteger(value) || value < 1)) {

@@ -227,6 +227,13 @@ export function defineFlaryInteractiveAgent(
     const active = interactiveAgentForRun(value, id);
     const state = getAgentState(active)!;
     const definition = state.definition;
+    const authoredInstructions = typeof definition.instructions === "function"
+      ? await definition.instructions({
+          bindings: env,
+          runId: id,
+          agentId: definition.name,
+        })
+      : definition.instructions;
     const model = definition.model ??
       (definition.models?.allow[0]
         ? toFlueModelSpecifier(normalizeModelInput(definition.models.allow[0]))
@@ -261,7 +268,7 @@ export function defineFlaryInteractiveAgent(
     ];
     return {
       model,
-      instructions: interactiveAgentInstructions(active),
+      instructions: interactiveAgentInstructions(active, authoredInstructions),
       ...(definition.skills?.length
         ? { skills: definition.skills.map(toFlueSkillReference) }
         : {}),
@@ -412,11 +419,14 @@ function interactiveCoordinationTools(
   ];
 }
 
-function interactiveAgentInstructions(value: FlaryAgent<any>): string {
+function interactiveAgentInstructions(
+  value: FlaryAgent<any>,
+  authoredInstructions?: string,
+): string {
   const state = getAgentState(value)!;
   const definition = state.definition;
   return [
-    definition.instructions ??
+    authoredInstructions ??
       definition.description ??
       `Act as the ${definition.name} agent.`,
     definition.mode ? `Operating mode: ${definition.mode}.` : "",

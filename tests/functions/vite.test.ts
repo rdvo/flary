@@ -379,7 +379,8 @@ test("the Vite plugin generates Flue Durable Object entry and bindings", (t) => 
   assert.match(authoredHost, /authoredResponse\.status !== 404/);
   assert.match(authoredHost, /attachThreadService/);
   assert.match(authoredHost, /resolveModel: userApp\.options\.resolveModel/);
-  assert.match(authoredHost, /handleFlarySessionProjectionQueue\(\{ messages: batch\.messages, env, resolveModel: userApp\.options\.resolveModel \}\)/);
+  assert.match(authoredHost, /resolveTurnContext: userApp\.options\.resolveTurnContext/);
+  assert.match(authoredHost, /handleFlarySessionProjectionQueue\(\{ messages: batch\.messages, env, resolveModel: userApp\.options\.resolveModel, resolveTurnContext: userApp\.options\.resolveTurnContext \}\)/);
   assert.match(authoredHost, /\.serve\(functions\)/);
   assert.match(authoredHost, /const apiPrefix = "\/custom-api"/);
   assert.doesNotMatch(authoredHost, /flueApp|\/api\/flue/);
@@ -395,7 +396,7 @@ test("the Vite plugin generates Flue Durable Object entry and bindings", (t) => 
   assert.match(cloudflareHost, /fetch: _authoredFetch, queue: _authoredQueue, \.\.\.authoredHandlers/);
   assert.match(cloudflareHost, /\.\.\.authoredHandlers/);
   assert.match(cloudflareHost, /_authoredQueue\.call\(customWorker, batch, env, ctx\)/);
-  assert.match(cloudflareHost, /handleFlarySessionProjectionQueue\(\{ messages: batch\.messages, env, resolveModel: userApp\.options\.resolveModel \}\)/);
+  assert.match(cloudflareHost, /handleFlarySessionProjectionQueue\(\{ messages: batch\.messages, env, resolveModel: userApp\.options\.resolveModel, resolveTurnContext: userApp\.options\.resolveTurnContext \}\)/);
   assert.match(
     cloudflareHost,
     /async alarm\(\): Promise<void> \{[\s\S]*?handleFlaryThreadControlAlarm\(\{[\s\S]*?webSockets:/,

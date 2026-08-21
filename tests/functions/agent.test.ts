@@ -248,6 +248,27 @@ test("interactive agents prepare trusted thread providers before model resolutio
   assert.equal(result.model, "runtime-alias/model");
 });
 
+test("interactive agents resolve trusted instructions inside the agent isolate", async () => {
+  const app = flary({ model: "openai/gpt-5" });
+  const agent = app.agent({
+    name: "operator",
+    instructions: async ({ bindings, runId, agentId }) =>
+      `Organization: ${(bindings as { organization: string }).organization}\nRun: ${runId}\nAgent: ${agentId}`,
+  });
+  const runtime = defineFlaryInteractiveAgent(agent) as unknown as {
+    initialize(input: { env: object; id: string }): Promise<{ instructions: string }>;
+  };
+
+  const result = await runtime.initialize({
+    env: { organization: "Acme" },
+    id: "tenant:app:operator:thread_1",
+  });
+
+  assert.match(result.instructions, /Organization: Acme/);
+  assert.match(result.instructions, /Run: tenant:app:operator:thread_1/);
+  assert.match(result.instructions, /Agent: operator/);
+});
+
 test("durable agent tools restore admitted roles and scopes", async () => {
   let stored = binding();
   let observedIdentity: unknown;

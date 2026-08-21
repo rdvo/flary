@@ -287,10 +287,25 @@ export interface FlaryModelPolicy {
   readonly compactionModel?: ModelInput;
 }
 
+/** Trusted context available while one persistent agent instance starts. */
+export interface FlaryAgentInstructionContext<TBindings = unknown> {
+  readonly bindings: TBindings;
+  /** Stable Flue instance id. It includes the application, agent, and thread. */
+  readonly runId: string;
+  readonly agentId: string;
+}
+
+/** Static instructions or trusted instructions resolved inside the Worker. */
+export type FlaryAgentInstructions<TBindings = unknown> =
+  | string
+  | ((context: FlaryAgentInstructionContext<TBindings>) =>
+    | string
+    | Promise<string>);
+
 export interface FlaryAgentOptions<TBindings = unknown> {
   readonly name: string;
   readonly description?: string;
-  readonly instructions?: string;
+  readonly instructions?: FlaryAgentInstructions<TBindings>;
   readonly model?: string;
   readonly models?: FlaryModelPolicy;
   readonly thinking?: string;
@@ -557,6 +572,20 @@ export interface FlaryAppOptions<TBindings = unknown> {
   readonly auth?: FlaryAuthResolver<TBindings>;
   /** Resolve an authenticated provider connection for interactive turns. */
   readonly resolveModel?: FlaryModelGrantResolver;
+  /**
+   * Add trusted, ephemeral context to one model turn. Flue persists this with
+   * the durable admission, but it does not add it to the visible transcript.
+   */
+  readonly resolveTurnContext?: (input: {
+    readonly bindings: TBindings;
+    readonly tenantId: string;
+    readonly userId: string;
+    readonly applicationId: string;
+    readonly agentId: string;
+    readonly threadId: string;
+    readonly message: string;
+    readonly admittedAt: string;
+  }) => string | undefined | Promise<string | undefined>;
   /**
    * Register thread-unique trusted provider aliases inside an interactive
    * agent isolate before Flue resolves its runtime model.

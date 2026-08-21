@@ -382,17 +382,22 @@ test("thread model selection is durable, exact, and auditable", async () => {
   assert.ok(childRecords.some((record: any) => record.publicPayload?._forkedFrom));
 });
 
-test("trusted runtime model aliases are thread-unique, pinned, and sent to Flue", async () => {
+test("trusted runtime model aliases and turn context are thread-unique and sent to Flue", async () => {
   const controls = namespace();
-  const sent: Array<{ instance: string; model: string; body: string }> = [];
+  const sent: Array<{ instance: string; model: string; turnContext?: string; body: string }> = [];
   const engine = {
     idFromName(name: string) { return name; },
     get(id: unknown) {
       return {
         async fetch(request: Request) {
           const body = await request.text();
-          const parsed = JSON.parse(body) as { model: string };
-          sent.push({ instance: String(id), model: parsed.model, body });
+          const parsed = JSON.parse(body) as { model: string; turnContext?: string };
+          sent.push({
+            instance: String(id),
+            model: parsed.model,
+            turnContext: parsed.turnContext,
+            body,
+          });
           return Response.json({
             streamUrl: "https://flue.test/stream",
             offset: "0",
@@ -420,6 +425,10 @@ test("trusted runtime model aliases are thread-unique, pinned, and sent to Flue"
         credentialGeneration: "generation-1",
         billingMode: "subscription",
       };
+    },
+    resolveTurnContext(input) {
+      assert.equal(input.bindings.FLUE_CODER_AGENT, engine);
+      return `Thread: ${input.threadId}\nUser: ${input.userId}`;
     },
   });
   const scope = {
@@ -465,6 +474,10 @@ test("trusted runtime model aliases are thread-unique, pinned, and sent to Flue"
   ]);
   assert.equal(new Set(sent.map(({ model }) => model)).size, 2);
   assert.ok(sent.every(({ model }) => model.startsWith("flary_tenant_alias_thread_")));
+  assert.deepEqual(sent.map(({ turnContext }) => turnContext).sort(), [
+    "Thread: thread_a\nUser: user_alias",
+    "Thread: thread_b\nUser: user_alias",
+  ]);
   assert.ok(sent.every(({ body }) => !body.includes("secret")));
   for (const threadId of ["thread_a", "thread_b"]) {
     const records = await service.auditList!({ ...scope, threadId }, { after: 0, limit: 100 });

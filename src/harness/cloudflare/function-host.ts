@@ -333,6 +333,9 @@ export function createCloudflareFlueGateway<TEnv extends Record<string, unknown>
             ...(sendOptions.cacheRetention
               ? { cacheRetention: sendOptions.cacheRetention }
               : {}),
+            ...(sendOptions.turnContext
+              ? { turnContext: sendOptions.turnContext }
+              : {}),
           }),
         },
       );

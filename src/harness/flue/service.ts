@@ -253,6 +253,8 @@ export interface FlueAgentGateway {
       readonly model?: string;
       readonly thinkingLevel?: string;
       readonly cacheRetention?: "none" | "short" | "long";
+      /** Trusted context for this turn. It is not part of the user transcript. */
+      readonly turnContext?: string;
     },
   ): Promise<FlueAdmission>;
   wait(

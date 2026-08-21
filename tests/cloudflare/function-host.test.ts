@@ -241,6 +241,7 @@ test("Cloudflare Flue gateway preserves the pinned direct model payload", async 
     model: "anthropic/claude-sonnet",
     thinkingLevel: "high",
     cacheRetention: "none",
+    turnContext: "Current local date and time: Friday, August 21, 2026",
   });
   assert.equal(admission.submissionId, "submission_pinned");
   assert.deepEqual(received, {
@@ -249,6 +250,7 @@ test("Cloudflare Flue gateway preserves the pinned direct model payload", async 
     model: "anthropic/claude-sonnet",
     thinkingLevel: "high",
     cacheRetention: "none",
+    turnContext: "Current local date and time: Friday, August 21, 2026",
   });
 });
 

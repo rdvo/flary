@@ -172,6 +172,34 @@ export interface CreateCloudflareThreadServiceOptions<
     readonly connectionIds: readonly string[];
     readonly selection: ModelSelection;
   }) => Promise<Partial<ResolvedModelPin> | void> | Partial<ResolvedModelPin> | void;
+  /** Resolve trusted context for one turn without changing the public message. */
+  readonly resolveTurnContext?: (input: {
+    readonly bindings: TEnv;
+    readonly tenantId: string;
+    readonly userId: string;
+    readonly applicationId: string;
+    readonly agentId: string;
+    readonly threadId: string;
+    readonly message: string;
+    readonly admittedAt: string;
+  }) => string | undefined | Promise<string | undefined>;
+}
+
+async function resolveTrustedTurnContext<TEnv extends Record<string, unknown>>(
+  resolver: CreateCloudflareThreadServiceOptions<TEnv>["resolveTurnContext"],
+  input: Parameters<NonNullable<CreateCloudflareThreadServiceOptions<TEnv>["resolveTurnContext"]>>[0],
+): Promise<string | undefined> {
+  if (!resolver) return undefined;
+  const value = (await resolver(input))?.trim();
+  if (!value) return undefined;
+  if (value.length > 8_192) {
+    throw new FlaryHostError(
+      500,
+      "turn_context_too_large",
+      "Trusted turn context must not exceed 8,192 characters",
+    );
+  }
+  return value;
 }
 
 interface ThreadControlExecutionContext {
@@ -736,6 +764,19 @@ export function createCloudflareThreadService<
         await gateway.abort(runtimeAgentId(binding), instanceId).catch(() => undefined);
       }
       const runtimeSelection = pin.runtimeSelection ?? pin.selection;
+      const turnContext = await resolveTrustedTurnContext(
+        options.resolveTurnContext,
+        {
+          bindings: options.env,
+          tenantId: target.authorization.organizationId,
+          userId: target.authorization.actor.id,
+          applicationId: target.appId,
+          agentId: binding.thread.agentId,
+          threadId: binding.thread.threadId,
+          message: input.message,
+          admittedAt: new Date().toISOString(),
+        },
+      );
       const admission = await gateway.send(
         runtimeAgentId(binding),
         instanceId,
@@ -746,6 +787,7 @@ export function createCloudflareThreadService<
           ...(input.images ? { images: input.images } : {}),
           ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
           ...(input.cacheRetention ? { cacheRetention: input.cacheRetention } : {}),
+          ...(turnContext ? { turnContext } : {}),
         },
       );
       await rpc(controlName(target), "record", {
@@ -2620,6 +2662,7 @@ export async function handleFlaryThreadControlWebSocketMessage(input: {
   readonly execution?: ThreadControlExecutionContext;
   readonly webSockets?: ThreadControlWebSocketHost;
   readonly resolveModel?: CreateCloudflareThreadServiceOptions<Record<string, unknown>>["resolveModel"];
+  readonly resolveTurnContext?: CreateCloudflareThreadServiceOptions<Record<string, unknown>>["resolveTurnContext"];
 }): Promise<void> {
   const storage = normalizeThreadControlStorage(input.storage);
   const attachment = realtimeAttachment(input.socket);
@@ -2710,6 +2753,7 @@ export async function handleFlaryThreadControlWebSocketMessage(input: {
         attachment,
         frame,
         resolveModel: input.resolveModel,
+        resolveTurnContext: input.resolveTurnContext,
       });
       storeRealtimeCommandSuccess(storage.sql, frame, result);
       input.socket.send(JSON.stringify({
@@ -2768,6 +2812,7 @@ async function submitRealtimeMessageDirect(input: {
   readonly attachment: RealtimeSocketAttachment;
   readonly frame: Extract<RealtimeClientFrame, { type: "command" }>;
   readonly resolveModel?: CreateCloudflareThreadServiceOptions<Record<string, unknown>>["resolveModel"];
+  readonly resolveTurnContext?: CreateCloudflareThreadServiceOptions<Record<string, unknown>>["resolveTurnContext"];
 }): Promise<FlueAdmission> {
   const binding = requireBinding(input.sql);
   const request = ThreadMessageRequestSchema.parse({
@@ -2837,6 +2882,19 @@ async function submitRealtimeMessageDirect(input: {
     await gateway.abort(runtimeAgentId(binding), threadName(binding.thread)).catch(() => undefined);
   }
   const runtimeSelection = pin.runtimeSelection ?? pin.selection;
+  const turnContext = await resolveTrustedTurnContext(
+    input.resolveTurnContext,
+    {
+      bindings: input.env,
+      tenantId: input.attachment.tenantId,
+      userId: String(input.attachment.actor.id ?? "realtime-user"),
+      applicationId: input.attachment.applicationId,
+      agentId: binding.thread.agentId,
+      threadId: binding.thread.threadId,
+      message: request.message,
+      admittedAt: new Date().toISOString(),
+    },
+  );
   const admission = await gateway.send(
     runtimeAgentId(binding),
     threadName(binding.thread),
@@ -2847,6 +2905,7 @@ async function submitRealtimeMessageDirect(input: {
       ...(request.images ? { images: request.images } : {}),
       ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
       ...(request.cacheRetention ? { cacheRetention: request.cacheRetention } : {}),
+      ...(turnContext ? { turnContext } : {}),
     },
   );
   await appendLedger(input.sql, binding, "turn.started", {
@@ -2969,6 +3028,8 @@ export async function handleFlarySessionProjectionQueue(input: {
   readonly env: Record<string, unknown>;
   /** Preserve trusted provider resolution for commands admitted by WebSocket. */
   readonly resolveModel?: CreateCloudflareThreadServiceOptions<Record<string, unknown>>["resolveModel"];
+  /** Preserve trusted turn context for commands admitted by WebSocket. */
+  readonly resolveTurnContext?: CreateCloudflareThreadServiceOptions<Record<string, unknown>>["resolveTurnContext"];
 }): Promise<void> {
   const namespace = input.env.FLARY_THREAD_CONTROL as
     | DurableObjectNamespace
@@ -2984,7 +3045,13 @@ export async function handleFlarySessionProjectionQueue(input: {
       }
       try {
         if (body.kind === "realtime.command") {
-          await executeRealtimeCommand(input.env, body, controlName, input.resolveModel);
+          await executeRealtimeCommand(
+            input.env,
+            body,
+            controlName,
+            input.resolveModel,
+            input.resolveTurnContext,
+          );
           message.ack();
           return;
         }
@@ -3063,6 +3130,7 @@ async function executeRealtimeCommand(
   body: Record<string, unknown>,
   controlName: string,
   resolveModel?: CreateCloudflareThreadServiceOptions<Record<string, unknown>>["resolveModel"],
+  resolveTurnContext?: CreateCloudflareThreadServiceOptions<Record<string, unknown>>["resolveTurnContext"],
 ): Promise<void> {
   const target = body.target as FlaryThreadTarget | undefined;
   const parsed = RealtimeClientFrameSchema.safeParse(body.frame);
@@ -3070,7 +3138,7 @@ async function executeRealtimeCommand(
     throw new Error("The queued realtime command is invalid");
   }
   const frame = parsed.data;
-  const service = createCloudflareThreadService({ env, resolveModel });
+  const service = createCloudflareThreadService({ env, resolveModel, resolveTurnContext });
   let result: unknown;
   let error: { code: string; message: string } | undefined;
   try {
