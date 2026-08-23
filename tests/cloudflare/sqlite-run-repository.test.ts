@@ -179,3 +179,29 @@ test("Durable Object SQLite keeps user-input requests across restart and workflo
   assert.equal(answered.response?.answers.Branch, "main");
   assert.equal((await restarted.listUserInput("run_user_input"))[0]?.response?.canceled, false);
 });
+
+test("Durable Object SQLite stores input for standalone interactive threads", async () => {
+  const repository = new SqliteFlaryRunRepository(sqlStore());
+  const runId = "tenant:app:concierge:thread_input";
+  const request = UserInputRequestSchema.parse({
+    id: "input_thread",
+    threadId: runId,
+    questions: [{
+      header: "Delivery",
+      question: "When should we deliver?",
+      options: [{ label: "Tomorrow", description: "Recommended" }],
+      multiSelect: false,
+    }],
+    requestedBy: { id: "concierge", kind: "agent" },
+    requestedAt: new Date().toISOString(),
+  });
+  await repository.createUserInput(runId, request);
+  assert.equal((await repository.listUserInput(runId))[0]?.request.id, "input_thread");
+  const answered = await repository.respondToUserInput(
+    runId,
+    "input_thread",
+    { answers: { Delivery: "Tomorrow" } },
+    { id: "user_1", kind: "user" },
+  );
+  assert.equal(answered.response?.answers.Delivery, "Tomorrow");
+});

@@ -114,7 +114,7 @@ export class SqliteFlaryRunRepository implements FlaryRunRepository, FlaryUserIn
     runId: string,
     requestInput: UserInputRequest,
   ): Promise<UserInputRequest> {
-    const canonicalRunId = await this.canonicalRunId(runId);
+    const canonicalRunId = await this.canonicalRunId(runId, true);
     const request = UserInputRequestSchema.parse(requestInput);
     const now = new Date().toISOString();
     this.#sql.exec(
@@ -141,7 +141,7 @@ export class SqliteFlaryRunRepository implements FlaryRunRepository, FlaryUserIn
     runId: string,
     requestId: string,
   ): Promise<UserInputRecord | undefined> {
-    const canonicalRunId = await this.canonicalRunId(runId);
+    const canonicalRunId = await this.canonicalRunId(runId, true);
     const row = this.first<{ request_json: string; response_json: string | null }>(
       `SELECT request_json, response_json FROM flary_function_user_input
        WHERE run_id = ? AND request_id = ? LIMIT 1`,
@@ -152,7 +152,7 @@ export class SqliteFlaryRunRepository implements FlaryRunRepository, FlaryUserIn
   }
 
   async listUserInput(runId: string): Promise<UserInputRecord[]> {
-    const canonicalRunId = await this.canonicalRunId(runId);
+    const canonicalRunId = await this.canonicalRunId(runId, true);
     return this.#sql.exec<{ request_json: string; response_json: string | null }>(
       `SELECT request_json, response_json FROM flary_function_user_input
        WHERE run_id = ? ORDER BY created_at ASC, request_id ASC`,
@@ -166,7 +166,7 @@ export class SqliteFlaryRunRepository implements FlaryRunRepository, FlaryUserIn
     inputValue: UserInputAnswerRequest,
     answeredBy: IdentityReference,
   ): Promise<UserInputRecord> {
-    const canonicalRunId = await this.canonicalRunId(runId);
+    const canonicalRunId = await this.canonicalRunId(runId, true);
     const current = await this.getUserInput(canonicalRunId, requestId);
     if (!current) throw new Error("The user-input request was not found");
     if (current.response) return current;
@@ -370,7 +370,10 @@ export class SqliteFlaryRunRepository implements FlaryRunRepository, FlaryUserIn
    * while the Flary Runtime stores the parent function run id. Resolve that
    * private alias before reading or writing user-input records.
    */
-  private async canonicalRunId(runId: string): Promise<string> {
+  private async canonicalRunId(
+    runId: string,
+    allowStandalone = false,
+  ): Promise<string> {
     const direct = await this.get(runId);
     if (direct) return direct.runId;
     const rows = this.#sql.exec<{ run_id: string; record_json: string }>(
@@ -385,6 +388,7 @@ export class SqliteFlaryRunRepository implements FlaryRunRepository, FlaryUserIn
         // fail closed through required() and the public schema validators.
       }
     }
+    if (allowStandalone) return runId;
     throw new Error("The run was not found");
   }
 
