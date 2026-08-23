@@ -3,6 +3,23 @@ import test from "node:test";
 
 import { createFlaryThreadClient } from "../../src/harness/client/flue.js";
 
+test("binds the native fetch receiver for browser clients", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async function (this: typeof globalThis) {
+    assert.equal(this, globalThis);
+    return Response.json({ threads: [] });
+  };
+
+  try {
+    const client = createFlaryThreadClient({
+      baseUrl: "https://cloud.flary.test",
+    });
+    assert.deepEqual(await client.list("app_123"), []);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("routes every turn through authenticated Flary thread admission", async () => {
   let requestUrl = "";
   let requestBody: Record<string, unknown> | undefined;

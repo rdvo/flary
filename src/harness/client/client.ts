@@ -93,7 +93,7 @@ export class FlaryClient {
       /^\/+|\/+$/g,
       ""
     )}`;
-    this.request = options.fetch ?? globalThis.fetch;
+    this.request = options.fetch ?? globalThis.fetch.bind(globalThis);
   }
 
   async savePrompt(input: SavePromptInput): Promise<SavePromptResponse> {

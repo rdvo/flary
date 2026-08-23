@@ -132,7 +132,7 @@ export class FlaryThreadClient {
 
   constructor(options: CreateFlaryThreadClientOptions) {
     this.#baseUrl = options.baseUrl.replace(/\/+$/, "");
-    this.#request = options.fetch ?? globalThis.fetch;
+    this.#request = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.#headers = options.headers;
     this.#token = options.token;
     this.#apiPath = normalizeApiPath(options.apiPath ?? "/api");
@@ -140,7 +140,7 @@ export class FlaryThreadClient {
     const mountPath = options.mountPath ?? "/api/flue";
     this.flue = createFlueClient({
       baseUrl: joinBaseUrl(options.baseUrl, mountPath),
-      fetch: options.fetch,
+      fetch: this.#request,
       headers: options.headers,
       token: options.token,
     });
