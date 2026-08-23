@@ -239,12 +239,17 @@ export function defineFlaryInteractiveAgent(
       (definition.models?.allow[0]
         ? toFlueModelSpecifier(normalizeModelInput(definition.models.allow[0]))
         : state.app.options.model ?? "openai/gpt-5");
-    const approvalContinuation = definition.tools
+    const codemodeContinuation = definition.tools
       ? await state.app.agentApprovalContinuation(active, {
           bindings: env,
           runId: id,
         })
       : undefined;
+    const userInputTool = createFlaryUserInputTool(env, id);
+    const approvalContinuation = combineContinuations(
+      codemodeContinuation,
+      createFlaryUserInputContinuation(env, id),
+    );
     const coordinationTools = definition.delegation?.mode === "disabled"
       ? []
       : interactiveCoordinationTools(value, active, env, id);
@@ -265,6 +270,7 @@ export function defineFlaryInteractiveAgent(
             },
           })]
         : []),
+      ...(userInputTool ? [userInputTool] : []),
       ...coordinationTools,
     ];
     const instructions = interactiveAgentInstructions(active, authoredInstructions);
@@ -448,6 +454,7 @@ function interactiveAgentInstructions(
     definition.tools
       ? "After tool work, always finish the turn with a user-facing assistant message. Never end a turn with only tool calls or reasoning."
       : "",
+    "When a required choice is missing, use request_user_input. Ask one focused question when possible. Give two or three clear choices and let the user type a different answer.",
     definition.delegation?.mode === "disabled"
       ? "Do not delegate work."
       : Object.keys(definition.subagents ?? {}).length > 0

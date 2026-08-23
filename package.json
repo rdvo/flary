@@ -1,6 +1,6 @@
 {
   "name": "flary",
-  "version": "0.8.0-rc.34",
+  "version": "0.8.0-rc.35",
   "description": "Durable, provider-neutral AI agent harness for Cloudflare Workers",
   "main": "dist/index.js",
   "module": "dist/index.js",
@@ -56,6 +56,7 @@
     "hono": "4.12.34",
     "jsonc-parser": "^3.3.1",
     "patch-package": "8.0.1",
+    "streamdown": "^2.5.0",
     "valibot": "^1.4.0",
     "yaml": "^2.8.1",
     "zod": "^4.4.3"
@@ -222,6 +223,7 @@
     "dompurify": "3.4.13",
     "fast-uri": "3.1.5",
     "hono": "$hono",
+    "js-yaml": "4.3.1",
     "undici": "7.29.0"
   }
 }

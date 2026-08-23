@@ -151,8 +151,12 @@ export interface FlaryAgentThreadHandle {
   approvals(): Promise<unknown[]>;
   approve(approvalId: string, options?: { reason?: string }): Promise<void>;
   reject(approvalId: string, options?: { reason?: string }): Promise<void>;
-  userInput(): Promise<readonly unknown[]>;
-  sendInput(requestId: string, answers: Readonly<Record<string, string>>): Promise<unknown>;
+  userInput(): Promise<readonly UserInputRecord[]>;
+  sendInput(
+    requestId: string,
+    answers: Readonly<Record<string, string>>,
+    options?: { response?: string; canceled?: boolean },
+  ): Promise<unknown>;
   setGoal(input: {
     objective: string;
     tokenBudget?: number;
@@ -432,7 +436,8 @@ function makeAgentThreadHandle(
       ...(options.reason ? { comment: options.reason } : {}),
     }),
     userInput: () => client.userInput(ref),
-    sendInput: (requestId, answers) => client.respondToUserInput(ref, requestId, { answers }),
+    sendInput: (requestId, answers, options = {}) =>
+      client.respondToUserInput(ref, requestId, { answers, ...options }),
     setGoal: (input) => client.setGoal(ref, input),
     clearGoal: () => client.clearGoal(ref),
     model: {

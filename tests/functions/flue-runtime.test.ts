@@ -10,6 +10,7 @@ import {
 import {
   defineFlaryFunctionAgent,
   defineFlaryFunctionWorkflow,
+  defineFlaryInteractiveAgent,
   flary,
 } from "../../src/harness/functions/index.ts";
 
@@ -471,4 +472,62 @@ test("generated prompt agents use the durable request_user_input bridge", async 
     }),
     "ready",
   );
+});
+
+test("interactive agents use the durable request_user_input bridge", async () => {
+  const requests = new Map<string, Record<string, unknown>>();
+  const namespace = {
+    idFromName(name: string) { return name; },
+    get() {
+      return {
+        async fetch(request: Request) {
+          const method = new URL(request.url).pathname.split("/").at(-1);
+          const body = JSON.parse(await request.text()) as Record<string, any>;
+          if (method === "createUserInput") {
+            requests.set(body.request.id, body.request);
+            return Response.json(body.request);
+          }
+          if (method === "getUserInput") {
+            return Response.json({
+              request: requests.get(body.requestId),
+              response: {
+                requestId: body.requestId,
+                answers: { Delivery: "Tomorrow" },
+                canceled: false,
+                answeredBy: { id: "user_1", kind: "user", version: "1" },
+                answeredAt: new Date().toISOString(),
+              },
+            });
+          }
+          if (method === "listUserInput") return Response.json([]);
+          return Response.json({ error: { message: "unknown method" } }, { status: 404 });
+        },
+      };
+    },
+  };
+  const app = flary({ model: "openai/gpt-5" });
+  const concierge = app.agent({ name: "concierge", instructions: "Help the shopper." });
+  const config = await defineFlaryInteractiveAgent(concierge).initialize({
+    id: "tenant:app:concierge:thread_1",
+    env: {
+      FLARY_RUN_SERVICE: namespace,
+      FLARY_INTERNAL_TOKEN: "t".repeat(32),
+    },
+  });
+  const tool = config.tools?.find((item) => item.name === "request_user_input");
+  assert.ok(tool);
+  const result = await tool.run({
+    input: {
+      questions: [{
+        header: "Delivery",
+        question: "When should we deliver?",
+        options: [{ label: "Tomorrow", description: "Recommended" }],
+      }],
+    },
+  } as never);
+  assert.deepEqual((result as { answers: Record<string, string> }).answers, {
+    Delivery: "Tomorrow",
+  });
+  assert.match(config.instructions, /request_user_input/);
+  assert.ok(config.approvalContinuation);
 });

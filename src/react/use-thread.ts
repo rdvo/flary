@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { FlaryAgentThreadHandle } from "../harness/client/functions.js";
 import type { FlaryRealtimeConnection } from "../harness/client/flue.js";
+import type { UserInputRecord } from "../harness/contracts/user-input.js";
 import {
   flaryUiTurnIsActive,
   mergeFlaryUiRecords,
@@ -25,10 +26,16 @@ export interface UseFlaryThreadResult {
   connectionState: FlaryConnectionState;
   active: boolean;
   error: string | null;
+  inputRequests: UserInputRecord[];
   send(message: string, mode?: "queue" | "steer"): Promise<void>;
   interrupt(): Promise<void>;
   approve(approvalId: string): Promise<void>;
   reject(approvalId: string): Promise<void>;
+  respondToInput(
+    requestId: string,
+    answers: Readonly<Record<string, string>>,
+    options?: { response?: string; canceled?: boolean }
+  ): Promise<void>;
   reconnect(): void;
 }
 
@@ -110,6 +117,7 @@ export function useFlaryThread(
   );
   const [reconnectToken, setReconnectToken] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [inputRequests, setInputRequests] = useState<UserInputRecord[]>([]);
   const connection = useRef<FlaryRealtimeConnection | null>(null);
   const cursor = useRef(0);
   const reconnectGeneration = useRef(0);
@@ -121,6 +129,11 @@ export function useFlaryThread(
       const merged = mergeFlaryUiRecords(currentRecords.current, incoming);
       currentRecords.current = merged;
       setRecords(merged);
+      if (incoming.some((record) => record.type.startsWith("input."))) {
+        void thread.userInput().then((requests) => {
+          setInputRequests([...requests]);
+        }).catch(() => undefined);
+      }
       const confirmed = incoming.filter(
         (record) => record.type === "message.user"
       ).length;
@@ -144,6 +157,7 @@ export function useFlaryThread(
     setRecords([]);
     setPendingMessages([]);
     setError(null);
+    setInputRequests([]);
     if (!thread) {
       setConnectionState("idle");
       return;
@@ -159,7 +173,10 @@ export function useFlaryThread(
         : 0;
 
     const resync = async () => {
-      const history = await readAllAudit(thread);
+      const [history, requests] = await Promise.all([
+        readAllAudit(thread),
+        thread.userInput(),
+      ]);
       if (
         controller.signal.aborted ||
         generation !== reconnectGeneration.current
@@ -168,6 +185,7 @@ export function useFlaryThread(
       const merged = mergeFlaryUiRecords(history, currentRecords.current);
       currentRecords.current = merged;
       setRecords(merged);
+      setInputRequests([...requests]);
       const nextCursor = merged.at(-1)?.sequence ?? 0;
       cursor.current = nextCursor;
       storageFor(options)?.setItem(cursorKey(thread), String(nextCursor));
@@ -303,6 +321,37 @@ export function useFlaryThread(
     else await thread.interrupt();
   }, [thread]);
 
+  const respondToInput = useCallback(
+    async (
+      requestId: string,
+      answers: Readonly<Record<string, string>>,
+      inputOptions: { response?: string; canceled?: boolean } = {}
+    ) => {
+      if (!thread) return;
+      await thread.sendInput(requestId, answers, inputOptions);
+      setInputRequests((current) =>
+        current.map((record) =>
+          record.request.id === requestId
+            ? {
+                ...record,
+                response: {
+                  requestId,
+                  answers: { ...answers },
+                  ...(inputOptions.response
+                    ? { response: inputOptions.response }
+                    : {}),
+                  canceled: inputOptions.canceled ?? false,
+                  answeredBy: thread.binding.createdBy,
+                  answeredAt: new Date().toISOString(),
+                },
+              }
+            : record
+        )
+      );
+    },
+    [thread]
+  );
+
   const decide = useCallback(
     async (approvalId: string, decision: "approve" | "reject") => {
       if (!thread) return;
@@ -322,10 +371,12 @@ export function useFlaryThread(
     connectionState,
     active: flaryUiTurnIsActive(turns) || pendingMessages.length > 0,
     error,
+    inputRequests,
     send,
     interrupt,
     approve: (approvalId) => decide(approvalId, "approve"),
     reject: (approvalId) => decide(approvalId, "reject"),
+    respondToInput,
     reconnect: () => {
       connection.current?.close(4101, "manual reconnect");
       setReconnectToken((value) => value + 1);
