@@ -1,5 +1,19 @@
 # Flary
 
+## Quick start
+
+Create a Worker and your first chat widget with the local setup assistant:
+
+```bash
+npx flary quickstart my-flary-widget
+```
+
+The assistant connects to your Cloudflare account, creates a Gemini-backed
+agent, previews the widget, provisions the required resources, deploys the
+Worker, verifies it, and prints HTML and React integration code. Credentials
+stay in the local process, protected local files, Wrangler, and Worker
+secrets. See [the local quick-start guide](docs/quickstart.md).
+
 **Build durable AI agents in TypeScript. Deploy them to your Cloudflare account.**
 
 Flary is an open-source framework for typed AI functions and persistent agent

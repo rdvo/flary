@@ -151,6 +151,7 @@ worker.get("/settings", async (context) => {
   return context.json({ secrets: {
     OPENAI_API_KEY: Boolean(context.env.OPENAI_API_KEY),
     ANTHROPIC_API_KEY: Boolean(context.env.ANTHROPIC_API_KEY),
+    GEMINI_API_KEY: Boolean(context.env.GEMINI_API_KEY),
     FLARY_SESSION_ARCHIVE_KEY: Boolean(context.env.FLARY_SESSION_ARCHIVE_KEY),
     FLARY_TOKEN_ENCRYPTION_KEY_B64: Boolean(context.env.FLARY_TOKEN_ENCRYPTION_KEY_B64),
   } });

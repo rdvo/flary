@@ -45,6 +45,7 @@ const entryPoints = glob.sync(["./src/**/*.ts", "./src/**/*.tsx"], {
   ignore: [
     "./src/cli.ts",
     "./src/cli-api.ts",
+    "./src/quickstart.ts",
     "./src/**/*.test.ts",
     "./src/**/*.test.tsx",
     "./src/mod.ts",
@@ -117,7 +118,7 @@ const esmBuild = async () => {
 
 const cliBuild = async () => {
   const buildOptions: BuildOptions = {
-    entryPoints: ["./src/cli.ts", "./src/cli-api.ts"],
+    entryPoints: ["./src/cli.ts", "./src/cli-api.ts", "./src/quickstart.ts"],
     outbase: "./src",
     outdir: "./dist",
     format: "esm",

@@ -20,8 +20,8 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const templatesRoot = join(packageRoot, "templates");
 
 type Template = "dashboard" | "backend";
-type Provider = "openai" | "anthropic" | "workers-ai" | "none";
-type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
+export type Provider = "google" | "openai" | "anthropic" | "workers-ai" | "none";
+export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
 type Feature = "browser" | "sandbox" | "mcp";
 
 type PackageManifest = {
@@ -35,6 +35,8 @@ export interface FlaryProjectState {
   readonly version: 1;
   readonly template: Template;
   readonly provider: Provider;
+  readonly model?: string;
+  readonly widget?: boolean;
   readonly features: readonly Feature[];
   readonly packageManager: PackageManager;
   readonly workerName: string;
@@ -82,6 +84,7 @@ interface ParsedArgs {
   readonly target?: string;
   readonly template?: Template;
   readonly provider?: Provider;
+  readonly model?: string;
   readonly features?: readonly Feature[];
   readonly profile?: string;
   readonly account?: string;
@@ -94,6 +97,7 @@ interface ParsedArgs {
 interface SetupAnswers {
   readonly template: Template;
   readonly provider: Provider;
+  readonly model?: string;
   readonly features: readonly Feature[];
   readonly packageManager: PackageManager;
   readonly deploy: boolean;
@@ -177,6 +181,7 @@ function printHelp(log: (message: string) => void): void {
 
 Usage:
   flary create [directory]   Create and optionally deploy a Flary project
+  flary quickstart [directory] Open the local setup assistant
   flary setup [directory]    Resume setup or change provider and features
   flary deploy [directory]   Build, provision, deploy, and verify
   flary doctor [directory]   Check the local and deployed configuration
@@ -185,7 +190,8 @@ Usage:
 
 Setup options:
   --template dashboard|backend
-  --provider openai|anthropic|workers-ai|none
+  --provider google|openai|anthropic|workers-ai|none
+  --model <exact-provider-model>
   --features browser,sandbox,mcp
   --profile <wrangler-profile>
   --account <cloudflare-account-id>
@@ -205,6 +211,7 @@ function parseArgs(args: readonly string[]): ParsedArgs {
   let target: string | undefined;
   let template: Template | undefined;
   let provider: Provider | undefined;
+  let model: string | undefined;
   let features: Feature[] | undefined;
   let profile: string | undefined;
   let account: string | undefined;
@@ -226,7 +233,8 @@ function parseArgs(args: readonly string[]): ParsedArgs {
       return next;
     };
     if (value === "--template") template = parseChoice<Template>(take(), ["dashboard", "backend"], value);
-    else if (value === "--provider") provider = parseChoice<Provider>(take(), ["openai", "anthropic", "workers-ai", "none"], value);
+    else if (value === "--provider") provider = parseChoice<Provider>(take(), ["google", "openai", "anthropic", "workers-ai", "none"], value);
+    else if (value === "--model") model = take();
     else if (value === "--features") {
       const raw = take();
       features = raw === "" ? [] : raw.split(",").map((entry) => parseChoice<Feature>(entry, ["browser", "sandbox", "mcp"], value));
@@ -238,7 +246,7 @@ function parseArgs(args: readonly string[]): ParsedArgs {
     else if (value === "--yes" || value === "-y") yes = true;
     else throw new Error(`Unknown option: ${value}`);
   }
-  return { command, target, template, provider, features, profile, account, packageManager, deploy, yes, hasNewFlags };
+  return { command, target, template, provider, model, features, profile, account, packageManager, deploy, yes, hasNewFlags };
 }
 
 function parseChoice<T extends string>(value: string, choices: readonly T[], flag: string): T {
@@ -291,6 +299,7 @@ function requiredSecrets(
   }
   if (provider === "openai") values.push("OPENAI_API_KEY");
   if (provider === "anthropic") values.push("ANTHROPIC_API_KEY");
+  if (provider === "google") values.push("GEMINI_API_KEY");
   if (template === "backend" && features.includes("mcp")) values.push("GITHUB_MCP_PAT");
   return values;
 }
@@ -319,6 +328,7 @@ async function promptSetup(parsed: ParsedArgs, env: NodeJS.ProcessEnv, prompt: C
   const provider = parsed.provider ?? await prompt.select({
     message: "Which AI provider should work first?",
     options: [
+      { value: "google", label: "Google Gemini API key", hint: "Recommended for the quick start" },
       { value: "openai", label: "OpenAI API key" },
       { value: "anthropic", label: "Anthropic API key" },
       { value: "workers-ai", label: "Cloudflare Workers AI", hint: "No provider key" },
@@ -327,6 +337,17 @@ async function promptSetup(parsed: ParsedArgs, env: NodeJS.ProcessEnv, prompt: C
     initialValue: "openai",
   });
   cancelIfNeeded(provider, prompt);
+  const model = parsed.model ?? (provider === "google"
+    ? await prompt.select({
+        message: "Exact Gemini model",
+        options: [
+          { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+          { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+        ],
+        initialValue: "gemini-2.5-flash",
+      })
+    : undefined);
+  cancelIfNeeded(model, prompt);
   const packageManager = parsed.packageManager ?? await prompt.select({
     message: "Package manager",
     options: ["npm", "pnpm", "yarn", "bun"].map((value) => ({ value, label: value })),
@@ -366,6 +387,10 @@ async function promptSetup(parsed: ParsedArgs, env: NodeJS.ProcessEnv, prompt: C
     const value = env.ANTHROPIC_API_KEY ?? await prompt.password({ message: "Anthropic API key", validate: requiredValue });
     cancelIfNeeded(value, prompt);
     secrets.ANTHROPIC_API_KEY = String(value);
+  } else if (provider === "google") {
+    const value = env.GEMINI_API_KEY ?? env.GOOGLE_GENERATIVE_AI_API_KEY ?? await prompt.password({ message: "Google Gemini API key", validate: requiredValue });
+    cancelIfNeeded(value, prompt);
+    secrets.GEMINI_API_KEY = String(value);
   }
   if (template === "backend" && features.includes("mcp")) {
     const value = env.GITHUB_MCP_PAT ?? await prompt.password({ message: "GitHub token for the read-only MCP example", validate: requiredValue });
@@ -375,6 +400,7 @@ async function promptSetup(parsed: ParsedArgs, env: NodeJS.ProcessEnv, prompt: C
   return {
     template: template as Template,
     provider: provider as Provider,
+    ...(model ? { model: String(model) } : {}),
     packageManager: packageManager as PackageManager,
     features,
     authMode: authMode as "personal" | "existing",
@@ -418,6 +444,7 @@ async function scaffoldProject(target: string, answers: SetupAnswers, parsed: Pa
     version: 1,
     template: answers.template,
     provider: answers.provider,
+    ...(answers.model ? { model: answers.model } : {}),
     features: answers.features,
     packageManager: answers.packageManager,
     workerName: name,
@@ -447,7 +474,9 @@ function generatedSecretValues(template: Template, authMode: "personal" | "exist
 }
 
 async function writeGeneratedOptions(target: string, state: FlaryProjectState, authMode: "personal" | "existing"): Promise<void> {
-  const model = state.provider === "anthropic" ? "anthropic/claude-sonnet-4-5" : state.provider === "workers-ai" ? "cloudflare/@cf/meta/llama-3.3-70b-instruct-fp8-fast" : "openai/gpt-5";
+  const model = state.model ?? (state.provider === "google" ? "gemini-2.5-flash" : state.provider === "anthropic" ? "claude-sonnet-4-5" : state.provider === "workers-ai" ? "@cf/meta/llama-3.3-70b-instruct-fp8-fast" : "gpt-5");
+  const modelPrefix = state.provider === "workers-ai" ? "cloudflare" : state.provider;
+  const qualifiedModel = state.provider !== "none" && !model.startsWith(`${modelPrefix}/`) ? `${modelPrefix}/${model}` : model;
   const features = {
     mcp: state.features.includes("mcp"),
     browser: state.features.includes("browser"),
@@ -457,11 +486,12 @@ async function writeGeneratedOptions(target: string, state: FlaryProjectState, a
     "// Generated by `flary setup`. You can rerun setup safely.",
     "type GeneratedConfig = {",
     "  readonly model: string;",
-    "  readonly provider: \"openai\" | \"anthropic\" | \"workers-ai\" | \"none\";",
+    "  readonly provider: \"google\" | \"openai\" | \"anthropic\" | \"workers-ai\" | \"none\";",
     "  readonly features: { readonly mcp: boolean; readonly browser: boolean; readonly sandbox: boolean };",
     "  readonly authMode: \"personal\" | \"existing\";",
+    "  readonly widget: boolean;",
     "};",
-    `export const generated: GeneratedConfig = ${JSON.stringify({ model, provider: state.provider, features, authMode }, null, 2)};`,
+    `export const generated: GeneratedConfig = ${JSON.stringify({ model: qualifiedModel, provider: state.provider, features, authMode, widget: Boolean(state.widget) }, null, 2)};`,
     "",
   ].join("\n");
   await writeFile(join(target, "src", "flary.generated.ts"), source);
@@ -508,8 +538,10 @@ async function readOrRecoverProjectState(target: string): Promise<FlaryProjectSt
     }
     const source = await readFile(generatedFile, "utf8");
     const provider = /["']?provider["']?\s*:\s*["']([^"']+)/.exec(source)?.[1] as Provider | undefined;
+    const model = /["']?model["']?\s*:\s*["']([^"']+)/.exec(source)?.[1];
+    const widget = /["']?widget["']?\s*:\s*true/.test(source);
     const authMode = /["']?authMode["']?\s*:\s*["']([^"']+)/.exec(source)?.[1] === "personal" ? "personal" : "existing";
-    if (!provider || !["openai", "anthropic", "workers-ai", "none"].includes(provider)) {
+    if (!provider || !["google", "openai", "anthropic", "workers-ai", "none"].includes(provider)) {
       throw new Error("Setup cannot resume because the generated provider setting is invalid.");
     }
     const legacyFeatures = /["']?features["']?\s*:\s*(\[[^\]]*\])/.exec(source)?.[1];
@@ -529,6 +561,8 @@ async function readOrRecoverProjectState(target: string): Promise<FlaryProjectSt
       version: 1,
       template,
       provider,
+      ...(model ? { model } : {}),
+      ...(widget ? { widget: true } : {}),
       features,
       packageManager,
       workerName: typeof wrangler.name === "string" ? wrangler.name : workerName(manifest.name ?? basename(target)),
@@ -727,12 +761,17 @@ async function createProject(parsed: ParsedArgs, options: Required<Pick<RunFlary
       if (!options.env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY is required for --provider anthropic in non-interactive mode.");
       secrets.ANTHROPIC_API_KEY = options.env.ANTHROPIC_API_KEY;
     }
+    if (parsed.provider === "google") {
+      const value = options.env.GEMINI_API_KEY ?? options.env.GOOGLE_GENERATIVE_AI_API_KEY;
+      if (!value) throw new Error("GEMINI_API_KEY is required for --provider google in non-interactive mode.");
+      secrets.GEMINI_API_KEY = value;
+    }
     const features = normalizeFeatures(parsed.template, parsed.features ?? []);
     if (parsed.template === "backend" && features.includes("mcp")) {
       if (!options.env.GITHUB_MCP_PAT) throw new Error("GITHUB_MCP_PAT is required when the MCP example is enabled in non-interactive mode.");
       secrets.GITHUB_MCP_PAT = options.env.GITHUB_MCP_PAT;
     }
-    answers = { template: parsed.template, provider: parsed.provider, features, packageManager: parsed.packageManager, deploy: parsed.deploy, authMode, secrets };
+    answers = { template: parsed.template, provider: parsed.provider, ...(parsed.model ? { model: parsed.model } : {}), features, packageManager: parsed.packageManager, deploy: parsed.deploy, authMode, secrets };
   }
   let state = await scaffoldProject(target, answers, parsed);
   options.log(`Created ${target}`);
@@ -758,7 +797,7 @@ async function setupProject(target: string, parsed: ParsedArgs, options: Require
   let provider = parsed.provider ?? current.provider;
   let features = parsed.features ?? current.features;
   if (options.isTTY && !parsed.provider) {
-    const selected = await options.prompt.select({ message: "AI provider", options: ["openai", "anthropic", "workers-ai", "none"].map((value) => ({ value, label: value })) , initialValue: current.provider });
+    const selected = await options.prompt.select({ message: "AI provider", options: ["google", "openai", "anthropic", "workers-ai", "none"].map((value) => ({ value, label: value })) , initialValue: current.provider });
     cancelIfNeeded(selected, options.prompt);
     provider = selected as Provider;
   }
@@ -785,6 +824,14 @@ async function setupProject(target: string, parsed: ParsedArgs, options: Require
     if (!value) throw new Error("ANTHROPIC_API_KEY is required. Set it in the environment or run setup in a terminal.");
     secrets.ANTHROPIC_API_KEY = String(value);
   }
+  if (provider === "google") {
+    const value = options.env.GEMINI_API_KEY ?? options.env.GOOGLE_GENERATIVE_AI_API_KEY ?? localSecrets.GEMINI_API_KEY ?? (options.isTTY
+      ? await options.prompt.password({ message: "Google Gemini API key", validate: requiredValue })
+      : undefined);
+    cancelIfNeeded(value, options.prompt);
+    if (!value) throw new Error("GEMINI_API_KEY is required. Set it in the environment or run setup in a terminal.");
+    secrets.GEMINI_API_KEY = String(value);
+  }
   if (current.template === "backend" && features.includes("mcp")) {
     const value = options.env.GITHUB_MCP_PAT ?? localSecrets.GITHUB_MCP_PAT ?? (options.isTTY
       ? await options.prompt.password({ message: "GitHub token for the read-only MCP example", validate: requiredValue })
@@ -795,7 +842,7 @@ async function setupProject(target: string, parsed: ParsedArgs, options: Require
   }
   if (Object.keys(secrets).length > 0) await writeDevVars(target, secrets);
   const authMode = current.requiredSecrets.includes("FLARY_ACCESS_TOKEN") ? "personal" : "existing";
-  const next: FlaryProjectState = { ...current, provider, features, requiredSecrets: requiredSecrets(current.template, provider, authMode, features) };
+  const next: FlaryProjectState = { ...current, provider, model: parsed.model ?? (provider === current.provider ? current.model : undefined), features, requiredSecrets: requiredSecrets(current.template, provider, authMode, features) };
   await writeGeneratedOptions(target, next, authMode);
   await updateWrangler(target, { requiredSecrets: next.requiredSecrets, workersAI: provider === "workers-ai" });
   await writeProjectState(target, next);
@@ -897,6 +944,111 @@ async function initProject(targetArg: string | undefined, cwd: string, log: (mes
   for (const result of results) log(`  ${result.status === "created" ? "created" : "kept"} ${result.path}`);
 }
 
+export interface QuickstartProjectInput {
+  readonly target: string;
+  readonly workerName: string;
+  readonly agentName: string;
+  readonly systemPrompt: string;
+  readonly provider: Provider;
+  readonly model: string;
+  readonly providerKey?: string;
+  readonly accountId?: string;
+  readonly packageManager?: PackageManager;
+}
+
+/** Create or update the generated widget project without exposing secret values. */
+export async function prepareQuickstartProject(
+  input: QuickstartProjectInput,
+  options: Pick<RunFlaryCliOptions, "env" | "runner" | "log"> = {},
+): Promise<FlaryProjectState> {
+  const target = resolve(input.target);
+  const env = options.env ?? process.env;
+  const runner = options.runner ?? defaultRunner;
+  const keyName = input.provider === "google"
+    ? "GEMINI_API_KEY"
+    : input.provider === "openai"
+      ? "OPENAI_API_KEY"
+      : input.provider === "anthropic"
+        ? "ANTHROPIC_API_KEY"
+        : undefined;
+  let state: FlaryProjectState;
+  if (!(await exists(join(target, ".flary", "project.json")))) {
+    const secrets = keyName && input.providerKey ? { [keyName]: input.providerKey } : {};
+    state = await scaffoldProject(target, {
+      template: "backend",
+      provider: input.provider,
+      model: input.model,
+      features: [],
+      packageManager: input.packageManager ?? "npm",
+      deploy: false,
+      authMode: "personal",
+      secrets,
+    }, {
+      command: "create",
+      target,
+      template: "backend",
+      provider: input.provider,
+      model: input.model,
+      features: [],
+      packageManager: input.packageManager ?? "npm",
+      deploy: false,
+      yes: true,
+      hasNewFlags: true,
+      ...(input.accountId ? { account: input.accountId } : {}),
+    });
+    await installProject(target, state, runner, env);
+  } else {
+    state = await readProjectState(target);
+    if (state.template !== "backend") throw new Error("The quick start needs a backend project directory.");
+    if (keyName && input.providerKey) await writeDevVars(target, { [keyName]: input.providerKey });
+  }
+  const next: FlaryProjectState = {
+    ...state,
+    provider: input.provider,
+    model: input.model,
+    widget: true,
+    workerName: workerName(input.workerName),
+    ...(input.accountId ? { accountId: input.accountId } : {}),
+    requiredSecrets: requiredSecrets("backend", input.provider, "personal", []),
+  };
+  await writeGeneratedOptions(target, next, "personal");
+  await writeFile(join(target, "src", "assistant.generated.ts"), [
+    "// Generated by the Flary quick start. Edit this file or run the setup again.",
+    "export const assistantConfig = {",
+    `  name: ${JSON.stringify(input.agentName)},`,
+    `  systemPrompt: ${JSON.stringify(input.systemPrompt)},`,
+    "} as const;",
+    "",
+  ].join("\n"));
+  await updateWrangler(target, {
+    name: next.workerName,
+    accountId: next.accountId,
+    requiredSecrets: next.requiredSecrets,
+    workersAI: next.provider === "workers-ai",
+  });
+  await writeProjectState(target, next);
+  options.log?.(`Prepared ${target}`);
+  return next;
+}
+
+export async function deployQuickstartProject(
+  target: string,
+  input: { readonly accountId: string; readonly cloudflareAccessToken?: string },
+  options: Pick<RunFlaryCliOptions, "env" | "runner" | "log"> = {},
+): Promise<FlaryProjectState> {
+  const env = {
+    ...(options.env ?? process.env),
+    ...(input.cloudflareAccessToken ? { CLOUDFLARE_API_TOKEN: input.cloudflareAccessToken } : {}),
+  };
+  return deployProject(resolve(target), {
+    runner: options.runner ?? defaultRunner,
+    env,
+    account: input.accountId,
+    prompt: defaultPrompt,
+    log: options.log ?? (() => undefined),
+  });
+}
+
 export async function runFlaryCli(args: readonly string[], options: RunFlaryCliOptions = {}): Promise<void> {
   const parsed = parseArgs(args);
   const cwd = options.cwd ?? process.cwd();
@@ -906,6 +1058,10 @@ export async function runFlaryCli(args: readonly string[], options: RunFlaryCliO
   const log = options.log ?? console.log;
   const prompt = options.prompt ?? defaultPrompt;
   if (!parsed.command || parsed.command === "help" || parsed.command === "--help" || parsed.command === "-h") return printHelp(log);
+  if (parsed.command === "quickstart") {
+    const { runQuickstart } = await import("./quickstart.js");
+    return runQuickstart({ cwd, target: parsed.target, env, runner, log });
+  }
   if (parsed.command === "create") return createProject(parsed, { cwd, env, isTTY, runner, log, prompt });
   if (parsed.command === "init") return initProject(parsed.target, cwd, log);
   const target = resolve(cwd, parsed.target ?? ".");
