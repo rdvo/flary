@@ -189,6 +189,12 @@ run("npm", ["install", "--loglevel", "error"], starter);
 run("npm", ["audit", "--audit-level=high"], starter);
 run("npm", ["run", "build"], starter);
 
+for (const name of [".dev.vars", ".env"]) {
+  if (findFiles(path.join(starter, "dist"), name).length > 0) {
+    throw new Error(`The built starter contains a secret environment file: ${name}`);
+  }
+}
+
 const dashboard = path.join(temporary, "dashboard");
 fs.cpSync(
   path.join(consumer, "node_modules/flary/templates/dashboard"),

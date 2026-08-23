@@ -335,7 +335,9 @@ test("the Vite plugin removes Cloudflare's empty migrations artefact", () => {
     );
     fs.writeFileSync(path.join(output, ".dev.vars"), "GEMINI_API_KEY=must-not-ship\n");
     const plugin = flaryVite({ root });
-    plugin.closeBundle?.();
+    const closeBundle = plugin.closeBundle;
+    if (typeof closeBundle === "function") closeBundle();
+    else closeBundle?.handler();
     const generated = JSON.parse(
       fs.readFileSync(path.join(output, "wrangler.json"), "utf8"),
     ) as { exports?: unknown; migrations?: unknown };

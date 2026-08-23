@@ -108,7 +108,9 @@ interface FlaryVitePlugin {
       }): void;
     },
   ): void;
-  closeBundle?(): void;
+  closeBundle?:
+    | (() => void)
+    | { readonly order: "post"; readonly handler: () => void };
 }
 
 const VIRTUAL_PREFIX = "\0flary:function:";
@@ -343,15 +345,16 @@ export function flary(options: FlaryVitePluginOptions = {}): {
         source: JSON.stringify(manifest, null, 2),
       });
     },
-    closeBundle() {
-      // The Cloudflare Vite plugin writes a final Wrangler config after the
-      // Flary manifest hook. Its default config can add an empty `migrations`
-      // array even when the Worker uses the new `exports` lifecycle system.
-      // Remove only that empty artefact. Never change a non-empty legacy
-      // migration list, and never remove the authored .flue-vite config.
-      if (options.generateRuntime === false) return;
-      removeEmptyLifecycleMigrations(resolvedRoot);
-      removeGeneratedSecretFiles(resolvedRoot);
+    closeBundle: {
+      order: "post",
+      handler() {
+        // Cloudflare writes its final Worker output in closeBundle. Run this
+        // hook after normal closeBundle hooks so generated secrets cannot be
+        // copied back into dist after Flary removes them.
+        if (options.generateRuntime === false) return;
+        removeEmptyLifecycleMigrations(resolvedRoot);
+        removeGeneratedSecretFiles(resolvedRoot);
+      },
     },
   };
 }
