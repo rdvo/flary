@@ -5,6 +5,7 @@ import { generated } from "./flary.generated";
 
 export const BindingsSchema = z.object({
   OPENAI_API_KEY: z.string().optional(), ANTHROPIC_API_KEY: z.string().optional(),
+  GEMINI_API_KEY: z.string().optional(),
   AI: z.custom<{ run(model: string, input: Record<string, unknown>): Promise<unknown> }>().optional(),
   FLARY_INTERNAL_TOKEN: z.string(), FLARY_SESSION_ARCHIVE_KEY: z.string(),
   FLARY_TOKEN_ENCRYPTION_KEY_B64: z.string(), FLARY_SETUP_TOKEN: z.string(), BETTER_AUTH_SECRET: z.string(),

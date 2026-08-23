@@ -3,6 +3,7 @@ export * from "./cache.js";
 export * from "./cloudflare.js";
 export * from "./contracts.js";
 export * from "./durable-adapters.js";
+export * from "./gemini.js";
 export * from "./openai-compatible.js";
 export * from "./recovery.js";
 export * from "./registry.js";

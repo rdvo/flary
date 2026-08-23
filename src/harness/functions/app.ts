@@ -25,6 +25,7 @@ import {
   OpenAICompatibleAdapter,
   AnthropicMessagesAdapter,
   CloudflareWorkersAIAdapter,
+  GeminiAdapter,
   parseFlueModelSpecifier,
   type ModelAdapter,
 } from "../providers/index.js";
@@ -2049,6 +2050,16 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
         apiKey:
           stringValue(source?.ANTHROPIC_API_KEY) ?? environmentValue("ANTHROPIC_API_KEY"),
         baseUrl: stringValue(source?.ANTHROPIC_BASE_URL),
+      });
+    }
+    if (provider === "google") {
+      return new GeminiAdapter({
+        apiKey:
+          stringValue(source?.GEMINI_API_KEY) ??
+          stringValue(source?.GOOGLE_GENERATIVE_AI_API_KEY) ??
+          environmentValue("GEMINI_API_KEY") ??
+          environmentValue("GOOGLE_GENERATIVE_AI_API_KEY"),
+        baseUrl: stringValue(source?.GOOGLE_GENERATIVE_AI_BASE_URL),
       });
     }
     return new OpenAICompatibleAdapter({

@@ -47,3 +47,22 @@ arguments.
 The Vite integration generates the durable runtime, bindings, and Cloudflare
 configuration. It also attaches the durable run service, so `.start()` does
 not use an in-memory fallback after deployment.
+
+## Chat widget
+
+Projects created by `flary quickstart` serve the chat widget at `/widget`.
+Add it to any HTML page:
+
+```html
+<flary-chat title="Support assistant"></flary-chat>
+<script src="https://YOUR-WORKER.workers.dev/widget.js"></script>
+```
+
+For React, copy `examples/FlaryChat.tsx` into your application. The component
+loads the same small Web Component. Change its colors with `--flary-ink`,
+`--flary-paper`, `--flary-accent`, and `--flary-line`.
+
+The example widget is public. It creates an in-memory visitor ID to isolate
+thread lists. It has no secret in its code. Before you use it
+on a high-traffic site, add your application identity, an origin allowlist,
+rate limits, or Turnstile in `src/flary.ts`.

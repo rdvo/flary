@@ -351,8 +351,25 @@ export function flary(options: FlaryVitePluginOptions = {}): {
       // migration list, and never remove the authored .flue-vite config.
       if (options.generateRuntime === false) return;
       removeEmptyLifecycleMigrations(resolvedRoot);
+      removeGeneratedSecretFiles(resolvedRoot);
     },
   };
+}
+
+function removeGeneratedSecretFiles(root: string): void {
+  const outputRoot = path.resolve(root, "dist");
+  if (!fs.existsSync(outputRoot)) return;
+  const pending = [outputRoot];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const file = path.join(current, entry.name);
+      if (entry.isDirectory()) pending.push(file);
+      else if (entry.name === ".dev.vars" || entry.name === ".env" || entry.name.startsWith(".env.")) {
+        fs.rmSync(file, { force: true });
+      }
+    }
+  }
 }
 
 function removeEmptyLifecycleMigrations(root: string): void {
