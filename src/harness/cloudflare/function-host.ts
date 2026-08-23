@@ -26,7 +26,7 @@ import type {
   UserInputRecord,
   UserInputRequest,
 } from "../contracts/index.js";
-import { UserInputRequestSchema } from "../contracts/index.js";
+import { IdentityReferenceSchema, UserInputRequestSchema } from "../contracts/index.js";
 import type {
   FlaryRunService,
   ObserveRunOptions,
@@ -200,7 +200,12 @@ export async function handleFlaryDurableRunObjectRequest<TEnv>(input: {
     },
   });
   try {
-    if (method === "createUserInput" || method === "getUserInput") {
+    if (
+      method === "createUserInput" ||
+      method === "getUserInput" ||
+      method === "listStoredUserInput" ||
+      method === "respondToStoredUserInput"
+    ) {
       assertInternalToken(input.request, input.env);
     }
     const body = await readJson(input.request);
@@ -275,6 +280,15 @@ async function dispatchRuntimeRpc(
       );
     case "getUserInput":
       return repository.getUserInput(string(body.runId), string(body.requestId));
+    case "listStoredUserInput":
+      return repository.listUserInput(string(body.runId));
+    case "respondToStoredUserInput":
+      return repository.respondToUserInput(
+        string(body.runId),
+        string(body.requestId),
+        body.input as UserInputAnswerRequest,
+        IdentityReferenceSchema.parse(body.answeredBy),
+      );
     default:
       throw Object.assign(new Error(`Unknown Flary Runtime method '${method}'`), {
         code: "invalid_runtime_request",

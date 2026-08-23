@@ -10,6 +10,7 @@ import {
   ThreadDeletionSchema,
   type ThreadDeletion,
   UserInputAnswerRequestSchema,
+  UserInputRecordSchema,
   type ApprovalDecision,
   type ThreadBinding,
   type ThreadCreateRequest,
@@ -231,6 +232,47 @@ export function createCloudflareThreadService<
         ? options.env.FLARY_INTERNAL_TOKEN
         : undefined,
   });
+  const runtime = options.env.FLARY_RUN_SERVICE as
+    | DurableObjectNamespace
+    | undefined;
+  const runtimeToken = typeof options.env.FLARY_INTERNAL_TOKEN === "string"
+    ? options.env.FLARY_INTERNAL_TOKEN
+    : undefined;
+  const runtimeRpc = async (
+    method: "listStoredUserInput" | "respondToStoredUserInput",
+    body: Record<string, unknown>,
+  ): Promise<unknown> => {
+    if (!runtime || !runtimeToken) {
+      throw new FlaryHostError(
+        503,
+        "user_input_unavailable",
+        "User input is not configured for this thread host",
+      );
+    }
+    const stub = runtime.get(runtime.idFromName("default"));
+    const response = await stub.fetch(new Request(
+      `https://flary.internal/rpc/${method}`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${runtimeToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    ));
+    const value = await response.json().catch(() => undefined);
+    if (!response.ok) {
+      throw new FlaryHostError(
+        response.status,
+        "user_input_failed",
+        value && typeof value === "object" && "error" in value
+          ? String((value as { error?: { message?: unknown } }).error?.message ?? "User input failed")
+          : "User input failed",
+      );
+    }
+    return value;
+  };
 
   const rpc = async (
     name: string,
@@ -1304,6 +1346,27 @@ export function createCloudflareThreadService<
         decision,
       );
     },
+    ...(runtime && runtimeToken
+      ? {
+          async listUserInput(target) {
+            const binding = await service.inspect(target);
+            const value = await runtimeRpc("listStoredUserInput", {
+              runId: threadName(binding.thread),
+            });
+            return UserInputRecordSchema.array().parse(value);
+          },
+          async respondToUserInput(target, requestId, responseInput) {
+            const binding = await service.inspect(target);
+            await runtimeRpc("respondToStoredUserInput", {
+              runId: threadName(binding.thread),
+              requestId,
+              input: UserInputAnswerRequestSchema.parse(responseInput),
+              answeredBy: target.authorization.actor,
+            });
+            return { live: true };
+          },
+        }
+      : {}),
   };
 
   async function mutateBinding(

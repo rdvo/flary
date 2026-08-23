@@ -1073,6 +1073,77 @@ test("nested Code Mode tool activity is projected once for realtime clients", as
   );
 });
 
+test("the Cloudflare thread host bridges durable interactive user input", async () => {
+  const controls = namespace();
+  const calls: Array<{ method: string; body: Record<string, any> }> = [];
+  const runtime = {
+    idFromName(name: string) { return name; },
+    get() {
+      return {
+        async fetch(request: Request) {
+          const method = new URL(request.url).pathname.split("/").at(-1)!;
+          const body = await request.json<Record<string, any>>();
+          calls.push({ method, body });
+          if (method === "listStoredUserInput") {
+            return Response.json([{
+              request: {
+                id: "input_1",
+                threadId: body.runId,
+                questions: [{
+                  header: "Delivery",
+                  question: "When should we deliver?",
+                  options: [{ label: "Tomorrow", description: "Recommended" }],
+                  multiSelect: false,
+                }],
+                requestedBy: { id: "agent", kind: "agent" },
+                requestedAt: new Date(0).toISOString(),
+              },
+              response: null,
+            }]);
+          }
+          return Response.json({ request: {}, response: body.input });
+        },
+      };
+    },
+  };
+  const service = createCloudflareThreadService({
+    env: {
+      FLARY_RUN_SERVICE: runtime,
+      FLARY_INTERNAL_TOKEN: "t".repeat(32),
+    },
+    namespace: controls,
+  });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_input",
+      actor: { id: "user_1", kind: "user" as const },
+    },
+    appId: "concierge",
+  };
+  await service.create(scope, {
+    threadId: "thread_input",
+    agentId: "concierge",
+    workspace: {
+      organizationId: "tenant_input",
+      appId: "concierge",
+      projectId: "project",
+      workspaceId: "workspace",
+      branch: "main",
+    },
+    mode: "ask",
+  });
+  const target = { ...scope, threadId: "thread_input" };
+  const requests = await service.listUserInput!(target);
+  assert.equal(requests[0]?.request.id, "input_1");
+  await service.respondToUserInput!(target, "input_1", {
+    answers: { Delivery: "Tomorrow" },
+  });
+  assert.equal(calls[0]?.method, "listStoredUserInput");
+  assert.equal(calls[0]?.body.runId, "tenant_input:concierge:concierge:thread_input");
+  assert.equal(calls[1]?.method, "respondToStoredUserInput");
+  assert.deepEqual(calls[1]?.body.answeredBy, { id: "user_1", kind: "user" });
+});
+
 test("lazy catalog and Code Mode lifecycle events are durable and safe", async () => {
   const controls = namespace();
   const service = createCloudflareThreadService({ env: {}, namespace: controls });
