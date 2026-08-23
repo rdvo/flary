@@ -69,15 +69,22 @@ function json(value: unknown): FlaryUiJson | undefined {
   }
 }
 
-function content(value: unknown): string {
+function content(
+  value: unknown,
+  seen: WeakSet<object> = new WeakSet(),
+  depth = 0
+): string {
   if (typeof value === "string") return value;
-  if (Array.isArray(value)) return value.map(content).join("");
+  if (!value || typeof value !== "object" || depth >= 32) return "";
+  if (seen.has(value)) return "";
+  seen.add(value);
+  if (Array.isArray(value))
+    return value.map((item) => content(item, seen, depth + 1)).join("");
   const valueObject = object(value);
-  return (
-    text(valueObject.text) ||
-    text(valueObject.delta) ||
-    content(valueObject.parts ?? valueObject.content ?? valueObject.message)
-  );
+  const direct = text(valueObject.text) || text(valueObject.delta);
+  if (direct) return direct;
+  const nested = valueObject.parts ?? valueObject.content ?? valueObject.message;
+  return nested === undefined ? "" : content(nested, seen, depth + 1);
 }
 
 export function normalizeFlaryUiRecords(

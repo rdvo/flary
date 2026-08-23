@@ -89,6 +89,27 @@ test("record merge replaces replay duplicates by durable sequence", () => {
   );
 });
 
+test("assistant projection ignores empty and cyclic content", () => {
+  const cyclic: Record<string, unknown> = {};
+  cyclic.content = cyclic;
+  const turns = projectFlaryUiTurns(
+    normalizeFlaryUiRecords([
+      record(1, "message.user", { message: "Hello" }),
+      record(2, "message.assistant", {}),
+      record(3, "message.assistant", { message: cyclic }),
+      record(4, "message.assistant", { message: { content: "Hi" } }),
+    ])
+  );
+
+  assert.deepEqual(
+    turns[0]?.messages.map((item) => [item.role, item.text]),
+    [
+      ["user", "Hello"],
+      ["assistant", "Hi"],
+    ]
+  );
+});
+
 test("approval records pause the turn without exposing private data", () => {
   const turns = projectFlaryUiTurns(
     normalizeFlaryUiRecords([
