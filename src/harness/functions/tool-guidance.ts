@@ -72,7 +72,8 @@ export function coreToolGuidance(
     "Use a known catalog ID directly. Load its schema with tools.describe only when the input is not known.",
     "Pass the exact catalog id or a selected item's id value to tools.call. Never pass a variable name as a quoted id.",
     "Use tools.search for an unknown application, MCP, OpenAPI, skill, or uncommon capability.",
-    "Use tools.batch({ calls: [{ id: item.id, input: {...} }] }) for independent reads. The batch runs them concurrently with stable replay order.",
+    "Every execute program must return the value needed for the next model step. Never finish with only console.log or an unreturned expression.",
+    "For independent reads, make one tools.batch({ calls: [{ id: item.id, input: {...} }] }) call and return its result. The batch runs them concurrently with stable replay order. Do not call tools.call sequentially for independent reads.",
     "Never use Promise.all with tools.call, and never batch writes or approval-required calls.",
   ].join(" ");
 }

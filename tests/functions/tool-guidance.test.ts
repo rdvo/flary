@@ -40,6 +40,9 @@ test("core tool guidance names built-ins but keeps external catalogs lazy", () =
   assert.match(description, /tools\.search/);
   assert.match(description, /bounded parallel reads/);
   assert.match(description, /Never use Promise\.all/);
+  assert.match(description, /must return the value/);
+  assert.match(description, /Never finish with only console\.log/);
+  assert.match(description, /Do not call tools\.call sequentially/);
   assert.match(description, /never batch writes/i);
   assert.match(description, /files\.read/);
 });
