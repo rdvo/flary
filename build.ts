@@ -41,11 +41,12 @@ function removeDir(dirPath: string) {
   fs.rmdirSync(dirPath);
 }
 
-const entryPoints = glob.sync("./src/**/*.ts", {
+const entryPoints = glob.sync(["./src/**/*.ts", "./src/**/*.tsx"], {
   ignore: [
     "./src/cli.ts",
     "./src/cli-api.ts",
     "./src/**/*.test.ts",
+    "./src/**/*.test.tsx",
     "./src/mod.ts",
     "./src/middleware.ts",
     "./src/deno/**/*.ts",
@@ -66,6 +67,8 @@ const addExtension = (
         let importPath = "";
         if (fs.existsSync(tsPath)) {
           importPath = args.path + extension;
+        } else if (fileExtension === ".ts" && fs.existsSync(`${p}.tsx`)) {
+          importPath = args.path + extension;
         } else {
           tsPath = path.join(
             args.resolveDir,
@@ -73,6 +76,11 @@ const addExtension = (
             `index${fileExtension}`
           );
           if (fs.existsSync(tsPath)) {
+            importPath = `${args.path}/index${extension}`;
+          } else if (
+            fileExtension === ".ts" &&
+            fs.existsSync(path.join(args.resolveDir, args.path, "index.tsx"))
+          ) {
             importPath = `${args.path}/index${extension}`;
           }
         }
@@ -86,6 +94,7 @@ const commonOptions: BuildOptions = {
   entryPoints,
   logLevel: "info",
   platform: "neutral",
+  external: ["react", "react/jsx-runtime", "react-dom", "react-dom/client"],
 };
 
 const esmBuild = async () => {
@@ -131,7 +140,11 @@ removeDir("./dist");
 
 async function main() {
   if (isWatch) {
-    const typecheck = execFile("tsc", ["-w", "--project", "tsconfig.build.json"]);
+    const typecheck = execFile("tsc", [
+      "-w",
+      "--project",
+      "tsconfig.build.json",
+    ]);
     typecheck.stdout?.pipe(process.stdout);
     typecheck.stderr?.pipe(process.stderr);
     await Promise.all([esmBuild(), cliBuild()]);

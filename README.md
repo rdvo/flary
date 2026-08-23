@@ -18,7 +18,7 @@ npx flary create
 
 The guided command asks what you want to build:
 
-- **Personal dashboard:** first-owner login, a basic durable thread console,
+- **Personal dashboard:** first-owner login, a WebSocket-first durable thread console,
   provider setup, and secret-health status.
 - **Agent backend:** typed functions and persistent agents for an existing
   website, CMS, bot, or application.

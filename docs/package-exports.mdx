@@ -16,6 +16,7 @@ declarations small and makes the host boundary easy to audit.
 | flary/flue | Low-level Flue services, lazy tools, and user input |
 | flary/host | Authenticated host routers and trusted context |
 | flary/client | Function and low-level run/thread clients |
+| flary/react | WebSocket React console, durable thread hook, and timeline projector |
 | flary/vite | Vite generation for functions, Flue entries, bindings, and tools |
 | flary/tools | Zod tools, catalogs, lazy runtime, and capability handles |
 | flary/mcp | Remote MCP discovery and safe tool adapters |
@@ -37,6 +38,7 @@ declarations small and makes the host boundary easy to audit.
 ~~~ts
 import { flary, z, AgentModeSchema, resolveAgentMode } from "flary";
 import { flary as createFunctionClient } from "flary/client";
+import { FlaryAgentConsole, useFlaryThread } from "flary/react";
 import { createFlaryCodemodeExecutor } from "flary/functions";
 import { compilePrompt } from "flary/prompts";
 import { createFlaryRunRouter } from "flary/host";

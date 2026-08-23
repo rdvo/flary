@@ -37,6 +37,11 @@ import { getFunctionState } from "./app.js";
 import { parseThreadName } from "../storage/scopes.js";
 import { normalizeFlaryCatalogCalls } from "./code-syntax.js";
 import { createR2FileConnection } from "./r2.js";
+import {
+  catalogBatchInputSchema,
+  catalogCallInputSchema,
+  normalizeCatalogCall,
+} from "./code-contract.js";
 
 /** Structural type so the public package does not import Cloudflare-only modules. */
 export interface FlaryDurableObjectState {
@@ -202,7 +207,7 @@ class FlaryCodemodeExecutor<TBindings> implements CodeExecutor<TBindings> {
           "External Flary connectors need a Durable Object state for host execution.",
         );
       }
-      const result = await executor.execute(input.code, [
+      const result = await executor.execute(normalizeFlaryCatalogCalls(input.code), [
         {
           name: "tools",
           fns: localProviders(input.tools, callCounter, false),
@@ -554,7 +559,7 @@ async function createLocalConnector<TBindings>(
             ? (args as { calls: unknown[] }).calls
             : [args];
         return calls.some((call) => {
-          const normalized = normalizeCall(call);
+          const normalized = normalizeCatalogCall(call);
           const id = normalized && typeof normalized === "object"
             ? (normalized as { id?: unknown }).id
             : undefined;
@@ -638,16 +643,8 @@ async function createLocalConnector<TBindings>(
           },
         },
         call: {
-          description: "Call one selected tool. Keep calls sequential when approval or replay can occur.",
-          inputSchema: {
-            type: "object",
-            properties: {
-              id: { type: "string" },
-              input: { type: "object" },
-            },
-            required: ["id", "input"],
-            additionalProperties: false,
-          },
+          description: "Call one selected tool with { id: item.id, input: {...} }. Keep calls sequential when approval or replay can occur.",
+          inputSchema: catalogCallInputSchema(),
           // The selected catalog item, not another item in the lazy catalog,
           // decides if this call pauses.
           requiresApproval,
@@ -663,39 +660,59 @@ async function createLocalConnector<TBindings>(
           },
         },
         batch: {
-          description: "Run independent read tools concurrently in one replay-safe bounded request. Do not batch writes.",
-          inputSchema: {
-            type: "object",
-            properties: { calls: { type: "array" } },
-            required: ["calls"],
-            additionalProperties: false,
-          },
+          description: "Run independent reads concurrently with { calls: [{ id: item.id, input: {...} }] }. Keep call order stable. Do not batch writes.",
+          inputSchema: catalogBatchInputSchema(options.maxBatchCalls ?? 16),
           execute: async (args) => {
             const batchOrdinal = activity?.claim("batch") ?? 0;
             const startedAt = Date.now();
-            const calls = Array.isArray(args)
-              ? args
-              : (args as { calls?: unknown })?.calls;
-            if (!Array.isArray(calls)) throw new Error("calls must be an array");
-            if (calls.length > (options.maxBatchCalls ?? 16)) {
-              throw new Error(`A tools.batch request can contain at most ${options.maxBatchCalls ?? 16} calls.`);
-            }
-            for (const call of calls) {
-              const normalized = normalizeCall(call);
-              const id = normalized && typeof normalized === "object"
-                ? (normalized as { id?: unknown }).id
-                : undefined;
-              const descriptor = descriptors.find((item) => item.id === id);
-              if (!descriptor) throw new Error(`Tool is not available: ${String(id)}`);
-              if (descriptor.operation !== "read" || descriptor.requiresApproval) {
-                throw new Error(`tools.batch only accepts read tools. Call '${String(id)}' sequentially.`);
-              }
-            }
-            const admitted = calls.map((call) => ({
-              call,
-              ordinal: claimToolCallOrdinal(callCounter),
-            }));
             try {
+              const calls = Array.isArray(args)
+                ? args
+                : (args as { calls?: unknown })?.calls;
+              if (!Array.isArray(calls)) {
+                throw new Error("tools.batch needs { calls: [{ id, input }] }");
+              }
+              if (calls.length === 0) {
+                throw new Error("tools.batch needs at least one call");
+              }
+              if (calls.length > (options.maxBatchCalls ?? 16)) {
+                throw new Error(`A tools.batch request can contain at most ${options.maxBatchCalls ?? 16} calls.`);
+              }
+
+              const normalizedCalls = calls.map((call, index) => {
+                const normalized = normalizeCatalogCall(call);
+                if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) {
+                  throw new Error(`tools.batch calls[${index}] must be { id, input }`);
+                }
+                const suppliedId = (normalized as { id?: unknown }).id;
+                if (typeof suppliedId !== "string" || !suppliedId.trim()) {
+                  throw new Error(`tools.batch calls[${index}] needs a string id from item.id`);
+                }
+                const exact = descriptors.find((item) => item.id === suppliedId);
+                const named = exact
+                  ? []
+                  : descriptors.filter((item) => item.name === suppliedId);
+                const descriptor = exact ?? (named.length === 1 ? named[0] : undefined);
+                if (!descriptor) {
+                  throw new Error(
+                    named.length > 1
+                      ? `Tool name '${suppliedId}' is ambiguous. Use the exact catalog item.id.`
+                      : `Tool is not available: ${suppliedId}`,
+                  );
+                }
+                if (descriptor.operation !== "read" || descriptor.requiresApproval) {
+                  throw new Error(`tools.batch only accepts read tools. Call '${descriptor.id}' sequentially.`);
+                }
+                const toolInput = (normalized as { input?: unknown }).input;
+                if (!toolInput || typeof toolInput !== "object" || Array.isArray(toolInput)) {
+                  throw new Error(`tools.batch calls[${index}].input must be an object`);
+                }
+                return { id: descriptor.id, input: toolInput };
+              });
+              const admitted = normalizedCalls.map((call) => ({
+                call,
+                ordinal: claimToolCallOrdinal(callCounter),
+              }));
               const result = await concurrentMap(
                 admitted,
                 options.maxParallelToolCalls ?? 6,
@@ -708,7 +725,7 @@ async function createLocalConnector<TBindings>(
                   ),
               );
               await activity?.record("tool.batch", batchOrdinal, {
-                callCount: calls.length,
+                callCount: normalizedCalls.length,
                 maxParallel: options.maxParallelToolCalls ?? 6,
                 durationMs: Date.now() - startedAt,
                 state: "completed",
@@ -716,7 +733,9 @@ async function createLocalConnector<TBindings>(
               return result;
             } catch (error) {
               await activity?.record("tool.batch", batchOrdinal, {
-                callCount: calls.length,
+                callCount: Array.isArray((args as { calls?: unknown })?.calls)
+                  ? ((args as { calls: unknown[] }).calls.length)
+                  : Array.isArray(args) ? args.length : 0,
                 maxParallel: options.maxParallelToolCalls ?? 6,
                 durationMs: Date.now() - startedAt,
                 state: "failed",
@@ -1009,28 +1028,37 @@ function localProviders(
   allowWrites: boolean,
 ): Record<string, (...args: unknown[]) => Promise<unknown>> {
   return {
-    search: async (query: unknown) => ({
-      items: describeRegistry(registry)
-        .filter((item) =>
-          !query || item.id.toLowerCase().includes(String(query).toLowerCase()) ||
-            item.description?.toLowerCase().includes(String(query).toLowerCase()),
-        )
-        .map(summarizeDescriptor),
-    }),
-    describe: async (id: unknown) => {
+    search: async (value: unknown) => {
+      const queryValue = typeof value === "string"
+        ? value
+        : (value as { query?: unknown } | null)?.query;
+      const query = typeof queryValue === "string" ? queryValue : "";
+      return {
+        items: describeRegistry(registry)
+          .filter((item) =>
+            !query || item.id.toLowerCase().includes(query.toLowerCase()) ||
+              item.description?.toLowerCase().includes(query.toLowerCase()),
+          )
+          .map(summarizeDescriptor),
+      };
+    },
+    describe: async (value: unknown) => {
+      const id = typeof value === "string"
+        ? value
+        : (value as { id?: unknown } | null)?.id;
       const descriptor = describeRegistry(registry).find((item) => item.id === id);
       if (!descriptor) throw new Error(`Tool is not available: ${String(id)}`);
       return descriptor;
     },
     call: async (...args: unknown[]) =>
-      invokeRegistryTool(registry, normalizeCall(args[0], args[1]), undefined, callCounter, allowWrites),
+      invokeRegistryTool(registry, normalizeCatalogCall(args[0], args[1]), undefined, callCounter, allowWrites),
     batch: async (...args: unknown[]) => {
       const value = args[0];
       const calls = Array.isArray(value)
         ? value
         : (value as { calls?: unknown })?.calls;
       if (!Array.isArray(calls)) throw new Error("calls must be an array");
-      return Promise.all(calls.map((call) => invokeRegistryTool(registry, normalizeCall(call), undefined, callCounter, allowWrites)));
+      return Promise.all(calls.map((call) => invokeRegistryTool(registry, normalizeCatalogCall(call), undefined, callCounter, allowWrites)));
     },
   };
 }
@@ -1153,7 +1181,7 @@ async function invokeCatalogTool(
   ordinal: number,
   sourceTargets: ReadonlyMap<string, SourceTarget>,
 ): Promise<unknown> {
-  const normalized = normalizeCall(value);
+  const normalized = normalizeCatalogCall(value);
   if (!normalized || typeof normalized !== "object") {
     throw new Error("A tool call must be an object");
   }
@@ -1587,17 +1615,6 @@ function scoreDescriptor(item: RegistryDescriptor, query: string): number {
 function summarizeDescriptor(item: RegistryDescriptor): Omit<RegistryDescriptor, "inputSchema" | "outputSchema"> {
   const { inputSchema: _inputSchema, outputSchema: _outputSchema, ...summary } = item;
   return summary;
-}
-
-function normalizeCall(value: unknown, input?: unknown): unknown {
-  if (typeof value === "string") return { id: value, input: input ?? {} };
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    const record = value as Record<string, unknown>;
-    if ("arguments" in record && !("input" in record)) {
-      return { ...record, input: record.arguments };
-    }
-  }
-  return value;
 }
 
 function stableJson(value: unknown): string {

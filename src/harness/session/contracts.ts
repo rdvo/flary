@@ -32,6 +32,8 @@ export const SessionRecordTypeSchema = z.enum([
   "turn.completed",
   "turn.aborted",
   "turn.settings",
+  "prompt.snapshot",
+  "provider.turn",
   "model.changed",
   "provider.segment.started",
   "provider.segment.completed",

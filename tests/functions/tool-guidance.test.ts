@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { z } from "zod";
 
 import { flary } from "../../src/harness/functions/index.ts";
 import {
@@ -51,7 +52,10 @@ test("workspace draft options are retained as typed policy", () => {
 test("local tools stay unnamed unless they are eager", () => {
   const app = flary();
   const stats = app.fn({
-    input: undefined,
+    input: z.object({
+      range: z.enum(["today", "yesterday"]).default("today"),
+      campaign: z.string().optional(),
+    }),
     output: undefined,
     run: () => ({ ok: true }),
   });
@@ -63,9 +67,11 @@ test("local tools stay unnamed unless they are eager", () => {
 
   const guidance = coreToolGuidance(registry, ["stats"]);
   assert.match(guidance, /eager application tools: stats/);
+  assert.match(guidance, /stats\(\{ range\??: "today" \| "yesterday"; campaign\?: string \}\)/);
   assert.match(guidance, /exact catalog id/);
   assert.match(guidance, /selected item's id value/);
   assert.match(guidance, /tools\.batch/);
+  assert.match(guidance, /calls: \[\{ id: item\.id, input:/);
   assert.match(guidance, /tools\.search for an unknown application/i);
   assert.doesNotMatch(guidance, /inputSchema|outputSchema/);
 });

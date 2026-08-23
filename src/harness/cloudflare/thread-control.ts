@@ -1592,6 +1592,91 @@ async function dispatchThreadControl(
     return { deletion };
   }
   if (method === "inspect") return { binding: requireBinding(sql) };
+  if (method === "recordPromptSnapshot") {
+    const binding = requireBinding(sql);
+    const promptHash = String(body.promptHash ?? "");
+    const instructions = typeof body.instructions === "string"
+      ? body.instructions
+      : "";
+    const promptBytes = new TextEncoder().encode(instructions).byteLength;
+    if (!/^[0-9a-f]{64}$/.test(promptHash)) {
+      throw new Error("The prompt snapshot hash is invalid");
+    }
+    if (!instructions || promptBytes > 1024 * 1024) {
+      throw new Error("The prompt snapshot is empty or too large");
+    }
+    if (await sha256Text(instructions) !== promptHash) {
+      throw new Error("The prompt snapshot failed its hash check");
+    }
+    const snapshotKey = `prompt-snapshot:${promptHash}`;
+    const existing = sql.exec<{ value_json: string }>(
+      "SELECT value_json FROM flary_thread_control WHERE key = ?",
+      snapshotKey,
+    ).toArray()[0];
+    if (existing) {
+      return {
+        recorded: true,
+        replay: true,
+        promptHash,
+      };
+    }
+    const capturedAt = new Date().toISOString();
+    const agentRevision = typeof body.agentRevision === "string"
+      ? body.agentRevision.slice(0, 512)
+      : typeof binding.metadata?.flaryAgentRevision === "string"
+        ? binding.metadata.flaryAgentRevision
+        : undefined;
+    const archive = canonicalArchiveFor(sql, host?.env);
+    const entry = archive
+      ? await archive.append(
+          binding.thread.threadId,
+          JSON.stringify({
+            format: "flary-rendered-agent-prompt",
+            version: 1,
+            sessionId: binding.thread.threadId,
+            agentId: binding.agentId,
+            promptHash,
+            promptBytes,
+            capturedAt,
+            ...(agentRevision ? { agentRevision } : {}),
+            instructions,
+          }),
+          "prompt.instructions",
+        )
+      : undefined;
+    put(sql, snapshotKey, {
+      promptHash,
+      promptBytes,
+      capturedAt,
+      archived: Boolean(entry),
+      ...(agentRevision ? { agentRevision } : {}),
+    });
+    await appendLedger(sql, binding, "prompt.snapshot", {
+      promptHash,
+      promptBytes,
+      capturedAt,
+      archived: Boolean(entry),
+      ...(agentRevision ? { agentRevision } : {}),
+    }, {
+      ...(entry
+        ? {
+            encryptedContentRef: {
+              storageKey: entry.storageKey,
+              sha256: entry.sha256,
+              size: entry.size,
+              mediaType: "application/vnd.flary.prompt+json",
+              keyVersion: entry.keyVersion,
+            },
+          }
+        : {}),
+    });
+    return {
+      recorded: true,
+      replay: false,
+      promptHash,
+      archived: Boolean(entry),
+    };
+  }
   if (method === "catalogDelete") {
     sql.exec("DELETE FROM flary_thread_control WHERE key = ?", `catalog:${String(body.threadId)}`);
     return { ok: true };
@@ -4714,7 +4799,10 @@ async function appendLedger(
   binding: ThreadBinding,
   recordType: SessionRecordType,
   payload: Record<string, unknown>,
-  options: { readonly producer?: SessionRecord["producer"] } = {},
+  options: {
+    readonly producer?: SessionRecord["producer"];
+    readonly encryptedContentRef?: SessionRecord["encryptedContentRef"];
+  } = {},
 ) {
   const ledger = new SqliteSessionLedger(sql);
   return ledger.append({
@@ -4733,6 +4821,9 @@ async function appendLedger(
         ? binding.metadata.flaryAgentRevision
         : "flary-thread-control-v1",
     ...(options.producer ? { producer: options.producer } : {}),
+    ...(options.encryptedContentRef
+      ? { encryptedContentRef: options.encryptedContentRef }
+      : {}),
     publicPayload: JSON.parse(JSON.stringify(payload)),
   });
 }

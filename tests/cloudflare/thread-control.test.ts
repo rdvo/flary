@@ -124,6 +124,116 @@ test("only interrupted active projections resume after eviction", () => {
   assert.equal(projectionNeedsRecovery({ status: "failed" }), false);
 });
 
+test("rendered prompts keep only safe metadata in the public ledger", async () => {
+  const storage = sqlStorage();
+  const objects = new Map<string, Uint8Array>();
+  const bucket = {
+    async put(key: string, value: ArrayBuffer | ArrayBufferView) {
+      const bytes = value instanceof ArrayBuffer
+        ? new Uint8Array(value)
+        : new Uint8Array(
+            value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength),
+          );
+      objects.set(key, bytes);
+    },
+    async get(key: string) {
+      const value = objects.get(key);
+      return value ? { arrayBuffer: async () => value.slice().buffer } : null;
+    },
+    async delete(key: string) {
+      objects.delete(key);
+    },
+  };
+  const env = {
+    FLARY_SESSION_ARCHIVE: bucket,
+    FLARY_SESSION_ARCHIVE_KEY: "p".repeat(48),
+  };
+  const call = (body: Record<string, unknown>) =>
+    handleFlaryThreadControlObjectRequest({
+      storage,
+      env,
+      request: new Request("https://flary.internal/test", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    });
+  assert.equal((await call({
+    method: "initialize",
+    tenantId: "tenant_prompt",
+    applicationId: "app",
+    binding: {
+      thread: {
+        organizationId: "tenant_prompt",
+        appId: "app",
+        agentId: "agent",
+        threadId: "thread_prompt",
+      },
+      workspace: {
+        organizationId: "tenant_prompt",
+        appId: "app",
+        projectId: "project",
+        workspaceId: "workspace",
+        branch: "main",
+      },
+      agentId: "agent",
+      defaultMode: "ask",
+      defaultThinkingLevel: "medium",
+      connectionIds: [],
+      createdBy: { id: "user", kind: "user" },
+      status: "active",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+  })).ok, true);
+  const instructions = "Organization: Secret Acme\nAPI key: never-public";
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(instructions),
+  );
+  const promptHash = [...new Uint8Array(digest)]
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+  const first = await call({
+    method: "recordPromptSnapshot",
+    tenantId: "tenant_prompt",
+    applicationId: "app",
+    promptHash,
+    instructions,
+    agentRevision: "agent-revision-1",
+  });
+  assert.equal(first.ok, true, await first.clone().text());
+  assert.equal(objects.size, 1);
+  const replay = await call({
+    method: "recordPromptSnapshot",
+    tenantId: "tenant_prompt",
+    applicationId: "app",
+    promptHash,
+    instructions,
+  });
+  assert.deepEqual(await replay.json(), {
+    recorded: true,
+    replay: true,
+    promptHash,
+  });
+  assert.equal(objects.size, 1);
+
+  const recordsResponse = await call({
+    method: "records",
+    tenantId: "tenant_prompt",
+    applicationId: "app",
+    after: 0,
+    limit: 100,
+  });
+  const records = (await recordsResponse.json() as { records: any[] }).records;
+  const snapshot = records.find((record) => record.recordType === "prompt.snapshot");
+  assert.equal(snapshot.publicPayload.promptHash, promptHash);
+  assert.equal(snapshot.publicPayload.archived, true);
+  assert.equal(JSON.stringify(snapshot).includes("Secret Acme"), false);
+  assert.equal(JSON.stringify(snapshot).includes("never-public"), false);
+  assert.equal(snapshot.encryptedContentRef.mediaType, "application/vnd.flary.prompt+json");
+});
+
 test("Flue model-turn failures are retained when the direct result is empty", () => {
   assert.equal(
     providerFailureFromFlueEvent({

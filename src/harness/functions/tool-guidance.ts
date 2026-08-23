@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { FlaryToolRegistry } from "./types.js";
 
 const WORKSPACE_READS = [
@@ -56,7 +57,9 @@ export function coreToolGuidance(
   }
   const eagerLocalToolIds = eagerTools.filter((id) => localToolIds.has(id));
   if (eagerLocalToolIds.length > 0) {
-    groups.push(`eager application tools: ${eagerLocalToolIds.join(", ")}`);
+    groups.push(`eager application tools: ${eagerLocalToolIds.map((id) =>
+      eagerToolSignature(id, registry.entries[id])
+    ).join(", ")}`);
   }
   if (localToolIds.size > eagerLocalToolIds.length) {
     groups.push("other application tools are available through tools.search");
@@ -69,9 +72,38 @@ export function coreToolGuidance(
     "Use a known catalog ID directly. Load its schema with tools.describe only when the input is not known.",
     "Pass the exact catalog id or a selected item's id value to tools.call. Never pass a variable name as a quoted id.",
     "Use tools.search for an unknown application, MCP, OpenAPI, skill, or uncommon capability.",
-    "Use one tools.batch request for independent reads. The batch runs them concurrently with stable replay order.",
+    "Use tools.batch({ calls: [{ id: item.id, input: {...} }] }) for independent reads. The batch runs them concurrently with stable replay order.",
     "Never use Promise.all with tools.call, and never batch writes or approval-required calls.",
   ].join(" ");
+}
+
+function eagerToolSignature(
+  id: string,
+  source: FlaryToolRegistry["entries"][string] | undefined,
+): string {
+  if (typeof source !== "function" || !source.definition.input) return `${id}({})`;
+  try {
+    const schema = z.toJSONSchema(source.definition.input as never) as {
+      properties?: Record<string, Record<string, unknown>>;
+      required?: string[];
+    };
+    const properties = Object.entries(schema.properties ?? {});
+    if (properties.length === 0) return `${id}({})`;
+    const required = new Set(schema.required ?? []);
+    const fields = properties.slice(0, 12).map(([name, property]) => {
+      const optional = required.has(name) ? "" : "?";
+      const values = Array.isArray(property.enum) && property.enum.length <= 8
+        ? `: ${property.enum.map((value) => JSON.stringify(value)).join(" | ")}`
+        : property.type === "string" || property.type === "number" || property.type === "boolean"
+          ? `: ${property.type}`
+          : "";
+      return `${name}${optional}${values}`;
+    });
+    if (properties.length > fields.length) fields.push("...");
+    return `${id}({ ${fields.join("; ")} })`;
+  } catch {
+    return `${id}({...})`;
+  }
 }
 
 /** Description for the one provider-visible tool. */
@@ -81,7 +113,7 @@ export function executeToolDescription(
 ): string {
   return [
     "Run bounded TypeScript in Flary's isolated tool runtime.",
-    "Use tools.call for one operation. Use tools.batch for bounded parallel reads.",
+    "Use tools.call({ id: item.id, input: {...} }) for one operation. Use tools.batch({ calls: [{ id: item.id, input: {...} }] }) for bounded parallel reads.",
     coreToolGuidance(registry, eagerTools),
   ]
     .filter(Boolean)

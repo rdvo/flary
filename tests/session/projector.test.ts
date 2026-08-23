@@ -175,6 +175,7 @@ test("the session projector retains safe model-turn failures", async () => {
       },
     },
   });
+  assert.equal(record.recordType, "provider.turn");
   assert.equal(
     (record.publicPayload.response as Record<string, unknown>).responseId,
     "[REDACTED]",

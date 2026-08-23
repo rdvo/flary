@@ -149,7 +149,10 @@ export interface FlaryAgentThreadHandle {
   markRead(throughSequence?: number): Promise<ThreadBinding>;
   delete(): Promise<ThreadDeletion>;
   approvals(): Promise<unknown[]>;
+  approve(approvalId: string, options?: { reason?: string }): Promise<void>;
+  reject(approvalId: string, options?: { reason?: string }): Promise<void>;
   userInput(): Promise<readonly unknown[]>;
+  sendInput(requestId: string, answers: Readonly<Record<string, string>>): Promise<unknown>;
   setGoal(input: {
     objective: string;
     tokenBudget?: number;
@@ -416,7 +419,20 @@ function makeAgentThreadHandle(
     markRead: (throughSequence) => client.markRead(ref, throughSequence),
     delete: () => client.delete(ref),
     approvals: () => client.approvals(ref),
+    approve: (approvalId, options = {}) => client.decideApproval(ref, approvalId, {
+      status: "approved",
+      decidedBy: binding.createdBy,
+      decidedAt: new Date().toISOString(),
+      ...(options.reason ? { comment: options.reason } : {}),
+    }),
+    reject: (approvalId, options = {}) => client.decideApproval(ref, approvalId, {
+      status: "rejected",
+      decidedBy: binding.createdBy,
+      decidedAt: new Date().toISOString(),
+      ...(options.reason ? { comment: options.reason } : {}),
+    }),
     userInput: () => client.userInput(ref),
+    sendInput: (requestId, answers) => client.respondToUserInput(ref, requestId, { answers }),
     setGoal: (input) => client.setGoal(ref, input),
     clearGoal: () => client.clearGoal(ref),
     model: {

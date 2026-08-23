@@ -28,7 +28,41 @@ const api = flary<typeof functions>({
 Do not place a personal backend token in public browser code. Use your
 application session, a trusted server route, or the dashboard's secure cookie.
 
-## Your own web UI
+## Use the ready React console
+
+Flary ships the same WebSocket console that the dashboard starter uses. It
+includes thread creation and deletion, replay, reconnect, optimistic messages,
+one ordered activity rail, tool details, approvals, interruption, and the
+composer.
+
+```tsx
+import { flary } from "flary/client";
+import { FlaryAgentConsole } from "flary/react";
+import type { functions } from "../worker/src/index";
+
+const api = flary<typeof functions>({
+  baseUrl: "/api/flary",
+  headers: getApplicationSessionHeaders,
+});
+
+export function AgentPanel() {
+  return <FlaryAgentConsole agent={api.support} title="Support agent" />;
+}
+```
+
+The component does not copy the session into application storage. Flary stays
+the session authority. The browser stores only the newest replay cursor.
+
+Style the outer shell or build your own view from the same hook:
+
+```tsx
+import { useFlaryThread } from "flary/react";
+
+const state = useFlaryThread({ thread });
+// state.turns, state.send(), state.interrupt(), state.approve()
+```
+
+## Build your own web UI
 
 Store two values in the UI:
 
@@ -51,8 +85,9 @@ for await (const event of thread.stream({ after: savedCursor })) {
 }
 ```
 
-Use `thread.connect()` when the UI needs bidirectional WebSocket control. SSE
-is the read-only fallback.
+Use `thread.connect()` when the UI needs bidirectional WebSocket control. The
+connection uses one short-lived ticket, resumes from a durable cursor, and can
+sleep with its Thread Control Durable Object. SSE is the read-only fallback.
 
 ## Telegram, Discord, CMS, or webhook
 

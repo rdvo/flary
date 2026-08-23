@@ -174,7 +174,8 @@ function recordTypeForProjectedEvent(
 
 export function recordTypeForEvent(type: string): SessionRecordType {
   if (type === "turn_request" || type === "turn.started") return "turn.started";
-  if (type === "turn" || type === "turn.completed") return "turn.completed";
+  if (type === "turn") return "provider.turn";
+  if (type === "turn.completed") return "turn.completed";
   if (type === "turn.aborted") return "turn.aborted";
   if (type === "message.user") return "message.user";
   if (

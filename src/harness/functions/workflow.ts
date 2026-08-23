@@ -19,6 +19,7 @@ import { toFlueThinkingLevel } from "../flue/agent.js";
 import { normalizeModelInput } from "../contracts/provider.js";
 import { toFlueModelSpecifier } from "../providers/resolver.js";
 import { parseThreadName } from "../storage/scopes.js";
+import { recordResolvedAgentPrompt } from "../cloudflare/prompt-trace.js";
 import { getAgentState, getFunctionState } from "./app.js";
 import type { FlaryAgent, FlaryFunction } from "./types.js";
 import {
@@ -266,9 +267,20 @@ export function defineFlaryInteractiveAgent(
         : []),
       ...coordinationTools,
     ];
+    const instructions = interactiveAgentInstructions(active, authoredInstructions);
+    await recordResolvedAgentPrompt({
+      env: env as Record<string, unknown>,
+      runId: id,
+      instructions,
+      agentRevision: active.revision,
+    }).catch(() => {
+      // Do not log the rendered prompt or the upstream error body. A trace
+      // outage must remain visible without exposing tenant instructions.
+      console.warn("[Flary] The encrypted prompt trace could not be recorded");
+    });
     return {
       model,
-      instructions: interactiveAgentInstructions(active, authoredInstructions),
+      instructions,
       ...(definition.skills?.length
         ? { skills: definition.skills.map(toFlueSkillReference) }
         : {}),
