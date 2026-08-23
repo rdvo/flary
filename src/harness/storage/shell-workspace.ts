@@ -9,6 +9,7 @@ import type { ToolProvider } from "@cloudflare/codemode";
 import type { SqlStorage } from "@cloudflare/workers-types";
 
 import {
+  ProjectFileCopyRequestSchema,
   ProjectFileDeleteRequestSchema,
   ProjectFileDeleteResponseSchema,
   ProjectFileEditRequestSchema,
@@ -18,13 +19,17 @@ import {
   ProjectFileListResponseSchema,
   ProjectFileMoveRequestSchema,
   ProjectFileMutationResponseSchema,
+  ProjectFilePatchRequestSchema,
+  ProjectFilePatchResponseSchema,
   ProjectFileReadRequestSchema,
   ProjectFileReadResponseSchema,
   ProjectFileWriteRequestSchema,
+  type ProjectFileCopyRequestInput,
   type ProjectFileDeleteRequestInput,
   type ProjectFileEditRequestInput,
   type ProjectFileListRequestInput,
   type ProjectFileMoveRequestInput,
+  type ProjectFilePatchRequestInput,
   type ProjectFileMutationResponse,
   type ProjectFileReadRequest,
   type ProjectFileReadResponse,
@@ -52,6 +57,7 @@ import {
   workspacePathMatches,
   workspaceSha256Hex,
 } from "./workspace-codec.js";
+import { applyWorkspaceUnifiedPatch } from "./workspace-patch.js";
 
 export const FLARY_WORKSPACE_INLINE_THRESHOLD = 1_500_000;
 
@@ -350,6 +356,20 @@ export class ShellWorkspace {
     });
   }
 
+  async copy(input: ProjectFileCopyRequestInput) {
+    const request = ProjectFileCopyRequestSchema.parse(input);
+    if (this.#getMeta(request.to) && !request.overwrite) {
+      throw new Error(`Project file already exists: ${request.to}`);
+    }
+    const source = await this.read({ path: request.from, encoding: "base64" });
+    return this.write({
+      path: request.to,
+      content: source.content,
+      encoding: "base64",
+      mediaType: source.file.mediaType,
+    });
+  }
+
   async edit(input: ProjectFileEditRequestInput) {
     const request = ProjectFileEditRequestSchema.parse(input);
     const current = await this.read({ path: request.path, encoding: "utf8" });
@@ -385,6 +405,28 @@ export class ShellWorkspace {
     return ProjectFileEditResponseSchema.parse({
       file: result.file,
       replacementCount,
+    });
+  }
+
+  async applyPatch(input: ProjectFilePatchRequestInput) {
+    const request = ProjectFilePatchRequestSchema.parse(input);
+    const current = await this.read({ path: request.path, encoding: "utf8" });
+    if (
+      request.expectedSha256 &&
+      current.file.sha256 !== request.expectedSha256
+    ) {
+      throw new Error("File changed before the patch was applied");
+    }
+    const applied = applyWorkspaceUnifiedPatch(current.content, request.patch, request.path);
+    const result = await this.write({
+      path: request.path,
+      content: applied.content,
+      encoding: "utf8",
+      mediaType: current.file.mediaType,
+    });
+    return ProjectFilePatchResponseSchema.parse({
+      file: result.file,
+      hunkCount: applied.hunkCount,
     });
   }
 

@@ -47,10 +47,16 @@ function target(): WorkspaceToolTarget {
     async edit() {
       return { file, replacementCount: 1 };
     },
+    async applyPatch() {
+      return { file, hunkCount: 1 };
+    },
     async delete() {
       return { deleted: [file.path] };
     },
     async move() {
+      return { file };
+    },
+    async copy() {
       return { file };
     },
     async list() {
@@ -124,7 +130,7 @@ test("workspace tools are lazy, typed, and approval-aware", async () => {
   const catalog = new InMemoryToolCatalog();
   const registered = registerWorkspaceTools(catalog, target());
 
-  assert.equal(registered.descriptors.length, 16);
+  assert.equal(registered.descriptors.length, 18);
   const write = await catalog.load({ id: "workspace.file.write" });
   assert.equal(write?.capability.requiresApproval, true);
   const read = await catalog.loadHandle<

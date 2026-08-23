@@ -170,6 +170,14 @@ export type ProjectFileMoveRequest = z.output<
   typeof ProjectFileMoveRequestSchema
 >;
 
+export const ProjectFileCopyRequestSchema = ProjectFileMoveRequestSchema;
+export type ProjectFileCopyRequestInput = z.input<
+  typeof ProjectFileCopyRequestSchema
+>;
+export type ProjectFileCopyRequest = z.output<
+  typeof ProjectFileCopyRequestSchema
+>;
+
 export const ProjectTextEditSchema = z
   .object({
     oldText: z.string().min(1).max(2 * 1024 * 1024),
@@ -193,6 +201,20 @@ export type ProjectFileEditRequest = z.output<
   typeof ProjectFileEditRequestSchema
 >;
 
+export const ProjectFilePatchRequestSchema = z
+  .object({
+    path: ProjectFilePathSchema,
+    patch: z.string().min(1).max(8 * 1024 * 1024),
+    expectedSha256: Sha256HexSchema.optional(),
+  })
+  .strict();
+export type ProjectFilePatchRequestInput = z.input<
+  typeof ProjectFilePatchRequestSchema
+>;
+export type ProjectFilePatchRequest = z.output<
+  typeof ProjectFilePatchRequestSchema
+>;
+
 export const ProjectFileMutationResponseSchema = z
   .object({
     file: ProjectFileEntrySchema,
@@ -208,6 +230,14 @@ export const ProjectFileEditResponseSchema =
   }).strict();
 export type ProjectFileEditResponse = z.infer<
   typeof ProjectFileEditResponseSchema
+>;
+
+export const ProjectFilePatchResponseSchema =
+  ProjectFileMutationResponseSchema.extend({
+    hunkCount: z.number().int().positive(),
+  }).strict();
+export type ProjectFilePatchResponse = z.infer<
+  typeof ProjectFilePatchResponseSchema
 >;
 
 export const WorkspaceMutationSchema = z.discriminatedUnion("operation", [
@@ -243,8 +273,20 @@ export const WorkspaceMutationSchema = z.discriminatedUnion("operation", [
     .strict(),
   z
     .object({
+      operation: z.literal("copy"),
+      request: ProjectFileCopyRequestSchema,
+    })
+    .strict(),
+  z
+    .object({
       operation: z.literal("edit"),
       request: ProjectFileEditRequestSchema,
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("applyPatch"),
+      request: ProjectFilePatchRequestSchema,
     })
     .strict(),
 ]);

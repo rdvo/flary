@@ -312,6 +312,12 @@ export interface FlaryAgentOptions<TBindings = unknown> {
   readonly mode?: string;
   readonly tools?: FlaryToolRegistry;
   /**
+   * Attach a durable Cloudflare workspace without building a tool registry by
+   * hand. `"thread"` gives each thread its own files. `"project"` shares one
+   * workspace across the authenticated tenant project.
+   */
+  readonly workspace?: FlaryAgentWorkspace;
+  /**
    * Small catalog IDs that the model may know before tool search.
    * Schemas remain lazy and load only through tools.describe.
    */
@@ -374,6 +380,18 @@ export interface FlaryWorkspaceOptions {
   readonly tools?: readonly string[];
   /** Hide trusted host metadata from model-visible workspace tools. */
   readonly hiddenPaths?: readonly string[];
+}
+
+export type FlaryAgentWorkspace =
+  | "thread"
+  | "project"
+  | FlaryAgentWorkspaceOptions;
+
+/** Simple agent-level configuration for the built-in workspace source. */
+export interface FlaryAgentWorkspaceOptions extends FlaryWorkspaceOptions {
+  readonly scope?: "thread" | "project";
+  /** Tool namespace. Defaults to `workspace`. */
+  readonly namespace?: string;
 }
 
 /** Tenant-scoped object storage exposed as lazy file tools. */

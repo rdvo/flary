@@ -116,6 +116,39 @@ Your web UI, Telegram bot, Discord bot, mobile app, or backend can open a
 thread, send messages, stream events, reconnect from a cursor, and respond to
 approvals. You do not write a route for each agent operation.
 
+### Persistent files
+
+Give each thread a durable serverless filesystem with one option:
+
+```ts
+export const writer = app.agent({
+  name: "writer",
+  workspace: "thread",
+  instructions: "Create and edit the requested files.",
+});
+```
+
+The agent receives lazy `workspace` tools for list, stat, glob, grep, read,
+diff, write, edit, apply-patch, batch-edit, copy, move, delete, and Git. Small
+files stay in Durable Object SQLite. Large files spill to R2. Flary restores
+the same workspace when the thread resumes and creates a checkpoint after each
+turn.
+
+Use `workspace: "project"` when authenticated threads in one tenant project
+must share the same files. Use the detailed form to set draft-write policy,
+hidden paths, branches, or a custom namespace:
+
+```ts
+workspace: {
+  scope: "thread",
+  mode: "draft",
+  hiddenPaths: [".private"],
+}
+```
+
+Add `app.sandbox()` to the normal tool registry when the agent must run builds,
+tests, or long-lived processes against `/workspace`.
+
 ## Core terms
 
 - **Function:** one finite typed operation.

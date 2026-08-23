@@ -3,10 +3,12 @@ import {
   type WorkspaceRef,
 } from "../contracts/tenancy.js";
 import {
+  ProjectFileCopyRequestSchema,
   ProjectFileDeleteRequestSchema,
   ProjectFileEditRequestSchema,
   ProjectFileListRequestSchema,
   ProjectFileMoveRequestSchema,
+  ProjectFilePatchRequestSchema,
   ProjectFileReadRequestSchema,
   ProjectFileWriteRequestSchema,
 } from "../contracts/filesystem.js";
@@ -341,8 +343,10 @@ const WORKSPACE_METHODS = new Set([
   "read",
   "write",
   "edit",
+  "applyPatch",
   "delete",
   "move",
+  "copy",
   "list",
   "stat",
   "glob",
@@ -441,8 +445,10 @@ export async function createCloudflareWorkspaceConnection(
     ["diff", "Compare workspace files or content", "read"],
     ["write", "Write one workspace file", "write"],
     ["edit", "Apply text edits to one workspace file", "write"],
+    ["applyPatch", "Apply a unified diff to one workspace file", "write"],
     ["batchEdit", "Apply a group of workspace edits", "write"],
     ["move", "Move a workspace file", "write"],
+    ["copy", "Copy a workspace file", "write"],
     ["delete", "Delete a workspace file", "write"],
   ] as const;
   const fileInputSchemas = {
@@ -454,8 +460,10 @@ export async function createCloudflareWorkspaceConnection(
     diff: WorkspaceDiffRequestSchema,
     write: ProjectFileWriteRequestSchema,
     edit: ProjectFileEditRequestSchema,
+    applyPatch: ProjectFilePatchRequestSchema,
     batchEdit: WorkspaceBatchEditRequestSchema,
     move: ProjectFileMoveRequestSchema,
+    copy: ProjectFileCopyRequestSchema,
     delete: ProjectFileDeleteRequestSchema,
   } as const;
   const readGit = new Set(["status", "log", "diff", "remote"]);
@@ -521,8 +529,10 @@ function workspaceProxy(
     read: (input) => call("read", input) as ReturnType<WorkspaceToolTarget["read"]>,
     write: (input) => call("write", input) as ReturnType<WorkspaceToolTarget["write"]>,
     edit: (input) => call("edit", input) as ReturnType<WorkspaceToolTarget["edit"]>,
+    applyPatch: (input) => call("applyPatch", input) as ReturnType<WorkspaceToolTarget["applyPatch"]>,
     delete: (input) => call("delete", input) as ReturnType<WorkspaceToolTarget["delete"]>,
     move: (input) => call("move", input) as ReturnType<WorkspaceToolTarget["move"]>,
+    copy: (input) => call("copy", input) as ReturnType<WorkspaceToolTarget["copy"]>,
     list: (input) => call("list", input) as ReturnType<WorkspaceToolTarget["list"]>,
     stat: (path) => call("stat", path) as ReturnType<WorkspaceToolTarget["stat"]>,
     glob: (input) => call("glob", input) as ReturnType<WorkspaceToolTarget["glob"]>,

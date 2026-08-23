@@ -12,7 +12,9 @@ const WORKSPACE_READS = [
 const WORKSPACE_WRITES = [
   "write",
   "edit",
+  "applyPatch",
   "batchEdit",
+  "copy",
   "move",
   "delete",
 ] as const;

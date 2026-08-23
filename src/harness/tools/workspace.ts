@@ -10,9 +10,12 @@ import {
   GitStatusRequestSchema,
   GitStatusResponseSchema,
   ProjectFileDeleteRequestSchema,
+  ProjectFileCopyRequestSchema,
   ProjectFileEditRequestSchema,
   ProjectFileListRequestSchema,
   ProjectFileMoveRequestSchema,
+  ProjectFilePatchRequestSchema,
+  ProjectFilePatchResponseSchema,
   ProjectFileReadRequestSchema,
   ProjectFileWriteRequestSchema,
   WorkspaceBatchEditRequestSchema,
@@ -34,6 +37,7 @@ import {
   type GitStatusRequest,
   type GitStatusResponse,
   type ProjectFileDeleteRequest,
+  type ProjectFileCopyRequest,
   type ProjectFileEditRequest,
   type ProjectFileListRequest,
   type ProjectFileMoveRequest,
@@ -62,6 +66,8 @@ import {
   type ProjectFileMutationResponse,
   type ProjectFileDeleteResponse,
   type ProjectFileMoveRequestInput,
+  type ProjectFilePatchRequest,
+  type ProjectFilePatchResponse,
 } from "../contracts/filesystem";
 import type { JsonObject } from "../contracts/common";
 import type {
@@ -75,6 +81,8 @@ export interface WorkspaceToolTarget {
   read(input: ProjectFileReadRequest): Promise<ProjectFileReadResponse>;
   write(input: ProjectFileWriteRequestInput): Promise<ProjectFileMutationResponse>;
   edit(input: ProjectFileEditRequest): Promise<ProjectFileEditResponse>;
+  applyPatch(input: ProjectFilePatchRequest): Promise<ProjectFilePatchResponse>;
+  copy(input: ProjectFileCopyRequest): Promise<ProjectFileMutationResponse>;
   delete(input: ProjectFileDeleteRequest): Promise<ProjectFileDeleteResponse>;
   move(input: ProjectFileMoveRequestInput): Promise<ProjectFileMutationResponse>;
   list(input: ProjectFileListRequest): Promise<ProjectFileListResponse>;
@@ -254,6 +262,16 @@ export function registerWorkspaceTools(
     approval,
   );
   register(
+    "workspace.file.apply-patch",
+    "Apply workspace patch",
+    "Apply a unified diff to one workspace text file.",
+    ["workspace.write"],
+    (input) => target.applyPatch(ProjectFilePatchRequestSchema.parse(input)),
+    ProjectFilePatchRequestSchema,
+    ProjectFilePatchResponseSchema,
+    approval,
+  );
+  register(
     "workspace.file.delete",
     "Delete workspace file",
     "Delete one file or a validated directory tree.",
@@ -270,6 +288,16 @@ export function registerWorkspaceTools(
     ["workspace.write"],
     (input) => target.move(ProjectFileMoveRequestSchema.parse(input)),
     ProjectFileMoveRequestSchema,
+    ProjectFileMutationResponseSchema,
+    approval,
+  );
+  register(
+    "workspace.file.copy",
+    "Copy workspace file",
+    "Copy a file inside the current workspace.",
+    ["workspace.write"],
+    (input) => target.copy(ProjectFileCopyRequestSchema.parse(input)),
+    ProjectFileCopyRequestSchema,
     ProjectFileMutationResponseSchema,
     approval,
   );

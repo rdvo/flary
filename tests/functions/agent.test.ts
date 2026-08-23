@@ -128,6 +128,42 @@ test("app.agent compiles to Flue and serves durable thread controls", async () =
   assert.equal((messages[0] as { model?: string }).model, "anthropic/claude-sonnet");
 });
 
+test("app.agent attaches a durable thread workspace with one option", () => {
+  const app = flary();
+  const agent = app.agent({ name: "writer", workspace: "thread" });
+
+  assert.deepEqual(agent.definition.tools?.names, ["workspace"]);
+  const source = agent.definition.tools?.entries.workspace;
+  assert.equal(typeof source, "object");
+  assert.equal(source?.kind, "workspace");
+  if (source?.kind !== "workspace") return;
+  assert.deepEqual(source.options, {
+    checkpoint: "turn",
+    branch: "main",
+  });
+});
+
+test("app.agent can share a project workspace and retain application tools", () => {
+  const app = flary();
+  const lookup = app.fn({ run: () => ({ ok: true }) });
+  const agent = app.agent({
+    name: "builder",
+    tools: app.tools({ lookup }),
+    workspace: { scope: "project", namespace: "files", mode: "draft" },
+  });
+
+  assert.deepEqual(agent.definition.tools?.names, ["lookup", "files"]);
+  const source = agent.definition.tools?.entries.files;
+  assert.equal(source?.kind, "workspace");
+  if (source?.kind !== "workspace") return;
+  assert.deepEqual(source.options, {
+    checkpoint: "turn",
+    branch: "main",
+    workspaceId: "project",
+    mode: "draft",
+  });
+});
+
 test("durable subagents use their own provider and the root runtime binding", async () => {
   const actions: Array<{ action: string; input: Record<string, unknown> }> = [];
   const service: FlaryThreadHostService = {

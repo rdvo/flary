@@ -99,6 +99,7 @@ import type {
   FlaryToolSource,
   FlaryWorkspaceSource,
   FlaryWorkspaceOptions,
+  FlaryAgentWorkspace,
   FlaryIdentity,
   FlarySkill,
 } from "./types.js";
@@ -491,38 +492,61 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
   /** Define a persistent interactive agent. Flue remains its transcript owner. */
   agent(definition: FlaryAgentOptions<TBindings>): FlaryAgent<TBindings> {
     assertNamespace(definition.name);
-    validateAgentDefinition(definition);
+    const normalized = this.agentDefinition(definition);
+    validateAgentDefinition(normalized);
     const value = {
       kind: "agent" as const,
-      name: definition.name,
-      definition: Object.freeze({ ...definition }),
+      name: normalized.name,
+      definition: Object.freeze({ ...normalized }),
       revision: stableRevision({
-        name: definition.name,
-        instructions: typeof definition.instructions === "string"
-          ? definition.instructions
-          : definition.instructions
+        name: normalized.name,
+        instructions: typeof normalized.instructions === "string"
+          ? normalized.instructions
+          : normalized.instructions
             ? "dynamic"
             : undefined,
-        model: definition.model ?? this.options.model,
-        models: definition.models,
-        thinking: definition.thinking,
-        mode: definition.mode,
-        tools: definition.tools?.descriptors ?? [],
-        eagerTools: definition.eagerTools ?? [],
-        skills: definition.skills?.map((skill) => ({
+        model: normalized.model ?? this.options.model,
+        models: normalized.models,
+        thinking: normalized.thinking,
+        mode: normalized.mode,
+        tools: normalized.tools?.descriptors ?? [],
+        workspace: normalized.workspace,
+        eagerTools: normalized.eagerTools ?? [],
+        skills: normalized.skills?.map((skill) => ({
           name: skill.name,
           revision: skill.revision,
         })),
-        subagents: Object.keys(definition.subagents ?? {}).sort(),
-        delegation: definition.delegation,
-        compaction: definition.compaction,
-        limits: definition.limits,
+        subagents: Object.keys(normalized.subagents ?? {}).sort(),
+        delegation: normalized.delegation,
+        compaction: normalized.compaction,
+        limits: normalized.limits,
       }),
     } as FlaryAgent<TBindings> & { [AGENT_STATE]?: AgentState };
     Object.defineProperty(value, AGENT_STATE, {
-      value: { app: this, definition },
+      value: { app: this, definition: normalized },
     });
     return Object.freeze(value);
+  }
+
+  private agentDefinition(
+    definition: FlaryAgentOptions<TBindings>,
+  ): FlaryAgentOptions<TBindings> {
+    if (!definition.workspace) return definition;
+    const configured = normalizeAgentWorkspace(definition.workspace);
+    assertNamespace(configured.namespace);
+    if (definition.tools?.entries[configured.namespace]) {
+      throw new FlaryFunctionError(
+        "duplicate_agent_workspace",
+        `Tool namespace '${configured.namespace}' is already registered. Remove it from tools or remove agent.workspace.`,
+        400,
+      );
+    }
+    const source = this.workspace(configured.options);
+    const tools = this.tools({
+      ...(definition.tools?.entries ?? {}),
+      [configured.namespace]: source,
+    });
+    return Object.freeze({ ...definition, tools });
   }
 
   /** Define one immutable, lazily discoverable skill revision. */
@@ -2544,6 +2568,27 @@ function validateAgentDefinition(
   }
 }
 
+function normalizeAgentWorkspace(value: FlaryAgentWorkspace): {
+  readonly namespace: string;
+  readonly options: FlaryWorkspaceOptions;
+} {
+  const input = typeof value === "string" ? { scope: value } : value;
+  const {
+    scope = "thread",
+    namespace = "workspace",
+    ...options
+  } = input;
+  return {
+    namespace,
+    options: {
+      ...options,
+      checkpoint: options.checkpoint ?? "turn",
+      branch: options.branch ?? "main",
+      ...(scope === "project" ? { workspaceId: options.workspaceId ?? "project" } : {}),
+    },
+  };
+}
+
 function validateEagerTools(
   tools: FlaryToolRegistry | undefined,
   eagerTools: readonly string[] | undefined,
@@ -2997,8 +3042,10 @@ function defaultWorkspaceResolver<TBindings>(
       ["diff", "Compare workspace files or content", "read"],
       ["write", "Write one workspace file", "write"],
       ["edit", "Apply text edits to one workspace file", "write"],
+      ["applyPatch", "Apply a unified diff to one workspace file", "write"],
       ["batchEdit", "Apply a group of workspace edits", "write"],
       ["move", "Move a workspace file", "write"],
+      ["copy", "Copy a workspace file", "write"],
       ["delete", "Delete a workspace file", "write"],
     ] as const;
     const allowed = Array.isArray(options.tools)
