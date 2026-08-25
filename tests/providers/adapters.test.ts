@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   AnthropicMessagesAdapter,
+  GeminiAdapter,
   ModelRequestSchema,
   OpenAICompatibleAdapter,
   ProviderAdapterRegistry,
@@ -165,6 +166,38 @@ test("Anthropic Messages streaming normalizes message events", async () => {
     assert.equal(finish.response.content, "Hi");
     assert.equal(finish.response.usage?.totalTokens, 5);
   }
+});
+
+test("Gemini streams provider deltas and sends the selected thinking level", async () => {
+  let body: Record<string, any> | undefined;
+  let requestedUrl = "";
+  const adapter = new GeminiAdapter({
+    apiKey: "gemini-key",
+    fetch: async (input, init) => {
+      requestedUrl = String(input);
+      body = JSON.parse(String(init?.body)) as Record<string, any>;
+      return sseResponse([
+        "data: {\"responseId\":\"gemini-1\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Fast \"}]}}]}\n\n",
+        "data: {\"responseId\":\"gemini-1\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"reply\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":3,\"candidatesTokenCount\":2,\"totalTokenCount\":5}}\n\n",
+      ]);
+    },
+  });
+
+  const events = await collect(adapter.stream({
+    ...request,
+    model: "gemini-3.7-flash",
+    reasoningEffort: "low",
+  }));
+
+  assert.match(requestedUrl, /:streamGenerateContent\?alt=sse/);
+  assert.deepEqual(body?.generationConfig?.thinkingConfig, { thinkingLevel: "LOW" });
+  assert.deepEqual(
+    events.filter((event) => event.type === "text_delta").map((event) => event.type === "text_delta" ? event.delta : ""),
+    ["Fast ", "reply"],
+  );
+  const finish = events.at(-1);
+  assert.equal(finish?.type, "finish");
+  if (finish?.type === "finish") assert.equal(finish.response.content, "Fast reply");
 });
 
 test("registry resolves adapters by provider ID", () => {

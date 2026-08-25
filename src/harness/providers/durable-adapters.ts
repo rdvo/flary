@@ -13,6 +13,7 @@ import {
   type ProviderToolCall,
   type ProviderUsage,
 } from "./contracts.js";
+import { geminiThinkingConfig } from "./gemini.js";
 import {
   AnthropicMessagesAdapter,
   type AnthropicMessagesAdapterOptions,
@@ -836,6 +837,7 @@ function geminiBody(request: ModelRequest): Record<string, unknown> {
         request.responseFormat === undefined
           ? undefined
           : "application/json",
+      ...geminiThinkingConfig(request),
     },
   };
   if (system) body.systemInstruction = { parts: [{ text: system }] };

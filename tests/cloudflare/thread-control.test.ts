@@ -127,8 +127,12 @@ test("only interrupted active projections resume after eviction", () => {
 test("rendered prompts keep only safe metadata in the public ledger", async () => {
   const storage = sqlStorage();
   const objects = new Map<string, Uint8Array>();
+  const background: Promise<unknown>[] = [];
+  let releaseArchive!: () => void;
+  const archiveGate = new Promise<void>((resolve) => { releaseArchive = resolve; });
   const bucket = {
     async put(key: string, value: ArrayBuffer | ArrayBufferView) {
+      await archiveGate;
       const bytes = value instanceof ArrayBuffer
         ? new Uint8Array(value)
         : new Uint8Array(
@@ -152,6 +156,7 @@ test("rendered prompts keep only safe metadata in the public ledger", async () =
     handleFlaryThreadControlObjectRequest({
       storage,
       env,
+      execution: { waitUntil: (work) => { background.push(work); } },
       request: new Request("https://flary.internal/test", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -203,6 +208,9 @@ test("rendered prompts keep only safe metadata in the public ledger", async () =
     agentRevision: "agent-revision-1",
   });
   assert.equal(first.ok, true, await first.clone().text());
+  assert.equal(objects.size, 0);
+  releaseArchive();
+  await Promise.all(background.splice(0));
   assert.equal(objects.size, 1);
   const replay = await call({
     method: "recordPromptSnapshot",

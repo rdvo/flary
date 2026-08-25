@@ -9,6 +9,7 @@ import {
   type ProviderToolCall,
 } from "./contracts.js";
 import type { ModelAdapter, ProviderRequestOptions } from "./types.js";
+import { parseServerSentEvents } from "./utils.js";
 
 export interface GeminiAdapterOptions {
   readonly id?: string;
@@ -21,7 +22,7 @@ export interface GeminiAdapterOptions {
 export class GeminiAdapter implements ModelAdapter {
   readonly id: string;
   readonly provider = "google" as const;
-  readonly supportsStreaming = false;
+  readonly supportsStreaming = true;
   readonly #apiKey?: string;
   readonly #baseUrl: string;
   readonly #fetch: typeof fetch;
@@ -55,24 +56,99 @@ export class GeminiAdapter implements ModelAdapter {
     return geminiResponse(await response.json(), request.model, this.id);
   }
 
-  async *stream(request: ModelRequest, options: ProviderRequestOptions = {}): AsyncIterable<ModelStreamEvent> {
-    const response = await this.complete(request, options);
-    yield ProviderStreamEventSchema.parse({ type: "start", responseId: response.id, model: response.model });
-    if (response.content) {
-      yield ProviderStreamEventSchema.parse({ type: "text_delta", responseId: response.id, delta: response.content });
+  async *stream(requestValue: ModelRequest, options: ProviderRequestOptions = {}): AsyncIterable<ModelStreamEvent> {
+    const request = ModelRequestSchema.parse(requestValue);
+    const url = new URL(
+      `${this.#baseUrl.replace(/\/$/, "")}/models/${encodeURIComponent(request.model)}:streamGenerateContent`,
+    );
+    url.searchParams.set("alt", "sse");
+    const response = await this.#fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "accept": "text/event-stream",
+        ...(this.#apiKey ? { "x-goog-api-key": this.#apiKey } : {}),
+        ...headersRecord(options.headers),
+      },
+      body: JSON.stringify(geminiRequest(request)),
+      signal: options.signal ?? (options.timeoutMs ? AbortSignal.timeout(options.timeoutMs) : undefined),
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      throw new Error(`Gemini request failed with HTTP ${response.status}${detail ? `: ${detail.slice(0, 300)}` : "."}`);
     }
-    for (const [index, call] of response.toolCalls.entries()) {
-      yield ProviderStreamEventSchema.parse({
-        type: "tool_call_delta",
-        responseId: response.id,
-        index,
-        toolCallId: call.id,
-        name: call.name,
-        argumentsDelta: call.rawArguments ?? JSON.stringify(call.arguments),
-      });
+    if (!response.body) throw new Error("Gemini returned no response stream.");
+
+    let responseId: string = crypto.randomUUID();
+    let started = false;
+    let content = "";
+    const toolCalls: ProviderToolCall[] = [];
+    let usage: ModelResponse["usage"];
+    let finalReason: unknown;
+    for await (const frame of parseServerSentEvents(response.body)) {
+      if (!frame.data) continue;
+      const root = record(JSON.parse(frame.data));
+      if (typeof root.responseId === "string") responseId = root.responseId;
+      if (!started) {
+        started = true;
+        yield ProviderStreamEventSchema.parse({ type: "start", responseId, model: request.model });
+      }
+      const candidates = Array.isArray(root.candidates) ? root.candidates.map(record) : [];
+      for (const candidate of candidates) {
+        finalReason = candidate.finishReason ?? finalReason;
+        const parts = Array.isArray(record(candidate.content).parts)
+          ? record(candidate.content).parts.map(record)
+          : [];
+        for (const part of parts) {
+          if (typeof part.text === "string" && part.text) {
+            content += part.text;
+            yield ProviderStreamEventSchema.parse({
+              type: "text_delta",
+              responseId,
+              delta: part.text,
+            });
+          }
+          const call = record(part.functionCall);
+          if (typeof call.name === "string") {
+            const index = toolCalls.length;
+            const args = record(call.args);
+            const normalized: ProviderToolCall = {
+              id: typeof call.id === "string" ? call.id : `gemini_tool_${index}`,
+              name: call.name,
+              arguments: args,
+              rawArguments: JSON.stringify(args),
+            };
+            toolCalls.push(normalized);
+            yield ProviderStreamEventSchema.parse({
+              type: "tool_call_delta",
+              responseId,
+              index,
+              toolCallId: normalized.id,
+              name: normalized.name,
+              argumentsDelta: normalized.rawArguments,
+            });
+          }
+        }
+      }
+      const nextUsage = geminiUsage(root.usageMetadata);
+      if (nextUsage) {
+        usage = nextUsage;
+        yield ProviderStreamEventSchema.parse({ type: "usage", responseId, usage });
+      }
     }
-    if (response.usage) yield ProviderStreamEventSchema.parse({ type: "usage", responseId: response.id, usage: response.usage });
-    yield ProviderStreamEventSchema.parse({ type: "finish", responseId: response.id, response });
+    const completed = ModelResponseSchema.parse({
+      id: responseId,
+      model: request.model,
+      content,
+      toolCalls,
+      finishReason: toolCalls.length ? "tool_call" : finishReason(finalReason),
+      provider: this.id,
+      usage,
+    });
+    if (!started) {
+      yield ProviderStreamEventSchema.parse({ type: "start", responseId, model: request.model });
+    }
+    yield ProviderStreamEventSchema.parse({ type: "finish", responseId, response: completed });
   }
 }
 
@@ -106,8 +182,27 @@ function geminiRequest(request: ModelRequest): Record<string, unknown> {
       ...(request.responseFormat && request.responseFormat !== "text"
         ? { responseMimeType: "application/json", ...(request.responseFormat.schema ? { responseSchema: request.responseFormat.schema } : {}) }
         : {}),
+      ...geminiThinkingConfig(request),
     },
   };
+}
+
+/** Map provider-neutral reasoning levels to Google's current REST contract. */
+export function geminiThinkingConfig(request: ModelRequest): Record<string, unknown> {
+  const effort = request.reasoningEffort;
+  if (!effort) return {};
+  if (/gemini-(?:3|[4-9]|\d{2,})(?:\.|-|$)/i.test(request.model)) {
+    const thinkingLevel = effort === "none" || effort === "minimal"
+      ? "MINIMAL"
+      : effort === "low"
+        ? "LOW"
+        : effort === "medium"
+          ? "MEDIUM"
+          : "HIGH";
+    return { thinkingConfig: { thinkingLevel } };
+  }
+  if (effort === "none") return { thinkingConfig: { thinkingBudget: 0 } };
+  return {};
 }
 
 function messageText(message: ProviderMessage): string {
@@ -179,4 +274,14 @@ function record(value: unknown): Record<string, any> {
 
 function numberValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function geminiUsage(value: unknown): ModelResponse["usage"] {
+  const usage = record(value);
+  if (Object.keys(usage).length === 0) return undefined;
+  return {
+    inputTokens: numberValue(usage.promptTokenCount),
+    outputTokens: numberValue(usage.candidatesTokenCount),
+    totalTokens: numberValue(usage.totalTokenCount),
+  };
 }

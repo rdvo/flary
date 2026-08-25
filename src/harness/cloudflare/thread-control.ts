@@ -384,12 +384,12 @@ export function createCloudflareThreadService<
         updatedAt: now,
         metadata: input.metadata,
       });
-      await rpc(
-        `thread:${scope.authorization.organizationId}:${scope.appId}:${threadId}`,
-        "initialize",
-        { ...ownership(scope), binding },
-      );
       await Promise.all([
+        rpc(
+          `thread:${scope.authorization.organizationId}:${scope.appId}:${threadId}`,
+          "initialize",
+          { ...ownership(scope), binding },
+        ),
         rpc(catalogName(scope), "catalogPut", {
           ...ownership(scope),
           binding,
@@ -1689,55 +1689,73 @@ async function dispatchThreadControl(
       : typeof binding.metadata?.flaryAgentRevision === "string"
         ? binding.metadata.flaryAgentRevision
         : undefined;
-    const archive = canonicalArchiveFor(sql, host?.env);
-    const entry = archive
-      ? await archive.append(
-          binding.thread.threadId,
-          JSON.stringify({
-            format: "flary-rendered-agent-prompt",
-            version: 1,
-            sessionId: binding.thread.threadId,
-            agentId: binding.agentId,
-            promptHash,
-            promptBytes,
-            capturedAt,
-            ...(agentRevision ? { agentRevision } : {}),
-            instructions,
-          }),
-          "prompt.instructions",
-        )
-      : undefined;
     put(sql, snapshotKey, {
       promptHash,
       promptBytes,
       capturedAt,
-      archived: Boolean(entry),
+      archived: false,
+      pending: true,
       ...(agentRevision ? { agentRevision } : {}),
     });
-    await appendLedger(sql, binding, "prompt.snapshot", {
-      promptHash,
-      promptBytes,
-      capturedAt,
-      archived: Boolean(entry),
-      ...(agentRevision ? { agentRevision } : {}),
-    }, {
-      ...(entry
-        ? {
-            encryptedContentRef: {
-              storageKey: entry.storageKey,
-              sha256: entry.sha256,
-              size: entry.size,
-              mediaType: "application/vnd.flary.prompt+json",
-              keyVersion: entry.keyVersion,
-            },
-          }
-        : {}),
+    const persist = (async () => {
+      const archive = canonicalArchiveFor(sql, host?.env);
+      const entry = archive
+        ? await archive.append(
+            binding.thread.threadId,
+            JSON.stringify({
+              format: "flary-rendered-agent-prompt",
+              version: 1,
+              sessionId: binding.thread.threadId,
+              agentId: binding.agentId,
+              promptHash,
+              promptBytes,
+              capturedAt,
+              ...(agentRevision ? { agentRevision } : {}),
+              instructions,
+            }),
+            "prompt.instructions",
+          )
+        : undefined;
+      put(sql, snapshotKey, {
+        promptHash,
+        promptBytes,
+        capturedAt,
+        archived: Boolean(entry),
+        pending: false,
+        ...(agentRevision ? { agentRevision } : {}),
+      });
+      await appendLedger(sql, binding, "prompt.snapshot", {
+        promptHash,
+        promptBytes,
+        capturedAt,
+        archived: Boolean(entry),
+        ...(agentRevision ? { agentRevision } : {}),
+      }, {
+        ...(entry
+          ? {
+              encryptedContentRef: {
+                storageKey: entry.storageKey,
+                sha256: entry.sha256,
+                size: entry.size,
+                mediaType: "application/vnd.flary.prompt+json",
+                keyVersion: entry.keyVersion,
+              },
+            }
+          : {}),
+      });
+      await broadcastThreadRecords(sql, host?.webSockets).catch(() => undefined);
+    })().catch((error) => {
+      sql.exec("DELETE FROM flary_thread_control WHERE key = ?", snapshotKey);
+      throw error;
     });
+    if (host?.execution) host.execution.waitUntil(persist);
+    else await persist;
     return {
       recorded: true,
       replay: false,
       promptHash,
-      archived: Boolean(entry),
+      archived: false,
+      pending: Boolean(host?.execution),
     };
   }
   if (method === "catalogDelete") {

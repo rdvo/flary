@@ -164,13 +164,11 @@ export function useFlaryThread(
     }
 
     const controller = new AbortController();
-    const storedCursor = Number(
-      storageFor(options)?.getItem(cursorKey(thread)) ?? 0
-    );
-    cursor.current =
-      Number.isSafeInteger(storedCursor) && storedCursor >= 0
-        ? storedCursor
-        : 0;
+    // React state is not stored with the cursor. Start a new hook instance at
+    // zero so the WebSocket can replay the durable view in one request. The
+    // previous eager HTTP history repair competed with the socket handshake
+    // on the same Durable Object and made cold chat startup visibly slower.
+    cursor.current = 0;
 
     const resync = async () => {
       const [history, requests] = await Promise.all([
@@ -193,14 +191,6 @@ export function useFlaryThread(
 
     const run = async () => {
       let attempt = 0;
-      void resync().catch((cause) => {
-        if (!controller.signal.aborted)
-          setError(
-            cause instanceof Error
-              ? cause.message
-              : "Thread history is unavailable."
-          );
-      });
       while (
         !controller.signal.aborted &&
         generation === reconnectGeneration.current

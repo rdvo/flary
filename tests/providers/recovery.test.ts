@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  GeminiRecoveryAdapter,
   OpenAIResponsesRecoveryAdapter,
   InterruptedProviderAdapter,
 } from "../../src/harness/providers/durable-adapters.js";
@@ -148,6 +149,40 @@ test("OpenAI Responses requests a streamable reasoning summary", async () => {
   assert.deepEqual(requestBody?.reasoning, {
     effort: "high",
     summary: "auto",
+  });
+});
+
+test("Gemini durable requests preserve the selected thinking level", async () => {
+  let requestBody: Record<string, any> | undefined;
+  const adapter = new GeminiRecoveryAdapter({
+    apiKey: "test-key",
+    fetch: async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body)) as Record<string, any>;
+      return sse([
+        {
+          responseId: "gemini-thinking",
+          candidates: [{ content: { parts: [{ text: "Done" }] }, finishReason: "STOP" }],
+        },
+      ]);
+    },
+  });
+  const context: ProviderRecoveryContext = {
+    runId: "run-gemini-thinking",
+    operationId: "model-gemini-thinking",
+    idempotencyKey: "request-gemini-thinking",
+    checkpoints: new InMemoryProviderCheckpointStore(),
+  };
+
+  for await (const _event of adapter.start({
+    model: "gemini-3.7-flash",
+    messages: [{ role: "user", content: "hello" }],
+    reasoningEffort: "low",
+  }, context)) {
+    // Consume the complete response.
+  }
+
+  assert.deepEqual(requestBody?.generationConfig?.thinkingConfig, {
+    thinkingLevel: "LOW",
   });
 });
 
