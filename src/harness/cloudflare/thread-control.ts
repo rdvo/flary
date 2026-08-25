@@ -1357,11 +1357,24 @@ export function createCloudflareThreadService<
           },
           async respondToUserInput(target, requestId, responseInput) {
             const binding = await service.inspect(target);
-            await runtimeRpc("respondToStoredUserInput", {
-              runId: threadName(binding.thread),
-              requestId,
-              input: UserInputAnswerRequestSchema.parse(responseInput),
-              answeredBy: target.authorization.actor,
+            const record = UserInputRecordSchema.parse(
+              await runtimeRpc("respondToStoredUserInput", {
+                runId: threadName(binding.thread),
+                requestId,
+                input: UserInputAnswerRequestSchema.parse(responseInput),
+                answeredBy: target.authorization.actor,
+              }),
+            );
+            await rpc(controlName(target), "project", {
+              ...ownership(target),
+              sourceCursor: `user-input:${requestId}:resolved`,
+              event: {
+                type: "user_input.resolved",
+                request: record.request,
+                response: record.response,
+                requestId,
+                timestamp: record.response?.answeredAt ?? new Date().toISOString(),
+              },
             });
             return { live: true };
           },

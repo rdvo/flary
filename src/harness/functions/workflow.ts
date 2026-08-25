@@ -788,7 +788,17 @@ function createFlaryUserInputTool(
         "createUserInput",
         { runId, request },
       );
-      return UserInputRequestSchema.parse(stored);
+      const storedRequest = UserInputRequestSchema.parse(stored);
+      await projectFlaryUserInput(env, runId, {
+        sourceCursor: `user-input:${storedRequest.id}:requested`,
+        event: {
+          type: "user_input.requested",
+          request: storedRequest,
+          requestId: storedRequest.id,
+          timestamp: storedRequest.requestedAt,
+        },
+      });
+      return storedRequest;
     },
     async waitForResponse(request, signal) {
       while (true) {
@@ -931,6 +941,48 @@ async function flaryRuntimeRpc(
 function flaryRuntime(env: unknown): FlaryRuntimeNamespace | undefined {
   if (!isRecord(env)) return undefined;
   const value = env.FLARY_RUN_SERVICE;
+  if (!isRecord(value) ||
+      typeof value.idFromName !== "function" ||
+      typeof value.get !== "function") return undefined;
+  return value as unknown as FlaryRuntimeNamespace;
+}
+
+async function projectFlaryUserInput(
+  env: unknown,
+  runId: string,
+  input: {
+    readonly sourceCursor: string;
+    readonly event: Record<string, unknown>;
+  },
+): Promise<void> {
+  const namespace = flaryThreadControl(env);
+  if (!namespace) return;
+  const thread = parseThreadName(runId);
+  const name = `thread:${thread.organizationId}:${thread.appId}:${thread.threadId}`;
+  const stub = namespace.get(namespace.idFromName(name));
+  const response = await stub.fetch(new Request("https://flary.internal/project", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      method: "project",
+      tenantId: thread.organizationId,
+      applicationId: thread.appId,
+      sourceCursor: input.sourceCursor,
+      event: input.event,
+    }),
+  }));
+  if (!response.ok) {
+    const value = await response.json().catch(() => undefined);
+    const message = isRecord(value) && typeof value.error === "string"
+      ? value.error
+      : `Thread Control rejected user input (${response.status})`;
+    throw new Error(message);
+  }
+}
+
+function flaryThreadControl(env: unknown): FlaryRuntimeNamespace | undefined {
+  if (!isRecord(env)) return undefined;
+  const value = env.FLARY_THREAD_CONTROL;
   if (!isRecord(value) ||
       typeof value.idFromName !== "function" ||
       typeof value.get !== "function") return undefined;

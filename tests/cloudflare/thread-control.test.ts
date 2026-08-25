@@ -1109,7 +1109,27 @@ test("the Cloudflare thread host bridges durable interactive user input", async 
               response: null,
             }]);
           }
-          return Response.json({ request: {}, response: body.input });
+          return Response.json({
+            request: {
+              id: "input_1",
+              threadId: body.runId,
+              questions: [{
+                header: "Delivery",
+                question: "When should we deliver?",
+                options: [{ label: "Tomorrow", description: "Recommended" }],
+                multiSelect: false,
+              }],
+              requestedBy: { id: "agent", kind: "agent" },
+              requestedAt: new Date(0).toISOString(),
+            },
+            response: {
+              requestId: "input_1",
+              answers: body.input.answers,
+              canceled: false,
+              answeredBy: body.answeredBy,
+              answeredAt: new Date().toISOString(),
+            },
+          });
         },
       };
     },
@@ -1150,6 +1170,17 @@ test("the Cloudflare thread host bridges durable interactive user input", async 
   assert.equal(calls[0]?.body.runId, "tenant_input:concierge:concierge:thread_input");
   assert.equal(calls[1]?.method, "respondToStoredUserInput");
   assert.deepEqual(calls[1]?.body.answeredBy, { id: "user_1", kind: "user" });
+  const records = await service.auditList!(target, { after: 0, limit: 100 });
+  const resolved = records.find((item) => item.recordType === "input.resolved");
+  assert.equal(resolved?.publicPayload.requestId, "input_1");
+  assert.deepEqual(resolved?.publicPayload.response, {
+    requestId: "input_1",
+    answers: { Delivery: "Tomorrow" },
+    canceled: false,
+    answeredBy: { id: "user_1", kind: "user" },
+    answeredAt: resolved?.publicPayload.response &&
+      (resolved.publicPayload.response as Record<string, unknown>).answeredAt,
+  });
 });
 
 test("lazy catalog and Code Mode lifecycle events are durable and safe", async () => {

@@ -476,6 +476,7 @@ test("generated prompt agents use the durable request_user_input bridge", async 
 
 test("interactive agents use the durable request_user_input bridge", async () => {
   const requests = new Map<string, Record<string, unknown>>();
+  const projections: Array<Record<string, any>> = [];
   const namespace = {
     idFromName(name: string) { return name; },
     get() {
@@ -505,12 +506,24 @@ test("interactive agents use the durable request_user_input bridge", async () =>
       };
     },
   };
+  const controls = {
+    idFromName(name: string) { return name; },
+    get() {
+      return {
+        async fetch(request: Request) {
+          projections.push(JSON.parse(await request.text()));
+          return Response.json({ projected: true });
+        },
+      };
+    },
+  };
   const app = flary({ model: "openai/gpt-5" });
   const concierge = app.agent({ name: "concierge", instructions: "Help the shopper." });
   const config = await defineFlaryInteractiveAgent(concierge).initialize({
     id: "tenant:app:concierge:thread_1",
     env: {
       FLARY_RUN_SERVICE: namespace,
+      FLARY_THREAD_CONTROL: controls,
       FLARY_INTERNAL_TOKEN: "t".repeat(32),
     },
   });
@@ -528,6 +541,12 @@ test("interactive agents use the durable request_user_input bridge", async () =>
   assert.deepEqual((result as { answers: Record<string, string> }).answers, {
     Delivery: "Tomorrow",
   });
+  const requested = projections.find((item) =>
+    item.event?.type === "user_input.requested"
+  );
+  assert.equal(requested?.method, "project");
+  assert.equal(requested?.sourceCursor.startsWith("user-input:input_"), true);
+  assert.equal(requested?.event.request.questions[0].header, "Delivery");
   assert.match(config.instructions, /request_user_input/);
   assert.ok(config.approvalContinuation);
 });
