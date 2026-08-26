@@ -37,7 +37,7 @@ test("the quick start generates an exact Gemini widget project without public se
   }
 });
 
-test("the localhost server requires its HttpOnly session and exact origin", async () => {
+test("the localhost server uses an OAuth-compatible HttpOnly session and exact origin", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "flary-quickstart-server-"));
   const port = 44000 + Math.floor(Math.random() * 1000);
   const server = await startQuickstartServer({ cwd: root, target: "widget", port, openBrowser: false, runner, env: {}, log: () => undefined });
@@ -46,7 +46,7 @@ test("the localhost server requires its HttpOnly session and exact origin", asyn
     const pageText = await page.text();
     const cookie = page.headers.get("set-cookie") ?? "";
     assert.match(cookie, /HttpOnly/);
-    assert.match(cookie, /SameSite=Strict/);
+    assert.match(cookie, /SameSite=Lax/);
     assert.match(page.headers.get("content-security-policy") ?? "", /script-src 'self'/);
     assert.match(pageText, /id="cloudflare-next"[^>]*disabled/);
     const missingSession = await fetch(`${server.url}/api/status`);
