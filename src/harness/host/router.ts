@@ -2,12 +2,18 @@ import { Hono } from "hono";
 import { ZodError } from "zod";
 
 import {
+  ConnectionSecretMetadataSchema,
   ProviderCredentialLifecycleSchema,
   ProviderEncryptedCredentialHandoffSchema,
   ProviderOAuthCompleteInputSchema,
   ProviderOAuthStartInputSchema,
   ProviderOAuthSessionSchema,
 } from "../contracts/connections.js";
+import {
+  ConnectionSecretInputSchema,
+  SecretRequestFulfillmentInputSchema,
+  SecretRequestMetadataSchema,
+} from "../contracts/secrets.js";
 import {
   ThreadConnectionsRequestSchema,
   ThreadCompactRequestSchema,
@@ -39,6 +45,7 @@ import { ApprovalDecisionSchema } from "../contracts/approvals.js";
 import {
   UserInputAnswerRequestSchema,
   UserInputRecordSchema,
+  type UserInputRecord,
 } from "../contracts/user-input.js";
 import {
   RecallDocumentSchema,
@@ -52,6 +59,7 @@ import {
   FlaryThreadAdmissionSchema,
   type FlaryThreadHostService,
   type FlaryProviderOAuthHostService,
+  type FlarySecretHostService,
   type FlaryThreadScope,
   type FlaryThreadTarget,
   type ResolveFlaryHostAuthorization,
@@ -65,6 +73,10 @@ export interface CreateFlaryHostRouterOptions<TBindings extends object> {
   readonly providerOAuth?:
     | FlaryProviderOAuthHostService
     | ((env: TBindings) => FlaryProviderOAuthHostService);
+  /** Encrypted credential storage used by connection and secret-request routes. */
+  readonly secrets?:
+    | FlarySecretHostService
+    | ((env: TBindings) => FlarySecretHostService);
 }
 
 /**
@@ -92,6 +104,13 @@ export function createFlaryHostRouter<TBindings extends object>(
     return typeof options.providerOAuth === "function"
       ? options.providerOAuth(env)
       : options.providerOAuth;
+  };
+
+  const secretsFor = (env: TBindings): FlarySecretHostService => {
+    if (!options.secrets) throw featureUnavailable("Secret storage");
+    return typeof options.secrets === "function"
+      ? options.secrets(env)
+      : options.secrets;
   };
 
   const scopeFor = async (
@@ -234,6 +253,17 @@ export function createFlaryHostRouter<TBindings extends object>(
       );
       const service = serviceFor(context.env);
       if (!service.respondToUserInput) throw featureUnavailable("User input");
+      if (!service.listUserInput) throw featureUnavailable("User input");
+      const record = (await service.listUserInput(target)).find(
+        (item) => item.request.id === context.req.param("requestId"),
+      );
+      if (record && secretRequestFor(record)) {
+        throw new FlaryHostError(
+          409,
+          "secure_input_required",
+          "Use the protected secret-fulfillment route for this request",
+        );
+      }
       return context.json(
         await service.respondToUserInput(
           target,
@@ -241,6 +271,105 @@ export function createFlaryHostRouter<TBindings extends object>(
           response,
         ),
       );
+    },
+  );
+
+  router.post(
+    "/apps/:appId/threads/:threadId/secret-requests/:requestId",
+    async (context) => {
+      const target = await targetFor(
+        context.req.raw,
+        context.env,
+        context.req.param("appId"),
+        context.req.param("threadId"),
+      );
+      const service = serviceFor(context.env);
+      if (!service.listUserInput || !service.respondToUserInput) {
+        throw featureUnavailable("Secure credential requests");
+      }
+      const requestId = context.req.param("requestId");
+      const record = (await service.listUserInput(target)).find(
+        (item) => item.request.id === requestId,
+      );
+      const requested = record ? secretRequestFor(record) : undefined;
+      if (!requested) {
+        throw new FlaryHostError(
+          404,
+          "secret_request_not_found",
+          "The secure credential request was not found",
+        );
+      }
+      if (record?.response) {
+        throw new FlaryHostError(
+          409,
+          "secret_request_resolved",
+          "The secure credential request is already resolved",
+        );
+      }
+      const input = SecretRequestFulfillmentInputSchema.parse(
+        await context.req.json(),
+      );
+      const stored = ConnectionSecretMetadataSchema.parse(
+        await secretsFor(context.env).put(target, requested.connectionId, {
+          name: requested.secretName,
+          value: input.value,
+          scope: requested.scope,
+          ...(input.description ? { description: input.description } : {}),
+          ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
+        }),
+      );
+      const continuation = await service.respondToUserInput(target, requestId, {
+        answers: {
+          status: "stored",
+          connectionId: stored.connectionId,
+          name: stored.name,
+          scope: stored.scope,
+          version: String(stored.version),
+        },
+        metadata: { secureSecretStored: true },
+      });
+      return context.json({
+        ok: true,
+        secret: stored,
+        continuation,
+      });
+    },
+  );
+
+  router.post(
+    "/apps/:appId/connections/:connectionId/secrets",
+    async (context) => {
+      const scope = await scopeFor(
+        context.req.raw,
+        context.env,
+        context.req.param("appId"),
+      );
+      const input = ConnectionSecretInputSchema.parse(await context.req.json());
+      const secret = ConnectionSecretMetadataSchema.parse(
+        await secretsFor(context.env).put(
+          scope,
+          context.req.param("connectionId"),
+          input,
+        ),
+      );
+      return context.json({ ok: true, secret });
+    },
+  );
+
+  router.delete(
+    "/apps/:appId/connections/:connectionId/secrets/:secretName",
+    async (context) => {
+      const scope = await scopeFor(
+        context.req.raw,
+        context.env,
+        context.req.param("appId"),
+      );
+      await secretsFor(context.env).delete(
+        scope,
+        context.req.param("connectionId"),
+        context.req.param("secretName"),
+      );
+      return context.json({ ok: true });
     },
   );
 
@@ -1108,6 +1237,12 @@ export function createFlaryHostRouter<TBindings extends object>(
   );
 
   return router;
+}
+
+function secretRequestFor(record: UserInputRecord) {
+  const value = record.request.metadata?.flarySecretRequest;
+  const parsed = SecretRequestMetadataSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 }
 
 function assertWorkspaceScope(

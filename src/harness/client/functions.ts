@@ -33,6 +33,8 @@ import {
 } from "./flue.js";
 import type {
   ApprovalRequest,
+  ConnectionSecretMetadata,
+  SecretRequestResult,
   UserInputAnswerRequest,
   UserInputRecord,
 } from "../contracts/index.js";
@@ -157,6 +159,13 @@ export interface FlaryAgentThreadHandle {
     answers: Readonly<Record<string, string>>,
     options?: { response?: string; canceled?: boolean },
   ): Promise<unknown>;
+  fulfillSecret(
+    requestId: string,
+    input: { value: string; description?: string; expiresAt?: string },
+  ): Promise<{
+    secret: ConnectionSecretMetadata;
+    result: SecretRequestResult;
+  }>;
   setGoal(input: {
     objective: string;
     tokenBudget?: number;
@@ -438,6 +447,8 @@ function makeAgentThreadHandle(
     userInput: () => client.userInput(ref),
     sendInput: (requestId, answers, options = {}) =>
       client.respondToUserInput(ref, requestId, { answers, ...options }),
+    fulfillSecret: (requestId, input) =>
+      client.fulfillSecretRequest(ref, requestId, input),
     setGoal: (input) => client.setGoal(ref, input),
     clearGoal: () => client.clearGoal(ref),
     model: {

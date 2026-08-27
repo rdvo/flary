@@ -151,3 +151,48 @@ test("routes aborts and attachments through the authenticated thread proxy", asy
     /\/api\/apps\/app_123\/threads\/thread_123\/flue\/agents\/support\/.+\/attachments\/file_123$/,
   );
 });
+
+test("fulfills a secret request without using a thread message route", async () => {
+  let requestUrl = "";
+  let body: unknown;
+  const client = createFlaryThreadClient({
+    baseUrl: "https://cloud.flary.test",
+    fetch: async (input, init) => {
+      requestUrl = String(input);
+      body = JSON.parse(String(init?.body));
+      return Response.json({
+        ok: true,
+        secret: {
+          id: "secret_1",
+          connectionId: "github",
+          name: "api-token",
+          scope: "organization",
+          version: 1,
+          keyId: "kek_1",
+          createdAt: "2026-08-26T12:00:00.000Z",
+          updatedAt: "2026-08-26T12:00:00.000Z",
+        },
+      });
+    },
+  });
+  const result = await client.fulfillSecretRequest({
+    organizationId: "org_123",
+    appId: "app_123",
+    agentId: "support",
+    threadId: "thread_123",
+  }, "secret_request_1", { value: "raw-value" });
+
+  assert.equal(
+    requestUrl,
+    "https://cloud.flary.test/api/apps/app_123/threads/thread_123/secret-requests/secret_request_1",
+  );
+  assert.deepEqual(body, { value: "raw-value" });
+  assert.equal("value" in result.secret, false);
+  assert.deepEqual(result.result, {
+    status: "stored",
+    connectionId: "github",
+    name: "api-token",
+    scope: "organization",
+    version: 1,
+  });
+});

@@ -103,7 +103,8 @@
     "templates/dashboard/**/*",
     "docs/quickstart.md",
     "npm-patches/*.patch",
-    "scripts/apply-dependency-patches.cjs"
+    "scripts/apply-dependency-patches.cjs",
+    "scripts/apply-flue2-session-patch.cjs"
   ],
   "exports": {
     ".": {

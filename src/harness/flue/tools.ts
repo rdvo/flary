@@ -12,6 +12,12 @@ import {
   type UserInputRequest,
   type UserInputResponse,
 } from "../contracts/user-input";
+import {
+  CollectApiKeyRequestSchema,
+  SecretRequestResultSchema,
+  type CollectApiKeyRequest,
+  type SecretRequestResult,
+} from "../contracts/secrets";
 import type { JsonValue } from "../contracts/common";
 
 export const FLARY_LAZY_TOOL_INSTRUCTIONS = [
@@ -30,6 +36,16 @@ export interface FlueUserInputToolOptions {
     request: UserInputRequest,
     signal?: AbortSignal,
   ) => Promise<UserInputResponse>;
+}
+
+export interface FlueSecretRequestToolOptions {
+  createRequest(
+    input: CollectApiKeyRequest,
+  ): Promise<UserInputRequest> | UserInputRequest;
+  waitForResponse(
+    request: UserInputRequest,
+    signal?: AbortSignal,
+  ): Promise<SecretRequestResult>;
 }
 
 /**
@@ -136,16 +152,16 @@ export function createFlueRequestUserInputTool(
   return defineTool({
     name: "request_user_input",
     description:
-      "Ask the user up to three structured questions and wait for the answer.",
+      "Ask the user a structured or free-form question and wait for the answer. The answer returns to this turn. You can ask another follow-up question after you read it.",
     input: v.object({
       questions: v.array(v.object({
         header: v.string(),
         question: v.string(),
-        options: v.array(v.object({
+        options: v.optional(v.array(v.object({
           label: v.string(),
-          description: v.string(),
+          description: v.optional(v.string()),
           preview: v.optional(v.string()),
-        })),
+        }))),
         multiSelect: v.optional(v.boolean()),
       })),
     }),
@@ -153,6 +169,10 @@ export function createFlueRequestUserInputTool(
       const questions = UserInputQuestionSchema.array().min(1).max(3).parse(
         input.questions.map((question) => ({
           ...question,
+          options: (question.options ?? []).map((option) => ({
+            ...option,
+            description: option.description ?? "",
+          })),
           multiSelect: question.multiSelect ?? false,
         })),
       );
@@ -163,6 +183,42 @@ export function createFlueRequestUserInputTool(
         ? await options.waitForResponse(request, signal)
         : await waitForUserInput(options.threadKey, request.id);
       return toJson(UserInputResponseSchema.parse(response));
+    },
+  });
+}
+
+/**
+ * Ask the product UI to collect a credential through a protected route.
+ * The tool schema cannot carry a secret value. The tool result contains only
+ * a safe vault reference and version.
+ */
+export function createFlueRequestSecretTool(
+  options: FlueSecretRequestToolOptions,
+): ToolDefinition {
+  return defineTool({
+    name: "request_secret",
+    description:
+      "Request a credential through the secure product UI and wait until it is stored. Never ask the user to paste a secret into chat or request_user_input. This tool never receives or returns the secret value.",
+    input: v.object({
+      connectionId: v.string(),
+      secretName: v.string(),
+      label: v.string(),
+      provider: v.optional(v.string()),
+      docsUrl: v.optional(v.string()),
+      scope: v.optional(v.picklist([
+        "run",
+        "agent",
+        "flow",
+        "workspace",
+        "project",
+        "organization",
+      ])),
+    }),
+    async run({ input, signal }) {
+      const request = CollectApiKeyRequestSchema.parse(input);
+      const stored = await options.createRequest(request);
+      const result = await options.waitForResponse(stored, signal);
+      return toJson(SecretRequestResultSchema.parse(result));
     },
   });
 }

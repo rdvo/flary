@@ -1,19 +1,5 @@
 # Flary
 
-## Quick start
-
-Create a Worker and your first chat widget with the local setup assistant:
-
-```bash
-npx flary quickstart my-flary-widget
-```
-
-The assistant connects to your Cloudflare account, creates a Gemini-backed
-agent, previews the widget, provisions the required resources, deploys the
-Worker, verifies it, and prints HTML and React integration code. Credentials
-stay in the local process, protected local files, Wrangler, and Worker
-secrets. See [the local quick-start guide](docs/quickstart.md).
-
 **Build durable AI agents in TypeScript. Deploy them to your Cloudflare account.**
 
 Flary is an open-source framework for typed AI functions and persistent agent
@@ -105,6 +91,15 @@ export const support = app.agent({
 });
 ```
 
+The model starts with one bounded `execute` tool and protected user-input and
+secret controls. Application, MCP, OpenAPI, workspace, and Sandbox tools stay
+in a private catalog. Code Mode can search the catalog, load one selected
+schema, call a tool, or batch independent reads. Adding many tools does not
+place every schema in every model request.
+
+Read [Tools, MCP, and OpenAPI](https://flary.dev/docs/tools/) for the exact
+default tool surface, lazy discovery flow, approvals, and audit records.
+
 Serve the function and agent from one generated Worker:
 
 ```ts
@@ -168,6 +163,8 @@ tests, or long-lived processes against `/workspace`.
 6. [Build your UI or bot](https://flary.dev/docs/clients/)
 7. [Threads and realtime clients](https://flary.dev/docs/threads/)
 8. [Storage and recovery](https://flary.dev/docs/storage-and-recovery/)
+9. [Tracked product agent](https://flary.dev/docs/examples/tracked-agent/)
+10. [Florist storefront agent](https://flary.dev/docs/examples/florist-agent/)
 
 Advanced low-level modules remain available from focused package exports. Most
 applications should start with `flary()`, `app.fn()`, `app.agent()`,

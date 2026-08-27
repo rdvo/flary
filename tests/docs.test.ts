@@ -78,3 +78,32 @@ test("the coding guide uses the built starter and names the built-in coding tool
   assert.match(tools, /app\.workspace\(/);
   assert.match(coder, /subagents:\s*\{\s*reviewer\s*\}/);
 });
+
+test("real product examples state their verified integration status", () => {
+  const tracked = fs.readFileSync(
+    path.join(docsRoot, "examples/tracked-agent.mdx"),
+    "utf8",
+  );
+  const florist = fs.readFileSync(
+    path.join(docsRoot, "examples/florist-agent.mdx"),
+    "utf8",
+  );
+  assert.match(tracked, /verified Flary integration/i);
+  assert.match(tracked, /eagerTools:\s*\["stats", "trend"\]/);
+  assert.match(florist, /verified Flary integration/i);
+  assert.match(florist, /private Cloudflare service binding/i);
+  assert.match(florist, /request_user_input/);
+  assert.match(florist, /useFlaryThread/);
+});
+
+test("the public example picker includes Tracked and the florist pattern", () => {
+  const examples = fs.readFileSync(
+    path.join(root, "apps/cloud/src/components/CodeExamples.tsx"),
+    "utf8",
+  );
+  assert.match(examples, /id: "tracked"/);
+  assert.match(examples, /verified SaaS agent/i);
+  assert.match(examples, /id: "florist"/);
+  assert.match(examples, /verified Astro and Shopify concierge/i);
+  assert.match(examples, /useFlaryThread/);
+});

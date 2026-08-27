@@ -26,6 +26,44 @@ Importing this registry and assigning it to a function or agent completes
 registration. Local functions are read tools by default. Mark a tool as a
 write only when it changes external state; writes require approval by default.
 
+## What the model sees
+
+Flary keeps the first model request small. A persistent agent can receive this
+model-visible core:
+
+| Tool | When it appears | Purpose |
+| --- | --- | --- |
+| `execute` | The agent has an `app.tools()` registry or workspace | Run bounded TypeScript against the private tool catalog |
+| `request_user_input` | Enabled by default on a durable host | Ask one structured or free-form question, pause, and resume |
+| `request_secret` | Enabled by default when a secret host is configured | Ask through the protected credential UI without exposing the value to the model |
+| Subagent controls | Delegation is enabled | Start, message, wait for, interrupt, and close durable child agents |
+
+Application, MCP, OpenAPI, workspace, Sandbox, Browser Run, and R2 schemas do
+not all enter the first model request. They stay in Flary's private catalog.
+
+Inside `execute`, generated code uses four built-ins:
+
+```ts
+const matches = await tools.search({ query: "find recent support tickets" });
+const selected = matches.items[0];
+const descriptor = await tools.describe({ id: selected.id });
+
+return tools.call({
+  id: descriptor.id,
+  input: { status: "open" },
+});
+```
+
+- `tools.search()` returns public metadata, not credentials.
+- `tools.describe()` loads the selected input and output schemas.
+- `tools.call()` runs one selected operation.
+- `tools.batch()` runs independent, approval-free reads concurrently. Writes
+  stay sequential so approval and replay order remain deterministic.
+
+If the model already knows a stable catalog ID, it can skip search. If it also
+knows the input, it can skip describe. The fastest common path is one
+`tools.call()` inside `execute`.
+
 In the personal dashboard, open **Connections** and paste the server's HTTPS
 MCP URL. Flary discovers its OAuth service, opens the consent page, receives
 the callback in your Worker, encrypts the credential, checks the tool list,
@@ -138,6 +176,11 @@ Search, describe, batch, tool-call, and Code Mode lifecycle records are
 durable session events. Public records include bounded duration and usage
 data. Flary redacts secrets and does not store generated Code Mode source in
 the public ledger.
+
+This is a provider-neutral runtime. OpenAI, Anthropic, Google, and other
+providers receive the same public tool contract. Flary owns discovery,
+execution, approval, replay, and audit behavior instead of depending on one
+provider's private tool protocol.
 
 Every call passes through capability checks, policy, approval, input
 validation, redaction, limits, and durable replay. Provider, MCP, and API

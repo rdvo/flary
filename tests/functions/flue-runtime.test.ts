@@ -550,3 +550,98 @@ test("interactive agents use the durable request_user_input bridge", async () =>
   assert.match(config.instructions, /request_user_input/);
   assert.ok(config.approvalContinuation);
 });
+
+test("interactive agents can disable the built-in user-input tool", async () => {
+  const app = flary({ model: "openai/gpt-5" });
+  const agent = app.agent({
+    name: "non_interactive",
+    askUser: false,
+    instructions: "Complete the task without asking a question.",
+  });
+  const config = await defineFlaryInteractiveAgent(agent).initialize({
+    id: "tenant:app:non_interactive:thread_1",
+    env: {
+      FLARY_RUN_SERVICE: {
+        idFromName(name: string) { return name; },
+        get() {
+          return { fetch: async () => Response.json({}) };
+        },
+      },
+      FLARY_INTERNAL_TOKEN: "t".repeat(32),
+    },
+  });
+
+  assert.equal(
+    config.tools?.some((tool) => tool.name === "request_user_input") ?? false,
+    false,
+  );
+  assert.doesNotMatch(config.instructions, /request_user_input/);
+});
+
+test("interactive agents request secrets without placing values in the transcript", async () => {
+  const requests = new Map<string, Record<string, any>>();
+  const namespace = {
+    idFromName(name: string) { return name; },
+    get() {
+      return {
+        async fetch(request: Request) {
+          const method = new URL(request.url).pathname.split("/").at(-1);
+          const body = JSON.parse(await request.text()) as Record<string, any>;
+          if (method === "createUserInput") {
+            requests.set(body.request.id, body.request);
+            return Response.json(body.request);
+          }
+          if (method === "getUserInput") {
+            return Response.json({
+              request: requests.get(body.requestId),
+              response: {
+                requestId: body.requestId,
+                answers: {
+                  status: "stored",
+                  connectionId: "github",
+                  name: "api-token",
+                  scope: "organization",
+                  version: "3",
+                },
+                canceled: false,
+                answeredBy: { id: "user_1", kind: "user", version: "1" },
+                answeredAt: "2026-08-26T12:00:00.000Z",
+              },
+            });
+          }
+          if (method === "listUserInput") return Response.json([]);
+          return Response.json({ error: { message: "unknown method" } }, { status: 404 });
+        },
+      };
+    },
+  };
+  const app = flary({ model: "openai/gpt-5" });
+  const agent = app.agent({ name: "operator" });
+  const config = await defineFlaryInteractiveAgent(agent).initialize({
+    id: "tenant:app:operator:thread_1",
+    env: {
+      FLARY_RUN_SERVICE: namespace,
+      FLARY_INTERNAL_TOKEN: "t".repeat(32),
+    },
+  });
+  const tool = config.tools?.find((item) => item.name === "request_secret");
+  assert.ok(tool);
+  const result = await tool.run({
+    input: {
+      connectionId: "github",
+      secretName: "api-token",
+      label: "GitHub token",
+    },
+  } as never);
+  assert.deepEqual(result, {
+    status: "stored",
+    connectionId: "github",
+    name: "api-token",
+    scope: "organization",
+    version: 3,
+  });
+  const stored = [...requests.values()][0];
+  assert.equal(stored.metadata.flarySecretRequest.kind, "secret-request");
+  assert.equal(JSON.stringify(stored).includes("secret-value"), false);
+  assert.match(config.instructions, /Never ask the user to paste a key/);
+});

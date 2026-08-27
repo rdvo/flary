@@ -11,6 +11,7 @@ import type {
   TrustedRunContext,
 } from "../host/runs.js";
 import type { FlaryThreadHostService } from "../host/types.js";
+import type { FlarySecretHostService } from "../host/types.js";
 import type { ModelAdapter, ProviderAdapterRegistry } from "../providers/index.js";
 import type { ApprovalContinuation } from "../execution/approval-continuation.js";
 import type { FlaryCodemodeApprovalBridge } from "./codemode.js";
@@ -94,6 +95,18 @@ export interface FlaryFunctionBaseOptions<
   readonly mode?: string;
   readonly tools?: FlaryToolRegistry;
   readonly eagerTools?: readonly string[];
+  /**
+   * Let the model pause a durable run and ask the user a structured or
+   * free-form question. This built-in is enabled by default.
+   */
+  readonly askUser?: boolean;
+  /**
+   * Let the model request a credential through the protected secret UI. The
+   * credential value never enters the model, transcript, or tool result.
+   * Finite functions enable this explicitly. Persistent agents enable it by
+   * default.
+   */
+  readonly requestSecrets?: boolean;
   readonly policy?: FlaryToolPolicy;
   readonly subagents?: Readonly<Record<string, FlaryCallableLike<unknown, unknown>>>;
   readonly delegation?: FlaryDelegationPolicy;
@@ -322,6 +335,17 @@ export interface FlaryAgentOptions<TBindings = unknown> {
    * Schemas remain lazy and load only through tools.describe.
    */
   readonly eagerTools?: readonly string[];
+  /**
+   * Let the model pause the thread and ask the user a structured or
+   * free-form question. This built-in is enabled by default.
+   */
+  readonly askUser?: boolean;
+  /**
+   * Let the model request a credential through the protected secret UI. The
+   * credential value never enters the model, transcript, or tool result.
+   * This built-in is enabled by default.
+   */
+  readonly requestSecrets?: boolean;
   readonly skills?: readonly FlarySkill[];
   readonly subagents?: Readonly<Record<string, FlaryAgent<any>>>;
   readonly delegation?: FlaryDelegationPolicy;
@@ -633,6 +657,10 @@ export interface FlaryAppOptions<TBindings = unknown> {
   readonly threadService?:
     | FlaryThreadHostService
     | ((input: FlaryRunServiceResolverInput<TBindings>) => FlaryThreadHostService);
+  /** Encrypted credential store for request_secret and connection routes. */
+  readonly secretService?:
+    | FlarySecretHostService
+    | ((input: FlaryRunServiceResolverInput<TBindings>) => FlarySecretHostService);
   /** Optional host override for the trusted context stored at admission. */
   readonly resolveRunContext?: ResolveFlaryFunctionRunContext<TBindings>;
   readonly provider?: ModelAdapter;

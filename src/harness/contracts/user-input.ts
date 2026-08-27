@@ -21,10 +21,20 @@ export const UserInputQuestionSchema = z
   .object({
     header: NonEmptyStringSchema.max(80),
     question: NonEmptyStringSchema.max(4_000),
-    options: z.array(UserInputOptionSchema).min(1).max(10),
+    /** Empty options make this a free-form text question. */
+    options: z.array(UserInputOptionSchema).max(10).default([]),
     multiSelect: z.boolean().default(false),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (value.multiSelect && value.options.length === 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["multiSelect"],
+        message: "Free-form questions cannot use multi-select",
+      });
+    }
+  });
 export type UserInputQuestion = z.infer<typeof UserInputQuestionSchema>;
 
 export const UserInputRequestSchema = z

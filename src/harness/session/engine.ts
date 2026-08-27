@@ -37,6 +37,10 @@ export interface SessionEngineAdmission {
   readonly submissionId: string;
   readonly cursor: string;
   readonly duplicate?: boolean;
+  /** Pinned by the session adapter so observation can recover after restart. */
+  readonly agentId?: string;
+  /** Pinned by the session adapter so observation can recover after restart. */
+  readonly threadId?: string;
 }
 
 export interface SessionEngineForkArchive {
@@ -148,26 +152,22 @@ export function assertInteractiveSessionEngine(
 }
 
 /**
- * Public Flue 2.0.2 capabilities as used by Flary.
+ * Capabilities supplied by Flary's pinned Flue 2.0.2 session adapter.
  *
- * Flue 2 owns durable admission and observation. It supports compaction from
- * inside an agent harness, but its public Cloudflare control surface does not
- * expose the external `SessionEngine.compact()` operation. It also does not
- * yet expose Flary's append-only rollback,
- * exact canonical import/export, per-submission model pin, or approval pause
- * continuation contracts. Keep these false until executable adapters and
- * recovery tests prove the full behavior.
+ * The adapter stores the resolved model before transport admission. Its
+ * trusted Durable Object control surface owns compaction, canonical branch
+ * rollback, exact archive transfer, and approval recovery.
  */
 export const FLUE_2_0_2_FLARY_CAPABILITIES =
   SessionEngineCapabilitiesSchema.parse({
     durableAdmission: true,
     durableObservation: true,
-    manualCompaction: false,
-    activePathRollback: false,
-    exactCanonicalExport: false,
-    exactCanonicalRestore: false,
-    perSubmissionModelPin: false,
-    approvalContinuation: false,
+    manualCompaction: true,
+    activePathRollback: true,
+    exactCanonicalExport: true,
+    exactCanonicalRestore: true,
+    perSubmissionModelPin: true,
+    approvalContinuation: true,
   });
 
 /** Return true when a package version must pass the stable Flue 2 gate. */

@@ -33,8 +33,18 @@ import {
   UserInputResponseSchema,
 } from "../contracts/user-input.js";
 import {
+  CollectApiKeyRequestSchema,
+  SecretRequestMetadataSchema,
+  SecretRequestResultSchema,
+  type CollectApiKeyRequest,
+  type SecretRequestMetadata,
+  type SecretRequestResult,
+} from "../contracts/secrets.js";
+import {
+  createFlueRequestSecretTool,
   createFlueRequestUserInputTool,
 } from "../flue/tools.js";
+import { frameRestoredUserInputResponse } from "../tools/user-input.js";
 import type {
   ApprovalContinuation,
   ApprovalRecoveryCall,
@@ -83,15 +93,33 @@ export function defineFlaryFunctionWorkflow(
           runId: id,
         })
       : undefined;
-    const userInputTool = createFlaryUserInputTool(env, id);
+    const userInputTool = createFlaryUserInputTool(
+      env,
+      id,
+      definition.askUser !== false,
+    );
+    const secretRequestTool = createFlarySecretRequestTool(
+      env,
+      id,
+      definition.requestSecrets === true,
+    );
     const approvalContinuation = combineContinuations(
       codemodeContinuation,
-      createFlaryUserInputContinuation(env, id),
+      definition.askUser === false
+        ? undefined
+        : createFlaryUserInputContinuation(env, id),
+      definition.requestSecrets === true
+        ? createFlarySecretRequestContinuation(env, id)
+        : undefined,
     );
     const subagents = await functionSubagents(fn, env, id);
     return {
     model,
-    instructions: functionInstructions(fn),
+    instructions: functionInstructions(
+      fn,
+      Boolean(userInputTool),
+      Boolean(secretRequestTool),
+    ),
     ...(definition.thinking
       ? { thinkingLevel: toFlueThinkingLevel(definition.thinking as never) }
       : {}),
@@ -99,7 +127,7 @@ export function defineFlaryFunctionWorkflow(
       maxAttempts: definition.durable?.maxAttempts ?? 10,
       timeoutMs,
     },
-    ...(definition.tools || userInputTool
+    ...(definition.tools || userInputTool || secretRequestTool
       ? {
           tools: [
             ...(definition.tools
@@ -120,6 +148,7 @@ export function defineFlaryFunctionWorkflow(
                 })]
               : []),
             ...(userInputTool ? [userInputTool] : []),
+            ...(secretRequestTool ? [secretRequestTool] : []),
           ],
         }
       : {}),
@@ -165,15 +194,33 @@ export function defineFlaryFunctionAgent(
           runId: id,
         })
       : undefined;
-    const userInputTool = createFlaryUserInputTool(env, id);
+    const userInputTool = createFlaryUserInputTool(
+      env,
+      id,
+      definition.askUser !== false,
+    );
+    const secretRequestTool = createFlarySecretRequestTool(
+      env,
+      id,
+      definition.requestSecrets === true,
+    );
     const approvalContinuation = combineContinuations(
       codemodeContinuation,
-      createFlaryUserInputContinuation(env, id),
+      definition.askUser === false
+        ? undefined
+        : createFlaryUserInputContinuation(env, id),
+      definition.requestSecrets === true
+        ? createFlarySecretRequestContinuation(env, id)
+        : undefined,
     );
     const subagents = await functionSubagents(fn, env, id);
     return {
     model,
-    instructions: functionInstructions(fn),
+    instructions: functionInstructions(
+      fn,
+      Boolean(userInputTool),
+      Boolean(secretRequestTool),
+    ),
     ...(definition.thinking
       ? { thinkingLevel: toFlueThinkingLevel(definition.thinking as never) }
       : {}),
@@ -184,7 +231,7 @@ export function defineFlaryFunctionAgent(
         definition.limits?.timeoutMs,
       ),
     },
-    ...(definition.tools || userInputTool
+    ...(definition.tools || userInputTool || secretRequestTool
       ? {
           tools: [
             ...(definition.tools
@@ -205,6 +252,7 @@ export function defineFlaryFunctionAgent(
                 })]
               : []),
             ...(userInputTool ? [userInputTool] : []),
+            ...(secretRequestTool ? [secretRequestTool] : []),
           ],
         }
       : {}),
@@ -245,10 +293,24 @@ export function defineFlaryInteractiveAgent(
           runId: id,
         })
       : undefined;
-    const userInputTool = createFlaryUserInputTool(env, id);
+    const userInputTool = createFlaryUserInputTool(
+      env,
+      id,
+      definition.askUser !== false,
+    );
+    const secretRequestTool = createFlarySecretRequestTool(
+      env,
+      id,
+      definition.requestSecrets !== false,
+    );
     const approvalContinuation = combineContinuations(
       codemodeContinuation,
-      createFlaryUserInputContinuation(env, id),
+      definition.askUser === false
+        ? undefined
+        : createFlaryUserInputContinuation(env, id),
+      definition.requestSecrets === false
+        ? undefined
+        : createFlarySecretRequestContinuation(env, id),
     );
     const coordinationTools = definition.delegation?.mode === "disabled"
       ? []
@@ -271,9 +333,15 @@ export function defineFlaryInteractiveAgent(
           })]
         : []),
       ...(userInputTool ? [userInputTool] : []),
+      ...(secretRequestTool ? [secretRequestTool] : []),
       ...coordinationTools,
     ];
-    const instructions = interactiveAgentInstructions(active, authoredInstructions);
+    const instructions = interactiveAgentInstructions(
+      active,
+      authoredInstructions,
+      Boolean(userInputTool),
+      Boolean(secretRequestTool),
+    );
     await recordResolvedAgentPrompt({
       env: env as Record<string, unknown>,
       runId: id,
@@ -440,6 +508,8 @@ function interactiveCoordinationTools(
 function interactiveAgentInstructions(
   value: FlaryAgent<any>,
   authoredInstructions?: string,
+  canAskUser = true,
+  canRequestSecrets = true,
 ): string {
   const state = getAgentState(value)!;
   const definition = state.definition;
@@ -454,7 +524,12 @@ function interactiveAgentInstructions(
     definition.tools
       ? "After tool work, always finish the turn with a user-facing assistant message. Never end a turn with only tool calls or reasoning."
       : "",
-    "When a required choice is missing, use request_user_input. Ask one focused question when possible. Give two or three clear choices and let the user type a different answer.",
+    canAskUser
+      ? "When required information is missing, use request_user_input. Ask one focused question at a time when possible. Use two or three clear choices when choices help, or omit choices for a free-form answer. Read the answer, continue the same task, and ask another follow-up only when the answer creates a new required question. Do not front-load a fixed questionnaire."
+      : "",
+    canRequestSecrets
+      ? "When a connector needs a credential, use request_secret. Never ask the user to paste a key, token, password, or secret into chat or a normal input form. You receive only a safe stored-secret reference, never the credential value."
+      : "",
     definition.delegation?.mode === "disabled"
       ? "Do not delegate work."
       : Object.keys(definition.subagents ?? {}).length > 0
@@ -641,6 +716,8 @@ function jsonResponse(
 
 function functionInstructions(
   fn: FlaryFunction<any, any, any>,
+  canAskUser = true,
+  canRequestSecrets = true,
 ): string {
   const state = getFunctionState(fn)!;
   const definition = state.definition;
@@ -650,6 +727,12 @@ function functionInstructions(
     definition.mode ? `Operating mode: ${definition.mode}.` : "",
     definition.tools
       ? `You have one execute tool. ${coreToolGuidance(definition.tools, definition.eagerTools)}`
+      : "",
+    canAskUser
+      ? "When required information is missing, use request_user_input. Ask one focused question at a time. Use choices when useful, or omit choices for a free-form answer. Continue after each answer and ask another follow-up only if it is required."
+      : "",
+    canRequestSecrets
+      ? "When a connector needs a credential, use request_secret. Never ask for a key, token, password, or secret in chat or a normal input form. The secure UI stores it and returns only a safe reference."
       : "",
     definition.delegation?.mode === "disabled"
       ? "Do not delegate work to subagents."
@@ -706,7 +789,11 @@ async function functionSubagents(
       ...(definition.model ?? child.app.options.model
         ? { model: definition.model ?? child.app.options.model }
         : {}),
-      instructions: functionInstructions(candidate as FlaryFunction<any, any, any>),
+      instructions: functionInstructions(
+        candidate as FlaryFunction<any, any, any>,
+        false,
+        false,
+      ),
       ...(definition.thinking
         ? { thinkingLevel: toFlueThinkingLevel(definition.thinking as never) }
         : {}),
@@ -764,7 +851,9 @@ interface FlaryRuntimeNamespace {
 function createFlaryUserInputTool(
   env: unknown,
   runId: string,
+  enabled = true,
 ): ReturnType<typeof createFlueRequestUserInputTool> | undefined {
+  if (!enabled) return undefined;
   const runtime = flaryRuntime(env);
   const token = flaryInternalToken(env);
   if (!runtime || !token) return undefined;
@@ -812,6 +901,82 @@ function createFlaryUserInputTool(
         if (value !== undefined && value !== null) {
           const record = UserInputRecordSchema.parse(value);
           if (record.response) return UserInputResponseSchema.parse(record.response);
+        }
+        await delayWithSignal(250, signal);
+      }
+    },
+  });
+}
+
+/**
+ * Add the built-in secret-request tool. The request and response use the
+ * durable user-input store, but the credential value uses a different,
+ * protected host route and is never written to this record.
+ */
+function createFlarySecretRequestTool(
+  env: unknown,
+  runId: string,
+  enabled = true,
+): ReturnType<typeof createFlueRequestSecretTool> | undefined {
+  if (!enabled) return undefined;
+  const runtime = flaryRuntime(env);
+  const token = flaryInternalToken(env);
+  if (!runtime || !token) return undefined;
+
+  return createFlueRequestSecretTool({
+    async createRequest(inputValue) {
+      const input = CollectApiKeyRequestSchema.parse(inputValue);
+      const inputHash = shortHash(stableJson(input));
+      const secretMetadata = SecretRequestMetadataSchema.parse({
+        kind: "secret-request",
+        ...input,
+        inputHash,
+      });
+      const request = UserInputRequestSchema.parse({
+        id: `secret_${shortHash(`${runId}:${inputHash}`)}`,
+        threadId: runId,
+        questions: [{
+          header: "Secure credential",
+          question: `Enter ${input.label} in the protected credential form. Do not paste it into chat.`,
+          options: [],
+          multiSelect: false,
+        }],
+        requestedBy: { id: "flary", kind: "agent", version: "1" },
+        requestedAt: new Date().toISOString(),
+        metadata: { flarySecretRequest: secretMetadata },
+      });
+      const stored = await flaryRuntimeRpc(
+        runtime,
+        token,
+        "createUserInput",
+        { runId, request },
+      );
+      const storedRequest = UserInputRequestSchema.parse(stored);
+      await projectFlaryUserInput(env, runId, {
+        sourceCursor: `secret:${storedRequest.id}:requested`,
+        event: {
+          type: "secret.requested",
+          request: storedRequest,
+          requestId: storedRequest.id,
+          timestamp: storedRequest.requestedAt,
+        },
+      });
+      return storedRequest;
+    },
+    async waitForResponse(request, signal) {
+      while (true) {
+        if (signal?.aborted) {
+          throw signal.reason ?? new Error("Secret request was cancelled");
+        }
+        const value = await flaryRuntimeRpc(
+          runtime,
+          token,
+          "getUserInput",
+          { runId, requestId: request.id },
+        );
+        if (value !== undefined && value !== null) {
+          const record = UserInputRecordSchema.parse(value);
+          if (record.response) return secretResultFromRecord(record);
         }
         await delayWithSignal(250, signal);
       }
@@ -870,8 +1035,65 @@ function createFlaryUserInputContinuation(
       }
       const response = UserInputResponseSchema.parse(record.response);
       return {
-        content: JSON.stringify(response),
+        content: frameRestoredUserInputResponse(record.request, response),
         output: response,
+      };
+    },
+  };
+}
+
+/** Restore a request_secret tool call after a Worker or DO restart. */
+function createFlarySecretRequestContinuation(
+  env: unknown,
+  runId: string,
+): ApprovalContinuation | undefined {
+  const runtime = flaryRuntime(env);
+  const token = flaryInternalToken(env);
+  if (!runtime || !token) return undefined;
+
+  const find = async (
+    input: ApprovalRecoveryCall,
+  ): Promise<UserInputRecord | undefined> => {
+    if (input.toolName !== "request_secret") return undefined;
+    let requested: CollectApiKeyRequest;
+    try {
+      requested = CollectApiKeyRequestSchema.parse(input.arguments);
+    } catch {
+      return undefined;
+    }
+    const inputHash = shortHash(stableJson(requested));
+    const value = await flaryRuntimeRpc(runtime, token, "listUserInput", { runId });
+    if (!Array.isArray(value)) return undefined;
+    return value
+      .map((item) => {
+        try {
+          return UserInputRecordSchema.parse(item);
+        } catch {
+          return undefined;
+        }
+      })
+      .filter((item): item is UserInputRecord => Boolean(item))
+      .find((record) => secretRequestMetadata(record)?.inputHash === inputHash);
+  };
+
+  return {
+    async inspect(input): Promise<ApprovalRecoveryState> {
+      const record = await find(input);
+      if (!record) return "none";
+      return record.response ? "ready" : "waiting";
+    },
+    async resume(input): Promise<ApprovalRecoveryResult> {
+      const record = await find(input);
+      if (!record?.response) {
+        return {
+          content: "The secure credential request is not available.",
+          isError: true,
+        };
+      }
+      const result = secretResultFromRecord(record);
+      return {
+        content: `The credential '${result.name}' is stored and available to its trusted connector.`,
+        output: result,
       };
     },
   };
@@ -880,24 +1102,57 @@ function createFlaryUserInputContinuation(
 function combineContinuations(
   codemode: ApprovalContinuation | undefined,
   userInput: ApprovalContinuation | undefined,
+  secretRequest: ApprovalContinuation | undefined,
 ): ApprovalContinuation | undefined {
-  if (!codemode) return userInput;
-  if (!userInput) return codemode;
+  const continuations = [codemode, userInput, secretRequest].filter(
+    (item): item is ApprovalContinuation => Boolean(item),
+  );
+  if (continuations.length === 0) return undefined;
+  if (continuations.length === 1) return continuations[0];
+  const continuationFor = (toolName: string): ApprovalContinuation | undefined =>
+    toolName === "execute"
+      ? codemode
+      : toolName === "request_user_input"
+        ? userInput
+        : toolName === "request_secret"
+          ? secretRequest
+          : undefined;
   return {
     inspect(input) {
-      if (input.toolName === "execute") return codemode.inspect(input);
-      if (input.toolName === "request_user_input") return userInput.inspect(input);
-      return "none";
+      return continuationFor(input.toolName)?.inspect(input) ?? "none";
     },
     resume(input) {
-      if (input.toolName === "execute") return codemode.resume(input);
-      if (input.toolName === "request_user_input") return userInput.resume(input);
+      const continuation = continuationFor(input.toolName);
+      if (continuation) return continuation.resume(input);
       return Promise.resolve({
         content: `No recovery handler is registered for '${input.toolName}'.`,
         isError: true,
       });
     },
   };
+}
+
+function secretRequestMetadata(
+  record: UserInputRecord,
+): SecretRequestMetadata | undefined {
+  const value = record.request.metadata?.flarySecretRequest;
+  const parsed = SecretRequestMetadataSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
+
+function secretResultFromRecord(record: UserInputRecord): SecretRequestResult {
+  const request = secretRequestMetadata(record);
+  if (!request || !record.response) {
+    throw new Error("The secure credential request is incomplete");
+  }
+  const answers = record.response.answers;
+  return SecretRequestResultSchema.parse({
+    status: answers.status,
+    connectionId: answers.connectionId,
+    name: answers.name,
+    scope: answers.scope,
+    version: Number(answers.version),
+  });
 }
 
 function normalizeUserInputQuestions(value: unknown): UserInputQuestion[] | undefined {

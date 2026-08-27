@@ -14,8 +14,8 @@ const capabilities = [
     body: "Reads can run directly. Writes and sensitive browser actions can pause for approval.",
   },
   {
-    title: "Lazy tools and MCP",
-    body: "Search and load tools only when needed. Keep credentials out of model context.",
+    title: "Small tool surface",
+    body: "Start with one executor and protected controls. Search and load application, MCP, and API tools only when needed.",
   },
   {
     title: "Parallel execution",
@@ -85,13 +85,13 @@ const description =
 
     <section class="examples" id="examples">
       <div class="section-intro">
-        <p class="eyebrow">Real project code</p>
+        <p class="eyebrow">Real product patterns</p>
         <h2>One runtime.<br />Different products.</h2>
       </div>
       <CodeExamples client:visible />
       <p class="editor-note">
-        These are editable Monaco files. The examples use Flary’s public
-        package APIs, not a landing-page-only SDK.
+        These are editable Monaco files that use Flary’s public package APIs.
+        Tracked and Fairway Florist are verified Flary integrations.
       </p>
     </section>
 
@@ -176,6 +176,33 @@ threads · tools · workspaces
 durable objects · d1 · optional r2
   ↓
 openai · anthropic · google · kimi</code></pre>
+    </section>
+
+    <section class="flow">
+      <div>
+        <p class="eyebrow">A small model-visible core</p>
+        <h2>Many tools.<br />One safe runtime.</h2>
+        <p class="lede">
+          Common controls stay direct. Application tools remain in a private
+          catalog until the agent needs them. Schemas, credentials, and large
+          results do not fill every model request.
+        </p>
+        <p>
+          <a href="/docs/tools/">See how tools, Code Mode, MCP, and OpenAPI work</a>
+        </p>
+      </div>
+      <pre aria-label="Flary tool runtime"><code>model
+  ├─ request_user_input
+  ├─ request_secret
+  └─ execute
+       ├─ tools.search
+       ├─ tools.describe
+       ├─ tools.call
+       └─ tools.batch
+            ↓
+local · mcp · openapi · workspace
+            ↓
+policy · approval · replay · audit</code></pre>
     </section>
 
     <footer>

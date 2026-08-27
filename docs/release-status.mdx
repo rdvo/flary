@@ -18,3 +18,50 @@ details. Application code should use the stable function, agent, thread, and
 client contracts.
 
 See the repository tags and npm dist-tags for the exact published state.
+
+## What the npm tags mean
+
+| Tag | Use |
+| --- | --- |
+| `latest` | The production release that passed the stable release gates. |
+| `next` | A release candidate for integration and staging tests. |
+| Repository source | Development code. It can be ahead of both npm tags. |
+
+Pin an exact release candidate when you test a product integration. Do not
+assume that a Git tag is available on npm.
+
+## Codex-style behavior
+
+Flary targets headless runtime behavior. It does not copy the Codex desktop
+interface, private app-server protocol, internal prompts, or ChatGPT login.
+
+The portable Flary tool surface has three protected model-visible controls:
+
+- `execute` for bounded Code Mode;
+- `request_user_input` for durable follow-up questions;
+- `request_secret` for protected credential collection.
+
+Inside `execute`, the model can use `tools.search`, `tools.describe`,
+`tools.call`, and `tools.batch`. Application, MCP, OpenAPI, workspace, and
+Sandbox adapters use normalized policy, approval, replay, and audit
+contracts. Each adapter must pass its matching restart and replay tests before
+a stable release.
+
+This is close to Codex-style lazy tool execution, but it is not exact parity.
+Flary uses a provider-neutral Dynamic Worker so the same thread can move
+between providers. Some providers also support native programmatic tool
+calling. Flary can use native acceleration only when it preserves the same
+durable call and audit contract.
+
+Current differences are intentional and documented:
+
+- `eagerTools` adds small, frequent tools to agent guidance. It does not expose
+  them as provider-native direct tools.
+- Tool search is lazy, but the runtime does not yet have the same central
+  exposure classes, default result cap, and search cache as Codex.
+- Dynamic Worker Code Mode is the portable default. Native provider code
+  execution is an optional optimization, not a separate execution contract.
+- The Codex desktop interface, private protocol, internal prompts, and exact
+  product UX are outside Flary's open runtime contract.
+
+See [Tools, MCP, and OpenAPI](/docs/tools/) for the exact current surface.

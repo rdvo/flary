@@ -39,6 +39,9 @@ import {
   type ThreadDeletion,
   UserInputAnswerRequestSchema,
   UserInputRecordSchema,
+  SecretRequestFulfillmentInputSchema,
+  SecretRequestResultSchema,
+  ConnectionSecretMetadataSchema,
   ThreadOperationalStateSchema,
   RealtimeServerFrameSchema,
   RealtimeTicketRequestSchema,
@@ -414,6 +417,40 @@ export class FlaryThreadClient {
         body: JSON.stringify(response),
       },
     );
+  }
+
+  /**
+   * Store a requested credential through the protected host route. The raw
+   * value is sent only to that route. It is not sent as a thread command or
+   * user-input response.
+   */
+  async fulfillSecretRequest(
+    refInput: ThreadRef,
+    requestId: string,
+    inputValue: unknown,
+  ) {
+    const ref = ThreadRefSchema.parse(refInput);
+    const input = SecretRequestFulfillmentInputSchema.parse(inputValue);
+    const value = await this.apiJson(
+      `${this.#apiPath}/apps/${encodeURIComponent(ref.appId)}/threads/${encodeURIComponent(ref.threadId)}/secret-requests/${encodeURIComponent(requestId)}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(input),
+      },
+    );
+    const response = value as { secret?: unknown };
+    const secret = ConnectionSecretMetadataSchema.parse(response.secret);
+    return {
+      secret,
+      result: SecretRequestResultSchema.parse({
+        status: "stored",
+        connectionId: secret.connectionId,
+        name: secret.name,
+        scope: secret.scope,
+        version: secret.version,
+      }),
+    };
   }
 
   async historyCheckpoints(

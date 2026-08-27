@@ -1,5 +1,9 @@
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { applyFlue2SessionPatch } = require("./apply-flue2-session-patch.cjs");
+
+const installRoot = process.env.INIT_CWD || process.cwd();
+applyFlue2SessionPatch([installRoot, process.cwd(), __dirname]);
 
 // pnpm applies the declared patchedDependencies during installation. Running
 // patch-package again is redundant and can fail when an optional transitive
@@ -8,7 +12,6 @@ if (path.basename(process.env.npm_execpath || "").startsWith("pnpm")) {
   process.exit(0);
 }
 
-const installRoot = process.env.INIT_CWD || process.cwd();
 let patchPackageCli;
 try {
   patchPackageCli = require.resolve("patch-package/dist/index.js", {

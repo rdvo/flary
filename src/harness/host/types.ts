@@ -68,6 +68,10 @@ import type {
   ProviderOAuthSession,
   ProviderOAuthStartInput,
 } from "../contracts/connections.js";
+import type {
+  ConnectionSecretInput,
+} from "../contracts/secrets.js";
+import type { ConnectionSecretMetadata } from "../contracts/connections.js";
 
 export const FlaryHostAuthorizationSchema = z
   .object({
@@ -176,6 +180,23 @@ export interface FlaryProviderOAuthHostService {
   ): Promise<ProviderCredentialLifecycle>;
   /** Remove the local credential. Remote provider revocation is optional. */
   disconnect(scope: FlaryThreadScope, connectionId: string): Promise<void>;
+}
+
+/**
+ * Product-owned encrypted credential store. Implementations must return only
+ * safe metadata and must never log the input value.
+ */
+export interface FlarySecretHostService {
+  put(
+    scope: FlaryThreadScope,
+    connectionId: string,
+    input: ConnectionSecretInput,
+  ): Promise<ConnectionSecretMetadata>;
+  delete(
+    scope: FlaryThreadScope,
+    connectionId: string,
+    secretName: string,
+  ): Promise<void>;
 }
 
 /**

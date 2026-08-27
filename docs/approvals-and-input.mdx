@@ -24,14 +24,34 @@ for await (const event of thread.stream()) {
 A write that started but has no terminal record becomes `outcome_unknown`.
 Flary does not run it again automatically.
 
-Requested input uses the same restart-safe pattern:
+Durable agents include `request_user_input` by default. It is a small built-in
+tool beside Code Mode and lazy tool search. Application tools stay lazy.
 
 ```ts
-await thread.sendInput({
-  requestId,
-  answers: { environment: "staging" },
+export const agent = app.agent({
+  name: "agent",
+  tools,
+  // Default: true. Set false only for a non-interactive agent.
+  askUser: true,
 });
 ```
+
+The agent can ask a multiple-choice question or omit the choices for a typed
+answer. Flary stores the request, pauses the active turn, and returns the
+answer to the same model tool call. The model can then continue the task or ask
+one new follow-up question. Questions do not have to be planned in advance.
+
+Requested input uses the same restart-safe client pattern:
+
+```ts
+await thread.sendInput(requestId, {
+  environment: "staging",
+});
+```
+
+The `flary/react` package includes `FlaryUserInput` for choice controls and
+free-form answers. A custom UI can use the same thread methods and WebSocket
+events.
 
 Every approval and input request is tenant-scoped, audited, and available after
 reconnect.

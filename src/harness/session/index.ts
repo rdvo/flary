@@ -1,5 +1,7 @@
 export * from "./contracts.js";
 export * from "./engine.js";
+export * from "./flue2-engine.js";
+export * from "./flue2-control.js";
 export * from "./integrity.js";
 export * from "./jsonl.js";
 export * from "./codex-import.js";

@@ -1,0 +1,118 @@
+---
+title: Fairway florist concierge
+description: See how an Astro and Shopify storefront uses Flary for a durable customer concierge without exposing commerce credentials to the model.
+section: Examples
+order: 5
+---
+
+Fairway Florist is a verified Flary integration. Its Astro storefront embeds
+Daisy, a durable flower concierge. A Hono route proxies the public chat to a
+separate Flary Worker through a private Cloudflare service binding.
+
+The storefront owns Shopify, checkout, delivery rules, and customer UI. Flary
+owns durable threads, model execution, typed tools, requested input, realtime
+events, and reconnect.
+
+## Product boundary
+
+| Fairway owns | Flary owns |
+| --- | --- |
+| Astro storefront and React islands | Durable Daisy threads |
+| Shopify catalog, cart, and checkout | Model and provider execution |
+| Delivery and fulfillment rules | Typed tool validation and execution |
+| Customer identity cookie and private proxy | Realtime tickets, WebSocket events, and cursor replay |
+| Storefront chat design | Requested input and normalized runtime records |
+
+## Keep commerce rules in trusted tools
+
+Wrap the exact operations that the agent needs. Keep Shopify access tokens and
+delivery-provider credentials in Worker secrets or a Flary connection. Never
+put them in the prompt or tool input.
+
+```ts
+import { flary, z } from "flary";
+
+const app = flary({
+  name: "fairway-daisy",
+  applicationId: "fairway-storefront",
+  model: "google/gemini-3.7-flash",
+  auth: ({ request, bindings }) => verifyPrivateStorefrontRequest(
+    request,
+    bindings.FLARY_INTERNAL_TOKEN,
+  ),
+});
+
+const searchCatalog = app.fn({
+  description: "Find available flower products by occasion, budget, or color.",
+  input: z.object({
+    query: z.string().min(1),
+    maximumPrice: z.number().positive().optional(),
+  }),
+  output: z.array(ProductSummary),
+  policy: {
+    operation: "read",
+    capabilities: ["shopify.products.read"],
+  },
+  run: (input) => catalog.search(input),
+});
+
+const checkDelivery = app.fn({
+  description: "Check delivery availability and price for a ZIP code and date.",
+  input: z.object({
+    zipCode: z.string().regex(/^\d{5}$/),
+  }),
+  output: DeliveryQuote,
+  policy: {
+    operation: "read",
+    capabilities: ["delivery.quote"],
+  },
+  run: (input) => fulfillment.checkArea(input),
+});
+```
+
+The current customer agent has two read tools: `search_catalog` and
+`check_delivery_area`. Shopify Admin writes are not in the customer agent.
+This keeps checkout and product publication outside model control.
+
+## Add a durable store agent
+
+```ts
+const daisyTools = app.tools({
+  catalog: searchCatalog,
+  delivery: checkDelivery,
+});
+
+export const daisy = app.agent({
+  name: "daisy",
+  model: "google/gemini-3.7-flash",
+  instructions: `
+    Help customers choose flowers and understand delivery.
+    Use the catalog before naming or pricing a product.
+    Use delivery before stating how a ZIP code is served.
+    Use request_user_input when one important detail is missing.
+    Never invent availability, prices, delivery promises, or order state.
+  `,
+  tools: daisyTools,
+  eagerTools: ["catalog", "delivery"],
+  delegation: { mode: "disabled" },
+  limits: { steps: 12, toolCalls: 16, timeoutMs: 90_000 },
+});
+
+export default app.serve({ daisy });
+```
+
+`request_user_input` lets Daisy ask for an occasion, budget, ZIP code, or
+delivery date and continue the same turn after the answer. Provider and
+Shopify credentials stay in Worker secrets. They do not enter the prompt.
+
+The browser stores only the durable thread ID. An HttpOnly identity cookie
+scopes that thread through the trusted storefront proxy. The React client uses
+`flary/client`, `useFlaryThread`, `FlaryMarkdown`, and `FlaryUserInput`.
+
+The Flary Worker uses Durable Object SQLite for the live transcript and D1/R2
+bindings for the catalog and session archive. The storefront can disconnect,
+reload, and reopen the same Daisy conversation.
+
+This is the correct pattern for a public storefront: keep commerce authority
+in the application, expose small trusted reads to the agent, and use Flary for
+the durable conversation runtime.

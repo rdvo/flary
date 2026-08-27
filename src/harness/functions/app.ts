@@ -1058,6 +1058,16 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
               agents,
             );
           },
+          ...(this.options.secretService
+            ? {
+                secrets: (env: TBindings) => {
+                  const configured = this.options.secretService!;
+                  return typeof configured === "function"
+                    ? configured({ bindings: this.parseBindings(env) })
+                    : configured;
+                },
+              }
+            : {}),
         }),
       );
     }

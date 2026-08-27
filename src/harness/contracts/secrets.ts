@@ -85,6 +85,50 @@ export const CollectApiKeyRequestSchema = z
 export type CollectApiKeyRequest = z.infer<typeof CollectApiKeyRequestSchema>;
 export type CollectApiKeyRequestRaw = z.input<typeof CollectApiKeyRequestSchema>;
 
+/**
+ * Safe metadata placed on the durable input request created by
+ * `request_secret`. It contains no secret value or ciphertext.
+ */
+export const SecretRequestMetadataSchema = z
+  .object({
+    kind: z.literal("secret-request"),
+    connectionId: IdentifierSchema,
+    secretName: IdentifierSchema,
+    label: NonEmptyStringSchema.max(120),
+    provider: IdentifierSchema.optional(),
+    docsUrl: z.string().url().max(2_000).optional(),
+    scope: SecretScopeSchema,
+    inputHash: NonEmptyStringSchema.max(128),
+  })
+  .strict();
+export type SecretRequestMetadata = z.infer<
+  typeof SecretRequestMetadataSchema
+>;
+
+/** A secret value accepted only by the protected secret-fulfillment route. */
+export const SecretRequestFulfillmentInputSchema = z
+  .object({
+    value: NonEmptyStringSchema.max(100_000),
+    description: NonEmptyStringSchema.max(500).optional(),
+    expiresAt: TimestampSchema.optional(),
+  })
+  .strict();
+export type SecretRequestFulfillmentInput = z.infer<
+  typeof SecretRequestFulfillmentInputSchema
+>;
+
+/** Safe result returned to the agent after the vault stores the credential. */
+export const SecretRequestResultSchema = z
+  .object({
+    status: z.literal("stored"),
+    connectionId: IdentifierSchema,
+    name: IdentifierSchema,
+    scope: SecretScopeSchema,
+    version: z.number().int().positive(),
+  })
+  .strict();
+export type SecretRequestResult = z.infer<typeof SecretRequestResultSchema>;
+
 // The value is accepted only by an authenticated secret write endpoint. It is
 // deliberately separate from CollectApiKeyRequestSchema.
 export const ConnectionSecretInputSchema = z

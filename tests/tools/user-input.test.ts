@@ -106,3 +106,62 @@ test("the Flue adapter lets a host persist and render user input", async () => {
     answeredAt: (result as { answeredAt: string }).answeredAt,
   });
 });
+
+test("the built-in can ask a free-form question and then a follow-up", async () => {
+  const asked: string[] = [];
+  const tool = createFlueRequestUserInputTool({
+    threadKey: "thread_follow_up",
+    createRequest({ questions }) {
+      const index = asked.push(questions[0]!.question);
+      return UserInputRequestSchema.parse({
+        id: `input_follow_up_${index}`,
+        threadId: "thread_follow_up",
+        questions,
+        requestedBy: { id: "agent_1", kind: "agent", version: "1" },
+        requestedAt: new Date().toISOString(),
+      });
+    },
+    async waitForResponse(request) {
+      const question = request.questions[0]!;
+      return UserInputResponseSchema.parse({
+        requestId: request.id,
+        answers: {
+          [question.header]: request.id.endsWith("1") ? "Launch next week" : "Email only",
+        },
+        answeredBy: { id: "user_1", kind: "user", version: "1" },
+        answeredAt: new Date().toISOString(),
+      });
+    },
+  });
+  const run = tool.run as unknown as (input: {
+    input: {
+      questions: Array<{
+        header: string;
+        question: string;
+        options?: Array<{ label: string; description?: string }>;
+      }>;
+    };
+  }) => Promise<{ answers: Record<string, string> }>;
+
+  const first = await run({
+    input: {
+      questions: [{ header: "Timing", question: "When should this launch?" }],
+    },
+  });
+  assert.equal(first.answers.Timing, "Launch next week");
+
+  const second = await run({
+    input: {
+      questions: [{
+        header: "Channel",
+        question: "Which channel should we use?",
+        options: [{ label: "Email" }, { label: "SMS" }],
+      }],
+    },
+  });
+  assert.equal(second.answers.Channel, "Email only");
+  assert.deepEqual(asked, [
+    "When should this launch?",
+    "Which channel should we use?",
+  ]);
+});

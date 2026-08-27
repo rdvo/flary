@@ -11,7 +11,7 @@ type Example = {
 };
 
 type ExampleGroup = {
-  id: "support" | "coding";
+  id: "support" | "coding" | "tracked" | "florist";
   label: string;
   description: string;
   examples: Example[];
@@ -175,6 +175,108 @@ for await (const event of thread.stream()) {
       },
     ],
   },
+  {
+    id: "tracked",
+    label: "Tracked",
+    description: "A verified SaaS agent with analytics, R2 drafts, approvals, and realtime activity.",
+    examples: [
+      {
+        id: "tracked-agent",
+        label: "Agent",
+        filename: "worker/flary.ts",
+        language: "typescript",
+        code: `import { flary } from "flary";
+
+const app = flary({
+  name: "tracked-site-agent",
+  model: "openai/gpt-5",
+  auth: ({ request }) => trackedIdentity(request),
+});
+
+export const siteEditor = app.agent({
+  name: "siteeditor",
+  instructions: trackedInstructions,
+  tools: trackedTools,
+  eagerTools: ["stats", "trend"],
+  workspace: { scope: "thread", mode: "draft" },
+});
+
+export default app.serve({ siteeditor: siteEditor });`,
+      },
+      {
+        id: "tracked-tools",
+        label: "Tools",
+        filename: "worker/tools.ts",
+        language: "typescript",
+        code: `export const trackedTools = app.tools({
+  stats: getStats,
+  trend: getTrend,
+  breakdown: getBreakdown,
+  create_site: createSite,
+  create_campaign: createCampaign,
+});
+
+// Tracked keeps tenant lookup, R2 roots, and publish policy
+// in trusted host code. Flary owns execution and audit.`,
+      },
+      {
+        id: "tracked-client",
+        label: "Realtime",
+        filename: "src/lib/agent.ts",
+        language: "typescript",
+        code: `const thread = await api.siteeditor.threads.open({ threadId });
+const connection = await thread.connect({ after: savedCursor });
+
+for await (const event of connection.events()) {
+  renderAgentEvent(event);
+  saveCursor(event.cursor);
+}`,
+      },
+    ],
+  },
+  {
+    id: "florist",
+    label: "Florist store",
+    description: "A verified Astro and Shopify concierge with durable chat and trusted commerce reads.",
+    examples: [
+      {
+        id: "florist-agent",
+        label: "Agent",
+        filename: "src/florist.ts",
+        language: "typescript",
+        code: `const daisyTools = app.tools({
+  catalog: searchCatalog,
+  delivery: checkDelivery,
+});
+
+export const daisy = app.agent({
+  name: "daisy",
+  model: "google/gemini-3.7-flash",
+  instructions: "Help customers choose flowers and understand delivery.",
+  tools: daisyTools,
+  eagerTools: ["catalog", "delivery"],
+  delegation: { mode: "disabled" },
+  limits: { steps: 12, toolCalls: 16, timeoutMs: 90_000 },
+});`,
+      },
+      {
+        id: "florist-client",
+        label: "Astro client",
+        filename: "src/hooks/useDaisyConversation.ts",
+        language: "typescript",
+        code: `const api = flary<typeof functions>({ baseUrl: "/api/daisy" });
+const thread = await api.daisy.threads.open({
+  organizationId: "fairway-storefront",
+  threadId: savedThreadId,
+});
+
+const live = useFlaryThread({
+  thread,
+  reconnectMaxMs: 8_000,
+});`,
+      },
+    ],
+  },
 ];
 
 declare global {
@@ -199,6 +301,8 @@ export function CodeExamples() {
   const [activeByGroup, setActiveByGroup] = useState<Record<string, string>>({
     support: "support-app",
     coding: "coding-agent",
+    tracked: "tracked-agent",
+    florist: "florist-agent",
   });
   const activeId = activeByGroup[group.id] ?? group.examples[0].id;
   const active =

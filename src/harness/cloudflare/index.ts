@@ -2,6 +2,7 @@ export * from "./dynamic-worker.js";
 export * from "./mcp-descriptor-cache.js";
 export * from "./mcp-oauth.js";
 export * from "./provider-oauth.js";
+export * from "./secrets.js";
 export * from "./thread-metadata.js";
 export * from "./tool-journal.js";
 export * from "./run-repository.js";

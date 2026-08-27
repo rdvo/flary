@@ -1,0 +1,132 @@
+---
+title: Tracked product agent
+description: See how a real SaaS product uses Flary for analytics, durable site editing, private previews, approvals, and realtime activity.
+section: Examples
+order: 4
+---
+
+Tracked is a verified Flary integration. It embeds one durable agent in the
+product instead of running a separate agent server.
+
+The product keeps control of login, organization membership, analytics, R2
+files, publish policy, and the user interface. Flary supplies the thread,
+model execution, lazy tools, Code Mode, workspace, approvals, audit records,
+and realtime transport.
+
+## Product boundary
+
+| Tracked owns | Flary owns |
+| --- | --- |
+| Better Auth identity and organization roles | Durable agent threads |
+| Analytics queries and business rules | Model and provider execution |
+| Tenant R2 buckets and site roots | Lazy tool search and Code Mode |
+| Draft preview and production publish policy | Tool validation, approval, replay, and audit |
+| The three-pane product interface | WebSocket commands and cursor replay |
+
+The Worker converts a trusted Tracked session into a Flary identity. The model
+never chooses a tenant, bucket, organization, or secret.
+
+```ts
+import { flary, z } from "flary";
+
+const app = flary({
+  name: "tracked-site-agent",
+  model: "openai/gpt-5",
+  auth: async ({ request }) => {
+    const member = await authenticateTrackedMember(request);
+    if (!member) return;
+
+    return {
+      tenantId: member.organizationId,
+      userId: member.userId,
+      roles: [member.role],
+    };
+  },
+});
+```
+
+## Small business tools
+
+Tracked defines narrow tools around its own data. Reads can run directly.
+Writes still pass through product policy.
+
+```ts
+const getStats = app.fn({
+  description: "Get authorized performance totals for a date range.",
+  input: z.object({
+    range: z.enum(["today", "yesterday", "7d", "30d", "custom"]),
+    campaign: z.string().optional(),
+  }),
+  output: PerformanceSnapshot,
+  policy: {
+    operation: "read",
+    capabilities: ["tracked.analytics.read"],
+  },
+  run: (input, context) => analytics.getStats(input, context.identity),
+});
+
+const createSite = app.fn({
+  description: "Create a site from an approved draft folder.",
+  input: CreateSiteInput,
+  output: SiteResult,
+  policy: {
+    operation: "write",
+    capabilities: ["tracked.sites.write"],
+    requiresApproval: true,
+  },
+  run: (input, context) => sites.create(input, context.identity),
+});
+```
+
+The agent combines those tools with a draft workspace. Only the two common
+analytics IDs are named in the initial guidance. All schemas stay lazy.
+
+```ts
+const tools = app.tools({
+  stats: getStats,
+  trend: getTrend,
+  breakdown: getBreakdown,
+  create_site: createSite,
+  create_campaign: createCampaign,
+});
+
+export const siteEditor = app.agent({
+  name: "siteeditor",
+  instructions: trackedAgentInstructions,
+  tools,
+  eagerTools: ["stats", "trend"],
+  workspace: {
+    scope: "thread",
+    mode: "draft",
+  },
+  limits: {
+    steps: 100,
+    toolCalls: 250,
+  },
+});
+
+export default app.serve({ siteeditor: siteEditor });
+```
+
+When a user adds an existing site folder, trusted host code seeds the thread
+workspace from the tenant's R2 bucket. The agent edits the durable draft. A
+private preview runs before save or publish. Publishing is a separate governed
+operation that checks the original file revisions.
+
+## Realtime user interface
+
+Tracked uses one hibernating WebSocket per open thread. The UI renders durable
+events for:
+
+- assistant text and safe reasoning summaries;
+- tool search, schema load, calls, batches, results, and errors;
+- approvals and requested user input;
+- draft checkpoints, changed files, and diffs;
+- terminal state, usage, and reconnect cursors.
+
+The UI can disconnect and reconnect after its last saved cursor. It does not
+send the full conversation again.
+
+Use this pattern when a SaaS application needs an agent that can use private
+product data and edit product-owned files without moving authorization or
+business rules into the prompt.
