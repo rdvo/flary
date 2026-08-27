@@ -10,8 +10,10 @@ Flary opens `http://127.0.0.1:43817`. The setup creates a local project and
 deploys it to your Cloudflare account. It does not send credentials to a
 Flary service.
 
-The setup session expires after 20 minutes. It uses an HttpOnly, SameSite
-cookie and checks the exact request origin. It does not use browser storage.
+The setup session expires after 20 minutes. It uses an HttpOnly, SameSite=Lax
+cookie so the top-level OAuth callback can return to localhost. State, PKCE,
+the exact callback URI, and exact mutation origins bind each action to the
+local setup session. The setup does not use browser storage.
 The local server writes provider keys only to `.dev.vars` with mode `0600`.
 Wrangler sends the required values to Worker secrets during deployment.
 

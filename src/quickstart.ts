@@ -82,7 +82,10 @@ export async function startQuickstartServer(options: QuickstartServerOptions = {
       if (url.origin !== origin || request.headers.host !== `${HOST}:${port}`) return sendJson(response, 400, { error: "The setup host is invalid." });
       if (request.method === "GET" && url.pathname === "/") {
         setSecurityHeaders(response);
-        response.setHeader("set-cookie", `flary_setup=${session.id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_LIFETIME_MS / 1000}`);
+        // OAuth returns through a top-level cross-site navigation. Lax sends
+        // the local HttpOnly cookie on that GET callback while Strict does
+        // not. State and PKCE still bind the callback to this setup session.
+        response.setHeader("set-cookie", `flary_setup=${session.id}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_LIFETIME_MS / 1000}`);
         return send(response, 200, "text/html; charset=utf-8", setupPageHtml);
       }
       if (request.method === "GET" && url.pathname === "/app.css") return sendAsset(response, "text/css; charset=utf-8", setupCss);
@@ -202,7 +205,7 @@ export async function startQuickstartServer(options: QuickstartServerOptions = {
         }
       }
       if (request.method === "POST" && url.pathname === "/api/finish") {
-        response.setHeader("set-cookie", "flary_setup=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0");
+        response.setHeader("set-cookie", "flary_setup=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0");
         return sendJson(response, 200, { ok: true });
       }
       return sendJson(response, 404, { error: "The setup route was not found." });
