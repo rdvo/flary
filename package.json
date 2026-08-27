@@ -101,6 +101,16 @@
     "dist/**/*",
     "templates/starter/**/*",
     "templates/dashboard/**/*",
+    "templates/mail/README.md",
+    "templates/mail/components.json",
+    "templates/mail/gitignore",
+    "templates/mail/index.html",
+    "templates/mail/package.json",
+    "templates/mail/tsconfig.json",
+    "templates/mail/vite.config.ts",
+    "templates/mail/wrangler.jsonc",
+    "templates/mail/migrations/**/*",
+    "templates/mail/src/**/*",
     "docs/quickstart.md",
     "npm-patches/*.patch",
     "scripts/apply-dependency-patches.cjs",
@@ -134,6 +144,10 @@
     "./cloudflare": {
       "types": "./dist/types/harness/cloudflare/index.d.ts",
       "import": "./dist/harness/cloudflare/index.js"
+    },
+    "./mail": {
+      "types": "./dist/types/mail/index.d.ts",
+      "import": "./dist/mail/index.js"
     },
     "./contracts": {
       "types": "./dist/types/harness/contracts/index.d.ts",

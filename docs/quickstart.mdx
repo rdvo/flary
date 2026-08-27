@@ -1,22 +1,27 @@
 ---
 title: Quickstart
-description: Deploy a personal dashboard or agent backend to your Cloudflare account.
+description: Deploy a personal dashboard, agent backend, or mail inbox to your Cloudflare account.
 section: Start
 order: 1
 ---
 
 ## 1. Choose what you need
 
-| You want | Choose |
-| --- | --- |
-| A ready personal control panel | **Personal dashboard** |
-| An API for your existing product or bot | **Agent backend** |
-| Your own web or mobile UI | **Agent backend**, then [build your UI](/docs/clients/) |
+| You want                                | Choose                                                  |
+| --------------------------------------- | ------------------------------------------------------- |
+| A ready personal control panel          | **Personal dashboard**                                  |
+| An API for your existing product or bot | **Agent backend**                                       |
+| Your own web or mobile UI               | **Agent backend**, then [build your UI](/docs/clients/) |
+| A self-hosted business inbox            | **Flary Mail**                                          |
 
 The dashboard starter includes first-owner login, the production React and
 WebSocket thread console, provider setup, MCP connections, approvals, tool
 activity, and secret-health status. The backend is headless and exposes the
 same durable agent runtime through typed APIs.
+
+The mail starter receives and sends mail for selected addresses. It includes
+inbox, sent, draft, archive, spam, and trash folders; replies and attachments;
+team access; and WebSocket updates.
 
 ## 2. Start the wizard
 
@@ -50,8 +55,10 @@ arguments.
 ## 5. Deploy
 
 The wizard installs packages, builds the Worker, creates required Cloudflare
-resources, uploads secrets, applies dashboard migrations, deploys, and checks
-`/health`.
+resources, uploads secrets, applies database migrations, deploys, and checks
+`/health`. For mail projects, it also enables Email Routing and Email Sending.
+Email Routing replaces the domain's MX records. The wizard asks for explicit
+approval before it makes this change.
 
 If setup stops, continue from the project directory:
 
@@ -72,6 +79,12 @@ For a personal backend, use `FLARY_ACCESS_TOKEN` from `.dev.vars` as a bearer
 token. Existing-application authentication stays closed in production until
 you add a trusted identity resolver.
 
+For mail, open the printed `/setup` URL and use `FLARY_SETUP_TOKEN` to create
+the first owner. The CLI uses Wrangler OAuth, so it does not need a Flary API
+key or a separate OAuth client. D1 stores mail state, R2 stores raw mail and
+attachments, Queues handle parse and send work, and a hibernating Durable
+Object sends live WebSocket events. The template does not use KV.
+
 Next, choose one guide:
 
 - [Functions](/docs/functions/) for finite typed work.
@@ -87,6 +100,18 @@ from the process environment.
 OPENAI_API_KEY=... npx flary create my-flary \
   --template backend \
   --provider openai \
+  --package-manager npm \
+  --deploy \
+  --yes
+```
+
+Create mail without interactive prompts:
+
+```bash
+npx flary create my-mail \
+  --template mail \
+  --domain example.com \
+  --mailboxes admin,support \
   --package-manager npm \
   --deploy \
   --yes

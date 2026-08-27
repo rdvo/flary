@@ -1,0 +1,43 @@
+{
+  "name": "flary-mail",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "wrangler types --env-interface Env && tsc --noEmit && vite build",
+    "deploy": "npx flary deploy",
+    "doctor": "npx flary doctor"
+  },
+  "dependencies": {
+    "@better-auth/drizzle-adapter": "^1.6.24",
+    "better-auth": "^1.6.24",
+    "clsx": "^2.1.1",
+    "drizzle-orm": "^0.45.2",
+    "flary": "latest",
+    "hono": "^4.12.34",
+    "lucide-react": "^0.544.0",
+    "postal-mime": "^2.6.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tailwind-merge": "^3.3.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.48.0",
+    "@tailwindcss/vite": "^4.1.14",
+    "@types/node": "^22.19.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "tailwindcss": "^4.1.14",
+    "typescript": "^5.8.3",
+    "vite": "^8.1.5",
+    "wrangler": "^4.90.0"
+  },
+  "overrides": {
+    "undici": "7.29.0"
+  }
+}

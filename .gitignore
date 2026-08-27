@@ -11,6 +11,8 @@ build
 .flue-vite
 .flue-vite.wrangler.jsonc
 .wrangler
+.flary/
+flary-*.tgz
 
 # Environment variables
 .env

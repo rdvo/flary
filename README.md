@@ -22,6 +22,8 @@ The guided command asks what you want to build:
   provider setup, and secret-health status.
 - **Agent backend:** typed functions and persistent agents for an existing
   website, CMS, bot, or application.
+- **Flary Mail:** a self-hosted business inbox with inbound mail, replies,
+  drafts, sent mail, team members, attachments, and live updates.
 
 It then signs in with Wrangler OAuth, lets you choose an AI provider, creates
 the required Cloudflare resources, uploads secrets, deploys, and checks the
@@ -41,6 +43,33 @@ npx flary create my-flary \
 
 Use `flary init` instead when you only want typed Flary files in an existing
 project and do not want Flary to change its deployment system.
+
+### Create a mail inbox
+
+```bash
+npx flary create my-mail \
+  --template mail \
+  --domain example.com \
+  --mailboxes admin,support \
+  --package-manager npm \
+  --deploy \
+  --yes
+```
+
+Flary uses Wrangler OAuth. You do not need a Flary API key or a separate
+OAuth client for the CLI flow. The deploy command enables Email Routing and
+Email Sending for the domain. Enabling Email Routing replaces the domain's
+MX records, so use a domain that does not already receive mail elsewhere.
+
+Mail data stays in your Cloudflare account. D1 stores mailbox state and
+message metadata. R2 stores raw messages and attachments. A Queue handles
+parse and send work. One hibernating Durable Object per mailbox sends
+WebSocket updates to connected inbox clients. The responsive web UI uses
+Tailwind CSS and is ready for shadcn/ui components. KV is not used.
+
+Cloudflare also offers outbound SMTP submission at
+`smtp.mx.cloudflare.net:465`. It does not offer IMAP or POP, so external mail
+client synchronization requires a separate IMAP/JMAP or provider bridge.
 
 ## A typed function
 
@@ -75,10 +104,12 @@ const tools = app.tools({
   searchDocs: app.fn({
     description: "Search product documentation",
     input: z.object({ query: z.string().min(1) }),
-    output: z.array(z.object({
-      title: z.string(),
-      url: z.string().url(),
-    })),
+    output: z.array(
+      z.object({
+        title: z.string(),
+        url: z.string().url(),
+      })
+    ),
     run: ({ query }) => searchDocumentation(query),
   }),
   github: app.mcp("github"),
