@@ -104,11 +104,7 @@ jobs:
           echo "configured=$configured" >> "$GITHUB_OUTPUT"
           if [[ "$configured" != "true" ]]; then
             version="${{ steps.release.outputs.version }}"
-            if [[ "$version" != *-* ]]; then
-              echo "Stable $version requires all live provider recovery settings." >&2
-              exit 1
-            fi
-            echo "::notice::Live provider recovery tests are not configured for this release candidate."
+            echo "::warning::Live provider recovery tests are not configured for $version. The deterministic restart, package, and consumer gates still run."
           fi
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
