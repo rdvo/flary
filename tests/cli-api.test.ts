@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -282,9 +282,11 @@ test("deploy passes a permission-restricted secrets file and always removes it",
   const target = path.join(root, "backend");
   let secretPath: string | undefined;
   let secretMode: number | undefined;
+  let wranglerCommand: string | undefined;
   const runner: CommandRunner = {
     async run(command, args) {
       if (command === "npm") return { code: 0, stdout: "", stderr: "" };
+      wranglerCommand = command;
       if (args.includes("whoami")) {
         return {
           code: 0,
@@ -327,6 +329,14 @@ test("deploy passes a permission-restricted secrets file and always removes it",
       { cwd: root, isTTY: false, runner, env: {}, log: () => undefined }
     );
     await mkdir(path.join(target, "node_modules"));
+    const hoistedWrangler = path.join(
+      root,
+      "node_modules",
+      ".bin",
+      process.platform === "win32" ? "wrangler.cmd" : "wrangler"
+    );
+    await mkdir(path.dirname(hoistedWrangler), { recursive: true });
+    await writeFile(hoistedWrangler, "");
     await assert.rejects(
       runFlaryCli(["deploy"], {
         cwd: target,
@@ -338,6 +348,7 @@ test("deploy passes a permission-restricted secrets file and always removes it",
       /Wrangler deployment failed/
     );
     assert.equal(secretMode, 0o600);
+    assert.equal(wranglerCommand, hoistedWrangler);
     assert.ok(secretPath);
     await assert.rejects(stat(secretPath!));
   } finally {

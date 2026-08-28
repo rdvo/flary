@@ -1095,13 +1095,27 @@ async function installProject(
   if (result.code !== 0) throw new Error(`${command} install failed.`);
 }
 
-function localWrangler(
+async function localWrangler(
   target: string,
   state: FlaryProjectState
-): [string, string[]] {
+): Promise<[string, string[]]> {
   const suffix = process.platform === "win32" ? ".cmd" : "";
-  const executable = join(target, "node_modules", ".bin", `wrangler${suffix}`);
-  return [executable, state.profile ? ["--profile", state.profile] : []];
+  let directory = resolve(target);
+  while (true) {
+    const executable = join(
+      directory,
+      "node_modules",
+      ".bin",
+      `wrangler${suffix}`
+    );
+    if (await exists(executable)) {
+      return [executable, state.profile ? ["--profile", state.profile] : []];
+    }
+    const parent = dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
+  }
+  return ["wrangler", state.profile ? ["--profile", state.profile] : []];
 }
 
 async function authenticateWrangler(
@@ -1112,7 +1126,7 @@ async function authenticateWrangler(
   prompt: CliPrompt,
   requestedAccount?: string
 ): Promise<FlaryProjectState> {
-  const [wrangler, prefix] = localWrangler(target, state);
+  const [wrangler, prefix] = await localWrangler(target, state);
   let result = await runner.run(wrangler, [...prefix, "whoami", "--json"], {
     cwd: target,
     env,
@@ -1237,7 +1251,7 @@ async function deployProject(
     env: input.env,
   });
   if (build.code !== 0) throw new Error("The project build failed.");
-  const [wrangler, prefix] = localWrangler(target, state);
+  const [wrangler, prefix] = await localWrangler(target, state);
   const validation = await input.runner.run(
     wrangler,
     [...prefix, "deploy", "--dry-run"],
@@ -1779,7 +1793,7 @@ async function doctorProject(
         : `${state.requiredSecrets.length} present`,
     ]);
     if (await exists(join(target, "node_modules"))) {
-      const [wrangler, prefix] = localWrangler(target, state);
+      const [wrangler, prefix] = await localWrangler(target, state);
       const identity = await options.runner.run(
         wrangler,
         [...prefix, "whoami", "--json"],
