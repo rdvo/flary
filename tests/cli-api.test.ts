@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   deploymentUrl,
   parseWranglerAccounts,
+  parseWranglerSecretNames,
   runFlaryCli,
   type CliPrompt,
   type CommandRunner,
@@ -351,6 +352,91 @@ test("deploy passes a permission-restricted secrets file and always removes it",
     assert.equal(wranglerCommand, hoistedWrangler);
     assert.ok(secretPath);
     await assert.rejects(stat(secretPath!));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Wrangler secret JSON is normalized", () => {
+  assert.deepEqual(
+    parseWranglerSecretNames(
+      JSON.stringify([
+        { name: "FLARY_INTERNAL_TOKEN", type: "secret_text" },
+        { name: "GEMINI_API_KEY", type: "secret_text" },
+        { type: "secret_text" },
+      ])
+    ),
+    ["FLARY_INTERNAL_TOKEN", "GEMINI_API_KEY"]
+  );
+});
+
+test("deploy keeps required secrets that already exist on the Worker", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "flary-cli-remote-secrets-"));
+  const target = path.join(root, "backend");
+  const calls: string[] = [];
+  const runner: CommandRunner = {
+    async run(command, args) {
+      calls.push(`${command} ${args.join(" ")}`);
+      if (command === "npm") return { code: 0, stdout: "", stderr: "" };
+      if (args.includes("whoami"))
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            accounts: [{ id: "account-1", name: "Test" }],
+          }),
+          stderr: "",
+        };
+      if (args.includes("--dry-run"))
+        return { code: 0, stdout: "", stderr: "" };
+      if (args.includes("secret") && args.includes("list"))
+        return {
+          code: 0,
+          stdout: JSON.stringify([
+            { name: "FLARY_INTERNAL_TOKEN", type: "secret_text" },
+            { name: "FLARY_SESSION_ARCHIVE_KEY", type: "secret_text" },
+            { name: "FLARY_ACCESS_TOKEN", type: "secret_text" },
+          ]),
+          stderr: "",
+        };
+      if (args.includes("deploy"))
+        return { code: 1, stdout: "", stderr: "expected failure" };
+      return { code: 0, stdout: "", stderr: "" };
+    },
+  };
+  try {
+    await runFlaryCli(
+      [
+        "create",
+        "backend",
+        "--template",
+        "backend",
+        "--provider",
+        "none",
+        "--package-manager",
+        "npm",
+        "--no-deploy",
+        "--yes",
+      ],
+      { cwd: root, isTTY: false, runner, env: {}, log: () => undefined }
+    );
+    await mkdir(path.join(target, "node_modules"));
+    await rm(path.join(target, ".dev.vars"));
+    await assert.rejects(
+      runFlaryCli(["deploy"], {
+        cwd: target,
+        isTTY: false,
+        runner,
+        env: {},
+        log: () => undefined,
+      }),
+      /Wrangler deployment failed/
+    );
+    assert.ok(calls.some((call) => call.includes("secret list")));
+    assert.ok(
+      calls.some(
+        (call) => call.includes(" deploy") && !call.includes("--dry-run") && !call.includes("--secrets-file")
+      )
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

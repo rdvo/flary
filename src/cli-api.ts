@@ -1223,6 +1223,21 @@ export function parseWranglerAccounts(
   });
 }
 
+export function parseWranglerSecretNames(output: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    throw new Error("Wrangler returned invalid secret data.");
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.flatMap((value) => {
+    if (!value || typeof value !== "object") return [];
+    const name = (value as Record<string, unknown>).name;
+    return typeof name === "string" ? [name] : [];
+  });
+}
+
 async function deployProject(
   target: string,
   input: {
@@ -1293,9 +1308,20 @@ async function deployProject(
       );
   }
   const localSecrets = await readKeyValueFile(join(target, ".dev.vars"));
-  const missing = state.requiredSecrets.filter(
+  const missingLocally = state.requiredSecrets.filter(
     (name) => !localSecrets[name] && !input.env[name]
   );
+  let remoteSecrets = new Set<string>();
+  if (missingLocally.length > 0) {
+    const listed = await input.runner.run(
+      wrangler,
+      [...prefix, "secret", "list"],
+      { cwd: target, env: input.env }
+    );
+    if (listed.code === 0)
+      remoteSecrets = new Set(parseWranglerSecretNames(listed.stdout));
+  }
+  const missing = missingLocally.filter((name) => !remoteSecrets.has(name));
   if (missing.length > 0)
     throw new Error(
       `Required secrets are missing: ${missing.join(
@@ -1303,10 +1329,10 @@ async function deployProject(
       )}. Run \`flary setup\`.`
     );
   const selectedSecrets = Object.fromEntries(
-    state.requiredSecrets.map((name) => [
-      name,
-      localSecrets[name] ?? input.env[name]!,
-    ])
+    state.requiredSecrets.flatMap((name) => {
+      const value = localSecrets[name] ?? input.env[name];
+      return value ? [[name, value]] : [];
+    })
   ) as Record<string, string>;
   const secretDir = await mkdtemp(join(tmpdir(), "flary-secrets-"));
   const secretFile = join(secretDir, "secrets.json");
@@ -1316,9 +1342,12 @@ async function deployProject(
       mode: 0o600,
     });
     await chmod(secretFile, 0o600);
+    const deployArgs = [...prefix, "deploy"];
+    if (Object.keys(selectedSecrets).length > 0)
+      deployArgs.push("--secrets-file", secretFile);
     const deployed = await input.runner.run(
       wrangler,
-      [...prefix, "deploy", "--secrets-file", secretFile],
+      deployArgs,
       {
         cwd: target,
         env: { ...input.env, WRANGLER_OUTPUT_FILE_PATH: deploymentOutputFile },
