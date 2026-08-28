@@ -1,5 +1,5 @@
 diff --git a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js b/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
-index dadadbe33b5adea911dfcc1a82cd4e04fe489a71..738b27c260f78f49d3ac516efca359cc592e96f1 100644
+index dadadbe..738b27c 100644
 --- a/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
 +++ b/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js
 @@ -156,12 +156,18 @@ export const stream = (model, context, options) => {
@@ -59,7 +59,7 @@ index dadadbe33b5adea911dfcc1a82cd4e04fe489a71..738b27c260f78f49d3ac516efca359cc
                      }
                  }
 diff --git a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.d.ts b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.d.ts
-index 1e185878cd594eb72245958ecddfe2aa014d5723..feb0661cf796e8ddcfaf08e7b0f0cbd3d1988f21 100644
+index 1e18587..feb0661 100644
 --- a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.d.ts
 +++ b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.d.ts
 @@ -5,5 +5,15 @@
@@ -80,7 +80,7 @@ index 1e185878cd594eb72245958ecddfe2aa014d5723..feb0661cf796e8ddcfaf08e7b0f0cbd3
  //# sourceMappingURL=anthropic.d.ts.map
 \ No newline at end of file
 diff --git a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.js b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.js
-index 05ba3fc970f095bacc3f2b175186ceab68ff7f59..db2a72cf4a469dbac5c6c50ba14add63bb8c14af 100644
+index 05ba3fc..db2a72c 100644
 --- a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.js
 +++ b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.js
 @@ -185,6 +185,43 @@ async function exchangeAuthorizationCode(code, state, verifier, redirectUri) {
@@ -128,7 +128,7 @@ index 05ba3fc970f095bacc3f2b175186ceab68ff7f59..db2a72cf4a469dbac5c6c50ba14add63
      const { verifier, challenge } = await generatePKCE();
      const server = await startCallbackServer(verifier);
 diff --git a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.d.ts b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.d.ts
-index 792fa803e087fdff4b09c82f2fb4d3205aaebc82..dde4ba15b5ec1294f22788031bd43bd31c44e466 100644
+index 792fa80..bfa780c 100644
 --- a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.d.ts
 +++ b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.d.ts
 @@ -5,5 +5,29 @@
@@ -161,11 +161,12 @@ index 792fa803e087fdff4b09c82f2fb4d3205aaebc82..dde4ba15b5ec1294f22788031bd43bd3
 +export declare function pollOpenAICodexDeviceAuthorization(device: OpenAICodexDeviceAuthorization, signal?: AbortSignal): Promise<OpenAICodexDevicePollResult>;
  export declare const openaiCodexOAuth: OAuthAuth;
  //# sourceMappingURL=openai-codex.d.ts.map
+\ No newline at end of file
 diff --git a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.js b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.js
-index 5275b3b7a81683fdcd207b7619103706e1ce4ad4..21d9d15082d2e37d77b9a42c7ab31f1c8dbe1de6 100644
+index 5275b3b..7faa16c 100644
 --- a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.js
 +++ b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.js
-@@ -108,6 +108,9 @@ async function readTokenResponse(response, operation) {
+@@ -107,6 +107,9 @@ async function readTokenResponse(response, operation) {
          access: json.access_token,
          refresh: json.refresh_token,
          expires: Date.now() + json.expires_in * 1000,
@@ -175,7 +176,7 @@ index 5275b3b7a81683fdcd207b7619103706e1ce4ad4..21d9d15082d2e37d77b9a42c7ab31f1c
      };
  }
  async function exchangeAuthorizationCode(code, verifier, redirectUri = REDIRECT_URI, signal) {
-@@ -172,6 +172,101 @@ async function startOpenAICodexDeviceAuth(signal) {
+@@ -172,6 +175,101 @@ async function startOpenAICodexDeviceAuth(signal) {
          intervalSeconds,
      };
  }
@@ -277,7 +278,7 @@ index 5275b3b7a81683fdcd207b7619103706e1ce4ad4..21d9d15082d2e37d77b9a42c7ab31f1c
  async function pollOpenAICodexDeviceAuth(device, signal) {
      return pollOAuthDeviceCodeFlow({
          intervalSeconds: device.intervalSeconds,
-@@ -320,9 +421,7 @@ function credentialsFromToken(token) {
+@@ -329,9 +427,7 @@ function credentialsFromToken(token) {
      }
      return {
          type: "oauth",
@@ -288,9 +289,73 @@ index 5275b3b7a81683fdcd207b7619103706e1ce4ad4..21d9d15082d2e37d77b9a42c7ab31f1c
          accountId,
      };
  }
+diff --git a/node_modules/@earendil-works/pi-ai/dist/providers/google.models.d.ts b/node_modules/@earendil-works/pi-ai/dist/providers/google.models.d.ts
+index d36c6f5..7c4d637 100644
+--- a/node_modules/@earendil-works/pi-ai/dist/providers/google.models.d.ts
++++ b/node_modules/@earendil-works/pi-ai/dist/providers/google.models.d.ts
+@@ -236,6 +236,30 @@ export declare const GOOGLE_MODELS: {
+         contextWindow: number;
+         maxTokens: number;
+     };
++    readonly "gemini-3.7-flash": {
++        id: string;
++        name: string;
++        api: "google-generative-ai";
++        provider: string;
++        baseUrl: string;
++        reasoning: true;
++        thinkingLevelMap: {
++            off: null;
++            minimal: null;
++            low: string;
++            medium: string;
++            high: string;
++        };
++        input: ("image" | "text")[];
++        cost: {
++            input: number;
++            output: number;
++            cacheRead: number;
++            cacheWrite: number;
++        };
++        contextWindow: number;
++        maxTokens: number;
++    };
+     readonly "gemini-flash-latest": {
+         id: string;
+         name: string;
+diff --git a/node_modules/@earendil-works/pi-ai/dist/providers/google.models.js b/node_modules/@earendil-works/pi-ai/dist/providers/google.models.js
+index f91fb18..9cfc764 100644
+--- a/node_modules/@earendil-works/pi-ai/dist/providers/google.models.js
++++ b/node_modules/@earendil-works/pi-ai/dist/providers/google.models.js
+@@ -212,6 +212,24 @@ export const GOOGLE_MODELS = {
+         contextWindow: 1048576,
+         maxTokens: 65536,
+     },
++    "gemini-3.7-flash": {
++        id: "gemini-3.7-flash",
++        name: "Gemini 3.7 Flash",
++        api: "google-generative-ai",
++        provider: "google",
++        baseUrl: "https://generativelanguage.googleapis.com/v1beta",
++        reasoning: true,
++        thinkingLevelMap: { "off": null, "minimal": null, "low": "LOW", "medium": "MEDIUM", "high": "HIGH" },
++        input: ["text", "image"],
++        cost: {
++            input: 0.75,
++            output: 3.75,
++            cacheRead: 0.075,
++            cacheWrite: 0,
++        },
++        contextWindow: 1048576,
++        maxTokens: 65536,
++    },
+     "gemini-flash-latest": {
+         id: "gemini-flash-latest",
+         name: "Gemini Flash Latest",
 diff --git a/node_modules/@earendil-works/pi-ai/dist/worker-oauth.d.ts b/node_modules/@earendil-works/pi-ai/dist/worker-oauth.d.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..e2353328c345a105a11044a3db669c7b54b52db5
+index 0000000..e235332
 --- /dev/null
 +++ b/node_modules/@earendil-works/pi-ai/dist/worker-oauth.d.ts
 @@ -0,0 +1,54 @@
@@ -350,7 +415,7 @@ index 0000000000000000000000000000000000000000..e2353328c345a105a11044a3db669c7b
 +//# sourceMappingURL=worker-oauth.d.ts.map
 diff --git a/node_modules/@earendil-works/pi-ai/dist/worker-oauth.js b/node_modules/@earendil-works/pi-ai/dist/worker-oauth.js
 new file mode 100644
-index 0000000000000000000000000000000000000000..667dbf075fc6047d6835ee8891b9034551cb6145
+index 0000000..667dbf0
 --- /dev/null
 +++ b/node_modules/@earendil-works/pi-ai/dist/worker-oauth.js
 @@ -0,0 +1,11 @@
@@ -366,7 +431,7 @@ index 0000000000000000000000000000000000000000..667dbf075fc6047d6835ee8891b90345
 +} from "./auth/oauth/openai-codex.js";
 +//# sourceMappingURL=worker-oauth.js.map
 diff --git a/node_modules/@earendil-works/pi-ai/package.json b/node_modules/@earendil-works/pi-ai/package.json
-index f8a499960b89886adfe4b2e934d26c1af3108b53..d00a41007ac6d1c18c49d48cef87deac8582e806 100644
+index f8a4999..d00a410 100644
 --- a/node_modules/@earendil-works/pi-ai/package.json
 +++ b/node_modules/@earendil-works/pi-ai/package.json
 @@ -31,6 +31,10 @@

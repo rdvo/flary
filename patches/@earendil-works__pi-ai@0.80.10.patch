@@ -288,6 +288,70 @@ index 5275b3b7a81683fdcd207b7619103706e1ce4ad4..21d9d15082d2e37d77b9a42c7ab31f1c
          accountId,
      };
  }
+diff --git a/dist/providers/google.models.d.ts b/dist/providers/google.models.d.ts
+index d36c6f5..7c4d637 100644
+--- a/dist/providers/google.models.d.ts
++++ b/dist/providers/google.models.d.ts
+@@ -236,6 +236,30 @@ export declare const GOOGLE_MODELS: {
+         contextWindow: number;
+         maxTokens: number;
+     };
++    readonly "gemini-3.7-flash": {
++        id: string;
++        name: string;
++        api: "google-generative-ai";
++        provider: string;
++        baseUrl: string;
++        reasoning: true;
++        thinkingLevelMap: {
++            off: null;
++            minimal: null;
++            low: string;
++            medium: string;
++            high: string;
++        };
++        input: ("image" | "text")[];
++        cost: {
++            input: number;
++            output: number;
++            cacheRead: number;
++            cacheWrite: number;
++        };
++        contextWindow: number;
++        maxTokens: number;
++    };
+     readonly "gemini-flash-latest": {
+         id: string;
+         name: string;
+diff --git a/dist/providers/google.models.js b/dist/providers/google.models.js
+index f91fb18..9cfc764 100644
+--- a/dist/providers/google.models.js
++++ b/dist/providers/google.models.js
+@@ -212,6 +212,24 @@ export const GOOGLE_MODELS = {
+         contextWindow: 1048576,
+         maxTokens: 65536,
+     },
++    "gemini-3.7-flash": {
++        id: "gemini-3.7-flash",
++        name: "Gemini 3.7 Flash",
++        api: "google-generative-ai",
++        provider: "google",
++        baseUrl: "https://generativelanguage.googleapis.com/v1beta",
++        reasoning: true,
++        thinkingLevelMap: { "off": null, "minimal": null, "low": "LOW", "medium": "MEDIUM", "high": "HIGH" },
++        input: ["text", "image"],
++        cost: {
++            input: 0.75,
++            output: 3.75,
++            cacheRead: 0.075,
++            cacheWrite: 0,
++        },
++        contextWindow: 1048576,
++        maxTokens: 65536,
++    },
+     "gemini-flash-latest": {
+         id: "gemini-flash-latest",
+         name: "Gemini Flash Latest",
 diff --git a/dist/worker-oauth.d.ts b/dist/worker-oauth.d.ts
 new file mode 100644
 index 0000000000000000000000000000000000000000..e2353328c345a105a11044a3db669c7b54b52db5
