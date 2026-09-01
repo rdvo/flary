@@ -21,11 +21,11 @@ See the repository tags and npm dist-tags for the exact published state.
 
 ## 1.0 release path
 
-`1.0.0-rc.2` is the first published 1.0 integration candidate. It includes the complete
-Flue 2 session engine, durable approval and user-input continuation, lazy tool
-search and Code Mode, protected secret collection, and default lazy web
-search. Test this exact candidate in production-like application staging
-before `1.0.0` moves to `latest`.
+`1.0.0` is the first stable 1.0 release. It includes the complete Flue 2
+session engine, durable approval and user-input continuation, lazy tool search
+and Code Mode, protected secret collection, and default lazy web search. The
+same package passed the release, restart, package-install, and generated
+consumer gates as `1.0.0-rc.2` before it moved to `latest`.
 
 Publishing uses npm trusted publishing from
 `.github/workflows/publish.yml`. The npm package must trust the `rdvo/flary`
