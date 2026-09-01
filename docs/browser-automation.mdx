@@ -32,3 +32,8 @@ receiving raw CDP credentials. Agent browser actions pause during takeover.
 
 Browser Run is optional. Its binding is generated only when an application
 registers `app.browser()`.
+
+Use the built-in `web_search` and `web_fetch` tools when the agent only needs
+public information or page text. Use Browser Run when it must interact with a
+page, keep cookies, take a screenshot, or let a person take control. Web
+search is enabled by default and does not require a Browser Run binding.

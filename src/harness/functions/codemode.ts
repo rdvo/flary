@@ -5,10 +5,7 @@ import type {
   CodemodeConnector,
   ConnectorTool,
 } from "@cloudflare/codemode";
-import type {
-  ApprovalDecision,
-  ApprovalRequest,
-} from "../contracts/index.js";
+import type { ApprovalDecision, ApprovalRequest } from "../contracts/index.js";
 import type {
   ApprovalContinuation,
   ApprovalRecoveryCall,
@@ -30,8 +27,12 @@ import type {
 } from "./types.js";
 import { ApprovalRequestSchema } from "../contracts/index.js";
 import { JsonObjectSchema } from "../contracts/common.js";
-import { redactErrorMessage, redactSecrets, redactText } from "../execution/redaction.js";
-import { createMcpConnection } from "./mcp.js";
+import {
+  redactErrorMessage,
+  redactSecrets,
+  redactText,
+} from "../execution/redaction.js";
+import { createMcpConnection, mcpSessionUuid } from "./mcp.js";
 import { createOpenApiRuntime } from "./openapi.js";
 import { getFunctionState } from "./app.js";
 import { parseThreadName } from "../storage/scopes.js";
@@ -71,30 +72,38 @@ export interface FlaryCodemodeExecutorOptions<TBindings = unknown> {
   readonly bindings?: Record<string, unknown>;
   readonly name?: string;
   readonly maxExecutions?: number;
-  readonly connectors?: (
+  readonly connectors?: (input: {
+    readonly bindings: TBindings;
+    readonly context: FlaryStepContext<TBindings>;
+    readonly tools: FlaryToolRegistry;
+  }) => readonly CodemodeConnector[] | Promise<readonly CodemodeConnector[]>;
+  readonly resolveMcp?: (
+    source: FlaryMcpSource,
     input: {
       readonly bindings: TBindings;
       readonly context: FlaryStepContext<TBindings>;
-      readonly tools: FlaryToolRegistry;
     },
-  ) =>
-    | readonly CodemodeConnector[]
-    | Promise<readonly CodemodeConnector[]>;
-  readonly resolveMcp?: (
-    source: FlaryMcpSource,
-    input: { readonly bindings: TBindings; readonly context: FlaryStepContext<TBindings> },
   ) => FlaryMcpConnection | Promise<FlaryMcpConnection>;
   readonly resolveOpenApi?: (
     source: FlaryOpenApiSource,
-    input: { readonly bindings: TBindings; readonly context: FlaryStepContext<TBindings> },
+    input: {
+      readonly bindings: TBindings;
+      readonly context: FlaryStepContext<TBindings>;
+    },
   ) => FlaryOpenApiRuntime | Promise<FlaryOpenApiRuntime>;
   readonly resolveWorkspace?: (
     source: FlaryWorkspaceSource,
-    input: { readonly bindings: TBindings; readonly context: FlaryStepContext<TBindings> },
+    input: {
+      readonly bindings: TBindings;
+      readonly context: FlaryStepContext<TBindings>;
+    },
   ) => FlaryToolConnection | Promise<FlaryToolConnection>;
   readonly resolveR2?: (
     source: FlaryR2Source,
-    input: { readonly bindings: TBindings; readonly context: FlaryStepContext<TBindings> },
+    input: {
+      readonly bindings: TBindings;
+      readonly context: FlaryStepContext<TBindings>;
+    },
   ) => FlaryToolConnection | Promise<FlaryToolConnection>;
   readonly resolveSandbox?: (
     source: FlarySandboxSource,
@@ -185,34 +194,44 @@ class FlaryCodemodeExecutor<TBindings> implements CodeExecutor<TBindings> {
   }): Promise<unknown> {
     const codeBytes = new TextEncoder().encode(input.code).byteLength;
     if (codeBytes > (this.options.maxCodeBytes ?? 256 * 1024)) {
-      throw new FlaryCodeExecutionError("The generated code exceeds the Flary code size limit.");
+      throw new FlaryCodeExecutionError(
+        "The generated code exceeds the Flary code size limit.",
+      );
     }
     const codemode = await import("@cloudflare/codemode");
     const executor = await this.#executor;
-    const extra = [
-      ...((await this.options.connectors?.(input)) ?? []),
-    ];
-    const ctx = typeof this.options.ctx === "function" ? this.options.ctx() : this.options.ctx;
+    const extra = [...((await this.options.connectors?.(input)) ?? [])];
+    const ctx =
+      typeof this.options.ctx === "function"
+        ? this.options.ctx()
+        : this.options.ctx;
 
     const maxToolCalls = input.limits?.toolCalls ?? this.options.maxToolCalls;
     const callCounter = { count: 0, max: maxToolCalls };
     if (!ctx) {
       const hasExternal = input.tools.names.some((name) => {
         const source = input.tools.entries[name]!;
-        return typeof source !== "function" &&
-          (source.kind === "mcp" || source.kind === "openapi" || source.kind === "r2");
+        return (
+          typeof source !== "function" &&
+          (source.kind === "mcp" ||
+            source.kind === "openapi" ||
+            source.kind === "r2")
+        );
       });
       if (extra.length > 0 || hasExternal) {
         throw new FlaryCodeExecutionError(
           "External Flary connectors need a Durable Object state for host execution.",
         );
       }
-      const result = await executor.execute(normalizeFlaryCatalogCalls(input.code), [
-        {
-          name: "tools",
-          fns: localProviders(input.tools, callCounter, false),
-        },
-      ]);
+      const result = await executor.execute(
+        normalizeFlaryCatalogCalls(input.code),
+        [
+          {
+            name: "tools",
+            fns: localProviders(input.tools, callCounter, false),
+          },
+        ],
+      );
       if (result.error) {
         throw new FlaryCodeExecutionError(result.error);
       }
@@ -283,14 +302,23 @@ class FlaryCodemodeExecutor<TBindings> implements CodeExecutor<TBindings> {
           },
         );
       }
-      throw new FlaryCodeExecutionError(result.error ?? "The Dynamic Worker execution failed.");
+      throw new FlaryCodeExecutionError(
+        result.error ?? "The Dynamic Worker execution failed.",
+      );
     } catch (error) {
-      if (!(error instanceof FlaryCodeExecutionError && error.code === "approval_pending")) {
-        await activity?.record("codemode.failed", 0, {
-          durationMs: Date.now() - startedAt,
-          usage: activity.usage(callCounter.count, 0),
-          error: redactErrorMessage(error, "The Code Mode execution failed."),
-        }).catch(() => undefined);
+      if (
+        !(
+          error instanceof FlaryCodeExecutionError &&
+          error.code === "approval_pending"
+        )
+      ) {
+        await activity
+          ?.record("codemode.failed", 0, {
+            durationMs: Date.now() - startedAt,
+            usage: activity.usage(callCounter.count, 0),
+            error: redactErrorMessage(error, "The Code Mode execution failed."),
+          })
+          .catch(() => undefined);
       }
       throw error;
     }
@@ -301,7 +329,10 @@ class FlaryCodemodeExecutor<TBindings> implements CodeExecutor<TBindings> {
     readonly tools: FlaryToolRegistry;
     readonly context: FlaryStepContext<TBindings>;
   }): ApprovalContinuation | undefined {
-    const ctx = typeof this.options.ctx === "function" ? this.options.ctx() : this.options.ctx;
+    const ctx =
+      typeof this.options.ctx === "function"
+        ? this.options.ctx()
+        : this.options.ctx;
     if (!ctx) return undefined;
     return this.createApprovalBridge(input, ctx)?.continuation;
   }
@@ -311,7 +342,10 @@ class FlaryCodemodeExecutor<TBindings> implements CodeExecutor<TBindings> {
     readonly tools: FlaryToolRegistry;
     readonly context: FlaryStepContext<TBindings>;
   }): Promise<FlaryCodemodeApprovalBridge | undefined> {
-    const ctx = typeof this.options.ctx === "function" ? this.options.ctx() : this.options.ctx;
+    const ctx =
+      typeof this.options.ctx === "function"
+        ? this.options.ctx()
+        : this.options.ctx;
     if (!ctx) return Promise.resolve(undefined);
     return Promise.resolve(this.createApprovalBridge(input, ctx));
   }
@@ -366,8 +400,13 @@ class FlaryCodemodeExecutor<TBindings> implements CodeExecutor<TBindings> {
     } catch {
       throw new FlaryCodeExecutionError("The code result is not serializable.");
     }
-    if (new TextEncoder().encode(serialized).byteLength > (this.options.maxOutputBytes ?? 512 * 1024)) {
-      throw new FlaryCodeExecutionError("The code result exceeds the Flary output size limit.");
+    if (
+      new TextEncoder().encode(serialized).byteLength >
+      (this.options.maxOutputBytes ?? 512 * 1024)
+    ) {
+      throw new FlaryCodeExecutionError(
+        "The code result exceeds the Flary output size limit.",
+      );
     }
     return redacted;
   }
@@ -375,29 +414,38 @@ class FlaryCodemodeExecutor<TBindings> implements CodeExecutor<TBindings> {
 
 /** Minimal runtime surface needed by the Flue approval bridge. */
 export interface FlaryCodemodeApprovalRuntime {
-  pending(executionId?: string): Promise<readonly {
+  pending(executionId?: string): Promise<
+    readonly {
+      readonly executionId: string;
+      readonly seq: number;
+      readonly connector: string;
+      readonly method: string;
+      readonly args: unknown;
+    }[]
+  >;
+  approve(input: { readonly executionId: string }): Promise<unknown>;
+  reject(input: {
     readonly executionId: string;
     readonly seq: number;
-    readonly connector: string;
-    readonly method: string;
-    readonly args: unknown;
-  }[]>;
-  approve(input: { readonly executionId: string }): Promise<unknown>;
-  reject(input: { readonly executionId: string; readonly seq: number }): Promise<boolean>;
-  executions(limit?: number): Promise<readonly {
-    readonly id: string;
-    readonly status: string;
-    readonly result?: unknown;
-    readonly error?: string;
-    /** Epoch milliseconds when the execution was admitted. */
-    readonly createdAt?: number;
-  }[]>;
+  }): Promise<boolean>;
+  executions(limit?: number): Promise<
+    readonly {
+      readonly id: string;
+      readonly status: string;
+      readonly result?: unknown;
+      readonly error?: string;
+      /** Epoch milliseconds when the execution was admitted. */
+      readonly createdAt?: number;
+    }[]
+  >;
 }
 
 export interface FlaryCodemodeApprovalBridgeOptions {
   readonly runtime:
     | FlaryCodemodeApprovalRuntime
-    | (() => FlaryCodemodeApprovalRuntime | Promise<FlaryCodemodeApprovalRuntime>);
+    | (() =>
+        | FlaryCodemodeApprovalRuntime
+        | Promise<FlaryCodemodeApprovalRuntime>);
   readonly runId: string;
   readonly requestedBy?: ApprovalRequest["requestedBy"];
 }
@@ -418,15 +466,15 @@ export function createFlaryCodemodeApprovalBridge(
 ): FlaryCodemodeApprovalBridge {
   const pendingId = (executionId: string, seq: number) =>
     `codemode_${executionId}_${seq}`;
-  const parsePendingId = (value: string): { executionId: string; seq: number } => {
+  const parsePendingId = (
+    value: string,
+  ): { executionId: string; seq: number } => {
     const match = /^codemode_(.+)_([0-9]+)$/.exec(value);
     if (!match) throw new Error("Invalid Codemode approval id");
     return { executionId: match[1]!, seq: Number(match[2]) };
   };
   const runtimeFor = async (): Promise<FlaryCodemodeApprovalRuntime> =>
-    typeof options.runtime === "function"
-      ? options.runtime()
-      : options.runtime;
+    typeof options.runtime === "function" ? options.runtime() : options.runtime;
   const pending = async () => (await runtimeFor()).pending();
   // Codemode's pending action does not include a timestamp. Keep the first
   // observed value stable for the public approval record, and prefer the
@@ -440,32 +488,41 @@ export function createFlaryCodemodeApprovalBridge(
     const createdAtByExecution = new Map(
       executions
         .filter((execution) => typeof execution.createdAt === "number")
-        .map((execution) => [execution.id, new Date(execution.createdAt!).toISOString()]),
+        .map((execution) => [
+          execution.id,
+          new Date(execution.createdAt!).toISOString(),
+        ]),
     );
-    return values.map((action) => ApprovalRequestSchema.parse({
-      id: pendingId(action.executionId, action.seq),
-      runId: options.runId,
-      action: "tool-call",
-      reason: `Approval is required for ${action.connector}.${action.method}`,
-      requestedBy: options.requestedBy ?? {
-        id: "flary",
-        kind: "agent",
-        version: "1",
-      },
-      toolCallId: pendingId(action.executionId, action.seq),
-      requestedAt: requestedAtByAction.get(pendingId(action.executionId, action.seq)) ??
-        createdAtByExecution.get(action.executionId) ??
-        (() => {
-          const value = new Date().toISOString();
-          requestedAtByAction.set(pendingId(action.executionId, action.seq), value);
-          return value;
-        })(),
-      context: JsonObjectSchema.parse({
-        connector: action.connector,
-        method: action.method,
-        arguments: jsonObject(action.args),
+    return values.map((action) =>
+      ApprovalRequestSchema.parse({
+        id: pendingId(action.executionId, action.seq),
+        runId: options.runId,
+        action: "tool-call",
+        reason: `Approval is required for ${action.connector}.${action.method}`,
+        requestedBy: options.requestedBy ?? {
+          id: "flary",
+          kind: "agent",
+          version: "1",
+        },
+        toolCallId: pendingId(action.executionId, action.seq),
+        requestedAt:
+          requestedAtByAction.get(pendingId(action.executionId, action.seq)) ??
+          createdAtByExecution.get(action.executionId) ??
+          (() => {
+            const value = new Date().toISOString();
+            requestedAtByAction.set(
+              pendingId(action.executionId, action.seq),
+              value,
+            );
+            return value;
+          })(),
+        context: JsonObjectSchema.parse({
+          connector: action.connector,
+          method: action.method,
+          arguments: jsonObject(action.args),
+        }),
       }),
-    }));
+    );
   };
 
   const decide = async (decision: ApprovalDecision): Promise<void> => {
@@ -478,15 +535,19 @@ export function createFlaryCodemodeApprovalBridge(
     await runtime.reject({ executionId, seq });
   };
 
-  const findExecution = async (): Promise<{
-    readonly executionId: string;
-    readonly pending: boolean;
-  } | undefined> => {
+  const findExecution = async (): Promise<
+    | {
+        readonly executionId: string;
+        readonly pending: boolean;
+      }
+    | undefined
+  > => {
     const actions = await pending();
-    if (actions.length > 0) return {
-      executionId: actions[0]!.executionId,
-      pending: true,
-    };
+    if (actions.length > 0)
+      return {
+        executionId: actions[0]!.executionId,
+        pending: true,
+      };
     const executions = await (await runtimeFor()).executions(10);
     const latest = executions[0];
     return latest ? { executionId: latest.id, pending: false } : undefined;
@@ -496,10 +557,15 @@ export function createFlaryCodemodeApprovalBridge(
     async inspect(_input: ApprovalRecoveryCall) {
       return (await findExecution())?.pending ? "waiting" : "ready";
     },
-    async resume(_input: ApprovalRecoveryCall): Promise<ApprovalRecoveryResult> {
+    async resume(
+      _input: ApprovalRecoveryCall,
+    ): Promise<ApprovalRecoveryResult> {
       const execution = await findExecution();
       if (!execution) {
-        return { content: "Codemode approval execution is unavailable.", isError: true };
+        return {
+          content: "Codemode approval execution is unavailable.",
+          isError: true,
+        };
       }
       // The public decision endpoint performs approve/reject. Recovery only
       // reads the durable terminal result and returns it to Flue.
@@ -546,8 +612,8 @@ async function createLocalConnector<TBindings>(
 
     protected async tools(): Promise<ConnectorTools> {
       const descriptors = [
-        ...describeRegistry(input.tools).filter((item) =>
-          typeof input.tools.entries[item.id] === "function",
+        ...describeRegistry(input.tools).filter(
+          (item) => typeof input.tools.entries[item.id] === "function",
         ),
         ...(await sourceDescriptors(sourceConnectors)),
       ];
@@ -556,20 +622,24 @@ async function createLocalConnector<TBindings>(
         const calls = Array.isArray(args)
           ? args
           : Array.isArray((args as { calls?: unknown } | null)?.calls)
-            ? (args as { calls: unknown[] }).calls
-            : [args];
+          ? (args as { calls: unknown[] }).calls
+          : [args];
         return calls.some((call) => {
           const normalized = normalizeCatalogCall(call);
-          const id = normalized && typeof normalized === "object"
-            ? (normalized as { id?: unknown }).id
-            : undefined;
-          return typeof id === "string" &&
-            descriptors.some((item) => item.id === id && item.requiresApproval);
+          const id =
+            normalized && typeof normalized === "object"
+              ? (normalized as { id?: unknown }).id
+              : undefined;
+          return (
+            typeof id === "string" &&
+            descriptors.some((item) => item.id === id && item.requiresApproval)
+          );
         });
       };
       return {
         search: {
-          description: "Find tools by intent. Schemas are not loaded until describe is called.",
+          description:
+            "Find tools by intent. Schemas are not loaded until describe is called.",
           inputSchema: {
             type: "object",
             properties: { query: { type: "string" } },
@@ -585,19 +655,22 @@ async function createLocalConnector<TBindings>(
           execute: async (args) => {
             const ordinal = activity?.claim("search") ?? 0;
             const startedAt = Date.now();
-            const queryValue = typeof args === "string"
-              ? args
-              : (args as { query?: unknown })?.query;
-            const query = typeof queryValue === "string"
-              ? queryValue.toLowerCase()
-              : "";
+            const queryValue =
+              typeof args === "string"
+                ? args
+                : (args as { query?: unknown })?.query;
+            const query =
+              typeof queryValue === "string" ? queryValue.toLowerCase() : "";
             const items = descriptors
               .map((item) => ({
                 ...item,
                 score: scoreDescriptor(item, query),
               }))
               .filter((item) => !query || item.score > 0)
-              .sort((left, right) => right.score - left.score || left.id.localeCompare(right.id))
+              .sort(
+                (left, right) =>
+                  right.score - left.score || left.id.localeCompare(right.id),
+              )
               .map(({ score: _score, ...item }) => summarizeDescriptor(item));
             await activity?.record("tool.search", ordinal, {
               query,
@@ -619,9 +692,8 @@ async function createLocalConnector<TBindings>(
           execute: async (args) => {
             const ordinal = activity?.claim("describe") ?? 0;
             const startedAt = Date.now();
-            const id = typeof args === "string"
-              ? args
-              : (args as { id?: unknown })?.id;
+            const id =
+              typeof args === "string" ? args : (args as { id?: unknown })?.id;
             const descriptor = descriptors.find((item) => item.id === id);
             await activity?.record("tool.describe", ordinal, {
               toolId: String(id),
@@ -638,12 +710,14 @@ async function createLocalConnector<TBindings>(
                 : {}),
               durationMs: Date.now() - startedAt,
             });
-            if (!descriptor) throw new Error(`Tool is not available: ${String(id)}`);
+            if (!descriptor)
+              throw new Error(`Tool is not available: ${String(id)}`);
             return descriptor;
           },
         },
         call: {
-          description: "Call one selected tool with { id: item.id, input: {...} }. Keep calls sequential when approval or replay can occur.",
+          description:
+            "Call one selected tool with { id: item.id, input: {...} }. Keep calls sequential when approval or replay can occur.",
           inputSchema: catalogCallInputSchema(),
           // The selected catalog item, not another item in the lazy catalog,
           // decides if this call pauses.
@@ -660,7 +734,8 @@ async function createLocalConnector<TBindings>(
           },
         },
         batch: {
-          description: "Run independent reads concurrently with { calls: [{ id: item.id, input: {...} }] }. Keep call order stable. Do not batch writes.",
+          description:
+            "Run independent reads concurrently with { calls: [{ id: item.id, input: {...} }] }. Keep call order stable. Do not batch writes.",
           inputSchema: catalogBatchInputSchema(options.maxBatchCalls ?? 16),
           execute: async (args) => {
             const batchOrdinal = activity?.claim("batch") ?? 0;
@@ -676,23 +751,38 @@ async function createLocalConnector<TBindings>(
                 throw new Error("tools.batch needs at least one call");
               }
               if (calls.length > (options.maxBatchCalls ?? 16)) {
-                throw new Error(`A tools.batch request can contain at most ${options.maxBatchCalls ?? 16} calls.`);
+                throw new Error(
+                  `A tools.batch request can contain at most ${
+                    options.maxBatchCalls ?? 16
+                  } calls.`,
+                );
               }
 
               const normalizedCalls = calls.map((call, index) => {
                 const normalized = normalizeCatalogCall(call);
-                if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) {
-                  throw new Error(`tools.batch calls[${index}] must be { id, input }`);
+                if (
+                  !normalized ||
+                  typeof normalized !== "object" ||
+                  Array.isArray(normalized)
+                ) {
+                  throw new Error(
+                    `tools.batch calls[${index}] must be { id, input }`,
+                  );
                 }
                 const suppliedId = (normalized as { id?: unknown }).id;
                 if (typeof suppliedId !== "string" || !suppliedId.trim()) {
-                  throw new Error(`tools.batch calls[${index}] needs a string id from item.id`);
+                  throw new Error(
+                    `tools.batch calls[${index}] needs a string id from item.id`,
+                  );
                 }
-                const exact = descriptors.find((item) => item.id === suppliedId);
+                const exact = descriptors.find(
+                  (item) => item.id === suppliedId,
+                );
                 const named = exact
                   ? []
                   : descriptors.filter((item) => item.name === suppliedId);
-                const descriptor = exact ?? (named.length === 1 ? named[0] : undefined);
+                const descriptor =
+                  exact ?? (named.length === 1 ? named[0] : undefined);
                 if (!descriptor) {
                   throw new Error(
                     named.length > 1
@@ -700,12 +790,23 @@ async function createLocalConnector<TBindings>(
                       : `Tool is not available: ${suppliedId}`,
                   );
                 }
-                if (descriptor.operation !== "read" || descriptor.requiresApproval) {
-                  throw new Error(`tools.batch only accepts read tools. Call '${descriptor.id}' sequentially.`);
+                if (
+                  descriptor.operation !== "read" ||
+                  descriptor.requiresApproval
+                ) {
+                  throw new Error(
+                    `tools.batch only accepts read tools. Call '${descriptor.id}' sequentially.`,
+                  );
                 }
                 const toolInput = (normalized as { input?: unknown }).input;
-                if (!toolInput || typeof toolInput !== "object" || Array.isArray(toolInput)) {
-                  throw new Error(`tools.batch calls[${index}].input must be an object`);
+                if (
+                  !toolInput ||
+                  typeof toolInput !== "object" ||
+                  Array.isArray(toolInput)
+                ) {
+                  throw new Error(
+                    `tools.batch calls[${index}].input must be an object`,
+                  );
                 }
                 return { id: descriptor.id, input: toolInput };
               });
@@ -716,7 +817,8 @@ async function createLocalConnector<TBindings>(
               const result = await concurrentMap(
                 admitted,
                 options.maxParallelToolCalls ?? 6,
-                ({ call, ordinal }) => invokeCatalogTool(
+                ({ call, ordinal }) =>
+                  invokeCatalogTool(
                     input.tools,
                     call,
                     input.context,
@@ -732,15 +834,19 @@ async function createLocalConnector<TBindings>(
               });
               return result;
             } catch (error) {
-              await activity?.record("tool.batch", batchOrdinal, {
-                callCount: Array.isArray((args as { calls?: unknown })?.calls)
-                  ? ((args as { calls: unknown[] }).calls.length)
-                  : Array.isArray(args) ? args.length : 0,
-                maxParallel: options.maxParallelToolCalls ?? 6,
-                durationMs: Date.now() - startedAt,
-                state: "failed",
-                error: redactErrorMessage(error, "The tool batch failed."),
-              }).catch(() => undefined);
+              await activity
+                ?.record("tool.batch", batchOrdinal, {
+                  callCount: Array.isArray((args as { calls?: unknown })?.calls)
+                    ? (args as { calls: unknown[] }).calls.length
+                    : Array.isArray(args)
+                    ? args.length
+                    : 0,
+                  maxParallel: options.maxParallelToolCalls ?? 6,
+                  durationMs: Date.now() - startedAt,
+                  state: "failed",
+                  error: redactErrorMessage(error, "The tool batch failed."),
+                })
+                .catch(() => undefined);
               throw error;
             }
           },
@@ -764,6 +870,9 @@ async function createSourceConnectors<TBindings>(
 ): Promise<import("@cloudflare/codemode").CodemodeConnector[]> {
   const connectors: import("@cloudflare/codemode").CodemodeConnector[] = [];
   const { McpConnector, OpenApiConnector } = codemode;
+  const sessionId = await mcpSessionUuid(
+    input.context.runId ?? input.context.idempotencyKey,
+  );
 
   for (const name of input.tools.names) {
     const source = input.tools.entries[name]!;
@@ -775,13 +884,23 @@ async function createSourceConnectors<TBindings>(
           return mcpSource.namespace;
         }
 
-        protected async createConnection(): Promise<import("@cloudflare/codemode").McpConnectionLike> {
-          const connection = options.resolveMcp
-            ? await options.resolveMcp(mcpSource, {
-                bindings: input.bindings,
-                context: input.context,
-              })
-            : createMcpConnection(mcpSource);
+        protected async createConnection(): Promise<
+          import("@cloudflare/codemode").McpConnectionLike
+        > {
+          const connection =
+            options.resolveMcp && mcpSource.connection
+              ? await options.resolveMcp(mcpSource, {
+                  bindings: input.bindings,
+                  context: input.context,
+                })
+              : mcpSource.url
+              ? createMcpConnection(mcpSource, { sessionId })
+              : options.resolveMcp
+              ? await options.resolveMcp(mcpSource, {
+                  bindings: input.bindings,
+                  context: input.context,
+                })
+              : createMcpConnection(mcpSource, { sessionId });
           return connection as unknown as import("@cloudflare/codemode").McpConnectionLike;
         }
 
@@ -794,11 +913,17 @@ async function createSourceConnectors<TBindings>(
           return Object.fromEntries(
             Object.entries(generated).map(([name, tool]) => {
               const metadata = byName.get(name) as
-                | { annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean } }
+                | {
+                    annotations?: {
+                      readOnlyHint?: boolean;
+                      destructiveHint?: boolean;
+                    };
+                  }
                 | undefined;
               const requiresApproval =
-                metadata?.annotations?.destructiveHint === true ||
-                metadata?.annotations?.readOnlyHint !== true;
+                mcpSource.readOnly !== true &&
+                (metadata?.annotations?.destructiveHint === true ||
+                  metadata?.annotations?.readOnlyHint !== true);
               return [
                 name,
                 requiresApproval ? { ...tool, requiresApproval: true } : tool,
@@ -809,7 +934,12 @@ async function createSourceConnectors<TBindings>(
       }
       connectors.push(new RuntimeMcpConnector(ctx, options.env));
     }
-    if (source.kind === "openapi" && (options.resolveOpenApi || typeof source.spec === "object" || typeof source.spec === "string")) {
+    if (
+      source.kind === "openapi" &&
+      (options.resolveOpenApi ||
+        typeof source.spec === "object" ||
+        typeof source.spec === "string")
+    ) {
       const openApiSource = source;
       class RuntimeOpenApiConnector extends OpenApiConnector<unknown, unknown> {
         readonly #writeMethods = new Set<string>();
@@ -825,7 +955,8 @@ async function createSourceConnectors<TBindings>(
                 context: input.context,
               })
             : await createOpenApiRuntime(openApiSource);
-          for (const name of openApiWriteMethods(runtime.spec)) this.#writeMethods.add(name);
+          for (const name of openApiWriteMethods(runtime.spec))
+            this.#writeMethods.add(name);
           return runtime.spec;
         }
 
@@ -858,15 +989,14 @@ async function createSourceConnectors<TBindings>(
         bindings: input.bindings,
         context: input.context,
       });
-      connectors.push(createHostToolConnector(
-        codemode,
-        ctx,
-        options.env,
-        name,
-        workspace,
-      ));
+      connectors.push(
+        createHostToolConnector(codemode, ctx, options.env, name, workspace),
+      );
     }
-    if (source.kind === "r2" && (options.resolveR2 || source.binding || source.connection)) {
+    if (
+      source.kind === "r2" &&
+      (options.resolveR2 || source.binding || source.connection)
+    ) {
       const r2Source = source;
       const connection = options.resolveR2
         ? await options.resolveR2(r2Source, {
@@ -874,29 +1004,19 @@ async function createSourceConnectors<TBindings>(
             context: input.context,
           })
         : await createR2FileConnection(r2Source, input.bindings, input.context);
-      connectors.push(createHostToolConnector(
-        codemode,
-        ctx,
-        options.env,
-        name,
-        connection,
-      ));
+      connectors.push(
+        createHostToolConnector(codemode, ctx, options.env, name, connection),
+      );
     }
     if (source.kind === "sandbox" && options.resolveSandbox) {
       const sandbox = await options.resolveSandbox(source, {
         bindings: input.bindings,
         context: input.context,
-        storage: (
-          ctx.storage as { readonly sql?: unknown }
-        ).sql,
+        storage: (ctx.storage as { readonly sql?: unknown }).sql,
       });
-      connectors.push(createHostToolConnector(
-        codemode,
-        ctx,
-        options.env,
-        name,
-        sandbox,
-      ));
+      connectors.push(
+        createHostToolConnector(codemode, ctx, options.env, name, sandbox),
+      );
     }
     if (source.kind === "browser" && options.resolveBrowser) {
       const browser = await options.resolveBrowser(source, {
@@ -904,13 +1024,9 @@ async function createSourceConnectors<TBindings>(
         context: input.context,
         storage: (ctx.storage as { readonly sql?: unknown }).sql,
       });
-      connectors.push(createHostToolConnector(
-        codemode,
-        ctx,
-        options.env,
-        name,
-        browser,
-      ));
+      connectors.push(
+        createHostToolConnector(codemode, ctx, options.env, name, browser),
+      );
     }
   }
   return connectors;
@@ -935,25 +1051,40 @@ function createHostToolConnector(
     }
 
     protected async tools(): Promise<ConnectorTools> {
-      return Object.fromEntries(connection.descriptors.map((descriptor) => {
-        const requiresApproval = descriptor.requiresApproval ?? descriptor.operation === "write";
-        return [descriptor.name, {
-          ...(descriptor.description ? { description: descriptor.description } : {}),
-          ...(descriptor.inputSchema ? { inputSchema: descriptor.inputSchema as never } : {}),
-          ...(descriptor.outputSchema ? { outputSchema: descriptor.outputSchema as never } : {}),
-          ...(requiresApproval ? { requiresApproval: true } : {}),
-          execute: (args: unknown) => connection.call(descriptor.name, args),
-        } satisfies ConnectorTool];
-      }));
+      return Object.fromEntries(
+        connection.descriptors.map((descriptor) => {
+          const requiresApproval =
+            descriptor.requiresApproval ?? descriptor.operation === "write";
+          return [
+            descriptor.name,
+            {
+              ...(descriptor.description
+                ? { description: descriptor.description }
+                : {}),
+              ...(descriptor.inputSchema
+                ? { inputSchema: descriptor.inputSchema as never }
+                : {}),
+              ...(descriptor.outputSchema
+                ? { outputSchema: descriptor.outputSchema as never }
+                : {}),
+              ...(requiresApproval ? { requiresApproval: true } : {}),
+              execute: (args: unknown) =>
+                connection.call(descriptor.name, args),
+            } satisfies ConnectorTool,
+          ];
+        }),
+      );
     }
   }
   const connector = new HostConnector(ctx, env);
   hostConnectorOperations.set(
     connector,
-    new Map(connection.descriptors.map((descriptor) => [
-      descriptor.name,
-      descriptor.operation ?? "read",
-    ])),
+    new Map(
+      connection.descriptors.map((descriptor) => [
+        descriptor.name,
+        descriptor.operation ?? "read",
+      ]),
+    ),
   );
   return connector;
 }
@@ -979,13 +1110,19 @@ async function sourceDescriptors(
   const values: RegistryDescriptor[] = [];
   for (const connector of connectors) {
     const description = await connector.describe();
-    for (const [method, descriptor] of Object.entries(description.descriptors)) {
+    for (const [method, descriptor] of Object.entries(
+      description.descriptors,
+    )) {
       const id = `${description.name}.${method}`;
-      const requiresApproval = Boolean(description.annotations?.[method]?.requiresApproval);
+      const requiresApproval = Boolean(
+        description.annotations?.[method]?.requiresApproval,
+      );
       values.push({
         id,
         name: id,
-        ...(descriptor.description ? { description: descriptor.description } : {}),
+        ...(descriptor.description
+          ? { description: descriptor.description }
+          : {}),
         operation: requiresApproval ? "write" : "read",
         requiresApproval,
         inputSchema: descriptor.inputSchema as Record<string, unknown>,
@@ -1013,8 +1150,11 @@ async function sourceTargetMap(
       targets.set(id, {
         id,
         method,
-        operation: operations?.get(method) ??
-          (description.annotations?.[method]?.requiresApproval ? "write" : "read"),
+        operation:
+          operations?.get(method) ??
+          (description.annotations?.[method]?.requiresApproval
+            ? "write"
+            : "read"),
         connector,
       });
     }
@@ -1029,36 +1169,58 @@ function localProviders(
 ): Record<string, (...args: unknown[]) => Promise<unknown>> {
   return {
     search: async (value: unknown) => {
-      const queryValue = typeof value === "string"
-        ? value
-        : (value as { query?: unknown } | null)?.query;
+      const queryValue =
+        typeof value === "string"
+          ? value
+          : (value as { query?: unknown } | null)?.query;
       const query = typeof queryValue === "string" ? queryValue : "";
       return {
         items: describeRegistry(registry)
-          .filter((item) =>
-            !query || item.id.toLowerCase().includes(query.toLowerCase()) ||
+          .filter(
+            (item) =>
+              !query ||
+              item.id.toLowerCase().includes(query.toLowerCase()) ||
               item.description?.toLowerCase().includes(query.toLowerCase()),
           )
           .map(summarizeDescriptor),
       };
     },
     describe: async (value: unknown) => {
-      const id = typeof value === "string"
-        ? value
-        : (value as { id?: unknown } | null)?.id;
-      const descriptor = describeRegistry(registry).find((item) => item.id === id);
+      const id =
+        typeof value === "string"
+          ? value
+          : (value as { id?: unknown } | null)?.id;
+      const descriptor = describeRegistry(registry).find(
+        (item) => item.id === id,
+      );
       if (!descriptor) throw new Error(`Tool is not available: ${String(id)}`);
       return descriptor;
     },
     call: async (...args: unknown[]) =>
-      invokeRegistryTool(registry, normalizeCatalogCall(args[0], args[1]), undefined, callCounter, allowWrites),
+      invokeRegistryTool(
+        registry,
+        normalizeCatalogCall(args[0], args[1]),
+        undefined,
+        callCounter,
+        allowWrites,
+      ),
     batch: async (...args: unknown[]) => {
       const value = args[0];
       const calls = Array.isArray(value)
         ? value
         : (value as { calls?: unknown })?.calls;
       if (!Array.isArray(calls)) throw new Error("calls must be an array");
-      return Promise.all(calls.map((call) => invokeRegistryTool(registry, normalizeCatalogCall(call), undefined, callCounter, allowWrites)));
+      return Promise.all(
+        calls.map((call) =>
+          invokeRegistryTool(
+            registry,
+            normalizeCatalogCall(call),
+            undefined,
+            callCounter,
+            allowWrites,
+          ),
+        ),
+      );
     },
   };
 }
@@ -1085,10 +1247,13 @@ function describeRegistry(registry: FlaryToolRegistry): RegistryDescriptor[] {
       return {
         id: name,
         name: definition.name ?? name,
-        ...(definition.description ? { description: definition.description } : {}),
+        ...(definition.description
+          ? { description: definition.description }
+          : {}),
         operation: definition.policy?.operation ?? "read",
         requiresApproval:
-          definition.policy?.requiresApproval ?? definition.policy?.operation === "write",
+          definition.policy?.requiresApproval ??
+          definition.policy?.operation === "write",
         inputSchema: toSchema(definition.input),
         outputSchema: toSchema(definition.output),
         capabilities: definition.policy?.capabilities ?? [],
@@ -1105,15 +1270,19 @@ function describeRegistry(registry: FlaryToolRegistry): RegistryDescriptor[] {
       id: namespace,
       name: namespace,
       description: `${source.kind} tools`,
-        operation:
-          source.kind === "sandbox" || source.kind === "workspace" || source.kind === "browser" ||
-          (source.kind === "r2" && source.access !== "read")
-            ? "write"
-            : "read",
+      operation:
+        source.kind === "sandbox" ||
+        source.kind === "workspace" ||
+        source.kind === "browser" ||
+        (source.kind === "r2" && source.access !== "read")
+          ? "write"
+          : "read",
       requiresApproval: source.kind !== "mcp",
       tags: [source.kind],
       capabilities: [],
-      ...(source.kind === "workspace" || source.kind === "sandbox" || source.kind === "browser" ||
+      ...(source.kind === "workspace" ||
+      source.kind === "sandbox" ||
+      source.kind === "browser" ||
       (source.kind === "r2" && source.access !== "read")
         ? { idempotency: "required" as const }
         : {}),
@@ -1128,7 +1297,8 @@ async function invokeRegistryTool(
   callCounter?: { count: number; max?: number },
   allowWrites = true,
 ): Promise<unknown> {
-  if (!value || typeof value !== "object") throw new Error("A tool call must be an object");
+  if (!value || typeof value !== "object")
+    throw new Error("A tool call must be an object");
   const id = (value as { id?: unknown }).id;
   const input = (value as { input?: unknown }).input;
   if (typeof id !== "string") throw new Error("A tool call needs an id");
@@ -1150,7 +1320,9 @@ async function invokeRegistryTool(
       (source.definition.policy?.operation === "write" ||
         source.definition.policy?.requiresApproval)
     ) {
-      throw new Error(`Approval is required before calling write tool '${id}'.`);
+      throw new Error(
+        `Approval is required before calling write tool '${id}'.`,
+      );
     }
     // Preserve the authenticated invocation context when a local function is
     // called from an isolated Worker. The public callable remains available
@@ -1162,9 +1334,12 @@ async function invokeRegistryTool(
         identity: context.identity,
         signal: context.signal,
         runId: context.runId,
-        idempotencyKey: (context.idempotencyKey ?? context.runId)
-          ? `flary_${context.idempotencyKey ?? context.runId}_${id}_${shortHash(stableJson(input))}`
-          : undefined,
+        idempotencyKey:
+          context.idempotencyKey ?? context.runId
+            ? `flary_${
+                context.idempotencyKey ?? context.runId
+              }_${id}_${shortHash(stableJson(input))}`
+            : undefined,
       });
     }
     return source(input);
@@ -1196,7 +1371,8 @@ async function invokeCatalogTool(
   );
   const source = sourceTargets.get(id);
   const registrySource = registry.entries[id];
-  const operation = source?.operation ??
+  const operation =
+    source?.operation ??
     (typeof registrySource === "function"
       ? registrySource.definition.policy?.operation ?? "read"
       : undefined);
@@ -1221,7 +1397,10 @@ async function invokeCatalogTool(
   return result;
 }
 
-function claimToolCallOrdinal(counter: { count: number; max?: number }): number {
+function claimToolCallOrdinal(counter: {
+  count: number;
+  max?: number;
+}): number {
   if (counter.max !== undefined && counter.count + 1 > counter.max) {
     throw new Error("The Flary tool-call limit was exceeded.");
   }
@@ -1293,10 +1472,16 @@ function createInteractiveCodeModeActivity(
 
 function interactiveThreadControlClient(
   context: FlaryStepContext<unknown> | undefined,
-): {
-  call(method: string, extra?: Record<string, unknown>): Promise<void>;
-} | undefined {
-  if (!context?.runId || !context.bindings || typeof context.bindings !== "object") {
+):
+  | {
+      call(method: string, extra?: Record<string, unknown>): Promise<void>;
+    }
+  | undefined {
+  if (
+    !context?.runId ||
+    !context.bindings ||
+    typeof context.bindings !== "object"
+  ) {
     return undefined;
   }
   let ref: ReturnType<typeof parseThreadName>;
@@ -1306,10 +1491,12 @@ function interactiveThreadControlClient(
     return undefined;
   }
   const namespace = (context.bindings as Record<string, unknown>)
-    .FLARY_THREAD_CONTROL as {
-      idFromName(name: string): unknown;
-      get(id: unknown): { fetch(request: Request): Promise<Response> };
-    } | undefined;
+    .FLARY_THREAD_CONTROL as
+    | {
+        idFromName(name: string): unknown;
+        get(id: unknown): { fetch(request: Request): Promise<Response> };
+      }
+    | undefined;
   if (!namespace) return undefined;
   const name = `thread:${ref.organizationId}:${ref.appId}:${ref.threadId}`;
   return {
@@ -1340,7 +1527,8 @@ function interactiveThreadControlClient(
 
 function encodedSize(value: unknown): number {
   try {
-    const encoded = typeof value === "string" ? value : JSON.stringify(value) ?? "null";
+    const encoded =
+      typeof value === "string" ? value : JSON.stringify(value) ?? "null";
     return new TextEncoder().encode(encoded).byteLength;
   } catch {
     return 0;
@@ -1352,16 +1540,21 @@ async function concurrentMap<T, R>(
   concurrency: number,
   run: (value: T, index: number) => Promise<R>,
 ): Promise<R[]> {
-  const limit = Math.max(1, Math.min(values.length || 1, Math.floor(concurrency)));
+  const limit = Math.max(
+    1,
+    Math.min(values.length || 1, Math.floor(concurrency)),
+  );
   const results = new Array<R>(values.length);
   let cursor = 0;
-  await Promise.all(Array.from({ length: limit }, async () => {
-    while (cursor < values.length) {
-      const index = cursor;
-      cursor += 1;
-      results[index] = await run(values[index]!, index);
-    }
-  }));
+  await Promise.all(
+    Array.from({ length: limit }, async () => {
+      while (cursor < values.length) {
+        const index = cursor;
+        cursor += 1;
+        results[index] = await run(values[index]!, index);
+      }
+    }),
+  );
   return results;
 }
 
@@ -1376,18 +1569,27 @@ async function reserveInteractiveToolCall(
   toolId: string,
   input: unknown,
   ordinal: number,
-): Promise<{
-  settle(result?: unknown): Promise<void>;
-  fail(error: unknown): Promise<void>;
-  unknown(error: unknown): Promise<void>;
-} | undefined> {
+): Promise<
+  | {
+      settle(result?: unknown): Promise<void>;
+      fail(error: unknown): Promise<void>;
+      unknown(error: unknown): Promise<void>;
+    }
+  | undefined
+> {
   const client = interactiveThreadControlClient(context);
   if (!client) return undefined;
   const reservationId = `tool_${shortHash(
-    `${context?.idempotencyKey ?? context?.runId}:${ordinal}:${toolId}:${stableJson(input)}`,
+    `${
+      context?.idempotencyKey ?? context?.runId
+    }:${ordinal}:${toolId}:${stableJson(input)}`,
   )}`;
   const call = async (
-    method: "reserveUsage" | "settleUsage" | "unknownUsage" | "recordToolActivity",
+    method:
+      | "reserveUsage"
+      | "settleUsage"
+      | "unknownUsage"
+      | "recordToolActivity",
     extra: Record<string, unknown> = {},
   ): Promise<void> => {
     await client.call(method, { reservationId, ...extra });
@@ -1450,7 +1652,10 @@ async function reserveInteractiveToolCall(
         toolId,
         ordinal,
         durationMs: Date.now() - startedAt,
-        error: redactErrorMessage(error, "The tool call failed.").slice(0, 1_000),
+        error: redactErrorMessage(error, "The tool call failed.").slice(
+          0,
+          1_000,
+        ),
       });
     },
     unknown: async (error) => {
@@ -1462,20 +1667,36 @@ async function reserveInteractiveToolCall(
         toolId,
         ordinal,
         durationMs: Date.now() - startedAt,
-        error: redactErrorMessage(error, "The write outcome is unknown.").slice(0, 1_000),
+        error: redactErrorMessage(error, "The write outcome is unknown.").slice(
+          0,
+          1_000,
+        ),
       });
     },
   };
 }
 
-export function projectPublicToolActivityInput(value: unknown, toolId: string): Record<string, unknown> {
+export function projectPublicToolActivityInput(
+  value: unknown,
+  toolId: string,
+): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const source = value as Record<string, unknown>;
   const output: Record<string, unknown> = {};
-  for (const key of ["path", "file", "target", "range", "campaign", "site", "dimension"]) {
+  for (const key of [
+    "path",
+    "file",
+    "target",
+    "range",
+    "campaign",
+    "site",
+    "dimension",
+  ]) {
     const candidate = source[key];
-    if (typeof candidate === "string") output[key] = redactText(candidate).slice(0, 200);
-    else if (typeof candidate === "number" || typeof candidate === "boolean") output[key] = candidate;
+    if (typeof candidate === "string")
+      output[key] = redactText(candidate).slice(0, 200);
+    else if (typeof candidate === "number" || typeof candidate === "boolean")
+      output[key] = candidate;
   }
   // UI artifact tools are an explicit public-display boundary. This strict
   // allowlist runs before tool execution, so untrusted model input cannot put
@@ -1511,89 +1732,165 @@ export function projectPublicToolActivityResult(value: unknown): unknown {
   };
 }
 
-function publicCanvasArtifact(source: Record<string, unknown>): Record<string, unknown> | undefined {
-  const text = (value: unknown, max: number) => typeof value === "string" && value.trim()
-    ? value.trim().slice(0, max)
-    : undefined;
+function publicCanvasArtifact(
+  source: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const text = (value: unknown, max: number) =>
+    typeof value === "string" && value.trim()
+      ? value.trim().slice(0, max)
+      : undefined;
   const title = text(source.title, 120);
   if (!title) return undefined;
   const artifact: Record<string, unknown> = { title };
-  for (const [key, max] of [["id", 80], ["subtitle", 240], ["eyebrow", 60], ["insight", 500], ["source", 160]] as const) {
+  for (const [key, max] of [
+    ["id", 80],
+    ["subtitle", 240],
+    ["eyebrow", 60],
+    ["insight", 500],
+    ["source", 160],
+  ] as const) {
     const value = text(source[key], max);
     if (value) artifact[key] = value;
   }
   const html = text(source.html, 60_000);
   if (html) {
     artifact.html = html;
-    artifact.height = typeof source.height === "number" && Number.isInteger(source.height)
-      ? Math.min(720, Math.max(240, source.height))
-      : 420;
+    artifact.height =
+      typeof source.height === "number" && Number.isInteger(source.height)
+        ? Math.min(720, Math.max(240, source.height))
+        : 420;
     return redactSecrets(artifact) as Record<string, unknown>;
   }
-  artifact.metrics = Array.isArray(source.metrics) ? source.metrics.slice(0, 8).flatMap((value) => {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-    const metric = value as Record<string, unknown>;
-    const label = text(metric.label, 80);
-    const metricValue = text(metric.value, 80);
-    if (!label || !metricValue) return [];
-    return [{
-      label,
-      value: metricValue,
-      ...(text(metric.detail, 120) ? { detail: text(metric.detail, 120) } : {}),
-      ...(typeof metric.change === "number" && Number.isFinite(metric.change) ? { change: metric.change } : {}),
-      ...(["neutral", "blue", "green", "amber", "red", "violet"].includes(String(metric.tone)) ? { tone: metric.tone } : {}),
-    }];
-  }) : [];
-  if (source.chart && typeof source.chart === "object" && !Array.isArray(source.chart)) {
+  artifact.metrics = Array.isArray(source.metrics)
+    ? source.metrics.slice(0, 8).flatMap((value) => {
+        if (!value || typeof value !== "object" || Array.isArray(value))
+          return [];
+        const metric = value as Record<string, unknown>;
+        const label = text(metric.label, 80);
+        const metricValue = text(metric.value, 80);
+        if (!label || !metricValue) return [];
+        return [
+          {
+            label,
+            value: metricValue,
+            ...(text(metric.detail, 120)
+              ? { detail: text(metric.detail, 120) }
+              : {}),
+            ...(typeof metric.change === "number" &&
+            Number.isFinite(metric.change)
+              ? { change: metric.change }
+              : {}),
+            ...(["neutral", "blue", "green", "amber", "red", "violet"].includes(
+              String(metric.tone),
+            )
+              ? { tone: metric.tone }
+              : {}),
+          },
+        ];
+      })
+    : [];
+  if (
+    source.chart &&
+    typeof source.chart === "object" &&
+    !Array.isArray(source.chart)
+  ) {
     const chart = source.chart as Record<string, unknown>;
-    const points = Array.isArray(chart.points) ? chart.points.slice(0, 120).flatMap((value) => {
-      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-      const point = value as Record<string, unknown>;
-      const label = text(point.label, 80);
-      if (!label || typeof point.value !== "number" || !Number.isFinite(point.value)) return [];
-      return [{
-        label,
-        value: point.value,
-        ...(typeof point.secondary === "number" && Number.isFinite(point.secondary) ? { secondary: point.secondary } : {}),
-      }];
-    }) : [];
-    if (points.length >= 2) artifact.chart = {
-      type: ["line", "area", "bar"].includes(String(chart.type)) ? chart.type : "line",
-      ...(text(chart.title, 120) ? { title: text(chart.title, 120) } : {}),
-      primaryLabel: text(chart.primaryLabel, 60) ?? "Current",
-      ...(text(chart.secondaryLabel, 60) ? { secondaryLabel: text(chart.secondaryLabel, 60) } : {}),
-      valueFormat: ["number", "currency", "percent"].includes(String(chart.valueFormat)) ? chart.valueFormat : "number",
-      points,
-    };
+    const points = Array.isArray(chart.points)
+      ? chart.points.slice(0, 120).flatMap((value) => {
+          if (!value || typeof value !== "object" || Array.isArray(value))
+            return [];
+          const point = value as Record<string, unknown>;
+          const label = text(point.label, 80);
+          if (
+            !label ||
+            typeof point.value !== "number" ||
+            !Number.isFinite(point.value)
+          )
+            return [];
+          return [
+            {
+              label,
+              value: point.value,
+              ...(typeof point.secondary === "number" &&
+              Number.isFinite(point.secondary)
+                ? { secondary: point.secondary }
+                : {}),
+            },
+          ];
+        })
+      : [];
+    if (points.length >= 2)
+      artifact.chart = {
+        type: ["line", "area", "bar"].includes(String(chart.type))
+          ? chart.type
+          : "line",
+        ...(text(chart.title, 120) ? { title: text(chart.title, 120) } : {}),
+        primaryLabel: text(chart.primaryLabel, 60) ?? "Current",
+        ...(text(chart.secondaryLabel, 60)
+          ? { secondaryLabel: text(chart.secondaryLabel, 60) }
+          : {}),
+        valueFormat: ["number", "currency", "percent"].includes(
+          String(chart.valueFormat),
+        )
+          ? chart.valueFormat
+          : "number",
+        points,
+      };
   }
-  if (source.table && typeof source.table === "object" && !Array.isArray(source.table)) {
+  if (
+    source.table &&
+    typeof source.table === "object" &&
+    !Array.isArray(source.table)
+  ) {
     const table = source.table as Record<string, unknown>;
-    const columns = Array.isArray(table.columns) ? table.columns.slice(0, 8).flatMap((value) => {
-      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-      const column = value as Record<string, unknown>;
-      const key = text(column.key, 40);
-      const label = text(column.label, 60);
-      return key && label ? [{ key, label }] : [];
-    }) : [];
-    if (columns.length > 0) artifact.table = {
-      ...(text(table.title, 120) ? { title: text(table.title, 120) } : {}),
-      columns,
-      rows: Array.isArray(table.rows) ? table.rows.slice(0, 30).flatMap((value) => {
-        if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-        const row = value as Record<string, unknown>;
-        return [Object.fromEntries(columns.map(({ key }) => {
-          const cell = row[key];
-          return [key, typeof cell === "string" ? cell.slice(0, 160) : typeof cell === "number" || typeof cell === "boolean" || cell === null ? cell : ""];
-        }))];
-      }) : [],
-    };
+    const columns = Array.isArray(table.columns)
+      ? table.columns.slice(0, 8).flatMap((value) => {
+          if (!value || typeof value !== "object" || Array.isArray(value))
+            return [];
+          const column = value as Record<string, unknown>;
+          const key = text(column.key, 40);
+          const label = text(column.label, 60);
+          return key && label ? [{ key, label }] : [];
+        })
+      : [];
+    if (columns.length > 0)
+      artifact.table = {
+        ...(text(table.title, 120) ? { title: text(table.title, 120) } : {}),
+        columns,
+        rows: Array.isArray(table.rows)
+          ? table.rows.slice(0, 30).flatMap((value) => {
+              if (!value || typeof value !== "object" || Array.isArray(value))
+                return [];
+              const row = value as Record<string, unknown>;
+              return [
+                Object.fromEntries(
+                  columns.map(({ key }) => {
+                    const cell = row[key];
+                    return [
+                      key,
+                      typeof cell === "string"
+                        ? cell.slice(0, 160)
+                        : typeof cell === "number" ||
+                          typeof cell === "boolean" ||
+                          cell === null
+                        ? cell
+                        : "",
+                    ];
+                  }),
+                ),
+              ];
+            })
+          : [],
+      };
   }
   return redactSecrets(artifact) as Record<string, unknown>;
 }
 
 function toSchema(schema: unknown): Record<string, unknown> | undefined {
   try {
-    return schema ? JsonObjectSchema.parse(z.toJSONSchema(schema as never)) : undefined;
+    return schema
+      ? JsonObjectSchema.parse(z.toJSONSchema(schema as never))
+      : undefined;
   } catch {
     return undefined;
   }
@@ -1612,22 +1909,30 @@ function scoreDescriptor(item: RegistryDescriptor, query: string): number {
   return tokens.length > 0 ? matched / tokens.length : 0;
 }
 
-function summarizeDescriptor(item: RegistryDescriptor): Omit<RegistryDescriptor, "inputSchema" | "outputSchema"> {
-  const { inputSchema: _inputSchema, outputSchema: _outputSchema, ...summary } = item;
+function summarizeDescriptor(
+  item: RegistryDescriptor,
+): Omit<RegistryDescriptor, "inputSchema" | "outputSchema"> {
+  const {
+    inputSchema: _inputSchema,
+    outputSchema: _outputSchema,
+    ...summary
+  } = item;
   return summary;
 }
 
 function stableJson(value: unknown): string {
   try {
-    return JSON.stringify(value, (_key, item: unknown) =>
-      item && typeof item === "object" && !Array.isArray(item)
-        ? Object.fromEntries(
-            Object.entries(item as Record<string, unknown>).sort(([left], [right]) =>
-              left.localeCompare(right),
-            ),
-          )
-        : item,
-    ) ?? "";
+    return (
+      JSON.stringify(value, (_key, item: unknown) =>
+        item && typeof item === "object" && !Array.isArray(item)
+          ? Object.fromEntries(
+              Object.entries(item as Record<string, unknown>).sort(
+                ([left], [right]) => left.localeCompare(right),
+              ),
+            )
+          : item,
+      ) ?? ""
+    );
   } catch {
     return String(value);
   }
@@ -1655,11 +1960,13 @@ function openApiWriteMethods(spec: Record<string, unknown>): string[] {
   const paths = spec.paths;
   if (!paths || typeof paths !== "object" || Array.isArray(paths)) return names;
   for (const [path, rawPath] of Object.entries(paths)) {
-    if (!rawPath || typeof rawPath !== "object" || Array.isArray(rawPath)) continue;
+    if (!rawPath || typeof rawPath !== "object" || Array.isArray(rawPath))
+      continue;
     for (const [method, rawOperation] of Object.entries(rawPath)) {
       if (!methods.has(method.toLowerCase())) continue;
       const operation = rawOperation as { operationId?: unknown };
-      if (typeof operation.operationId === "string") names.push(sanitizeTypeName(operation.operationId));
+      if (typeof operation.operationId === "string")
+        names.push(sanitizeTypeName(operation.operationId));
       names.push(sanitizeTypeName(`${method}_${path}`));
     }
   }

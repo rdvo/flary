@@ -123,10 +123,13 @@ export const support = app.agent({
 ```
 
 The model starts with one bounded `execute` tool and protected user-input and
-secret controls. Application, MCP, OpenAPI, workspace, and Sandbox tools stay
-in a private catalog. Code Mode can search the catalog, load one selected
-schema, call a tool, or batch independent reads. Adding many tools does not
-place every schema in every model request.
+secret controls. Every persistent agent also gets lazy public `web_search` and
+`web_fetch` through Parallel's anonymous Search MCP. Application, MCP,
+OpenAPI, workspace, and Sandbox tools stay in a private catalog. Code Mode can
+search the catalog, load one selected schema, call a tool, or batch independent
+reads. Adding many tools does not place every schema in every model request.
+Set `web: false` on the application or agent when public web access is not
+allowed.
 
 Read [Tools, MCP, and OpenAPI](https://flary.dev/docs/tools/) for the exact
 default tool surface, lazy discovery flow, approvals, and audit records.

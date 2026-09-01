@@ -125,14 +125,17 @@ test("app.agent compiles to Flue and serves durable thread controls", async () =
   );
   assert.equal(send.status, 202);
   assert.equal(messages[0]?.mode, "steer");
-  assert.equal((messages[0] as { model?: string }).model, "anthropic/claude-sonnet");
+  assert.equal(
+    (messages[0] as { model?: string }).model,
+    "anthropic/claude-sonnet",
+  );
 });
 
 test("app.agent attaches a durable thread workspace with one option", () => {
   const app = flary();
   const agent = app.agent({ name: "writer", workspace: "thread" });
 
-  assert.deepEqual(agent.definition.tools?.names, ["workspace"]);
+  assert.deepEqual(agent.definition.tools?.names, ["web", "workspace"]);
   const source = agent.definition.tools?.entries.workspace;
   assert.equal(typeof source, "object");
   assert.equal(source?.kind, "workspace");
@@ -152,7 +155,7 @@ test("app.agent can share a project workspace and retain application tools", () 
     workspace: { scope: "project", namespace: "files", mode: "draft" },
   });
 
-  assert.deepEqual(agent.definition.tools?.names, ["lookup", "files"]);
+  assert.deepEqual(agent.definition.tools?.names, ["lookup", "web", "files"]);
   const source = agent.definition.tools?.entries.files;
   assert.equal(source?.kind, "workspace");
   if (source?.kind !== "workspace") return;
@@ -167,8 +170,12 @@ test("app.agent can share a project workspace and retain application tools", () 
 test("durable subagents use their own provider and the root runtime binding", async () => {
   const actions: Array<{ action: string; input: Record<string, unknown> }> = [];
   const service: FlaryThreadHostService = {
-    async list() { return [binding()]; },
-    async create() { return binding(); },
+    async list() {
+      return [binding()];
+    },
+    async create() {
+      return binding();
+    },
     async inspect(target) {
       return {
         ...binding(),
@@ -178,23 +185,41 @@ test("durable subagents use their own provider and the root runtime binding", as
           agentId: target.threadId === "thread_child" ? "reviewer" : "coder",
         },
         agentId: target.threadId === "thread_child" ? "reviewer" : "coder",
-        metadata: target.threadId === "thread_child"
-          ? { flarySubagentRootThreadId: "thread_1", flaryRuntimeAgentId: "coder" }
-          : { flaryRuntimeAgentId: "coder" },
+        metadata:
+          target.threadId === "thread_child"
+            ? {
+                flarySubagentRootThreadId: "thread_1",
+                flaryRuntimeAgentId: "coder",
+              }
+            : { flaryRuntimeAgentId: "coder" },
       };
     },
-    async archive() { return binding(); },
-    async fork() { return binding(); },
-    async setMode() { return binding(); },
-    async setConnections() { return binding(); },
+    async archive() {
+      return binding();
+    },
+    async fork() {
+      return binding();
+    },
+    async setMode() {
+      return binding();
+    },
+    async setConnections() {
+      return binding();
+    },
     async submit() {
-      return { streamUrl: "https://local/stream", offset: "1", submissionId: "submission" };
+      return {
+        streamUrl: "https://local/stream",
+        offset: "1",
+        submissionId: "submission",
+      };
     },
     async subagentAction(_target, action, input) {
       actions.push({ action, input: { ...input } });
       return { accepted: true };
     },
-    async listApprovals() { return []; },
+    async listApprovals() {
+      return [];
+    },
     async decideApproval() {},
   };
   const app = flary({
@@ -218,7 +243,10 @@ test("durable subagents use their own provider and the root runtime binding", as
   const runtime = defineFlaryInteractiveAgent(coder) as unknown as {
     initialize(input: { env: object; id: string }): Promise<{
       model: string;
-      tools: Array<{ name: string; run(input: { input: any }): Promise<unknown> }>;
+      tools: Array<{
+        name: string;
+        run(input: { input: any }): Promise<unknown>;
+      }>;
     }>;
   };
 
@@ -252,7 +280,10 @@ test("durable subagents use their own provider and the root runtime binding", as
     {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ agent: "reviewer", task: "Review through the API." }),
+      body: JSON.stringify({
+        agent: "reviewer",
+        task: "Review through the API.",
+      }),
     },
   );
   assert.equal(response.status, 200, await response.clone().text());
@@ -279,7 +310,10 @@ test("interactive agents prepare trusted thread providers before model resolutio
     initialize(input: { env: object; id: string }): Promise<{ model: string }>;
   };
 
-  const result = await runtime.initialize({ env: {}, id: "tenant:app:coder:thread_1" });
+  const result = await runtime.initialize({
+    env: {},
+    id: "tenant:app:coder:thread_1",
+  });
   assert.deepEqual(prepared, ["tenant:app:coder:thread_1"]);
   assert.equal(result.model, "runtime-alias/model");
 });
@@ -289,10 +323,15 @@ test("interactive agents resolve trusted instructions inside the agent isolate",
   const agent = app.agent({
     name: "operator",
     instructions: async ({ bindings, runId, agentId }) =>
-      `Organization: ${(bindings as { organization: string }).organization}\nRun: ${runId}\nAgent: ${agentId}`,
+      `Organization: ${
+        (bindings as { organization: string }).organization
+      }\nRun: ${runId}\nAgent: ${agentId}`,
   });
   const runtime = defineFlaryInteractiveAgent(agent) as unknown as {
-    initialize(input: { env: object; id: string }): Promise<{ instructions: string }>;
+    initialize(input: {
+      env: object;
+      id: string;
+    }): Promise<{ instructions: string }>;
   };
 
   const result = await runtime.initialize({
@@ -309,20 +348,38 @@ test("durable agent tools restore admitted roles and scopes", async () => {
   let stored = binding();
   let observedIdentity: unknown;
   const service: FlaryThreadHostService = {
-    async list() { return [stored]; },
+    async list() {
+      return [stored];
+    },
     async create(_scope, input) {
       stored = { ...binding(), metadata: input.metadata };
       return stored;
     },
-    async inspect() { return stored; },
-    async archive() { return stored; },
-    async fork() { return stored; },
-    async setMode() { return stored; },
-    async setConnections() { return stored; },
-    async submit() {
-      return { streamUrl: "https://local/stream", offset: "1", submissionId: "submission" };
+    async inspect() {
+      return stored;
     },
-    async listApprovals() { return []; },
+    async archive() {
+      return stored;
+    },
+    async fork() {
+      return stored;
+    },
+    async setMode() {
+      return stored;
+    },
+    async setConnections() {
+      return stored;
+    },
+    async submit() {
+      return {
+        streamUrl: "https://local/stream",
+        offset: "1",
+        submissionId: "submission",
+      };
+    },
+    async listApprovals() {
+      return [];
+    },
     async decideApproval() {},
   };
   const app = flary({
@@ -353,14 +410,17 @@ test("durable agent tools restore admitted roles and scopes", async () => {
     /unknown catalog id/i,
   );
   const worker = app.serve({ coder }, { prefix: "/api/flary" });
-  const created = await worker.request("http://local/api/flary/apps/coder/threads", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      threadId: "thread_1",
-      workspace: binding().workspace,
-    }),
-  });
+  const created = await worker.request(
+    "http://local/api/flary/apps/coder/threads",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        threadId: "thread_1",
+        workspace: binding().workspace,
+      }),
+    },
+  );
   assert.equal(created.status, 201, await created.clone().text());
   assert.deepEqual(stored.metadata?.flaryAdmittedRoles, ["admin"]);
   assert.deepEqual(stored.metadata?.flaryAdmittedScopes, ["analytics.read"]);

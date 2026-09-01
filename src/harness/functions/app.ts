@@ -1,9 +1,5 @@
 import { Hono } from "hono";
-import {
-  z,
-  ZodError,
-  type ZodType,
-} from "zod";
+import { z, ZodError, type ZodType } from "zod";
 
 import {
   CreateRunRequestSchema,
@@ -100,6 +96,7 @@ import type {
   FlaryWorkspaceSource,
   FlaryWorkspaceOptions,
   FlaryAgentWorkspace,
+  FlaryWebOptions,
   FlaryIdentity,
   FlarySkill,
 } from "./types.js";
@@ -109,15 +106,10 @@ import {
   type FlaryCodemodeApprovalBridge,
   type FlaryDurableObjectState,
 } from "./codemode.js";
-import {
-  createOpenApiRuntime,
-  openApiRevision,
-} from "./openapi.js";
-import { createMcpConnection } from "./mcp.js";
+import { createOpenApiRuntime, openApiRevision } from "./openapi.js";
+import { createMcpConnection, mcpSessionUuid } from "./mcp.js";
 import type { ApprovalContinuation } from "../execution/approval-continuation.js";
-import {
-  DurableSandboxProcessRuntime,
-} from "../cloudflare/sandbox-process-runtime.js";
+import { DurableSandboxProcessRuntime } from "../cloudflare/sandbox-process-runtime.js";
 import {
   SqliteSandboxProcessRegistry,
   hashSandboxEnvironment,
@@ -152,7 +144,10 @@ interface FunctionState {
   readonly definition: FlaryFunctionOptions<any, any, any>;
   readonly mode: FlaryFunctionMode;
   functionId?: string;
-  invoke(input: unknown, invocation?: Partial<Invocation<any>>): Promise<unknown>;
+  invoke(
+    input: unknown,
+    invocation?: Partial<Invocation<any>>,
+  ): Promise<unknown>;
 }
 
 interface AgentState {
@@ -192,7 +187,9 @@ export class FlaryFunctionError extends Error {
  * authentication, and the small HTTP surface. Low-level Flary APIs remain
  * available for hosts that need more control.
  */
-export class FlaryApplication<TBindings extends object = Record<string, unknown>> {
+export class FlaryApplication<
+  TBindings extends object = Record<string, unknown>,
+> {
   readonly options: FlaryAppOptions<TBindings>;
   readonly runStore;
   readonly stepStore;
@@ -204,7 +201,8 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     this.options = options;
     this.#runServiceOverride = options.runService;
     this.#threadServiceOverride = options.threadService;
-    this.runStore = options.runStore ??
+    this.runStore =
+      options.runStore ??
       (options.runStorage
         ? new DurableObjectFlaryFunctionRunStore(options.runStorage)
         : new InMemoryFlaryFunctionRunStore());
@@ -393,7 +391,9 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
         flarySubagentParentThreadId: ref.threadId,
         flaryModelPolicy: modelPolicyMetadata(child),
         flaryDelegation: delegationMetadata(child),
-        flaryCompaction: { ...(child.definition.compaction ?? { mode: "auto" }) },
+        flaryCompaction: {
+          ...(child.definition.compaction ?? { mode: "auto" }),
+        },
         flaryLimits: { ...(child.definition.limits ?? {}) },
       };
     } else if (input.action === "send") {
@@ -420,21 +420,24 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
   }
 
   /** Define a Zod-backed native or prompt-backed callable function. */
-  fn<
-    TInput extends FlarySchema,
-    TOutput extends FlarySchema,
-  >(
+  fn<TInput extends FlarySchema, TOutput extends FlarySchema>(
     definition: FlaryFunctionOptions<TInput, TOutput, TBindings>,
   ): FlaryFunction<TInput, TOutput, TBindings> {
     validateFunctionDefinition(definition);
-    if (typeof definition.run !== "function" && definition.prompt === undefined) {
+    if (
+      typeof definition.run !== "function" &&
+      definition.prompt === undefined
+    ) {
       throw new FlaryFunctionError(
         "function_implementation_missing",
         "A Flary function needs exactly one prompt or run implementation.",
         400,
       );
     }
-    if (typeof definition.run === "function" && definition.prompt !== undefined) {
+    if (
+      typeof definition.run === "function" &&
+      definition.prompt !== undefined
+    ) {
       throw new FlaryFunctionError(
         "function_implementation_ambiguous",
         "A Flary function cannot define both prompt and run.",
@@ -448,18 +451,22 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
       mode: typeof definition.run === "function" ? "run" : "prompt",
       ...(definition.name ? { functionId: definition.name } : {}),
       invoke: async (input, invocation) =>
-        this.invokeDefinition(definition as FlaryFunctionOptions<any, any, any>, input, {
-          bindings:
-            invocation?.bindings === undefined
-              ? this.defaultBindings()
-              : invocation.bindings,
-          identity: invocation?.identity,
-          request: invocation?.request,
-          signal: invocation?.signal ?? new AbortController().signal,
-          runId: invocation?.runId,
-          idempotencyKey: invocation?.idempotencyKey,
-          stepCache: invocation?.stepCache ?? new Map(),
-        }),
+        this.invokeDefinition(
+          definition as FlaryFunctionOptions<any, any, any>,
+          input,
+          {
+            bindings:
+              invocation?.bindings === undefined
+                ? this.defaultBindings()
+                : invocation.bindings,
+            identity: invocation?.identity,
+            request: invocation?.request,
+            signal: invocation?.signal ?? new AbortController().signal,
+            runId: invocation?.runId,
+            idempotencyKey: invocation?.idempotencyKey,
+            stepCache: invocation?.stepCache ?? new Map(),
+          },
+        ),
     };
 
     const callable = (async (input: FlaryInput<TInput>) => {
@@ -481,11 +488,17 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     callable.start = (
       input: FlaryInput<TInput>,
       options: FlaryRunOptions = {},
-    ) => this.startState(state, input, options) as Promise<FlaryRun<z.output<TOutput>>>;
+    ) =>
+      this.startState(state, input, options) as Promise<
+        FlaryRun<z.output<TOutput>>
+      >;
     callable.stream = (
       input: FlaryInput<TInput>,
       options: FlaryRunOptions = {},
-    ) => this.streamState(state, input, options) as AsyncIterable<FlaryEvent<z.output<TOutput>>>;
+    ) =>
+      this.streamState(state, input, options) as AsyncIterable<
+        FlaryEvent<z.output<TOutput>>
+      >;
     return callable;
   }
 
@@ -500,9 +513,10 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
       definition: Object.freeze({ ...normalized }),
       revision: stableRevision({
         name: normalized.name,
-        instructions: typeof normalized.instructions === "string"
-          ? normalized.instructions
-          : normalized.instructions
+        instructions:
+          typeof normalized.instructions === "string"
+            ? normalized.instructions
+            : normalized.instructions
             ? "dynamic"
             : undefined,
         model: normalized.model ?? this.options.model,
@@ -531,22 +545,31 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
   private agentDefinition(
     definition: FlaryAgentOptions<TBindings>,
   ): FlaryAgentOptions<TBindings> {
-    if (!definition.workspace) return definition;
-    const configured = normalizeAgentWorkspace(definition.workspace);
-    assertNamespace(configured.namespace);
-    if (definition.tools?.entries[configured.namespace]) {
-      throw new FlaryFunctionError(
-        "duplicate_agent_workspace",
-        `Tool namespace '${configured.namespace}' is already registered. Remove it from tools or remove agent.workspace.`,
-        400,
-      );
-    }
-    const source = this.workspace(configured.options);
-    const tools = this.tools({
+    const entries: Record<string, FlaryToolSource> = {
       ...(definition.tools?.entries ?? {}),
-      [configured.namespace]: source,
+    };
+    const web = definition.web ?? this.options.web ?? true;
+    if (web !== false && !hasToolNamespace(entries, "web")) {
+      entries.web = this.web(typeof web === "object" ? web : {});
+    }
+    if (definition.workspace) {
+      const configured = normalizeAgentWorkspace(definition.workspace);
+      assertNamespace(configured.namespace);
+      if (hasToolNamespace(entries, configured.namespace)) {
+        throw new FlaryFunctionError(
+          "duplicate_agent_workspace",
+          `Tool namespace '${configured.namespace}' is already registered. Remove it from tools or remove agent.workspace.`,
+          400,
+        );
+      }
+      entries[configured.namespace] = this.workspace(configured.options);
+    }
+    const tools =
+      Object.keys(entries).length > 0 ? this.tools(entries) : undefined;
+    return Object.freeze({
+      ...definition,
+      ...(tools ? { tools } : { tools: undefined }),
     });
-    return Object.freeze({ ...definition, tools });
   }
 
   /** Define one immutable, lazily discoverable skill revision. */
@@ -604,7 +627,9 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
       }
       seenNamespaces.add(namespace);
     }
-    const descriptors = names.map((name) => describeToolSource(name, entries[name]!));
+    const descriptors = names.map((name) =>
+      describeToolSource(name, entries[name]!),
+    );
     return Object.freeze({
       kind: "tools" as const,
       entries: Object.freeze({ ...entries }) as T,
@@ -616,7 +641,9 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
   /** Register an MCP connection by logical name. */
   mcp(name: string): FlaryMcpSource;
   /** Register an explicit MCP endpoint. */
-  mcp(options: Omit<FlaryMcpSource, "kind"> & { namespace: string }): FlaryMcpSource;
+  mcp(
+    options: Omit<FlaryMcpSource, "kind"> & { namespace: string },
+  ): FlaryMcpSource;
   mcp(
     value: string | (Omit<FlaryMcpSource, "kind"> & { namespace: string }),
   ): FlaryMcpSource {
@@ -635,6 +662,29 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     return Object.freeze(source);
   }
 
+  /**
+   * Register Flary's low-latency public-web source. It stays lazy behind Tool
+   * Search and uses the free anonymous Parallel endpoint unless a connection
+   * is supplied by trusted host code.
+   */
+  web(options: FlaryWebOptions = {}): FlaryMcpSource {
+    if (options.provider !== undefined && options.provider !== "parallel") {
+      throw new FlaryFunctionError(
+        "web_provider_unsupported",
+        `Web provider '${options.provider}' is not supported.`,
+        400,
+      );
+    }
+    return this.mcp({
+      namespace: "web",
+      url: options.url ?? "https://search.parallel.ai/mcp",
+      ...(options.connection ? { connection: options.connection } : {}),
+      transport: options.transport ?? "streamable-http",
+      readOnly: true,
+      session: "run",
+    });
+  }
+
   /** Register an OpenAPI document. The document remains lazy until execution. */
   openapi(
     options: Omit<FlaryOpenApiSource, "kind"> & { namespace: string },
@@ -651,7 +701,10 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
   }
 
   workspace(options: FlaryWorkspaceOptions = {}): FlaryWorkspaceSource {
-    return Object.freeze({ kind: "workspace" as const, options: { ...options } });
+    return Object.freeze({
+      kind: "workspace" as const,
+      options: { ...options },
+    });
   }
 
   /** Register a tenant-scoped R2 or S3-compatible file source. */
@@ -700,13 +753,22 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
    * or use it directly in a function runtime.
    */
   codemode(
-    options: Omit<FlaryCodemodeExecutorOptions<TBindings>, "resolveMcp" | "resolveOpenApi">,
+    options: Omit<
+      FlaryCodemodeExecutorOptions<TBindings>,
+      "resolveMcp" | "resolveOpenApi"
+    >,
   ) {
     return createFlaryCodemodeExecutor({
       ...options,
-      ...(this.options.resolveMcp ? { resolveMcp: this.options.resolveMcp } : {}),
-      ...(this.options.resolveOpenApi ? { resolveOpenApi: this.options.resolveOpenApi } : {}),
-      ...(this.options.resolveBrowser ? { resolveBrowser: this.options.resolveBrowser } : {}),
+      ...(this.options.resolveMcp
+        ? { resolveMcp: this.options.resolveMcp }
+        : {}),
+      ...(this.options.resolveOpenApi
+        ? { resolveOpenApi: this.options.resolveOpenApi }
+        : {}),
+      ...(this.options.resolveBrowser
+        ? { resolveBrowser: this.options.resolveBrowser }
+        : {}),
     });
   }
 
@@ -811,10 +873,7 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
           waitUntil: executionWaitUntil(context),
         },
       });
-      return context.json(
-        { runId: run.runId, status: run.status },
-        202,
-      );
+      return context.json({ runId: run.runId, status: run.status }, 202);
     });
 
     router.get(`${prefix}/functions/:name/runs/:runId`, async (context) => {
@@ -839,9 +898,10 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
           this.parseBindings(context.env),
         );
         const body = await readOptionalJson(context.req.raw);
-        const reason = isRecord(body) && typeof body.reason === "string"
-          ? body.reason
-          : undefined;
+        const reason =
+          isRecord(body) && typeof body.reason === "string"
+            ? body.reason
+            : undefined;
         await run.cancel(reason);
         return context.json({ runId: run.runId, status: run.status }, 202);
       },
@@ -894,11 +954,14 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
           context.req.raw,
           this.parseBindings(context.env),
         );
-        const input = z.object({
-          status: z.enum(["approved", "rejected"]),
-          comment: z.string().trim().min(1).max(4_096).optional(),
-          metadata: z.record(z.string(), z.unknown()).optional(),
-        }).strict().parse(await readJson(context.req.raw));
+        const input = z
+          .object({
+            status: z.enum(["approved", "rejected"]),
+            comment: z.string().trim().min(1).max(4_096).optional(),
+            metadata: z.record(z.string(), z.unknown()).optional(),
+          })
+          .strict()
+          .parse(await readJson(context.req.raw));
         const decision = input.status === "approved" ? run.approve : run.reject;
         await decision(context.req.param("approvalId"), {
           ...(input.comment ? { comment: input.comment } : {}),
@@ -934,12 +997,17 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
         );
         await run.respond(
           context.req.param("requestId"),
-          z.object({
-            answers: z.record(z.string(), z.string().max(100_000)).default({}),
-            response: z.string().max(100_000).optional(),
-            canceled: z.boolean().default(false),
-            metadata: z.record(z.string(), z.unknown()).optional(),
-          }).strict().parse(await readJson(context.req.raw)),
+          z
+            .object({
+              answers: z
+                .record(z.string(), z.string().max(100_000))
+                .default({}),
+              response: z.string().max(100_000).optional(),
+              canceled: z.boolean().default(false),
+              metadata: z.record(z.string(), z.unknown()).optional(),
+            })
+            .strict()
+            .parse(await readJson(context.req.raw)),
         );
         return context.json({ runId: run.runId, status: run.status }, 202);
       },
@@ -964,13 +1032,14 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
           404,
         );
       }
-      await this.authorize(
-        context.req.raw,
-        this.parseBindings(context.env),
-      );
+      await this.authorize(context.req.raw, this.parseBindings(context.env));
       const status = run.status;
       if (status === "completed") {
-        return context.json({ runId: run.runId, status, result: await run.result() });
+        return context.json({
+          runId: run.runId,
+          status,
+          result: await run.result(),
+        });
       }
       if (status === "failed" || status === "cancelled") {
         try {
@@ -979,7 +1048,11 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
           return context.json({
             runId: run.runId,
             status,
-            error: { code: "flary_function_failed", message: cause instanceof Error ? cause.message : "The function failed" },
+            error: {
+              code: "flary_function_failed",
+              message:
+                cause instanceof Error ? cause.message : "The function failed",
+            },
           });
         }
       }
@@ -1005,10 +1078,7 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
           404,
         );
       }
-      await this.authorize(
-        context.req.raw,
-        this.parseBindings(context.env),
-      );
+      await this.authorize(context.req.raw, this.parseBindings(context.env));
       await run.cancel("Cancelled by the client");
       return context.json({ runId: run.runId, status: run.status });
     });
@@ -1019,9 +1089,16 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
         createFlaryHostRouter<TBindings>({
           authorize: async ({ request, env, appId }) => {
             if (!agents[appId]) {
-              throw new FlaryHostError(404, "agent_not_found", "The agent was not found.");
+              throw new FlaryHostError(
+                404,
+                "agent_not_found",
+                "The agent was not found.",
+              );
             }
-            const identity = await this.authorize(request, this.parseBindings(env));
+            const identity = await this.authorize(
+              request,
+              this.parseBindings(env),
+            );
             if (!identity) {
               throw new FlaryHostError(
                 401,
@@ -1104,10 +1181,7 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
 
   /** Resolve a function state for integrations such as a code executor. */
   functionState(value: unknown, name = "function"): FunctionState {
-    const candidate =
-      isRecord(value) && name in value
-        ? value[name]
-        : value;
+    const candidate = isRecord(value) && name in value ? value[name] : value;
     const state = getFunctionState(candidate);
     if (!state) {
       throw new FlaryFunctionError(
@@ -1171,7 +1245,8 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
       runId: input.runId,
       stepCache: new Map(),
     });
-    const executor = this.options.code ?? await this.defaultCodeExecutor(bindings);
+    const executor =
+      this.options.code ?? (await this.defaultCodeExecutor(bindings));
     if (!executor) {
       throw new FlaryFunctionError(
         "code_executor_missing",
@@ -1222,7 +1297,7 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
       stepCache: new Map(),
     });
     const executor =
-      this.options.code ?? await this.defaultCodeExecutor(input.bindings);
+      this.options.code ?? (await this.defaultCodeExecutor(input.bindings));
     if (!executor) {
       throw new FlaryFunctionError(
         "code_executor_missing",
@@ -1250,7 +1325,7 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     const state = getAgentState(value);
     if (!state?.definition.tools) return undefined;
     const executor =
-      this.options.code ?? await this.defaultCodeExecutor(input.bindings);
+      this.options.code ?? (await this.defaultCodeExecutor(input.bindings));
     if (!executor?.approvalContinuation) return undefined;
     const identity = await this.identityForAgentRun(
       input.bindings,
@@ -1280,7 +1355,7 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     const state = getAgentState(value);
     if (!state?.definition.tools) return undefined;
     const executor =
-      this.options.code ?? await this.defaultCodeExecutor(input.bindings);
+      this.options.code ?? (await this.defaultCodeExecutor(input.bindings));
     if (!executor?.approvalBridge) return undefined;
     const identity = await this.identityForAgentRun(
       input.bindings,
@@ -1314,7 +1389,8 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
   ): Promise<ApprovalContinuation | undefined> {
     const state = this.functionState(value);
     if (!state.definition.tools) return undefined;
-    const executor = this.options.code ?? await this.defaultCodeExecutor(input.bindings);
+    const executor =
+      this.options.code ?? (await this.defaultCodeExecutor(input.bindings));
     if (!executor?.approvalContinuation) return undefined;
     return executor.approvalContinuation({
       bindings: input.bindings,
@@ -1343,7 +1419,8 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
   ): Promise<FlaryCodemodeApprovalBridge | undefined> {
     const state = this.functionState(value);
     if (!state.definition.tools) return undefined;
-    const executor = this.options.code ?? await this.defaultCodeExecutor(input.bindings);
+    const executor =
+      this.options.code ?? (await this.defaultCodeExecutor(input.bindings));
     if (!executor?.approvalBridge) return undefined;
     return executor.approvalBridge({
       bindings: input.bindings,
@@ -1369,7 +1446,9 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     const configured = this.#threadServiceOverride;
     if (!configured) return undefined;
     const ref = parseThreadName(runId);
-    const binding = await resolveThreadService(configured, { bindings }).inspect({
+    const binding = await resolveThreadService(configured, {
+      bindings,
+    }).inspect({
       authorization: {
         organizationId: ref.organizationId,
         actor: { id: "flary-agent", kind: "service" },
@@ -1472,9 +1551,10 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
         waitUntil: internal?.waitUntil,
         stepCache: new Map(),
       };
-      const prompt = state.mode === "prompt"
-      ? await this.renderPrompt(state.definition, parsedInput, invocation)
-        : undefined;
+      const prompt =
+        state.mode === "prompt"
+          ? await this.renderPrompt(state.definition, parsedInput, invocation)
+          : undefined;
       const revision = await this.functionRevision(
         state,
         prompt,
@@ -1530,7 +1610,8 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     }
 
     const ephemeral =
-      this.options.runs?.mode === "ephemeral" || this.options.runtime === "local";
+      this.options.runs?.mode === "ephemeral" ||
+      this.options.runtime === "local";
     if (!ephemeral) {
       throw new FlaryFunctionError(
         "durable_host_required",
@@ -1570,7 +1651,10 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
       );
     }
     return typeof definition.prompt === "function"
-      ? definition.prompt(input, this.contextFor(invocation, definition.limits?.steps))
+      ? definition.prompt(
+          input,
+          this.contextFor(invocation, definition.limits?.steps),
+        )
       : definition.prompt;
   }
 
@@ -1620,17 +1704,27 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
             })
           : await createOpenApiRuntime(source);
         sourceRevisions[name] =
-          runtime.revision ?? await openApiRevision(runtime.spec);
+          runtime.revision ?? (await openApiRevision(runtime.spec));
         continue;
       }
       if (source.kind === "mcp") {
-        const connection = this.options.resolveMcp
-          ? await this.options.resolveMcp(source, {
-              bindings,
-              context: this.contextFor(invocation),
-            })
-          : source.url
-            ? createMcpConnection(source)
+        const connection =
+          this.options.resolveMcp && source.connection
+            ? await this.options.resolveMcp(source, {
+                bindings,
+                context: this.contextFor(invocation),
+              })
+            : source.url
+            ? createMcpConnection(source, {
+                sessionId: await mcpSessionUuid(
+                  invocation.runId ?? invocation.idempotencyKey,
+                ),
+              })
+            : this.options.resolveMcp
+            ? await this.options.resolveMcp(source, {
+                bindings,
+                context: this.contextFor(invocation),
+              })
             : undefined;
         if (!connection) {
           throw new FlaryFunctionError(
@@ -1640,22 +1734,23 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
           );
         }
         const descriptors =
-          connection.tools ?? await connection.fetchTools?.() ?? [];
+          connection.tools ?? (await connection.fetchTools?.()) ?? [];
         sourceRevisions[name] =
-          connection.revision ?? await sha256Hex(stableJson(descriptors));
+          connection.revision ?? (await sha256Hex(stableJson(descriptors)));
         continue;
       }
       sourceRevisions[name] = await sha256Hex(stableJson(source));
     }
 
-    const promptHash = prompt === undefined
-      ? undefined
-      : await sha256Hex(prompt);
+    const promptHash =
+      prompt === undefined ? undefined : await sha256Hex(prompt);
     const toolRegistryRevision = state.definition.tools
-      ? await sha256Hex(stableJson({
-          descriptors: state.definition.tools.descriptors ?? [],
-          sources: sourceRevisions,
-        }))
+      ? await sha256Hex(
+          stableJson({
+            descriptors: state.definition.tools.descriptors ?? [],
+            sources: sourceRevisions,
+          }),
+        )
       : undefined;
     const model = state.definition.model ?? this.options.model;
     const staticBuild = {
@@ -1665,8 +1760,8 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
         typeof state.definition.run === "function"
           ? state.definition.run.toString()
           : typeof state.definition.prompt === "function"
-            ? state.definition.prompt.toString()
-            : state.definition.prompt,
+          ? state.definition.prompt.toString()
+          : state.definition.prompt,
       inputSchemaHash,
       outputSchemaHash,
       toolRegistryRevision,
@@ -1710,9 +1805,7 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
         500,
       );
     }
-    return typeof configured === "function"
-      ? configured(input)
-      : configured;
+    return typeof configured === "function" ? configured(input) : configured;
   }
 
   private async resolveTrustedContext(input: {
@@ -1932,17 +2025,18 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
           stepStore: invocation.stepStore,
           stepCache: invocation.stepCache,
         });
-        const persisted = stepStore && invocation.runId
-          ? value.then(async (result) => {
-              await stepStore.put({
-                runId: invocation.runId!,
-                name,
-                inputHash: inputKey,
-                value: result,
-              });
-              return result;
-            })
-          : value;
+        const persisted =
+          stepStore && invocation.runId
+            ? value.then(async (result) => {
+                await stepStore.put({
+                  runId: invocation.runId!,
+                  name,
+                  inputHash: inputKey,
+                  value: result,
+                });
+                return result;
+              })
+            : value;
         invocation.stepCache.set(key, { input: inputKey, value: persisted });
         return persisted as Promise<TOutput>;
       },
@@ -1968,7 +2062,8 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
         context: context as FlaryPromptRequest["context"],
       });
     }
-    const codeExecutor = this.options.code ?? await this.defaultCodeExecutor(context.bindings);
+    const codeExecutor =
+      this.options.code ?? (await this.defaultCodeExecutor(context.bindings));
     if (definition.tools && !codeExecutor) {
       throw new FlaryFunctionError(
         "code_executor_missing",
@@ -1979,12 +2074,18 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     const model = definition.model ?? this.options.model ?? "openai/gpt-5";
     const selection = parseFlueModelSpecifier(model);
     const modelName = selection?.model ?? model;
-    const adapter = this.resolveAdapter(selection?.provider ?? providerFromModel(model), context.bindings);
+    const adapter = this.resolveAdapter(
+      selection?.provider ?? providerFromModel(model),
+      context.bindings,
+    );
     const messages: ProviderMessage[] = [{ role: "user", content: prompt }];
     const executeTool = definition.tools
       ? {
           name: "execute",
-          description: executeToolDescription(definition.tools, definition.eagerTools),
+          description: executeToolDescription(
+            definition.tools,
+            definition.eagerTools,
+          ),
           inputSchema: {
             type: "object",
             properties: { code: { type: "string" } },
@@ -2002,16 +2103,24 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
       const request: NormalizedModelRequest = {
         model: modelName,
         messages,
-        ...(executeTool ? { tools: [executeTool], toolChoice: "auto" as const } : {}),
-        ...(definition.thinking && ReasoningEffortSchema.safeParse(definition.thinking).success
-          ? { reasoningEffort: definition.thinking as NormalizedModelRequest["reasoningEffort"] }
+        ...(executeTool
+          ? { tools: [executeTool], toolChoice: "auto" as const }
+          : {}),
+        ...(definition.thinking &&
+        ReasoningEffortSchema.safeParse(definition.thinking).success
+          ? {
+              reasoningEffort:
+                definition.thinking as NormalizedModelRequest["reasoningEffort"],
+            }
           : {}),
         ...(isStringSchema(definition.output)
           ? { responseFormat: "text" as const }
           : {
               responseFormat: {
                 type: "json_object" as const,
-                schema: JsonObjectSchema.parse(z.toJSONSchema(definition.output)),
+                schema: JsonObjectSchema.parse(
+                  z.toJSONSchema(definition.output),
+                ),
               },
             }),
       };
@@ -2041,7 +2150,9 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
             400,
           );
         }
-        const args = z.object({ code: z.string().min(1) }).parse(toolCall.arguments);
+        const args = z
+          .object({ code: z.string().min(1) })
+          .parse(toolCall.arguments);
         const result = await codeExecutor!.execute({
           code: args.code,
           bindings: context.bindings,
@@ -2065,7 +2176,9 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
 
   private resolveAdapter(provider: string, bindings: unknown): ModelAdapter {
     if (this.options.provider) return this.options.provider;
-    const configured = this.options.providers?.get(provider) ?? this.options.providers?.get("openai");
+    const configured =
+      this.options.providers?.get(provider) ??
+      this.options.providers?.get("openai");
     if (configured) return configured;
     const source = isRecord(bindings) ? bindings : undefined;
     if (
@@ -2075,14 +2188,19 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
       "run" in source.AI &&
       typeof source.AI.run === "function"
     ) {
-      return new CloudflareWorkersAIAdapter(source.AI as ConstructorParameters<typeof CloudflareWorkersAIAdapter>[0]);
+      return new CloudflareWorkersAIAdapter(
+        source.AI as ConstructorParameters<
+          typeof CloudflareWorkersAIAdapter
+        >[0],
+      );
     }
     const apiKey =
       stringValue(source?.OPENAI_API_KEY) ?? environmentValue("OPENAI_API_KEY");
     if (provider === "anthropic") {
       return new AnthropicMessagesAdapter({
         apiKey:
-          stringValue(source?.ANTHROPIC_API_KEY) ?? environmentValue("ANTHROPIC_API_KEY"),
+          stringValue(source?.ANTHROPIC_API_KEY) ??
+          environmentValue("ANTHROPIC_API_KEY"),
         baseUrl: stringValue(source?.ANTHROPIC_BASE_URL),
       });
     }
@@ -2106,7 +2224,9 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     });
   }
 
-  private async defaultCodeExecutor(bindings: unknown): Promise<FlaryCodeExecutor<TBindings> | undefined> {
+  private async defaultCodeExecutor(
+    bindings: unknown,
+  ): Promise<FlaryCodeExecutor<TBindings> | undefined> {
     const record = isRecord(bindings) ? bindings : undefined;
     const loader = record?.LOADER ?? record?.WORKER_LOADER;
     if (!loader) return undefined;
@@ -2122,10 +2242,11 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
       // supplied application code executor, but the default executor stays
       // fail-closed for durable external tools.
     }
-    const cacheKey = ctx && typeof ctx === "object"
-      ? ctx as object
-      : typeof loader === "object" && loader !== null
-        ? loader as object
+    const cacheKey =
+      ctx && typeof ctx === "object"
+        ? (ctx as object)
+        : typeof loader === "object" && loader !== null
+        ? (loader as object)
         : undefined;
     if (cacheKey) {
       const cached = this.#defaultCodeExecutors.get(cacheKey);
@@ -2139,7 +2260,9 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
       resolveOpenApi: this.options.resolveOpenApi,
       resolveWorkspace:
         this.options.resolveWorkspace ??
-        (ctx ? defaultWorkspaceResolver(this.options, bindings, ctx.storage) : undefined),
+        (ctx
+          ? defaultWorkspaceResolver(this.options, bindings, ctx.storage)
+          : undefined),
       resolveR2:
         this.options.resolveR2 ??
         (ctx
@@ -2152,11 +2275,12 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
       resolveBrowser:
         this.options.resolveBrowser ??
         (ctx
-          ? async (source, input) => createCloudflareBrowserConnection(source, {
-              bindings: input.bindings,
-              context: input.context,
-              storage: input.storage,
-            })
+          ? async (source, input) =>
+              createCloudflareBrowserConnection(source, {
+                bindings: input.bindings,
+                context: input.context,
+                storage: input.storage,
+              })
           : undefined),
     });
     if (cacheKey) this.#defaultCodeExecutors.set(cacheKey, executor);
@@ -2177,13 +2301,18 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
         get?: <T = unknown>(key: string) => Promise<T | undefined>;
         put?: <T = unknown>(key: string, value: T) => Promise<void>;
       };
-      if (typeof kvStorage.get !== "function" || typeof kvStorage.put !== "function") {
+      if (
+        typeof kvStorage.get !== "function" ||
+        typeof kvStorage.put !== "function"
+      ) {
         return undefined;
       }
-      return new DurableObjectFlaryStepStore(kvStorage as {
-        get<T = unknown>(key: string): Promise<T | undefined>;
-        put<T = unknown>(key: string, value: T): Promise<void>;
-      });
+      return new DurableObjectFlaryStepStore(
+        kvStorage as {
+          get<T = unknown>(key: string): Promise<T | undefined>;
+          put<T = unknown>(key: string, value: T): Promise<void>;
+        },
+      );
     } catch {
       // Local and non-Flue hosts can still provide options.stepStore.
       return undefined;
@@ -2215,10 +2344,12 @@ export function getFunctionApp(
 }
 
 export function isFlaryAgent(value: unknown): value is FlaryAgent<any> {
-  return isRecord(value) &&
+  return (
+    isRecord(value) &&
     value.kind === "agent" &&
     typeof value.name === "string" &&
-    typeof value.revision === "string";
+    typeof value.revision === "string"
+  );
 }
 
 export function getAgentState(value: unknown): AgentState | undefined {
@@ -2228,9 +2359,7 @@ export function getAgentState(value: unknown): AgentState | undefined {
   ];
 }
 
-export function getAgentApp(
-  value: unknown,
-): FlaryApplication<any> | undefined {
+export function getAgentApp(value: unknown): FlaryApplication<any> | undefined {
   return getAgentState(value)?.app;
 }
 
@@ -2262,20 +2391,22 @@ function agentAwareThreadService(
               "The agent was not found.",
             );
           }
-          const requestedModel = input.model ?? (
-            agent.definition.model
+          const requestedModel =
+            input.model ??
+            (agent.definition.model
               ? parseFlueModelSpecifier(agent.definition.model)
               : agent.definition.models?.allow[0]
-                ? normalizeModelInput(agent.definition.models.allow[0])
-                : undefined
-          );
+              ? normalizeModelInput(agent.definition.models.allow[0])
+              : undefined);
           if (agent.definition.models?.allow.length && requestedModel) {
             const allowed = agent.definition.models.allow.some((candidate) => {
               const parsed = normalizeModelInput(candidate);
-              return parsed.provider === requestedModel.provider &&
+              return (
+                parsed.provider === requestedModel.provider &&
                 parsed.model === requestedModel.model &&
                 parsed.deployment === requestedModel.deployment &&
-                parsed.variant === requestedModel.variant;
+                parsed.variant === requestedModel.variant
+              );
             });
             if (!allowed) {
               throw new FlaryFunctionError(
@@ -2288,17 +2419,17 @@ function agentAwareThreadService(
           return target.create(scope, {
             ...input,
             agentId: agent.name,
-            model: input.model ?? (
-              agent.definition.model
+            model:
+              input.model ??
+              (agent.definition.model
                 ? parseFlueModelSpecifier(agent.definition.model)
                 : agent.definition.models?.allow[0]
-                  ? normalizeModelInput(agent.definition.models.allow[0])
-                  : getAgentState(agent)?.app.options.model
-                    ? parseFlueModelSpecifier(
-                        getAgentState(agent)!.app.options.model!,
-                      )
-                  : parseFlueModelSpecifier("openai/gpt-5")
-            ),
+                ? normalizeModelInput(agent.definition.models.allow[0])
+                : getAgentState(agent)?.app.options.model
+                ? parseFlueModelSpecifier(
+                    getAgentState(agent)!.app.options.model!,
+                  )
+                : parseFlueModelSpecifier("openai/gpt-5")),
             metadata: {
               ...(input.metadata ?? {}),
               flaryAdmittedRoles: [...(scope.authorization.roles ?? [])],
@@ -2330,7 +2461,11 @@ function agentAwareThreadService(
           }
           const root = agents[scope.appId];
           if (!root) {
-            throw new FlaryHostError(404, "agent_not_found", "The agent was not found.");
+            throw new FlaryHostError(
+              404,
+              "agent_not_found",
+              "The agent was not found.",
+            );
           }
           const currentBinding = await target.inspect(scope);
           const current = findAgentInTree(root, currentBinding.agentId);
@@ -2342,7 +2477,8 @@ function agentAwareThreadService(
             );
           }
           const rootThreadId =
-            typeof currentBinding.metadata?.flarySubagentRootThreadId === "string"
+            typeof currentBinding.metadata?.flarySubagentRootThreadId ===
+            "string"
               ? currentBinding.metadata.flarySubagentRootThreadId
               : scope.threadId;
           const value: Record<string, unknown> = {
@@ -2362,7 +2498,8 @@ function agentAwareThreadService(
             value.agentId = child.name;
             value.model = resolveAgentModelSelection(child, value.model);
             value.parentThreadId = scope.threadId;
-            value.requestId = value.requestId ?? `request_${crypto.randomUUID()}`;
+            value.requestId =
+              value.requestId ?? `request_${crypto.randomUUID()}`;
             value.metadata = {
               ...objectRecord(value.metadata),
               flaryRuntimeAgentId: root.name,
@@ -2371,12 +2508,15 @@ function agentAwareThreadService(
               flarySubagentParentThreadId: scope.threadId,
               flaryModelPolicy: modelPolicyMetadata(child),
               flaryDelegation: delegationMetadata(child),
-              flaryCompaction: { ...(child.definition.compaction ?? { mode: "auto" }) },
+              flaryCompaction: {
+                ...(child.definition.compaction ?? { mode: "auto" }),
+              },
               flaryLimits: { ...(child.definition.limits ?? {}) },
             };
           } else if (action === "send") {
             value.fromThreadId = scope.threadId;
-            value.requestId = value.requestId ?? `request_${crypto.randomUUID()}`;
+            value.requestId =
+              value.requestId ?? `request_${crypto.randomUUID()}`;
           }
           return target.subagentAction(
             { ...scope, threadId: rootThreadId },
@@ -2408,10 +2548,7 @@ function stableRevision(value: unknown): string {
 function validateFunctionDefinition(
   definition: FlaryFunctionOptions<any, any, any>,
 ): void {
-  const positiveInteger = (
-    value: number | undefined,
-    label: string,
-  ): void => {
+  const positiveInteger = (value: number | undefined, label: string): void => {
     if (value !== undefined && (!Number.isSafeInteger(value) || value < 1)) {
       throw new FlaryFunctionError(
         "invalid_function_limit",
@@ -2426,7 +2563,8 @@ function validateFunctionDefinition(
   positiveInteger(definition.limits?.timeoutMs, "limits.timeoutMs");
   if (
     definition.limits?.costUsd !== undefined &&
-    (!Number.isFinite(definition.limits.costUsd) || definition.limits.costUsd <= 0)
+    (!Number.isFinite(definition.limits.costUsd) ||
+      definition.limits.costUsd <= 0)
   ) {
     throw new FlaryFunctionError(
       "invalid_function_limit",
@@ -2455,7 +2593,10 @@ function validateFunctionDefinition(
       400,
     );
   }
-  positiveInteger(definition.delegation?.maxConcurrent, "delegation.maxConcurrent");
+  positiveInteger(
+    definition.delegation?.maxConcurrent,
+    "delegation.maxConcurrent",
+  );
   positiveInteger(definition.delegation?.maxTotal, "delegation.maxTotal");
   positiveInteger(definition.delegation?.maxDepth, "delegation.maxDepth");
   validateEagerTools(definition.tools, definition.eagerTools);
@@ -2472,9 +2613,7 @@ function validateFunctionDefinition(
   }
 }
 
-function validateAgentDefinition(
-  definition: FlaryAgentOptions<any>,
-): void {
+function validateAgentDefinition(definition: FlaryAgentOptions<any>): void {
   const positiveInteger = (value: number | undefined, label: string): void => {
     if (value !== undefined && (!Number.isSafeInteger(value) || value < 1)) {
       throw new FlaryFunctionError(
@@ -2484,11 +2623,20 @@ function validateAgentDefinition(
       );
     }
   };
-  positiveInteger(definition.delegation?.maxConcurrent, "delegation.maxConcurrent");
+  positiveInteger(
+    definition.delegation?.maxConcurrent,
+    "delegation.maxConcurrent",
+  );
   positiveInteger(definition.delegation?.maxTotal, "delegation.maxTotal");
   positiveInteger(definition.delegation?.maxDepth, "delegation.maxDepth");
-  positiveInteger(definition.compaction?.reserveTokens, "compaction.reserveTokens");
-  positiveInteger(definition.compaction?.thresholdTokens, "compaction.thresholdTokens");
+  positiveInteger(
+    definition.compaction?.reserveTokens,
+    "compaction.reserveTokens",
+  );
+  positiveInteger(
+    definition.compaction?.thresholdTokens,
+    "compaction.thresholdTokens",
+  );
   positiveInteger(definition.limits?.steps, "limits.steps");
   positiveInteger(definition.limits?.toolCalls, "limits.toolCalls");
   positiveInteger(definition.limits?.timeoutMs, "limits.timeoutMs");
@@ -2506,7 +2654,8 @@ function validateAgentDefinition(
   }
   if (
     definition.limits?.costUsd !== undefined &&
-    (!Number.isFinite(definition.limits.costUsd) || definition.limits.costUsd <= 0)
+    (!Number.isFinite(definition.limits.costUsd) ||
+      definition.limits.costUsd <= 0)
   ) {
     throw new FlaryFunctionError(
       "invalid_agent_limit",
@@ -2549,10 +2698,12 @@ function validateAgentDefinition(
         !parsedDefault ||
         !definition.models.allow.some((candidate) => {
           const parsed = normalizeModelInput(candidate);
-          return parsed.provider === parsedDefault.provider &&
+          return (
+            parsed.provider === parsedDefault.provider &&
             parsed.model === parsedDefault.model &&
             parsed.deployment === parsedDefault.deployment &&
-            parsed.variant === parsedDefault.variant;
+            parsed.variant === parsedDefault.variant
+          );
         })
       ) {
         throw new FlaryFunctionError(
@@ -2583,18 +2734,16 @@ function normalizeAgentWorkspace(value: FlaryAgentWorkspace): {
   readonly options: FlaryWorkspaceOptions;
 } {
   const input = typeof value === "string" ? { scope: value } : value;
-  const {
-    scope = "thread",
-    namespace = "workspace",
-    ...options
-  } = input;
+  const { scope = "thread", namespace = "workspace", ...options } = input;
   return {
     namespace,
     options: {
       ...options,
       checkpoint: options.checkpoint ?? "turn",
       branch: options.branch ?? "main",
-      ...(scope === "project" ? { workspaceId: options.workspaceId ?? "project" } : {}),
+      ...(scope === "project"
+        ? { workspaceId: options.workspaceId ?? "project" }
+        : {}),
     },
   };
 }
@@ -2631,6 +2780,15 @@ function sourceNamespace(source: FlaryToolSource, fallback: string): string {
   return "namespace" in source ? source.namespace : fallback;
 }
 
+function hasToolNamespace(
+  entries: Readonly<Record<string, FlaryToolSource>>,
+  namespace: string,
+): boolean {
+  return Object.entries(entries).some(
+    ([name, source]) => sourceNamespace(source, name) === namespace,
+  );
+}
+
 function describeToolSource(
   name: string,
   source: FlaryToolSource,
@@ -2640,13 +2798,16 @@ function describeToolSource(
     return {
       id: name,
       namespace: definition.name ?? name,
-      ...(definition.description ? { description: definition.description } : {}),
+      ...(definition.description
+        ? { description: definition.description }
+        : {}),
       inputSchema: toJsonSchema(definition.input),
       outputSchema: toJsonSchema(definition.output),
       operation: definition.policy?.operation ?? "read",
       capabilities: definition.policy?.capabilities ?? [],
       requiresApproval:
-        definition.policy?.requiresApproval ?? definition.policy?.operation === "write",
+        definition.policy?.requiresApproval ??
+        definition.policy?.operation === "write",
       ...(definition.policy?.concurrencyKey
         ? { concurrencyKey: definition.policy.concurrencyKey }
         : {}),
@@ -2655,8 +2816,12 @@ function describeToolSource(
         : {}),
     };
   }
-  const operation = source.kind === "sandbox" || source.kind === "workspace" ||
-    (source.kind === "r2" && source.access !== "read") ? "write" : "read";
+  const operation =
+    source.kind === "sandbox" ||
+    source.kind === "workspace" ||
+    (source.kind === "r2" && source.access !== "read")
+      ? "write"
+      : "read";
   const namespace = "namespace" in source ? source.namespace : name;
   return {
     id: name,
@@ -2679,7 +2844,9 @@ function describeToolSource(
   };
 }
 
-function toJsonSchema(schema: FlarySchema): Record<string, unknown> | undefined {
+function toJsonSchema(
+  schema: FlarySchema,
+): Record<string, unknown> | undefined {
   try {
     return JsonObjectSchema.parse(z.toJSONSchema(schema));
   } catch {
@@ -2716,10 +2883,12 @@ function validateR2Prefix(value: string): void {
 }
 
 function isSafeName(value: string): boolean {
-  return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(value) &&
+  return (
+    /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(value) &&
     value !== "__proto__" &&
     value !== "constructor" &&
-    value !== "prototype";
+    value !== "prototype"
+  );
 }
 
 function normalizePrefix(value: string): string {
@@ -2839,13 +3008,17 @@ function isStringSchema(schema: ZodType): boolean {
 
 function stableJson(value: unknown): string {
   try {
-    return JSON.stringify(value, (_key, item: unknown) =>
-      isRecord(item)
-        ? Object.fromEntries(
-            Object.entries(item).sort(([left], [right]) => left.localeCompare(right)),
-          )
-        : item,
-    ) ?? "undefined";
+    return (
+      JSON.stringify(value, (_key, item: unknown) =>
+        isRecord(item)
+          ? Object.fromEntries(
+              Object.entries(item).sort(([left], [right]) =>
+                left.localeCompare(right),
+              ),
+            )
+          : item,
+      ) ?? "undefined"
+    );
   } catch {
     return String(value);
   }
@@ -2863,7 +3036,9 @@ function findDeclaredChild(
   parent: FlaryAgent<any>,
   requestedName: string,
 ): FlaryAgent<any> | undefined {
-  for (const [key, child] of Object.entries(parent.definition.subagents ?? {})) {
+  for (const [key, child] of Object.entries(
+    parent.definition.subagents ?? {},
+  )) {
     if (key === requestedName || child.name === requestedName) return child;
   }
   return undefined;
@@ -2886,15 +3061,16 @@ function resolveAgentModelSelection(
   requested: unknown,
 ) {
   const state = getAgentState(agent);
-  const selected = requested !== undefined
-    ? normalizeModelInput(requested as never)
-    : agent.definition.model
+  const selected =
+    requested !== undefined
+      ? normalizeModelInput(requested as never)
+      : agent.definition.model
       ? parseFlueModelSpecifier(agent.definition.model)
       : agent.definition.models?.allow[0]
-        ? normalizeModelInput(agent.definition.models.allow[0])
-        : state?.app.options.model
-          ? parseFlueModelSpecifier(state.app.options.model)
-          : parseFlueModelSpecifier("openai/gpt-5");
+      ? normalizeModelInput(agent.definition.models.allow[0])
+      : state?.app.options.model
+      ? parseFlueModelSpecifier(state.app.options.model)
+      : parseFlueModelSpecifier("openai/gpt-5");
   if (!selected) {
     throw new FlaryFunctionError(
       "subagent_model_missing",
@@ -2908,12 +3084,15 @@ function resolveAgentModelSelection(
     deployment?: string;
     variant?: string;
   }>;
-  if (!allowed.some((candidate) =>
-    candidate.provider === selected.provider &&
-    candidate.model === selected.model &&
-    candidate.deployment === selected.deployment &&
-    candidate.variant === selected.variant
-  )) {
+  if (
+    !allowed.some(
+      (candidate) =>
+        candidate.provider === selected.provider &&
+        candidate.model === selected.model &&
+        candidate.deployment === selected.deployment &&
+        candidate.variant === selected.variant,
+    )
+  ) {
     throw new FlaryFunctionError(
       "invalid_subagent_model",
       `Model '${selected.provider}/${selected.model}' is not allowed for '${agent.name}'.`,
@@ -2923,14 +3102,18 @@ function resolveAgentModelSelection(
   return selected;
 }
 
-function modelPolicyMetadata(agent: FlaryAgent<any>): Record<string, unknown> & {
+function modelPolicyMetadata(agent: FlaryAgent<any>): Record<
+  string,
+  unknown
+> & {
   allow: unknown[];
 } {
   const selected = resolveDefaultAgentModel(agent);
   return {
-    allow: agent.definition.models?.allow.map((candidate) =>
-      normalizeModelInput(candidate)
-    ) ?? (selected ? [selected] : []),
+    allow:
+      agent.definition.models?.allow.map((candidate) =>
+        normalizeModelInput(candidate),
+      ) ?? (selected ? [selected] : []),
     switching: agent.definition.models?.switching ?? "user",
     fallback: agent.definition.models?.fallback ?? "none",
     ...(agent.definition.models?.compactionModel
@@ -2948,10 +3131,10 @@ function resolveDefaultAgentModel(agent: FlaryAgent<any>) {
   return agent.definition.model
     ? parseFlueModelSpecifier(agent.definition.model)
     : agent.definition.models?.allow[0]
-      ? normalizeModelInput(agent.definition.models.allow[0])
-      : state?.app.options.model
-        ? parseFlueModelSpecifier(state.app.options.model)
-        : parseFlueModelSpecifier("openai/gpt-5");
+    ? normalizeModelInput(agent.definition.models.allow[0])
+    : state?.app.options.model
+    ? parseFlueModelSpecifier(state.app.options.model)
+    : parseFlueModelSpecifier("openai/gpt-5");
 }
 
 function delegationMetadata(agent: FlaryAgent<any>): Record<string, unknown> {
@@ -2960,8 +3143,7 @@ function delegationMetadata(agent: FlaryAgent<any>): Record<string, unknown> {
     maxConcurrentChildren: agent.definition.delegation?.maxConcurrent ?? 4,
     maxTotalChildren: agent.definition.delegation?.maxTotal ?? 16,
     maxDepth: agent.definition.delegation?.maxDepth ?? 2,
-    allowPeerMessaging:
-      agent.definition.delegation?.allowPeerMessaging ?? true,
+    allowPeerMessaging: agent.definition.delegation?.allowPeerMessaging ?? true,
   };
 }
 
@@ -3006,9 +3188,7 @@ function defaultWorkspaceResolver<TBindings>(
         input.context.runId ??
         "default",
       branch:
-        stringValue(options.branch) ??
-        stringValue(identity.branch) ??
-        "main",
+        stringValue(options.branch) ?? stringValue(identity.branch) ?? "main",
     };
     const r2Name = stringValue(options.r2Binding) ?? "WORKSPACE_BLOBS";
     const r2 = isRecord(bindings) ? bindings[r2Name] : undefined;
@@ -3016,7 +3196,9 @@ function defaultWorkspaceResolver<TBindings>(
       ? bindings.FLARY_WORKSPACE
       : undefined;
     const hiddenPaths = Array.isArray(options.hiddenPaths)
-      ? options.hiddenPaths.filter((path): path is string => typeof path === "string")
+      ? options.hiddenPaths.filter(
+          (path): path is string => typeof path === "string",
+        )
       : undefined;
     if (
       isRecord(workspaceNamespace) &&
@@ -3059,7 +3241,11 @@ function defaultWorkspaceResolver<TBindings>(
       ["delete", "Delete a workspace file", "write"],
     ] as const;
     const allowed = Array.isArray(options.tools)
-      ? new Set(options.tools.filter((value): value is string => typeof value === "string"))
+      ? new Set(
+          options.tools.filter(
+            (value): value is string => typeof value === "string",
+          ),
+        )
       : undefined;
     return {
       descriptors: descriptors
@@ -3069,14 +3255,15 @@ function defaultWorkspaceResolver<TBindings>(
           description,
           operation,
           requiresApproval: operation === "write" && !draft,
-          inputSchema: name === "stat"
-            ? {
-                type: "object",
-                properties: { path: { type: "string" } },
-                required: ["path"],
-                additionalProperties: false,
-              }
-            : { type: "object", additionalProperties: true },
+          inputSchema:
+            name === "stat"
+              ? {
+                  type: "object",
+                  properties: { path: { type: "string" } },
+                  required: ["path"],
+                  additionalProperties: false,
+                }
+              : { type: "object", additionalProperties: true },
         })),
       call: async (name, value) => {
         if (allowed && !allowed.has(name)) {
@@ -3086,9 +3273,8 @@ function defaultWorkspaceResolver<TBindings>(
         if (typeof method !== "function") {
           throw new Error(`Workspace tool '${name}' is not available`);
         }
-        const normalizedValue = name === "stat" && isRecord(value)
-          ? value.path
-          : value;
+        const normalizedValue =
+          name === "stat" && isRecord(value) ? value.path : value;
         return (method as (input: unknown) => Promise<unknown>).call(
           workspace,
           normalizedValue,
@@ -3105,11 +3291,15 @@ function defaultSandboxResolver<TBindings>(
   return async (source, input) => {
     const options = isRecord(source.options) ? source.options : {};
     const bindingName = stringValue(options.bindingName) ?? "SANDBOX";
-    const binding = isRecord(bindings) ? bindings[stringValue(options.binding) ?? bindingName] : undefined;
+    const binding = isRecord(bindings)
+      ? bindings[stringValue(options.binding) ?? bindingName]
+      : undefined;
     if (!binding) {
       throw new FlaryFunctionError(
         "sandbox_runtime_missing",
-        `app.sandbox() needs a '${stringValue(options.binding) ?? bindingName}' binding.`,
+        `app.sandbox() needs a '${
+          stringValue(options.binding) ?? bindingName
+        }' binding.`,
         503,
       );
     }
@@ -3129,28 +3319,42 @@ function defaultSandboxResolver<TBindings>(
     const workspaceNamespace = isRecord(bindings)
       ? bindings.FLARY_WORKSPACE
       : undefined;
-    const workspaceScope = input.context.identity?.tenantId && workspaceNamespace
-      ? {
-          organizationId: input.context.identity.tenantId,
-          appId: input.context.identity.applicationId ?? appOptions.applicationId ?? appOptions.name ?? "flary",
-          projectId: input.context.identity.projectId ?? appOptions.projectId ?? "default",
-          workspaceId: stringValue(input.context.identity.workspaceId) ?? input.context.runId ?? "default",
-          branch: stringValue(input.context.identity.branch) ?? "main",
-        }
-      : undefined;
-    const workspaceBackend = input.storage && workspaceScope && isRecord(workspaceNamespace) &&
-        typeof workspaceNamespace.idFromName === "function" &&
-        typeof workspaceNamespace.get === "function"
-      ? new CloudflareSandboxWorkspaceBackend({
-          sandbox,
-          workspace: await createCloudflareWorkspaceConnection(
-            workspaceNamespace as never,
-            workspaceScope,
-          ),
-          sql: input.storage,
-          sessionId: input.context.runId ?? workspaceScope.workspaceId,
-        })
-      : undefined;
+    const workspaceScope =
+      input.context.identity?.tenantId && workspaceNamespace
+        ? {
+            organizationId: input.context.identity.tenantId,
+            appId:
+              input.context.identity.applicationId ??
+              appOptions.applicationId ??
+              appOptions.name ??
+              "flary",
+            projectId:
+              input.context.identity.projectId ??
+              appOptions.projectId ??
+              "default",
+            workspaceId:
+              stringValue(input.context.identity.workspaceId) ??
+              input.context.runId ??
+              "default",
+            branch: stringValue(input.context.identity.branch) ?? "main",
+          }
+        : undefined;
+    const workspaceBackend =
+      input.storage &&
+      workspaceScope &&
+      isRecord(workspaceNamespace) &&
+      typeof workspaceNamespace.idFromName === "function" &&
+      typeof workspaceNamespace.get === "function"
+        ? new CloudflareSandboxWorkspaceBackend({
+            sandbox,
+            workspace: await createCloudflareWorkspaceConnection(
+              workspaceNamespace as never,
+              workspaceScope,
+            ),
+            sql: input.storage,
+            sessionId: input.context.runId ?? workspaceScope.workspaceId,
+          })
+        : undefined;
     if (workspaceBackend) await workspaceBackend.prepare();
     const processRuntime = input.storage
       ? new DurableSandboxProcessRuntime({
@@ -3187,111 +3391,125 @@ function defaultSandboxResolver<TBindings>(
             additionalProperties: false,
           },
         },
-        ...(["processStart", "processAttach", "processStdin", "processSignal", "processSleep", "processWake"] as const)
-          .map((name) => ({
-            name,
-            description: `Durable sandbox ${name} operation`,
-            operation: (name === "processAttach" ? "read" : "write") as "read" | "write",
-            requiresApproval: name !== "processAttach",
-            inputSchema: { type: "object", additionalProperties: true },
-          })),
+        ...(
+          [
+            "processStart",
+            "processAttach",
+            "processStdin",
+            "processSignal",
+            "processSleep",
+            "processWake",
+          ] as const
+        ).map((name) => ({
+          name,
+          description: `Durable sandbox ${name} operation`,
+          operation: (name === "processAttach" ? "read" : "write") as
+            | "read"
+            | "write",
+          requiresApproval: name !== "processAttach",
+          inputSchema: { type: "object", additionalProperties: true },
+        })),
       ],
       call: async (name, value) => {
-        if (!isRecord(value)) throw new Error("Sandbox input must be an object");
-        const operationId = stringValue(value.requestId) ??
+        if (!isRecord(value))
+          throw new Error("Sandbox input must be an object");
+        const operationId =
+          stringValue(value.requestId) ??
           `sandbox_${crypto.randomUUID().replaceAll("-", "")}`;
         try {
-        if (name === "exec") {
-          if (typeof value.command !== "string") {
-            throw new Error("Sandbox exec needs a command");
+          if (name === "exec") {
+            if (typeof value.command !== "string") {
+              throw new Error("Sandbox exec needs a command");
+            }
+            const result = await sandbox.exec(value.command, {
+              ...(typeof value.cwd === "string" ? { cwd: value.cwd } : {}),
+              ...(typeof value.timeoutMs === "number"
+                ? { timeout: value.timeoutMs }
+                : {}),
+            });
+            const output = {
+              command: result.command,
+              exitCode: result.exitCode,
+              success: result.success,
+              stdout: result.stdout,
+              stderr: result.stderr,
+              duration: result.duration,
+            };
+            await workspaceBackend?.settle({ operationId, changed: true });
+            return output;
           }
-          const result = await sandbox.exec(value.command, {
-            ...(typeof value.cwd === "string" ? { cwd: value.cwd } : {}),
-            ...(typeof value.timeoutMs === "number" ? { timeout: value.timeoutMs } : {}),
-          });
-          const output = {
-            command: result.command,
-            exitCode: result.exitCode,
-            success: result.success,
-            stdout: result.stdout,
-            stderr: result.stderr,
-            duration: result.duration,
-          };
-          await workspaceBackend?.settle({ operationId, changed: true });
-          return output;
-        }
-        if (!processRuntime) {
-          throw new Error("Durable sandbox processes need Code Mode SQLite");
-        }
-        const processId =
-          stringValue(value.processId) ??
-          `process_${crypto.randomUUID().replaceAll("-", "")}`;
-        const requestId =
-          stringValue(value.requestId) ??
-          `control_${crypto.randomUUID().replaceAll("-", "")}`;
-        if (name === "processStart") {
-          if (typeof value.command !== "string") {
-            throw new Error("processStart needs a command");
+          if (!processRuntime) {
+            throw new Error("Durable sandbox processes need Code Mode SQLite");
           }
-          const output = await processRuntime.start({
-            id: processId,
-            runId: input.context.runId ?? sandboxId,
-            sandboxId,
-            command: value.command,
-            cwd: stringValue(value.cwd) ?? "/workspace",
-            ...(isRecord(value.environment)
-              ? {
-                  environmentHash: await hashSandboxEnvironment(
-                    Object.fromEntries(
-                      Object.entries(value.environment).map(([key, item]) => [
-                        key,
-                        String(item),
-                      ]),
+          const processId =
+            stringValue(value.processId) ??
+            `process_${crypto.randomUUID().replaceAll("-", "")}`;
+          const requestId =
+            stringValue(value.requestId) ??
+            `control_${crypto.randomUUID().replaceAll("-", "")}`;
+          if (name === "processStart") {
+            if (typeof value.command !== "string") {
+              throw new Error("processStart needs a command");
+            }
+            const output = await processRuntime.start({
+              id: processId,
+              runId: input.context.runId ?? sandboxId,
+              sandboxId,
+              command: value.command,
+              cwd: stringValue(value.cwd) ?? "/workspace",
+              ...(isRecord(value.environment)
+                ? {
+                    environmentHash: await hashSandboxEnvironment(
+                      Object.fromEntries(
+                        Object.entries(value.environment).map(([key, item]) => [
+                          key,
+                          String(item),
+                        ]),
+                      ),
                     ),
-                  ),
-                }
-              : {}),
-          });
-          return output;
-        }
-        if (name === "processAttach") {
-          return processRuntime.attach(
-            processId,
-            typeof value.afterCursor === "number" ? value.afterCursor : 0,
-          );
-        }
-        if (name === "processStdin") {
-          if (typeof value.data !== "string") {
-            throw new Error("processStdin needs data");
+                  }
+                : {}),
+            });
+            return output;
           }
-          const output = await processRuntime.stdin({
-            requestId,
-            processId,
-            data: value.data,
-          });
-          await workspaceBackend?.settle({ operationId, changed: true });
-          return output;
-        }
-        if (name === "processSignal") {
-          const output = await processRuntime.signal({
-            requestId,
-            processId,
-            signal: String(value.signal ?? "SIGTERM") as never,
-          });
-          await workspaceBackend?.settle({ operationId, changed: true });
-          return output;
-        }
-        if (name === "processSleep") {
-          const output = await processRuntime.sleep(processId, requestId);
-          await workspaceBackend?.settle({ operationId, changed: true });
-          return output;
-        }
-        if (name === "processWake") {
-          const output = await processRuntime.wake(processId, requestId);
-          await workspaceBackend?.settle({ operationId, changed: true });
-          return output;
-        }
-        throw new Error(`Sandbox tool '${name}' is not available`);
+          if (name === "processAttach") {
+            return processRuntime.attach(
+              processId,
+              typeof value.afterCursor === "number" ? value.afterCursor : 0,
+            );
+          }
+          if (name === "processStdin") {
+            if (typeof value.data !== "string") {
+              throw new Error("processStdin needs data");
+            }
+            const output = await processRuntime.stdin({
+              requestId,
+              processId,
+              data: value.data,
+            });
+            await workspaceBackend?.settle({ operationId, changed: true });
+            return output;
+          }
+          if (name === "processSignal") {
+            const output = await processRuntime.signal({
+              requestId,
+              processId,
+              signal: String(value.signal ?? "SIGTERM") as never,
+            });
+            await workspaceBackend?.settle({ operationId, changed: true });
+            return output;
+          }
+          if (name === "processSleep") {
+            const output = await processRuntime.sleep(processId, requestId);
+            await workspaceBackend?.settle({ operationId, changed: true });
+            return output;
+          }
+          if (name === "processWake") {
+            const output = await processRuntime.wake(processId, requestId);
+            await workspaceBackend?.settle({ operationId, changed: true });
+            return output;
+          }
+          throw new Error(`Sandbox tool '${name}' is not available`);
         } catch (error) {
           await workspaceBackend?.uncertain(operationId).catch(() => undefined);
           throw error;
@@ -3302,7 +3520,9 @@ function defaultSandboxResolver<TBindings>(
 }
 
 function environmentValue(name: string): string | undefined {
-  const processLike = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
+  const processLike = (
+    globalThis as { process?: { env?: Record<string, string | undefined> } }
+  ).process;
   return processLike?.env?.[name];
 }
 
@@ -3311,7 +3531,9 @@ function log(
   message: string,
   attributes?: Record<string, unknown>,
 ): void {
-  const line = attributes ? `${message} ${stringifyToolResult(attributes)}` : message;
+  const line = attributes
+    ? `${message} ${stringifyToolResult(attributes)}`
+    : message;
   if (level === "error") console.error(line);
   else if (level === "warn") console.warn(line);
   else console.info(line);
@@ -3327,16 +3549,16 @@ async function sha256Hex(value: string): Promise<string> {
     .join("");
 }
 
-function executionWaitUntil(context: unknown):
-  | ((work: Promise<unknown>) => void)
-  | undefined {
+function executionWaitUntil(
+  context: unknown,
+): ((work: Promise<unknown>) => void) | undefined {
   try {
-    const execution = (context as {
-      executionCtx?: { waitUntil(work: Promise<unknown>): void };
-    }).executionCtx;
-    return execution
-      ? (work) => execution.waitUntil(work)
-      : undefined;
+    const execution = (
+      context as {
+        executionCtx?: { waitUntil(work: Promise<unknown>): void };
+      }
+    ).executionCtx;
+    return execution ? (work) => execution.waitUntil(work) : undefined;
   } catch {
     return undefined;
   }

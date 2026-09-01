@@ -31,12 +31,12 @@ write only when it changes external state; writes require approval by default.
 Flary keeps the first model request small. A persistent agent can receive this
 model-visible core:
 
-| Tool | When it appears | Purpose |
-| --- | --- | --- |
-| `execute` | The agent has an `app.tools()` registry or workspace | Run bounded TypeScript against the private tool catalog |
-| `request_user_input` | Enabled by default on a durable host | Ask one structured or free-form question, pause, and resume |
-| `request_secret` | Enabled by default when a secret host is configured | Ask through the protected credential UI without exposing the value to the model |
-| Subagent controls | Delegation is enabled | Start, message, wait for, interrupt, and close durable child agents |
+| Tool                 | When it appears                                     | Purpose                                                                         |
+| -------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `execute`            | Persistent agents by default                        | Run bounded TypeScript against the private tool catalog                         |
+| `request_user_input` | Enabled by default on a durable host                | Ask one structured or free-form question, pause, and resume                     |
+| `request_secret`     | Enabled by default when a secret host is configured | Ask through the protected credential UI without exposing the value to the model |
+| Subagent controls    | Delegation is enabled                               | Start, message, wait for, interrupt, and close durable child agents             |
 
 Application, MCP, OpenAPI, workspace, Sandbox, Browser Run, and R2 schemas do
 not all enter the first model request. They stay in Flary's private catalog.
@@ -59,6 +59,52 @@ return tools.call({
 - `tools.call()` runs one selected operation.
 - `tools.batch()` runs independent, approval-free reads concurrently. Writes
   stay sequential so approval and replay order remain deterministic.
+
+## Public web search is built in
+
+Every persistent `app.agent()` receives a lazy `web` source by default. It
+uses [Parallel's free anonymous Search MCP endpoint](https://docs.parallel.ai/integrations/mcp/quickstart)
+and exposes `web_search` and `web_fetch` only after Tool Search selects them.
+The tool schemas do not enter every model request, and Flary makes no network
+call until the agent needs current public information.
+
+```ts
+export const researcher = app.agent({
+  name: "researcher",
+  instructions: "Use current public sources when facts can change.",
+});
+```
+
+Flary derives one non-secret UUID from the durable thread ID and injects it as
+Parallel's `session_id`. Related searches in the same thread use the same
+identifier. A different thread receives a different identifier. Flary does
+not send the tenant ID, user ID, or raw thread ID to Parallel.
+
+Disable web access for one agent or the full application:
+
+```ts
+const app = flary({ web: false });
+
+export const offline = app.agent({
+  name: "offline",
+  web: false,
+});
+```
+
+For higher limits, create a tenant-owned MCP connection in trusted host code
+and select it without placing the key in the model or source:
+
+```ts
+const app = flary({
+  web: { connection: "parallel-search" },
+  resolveMcp: (source, context) => connections.resolve(source, context),
+});
+```
+
+An explicit tool source with the `web` namespace replaces the built-in
+source. This lets a host use a different provider without changing agent
+code. Anonymous access is for light use. Production applications should use
+a tenant-owned Parallel key when they need higher or guaranteed limits.
 
 If the model already knows a stable catalog ID, it can skip search. If it also
 knows the input, it can skip describe. The fastest common path is one
@@ -121,7 +167,8 @@ const customerFiles = app.r2({
 
 export const siteEditor = app.agent({
   name: "site-editor",
-  instructions: "Edit only the customer's site files. Explain changes before writing.",
+  instructions:
+    "Edit only the customer's site files. Explain changes before writing.",
   tools: app.tools({ files: customerFiles }),
 });
 ```
@@ -135,9 +182,7 @@ Add the binding to the Worker's Wrangler configuration:
 
 ```jsonc
 {
-  "r2_buckets": [
-    { "binding": "CUSTOMER_FILES", "bucket_name": "my-app-files" }
-  ]
+  "r2_buckets": [{ "binding": "CUSTOMER_FILES", "bucket_name": "my-app-files" }]
 }
 ```
 

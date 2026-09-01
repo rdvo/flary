@@ -9,6 +9,8 @@ export interface FlaryMcpRuntimeOptions {
   readonly fetch?: typeof fetch;
   readonly credentials?: McpCredentialProvider;
   readonly allowInsecureHttp?: boolean;
+  /** Stable UUID used for MCP tools that accept a `session_id` argument. */
+  readonly sessionId?: string;
 }
 
 /** Build a safe MCP connection for an explicit HTTPS source URL. */
@@ -42,13 +44,40 @@ export function createMcpConnection(
       })),
     client: {
       callTool: async (input) => {
+        const argumentsInput =
+          source.session === "run" && options.sessionId
+            ? { ...(input.arguments ?? {}), session_id: options.sessionId }
+            : input.arguments ?? {};
         const result = await client.call(
           input.name,
-          input.arguments ?? {},
+          argumentsInput,
           options.credentials,
         );
         return { toolResult: result.content, isError: result.isError };
       },
     },
   };
+}
+
+/** Build a stable, non-secret UUID for one Flary run or submitted turn. */
+export async function mcpSessionUuid(seed?: string): Promise<string> {
+  if (!seed) return crypto.randomUUID();
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(seed)),
+  );
+  const bytes = digest.slice(0, 16);
+  // UUID version 8 permits application-defined bytes while keeping the RFC
+  // variant bits. The seed stays private and cannot be recovered from this ID.
+  bytes[6] = (bytes[6]! & 0x0f) | 0x80;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = [...bytes]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20),
+  ].join("-");
 }
