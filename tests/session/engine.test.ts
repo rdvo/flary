@@ -240,7 +240,7 @@ test("all 0.8 and later releases require the Flue 2 parity gate", () => {
   assert.equal(requiresFlue2StableRelease("0.7.1"), false);
   assert.equal(requiresFlue2StableRelease("0.8.0-rc.1"), true);
   assert.equal(requiresFlue2StableRelease("0.8.0"), true);
-  assert.equal(requiresFlue2StableRelease("1.0.0-rc.1"), true);
+  assert.equal(requiresFlue2StableRelease("1.0.0-rc.2"), true);
   assert.equal(requiresFlue2StableRelease("0.10.0"), true);
   assert.equal(requiresFlue2StableRelease("1.0.0"), true);
   assert.throws(() => requiresFlue2StableRelease("latest"), /Invalid/);

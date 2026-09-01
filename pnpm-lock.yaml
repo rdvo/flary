@@ -16,7 +16,7 @@ patchedDependencies:
     hash: suofjhmm7dpl35jzcozjgux4e4
     path: patches/@cloudflare+codemode+0.5.1.patch
   '@earendil-works/pi-ai@0.80.10':
-    hash: g32uezaopl5m3omq2hw2kfs2sy
+    hash: l3r5u55za3ar27gexa6tbzgphu
     path: patches/@earendil-works__pi-ai@0.80.10.patch
   '@flue/runtime@1.0.0-beta.9':
     hash: bc6fayv6l2xoi74jmbwrdfowie
@@ -49,7 +49,7 @@ importers:
         version: 0.4.3(@modelcontextprotocol/sdk@1.30.0)(zod@4.4.3)
       '@earendil-works/pi-ai':
         specifier: 0.80.10
-        version: 0.80.10(patch_hash=g32uezaopl5m3omq2hw2kfs2sy)(@modelcontextprotocol/sdk@1.30.0)(zod@4.4.3)
+        version: 0.80.10(patch_hash=l3r5u55za3ar27gexa6tbzgphu)(@modelcontextprotocol/sdk@1.30.0)(zod@4.4.3)
       '@flue/runtime':
         specifier: 1.0.0-beta.9
         version: 1.0.0-beta.9(patch_hash=bc6fayv6l2xoi74jmbwrdfowie)(@cfworker/json-schema@4.1.1)(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(typescript@5.9.3)(zod@4.4.3)
@@ -1697,7 +1697,7 @@ packages:
     resolution: {integrity: sha512-nwnOR3SuLYGRFfyQm8ri4Nj5VGVAvAM9GuqQd3u7BUQj0d6hmD2F8w7OHAAjThE3CuySIdM+v8E22QJG6/RfCg==}
     engines: {node: '>=22.19.0'}
     dependencies:
-      '@earendil-works/pi-ai': 0.80.10(patch_hash=g32uezaopl5m3omq2hw2kfs2sy)(@modelcontextprotocol/sdk@1.30.0)(zod@4.4.3)
+      '@earendil-works/pi-ai': 0.80.10(patch_hash=l3r5u55za3ar27gexa6tbzgphu)(@modelcontextprotocol/sdk@1.30.0)(zod@4.4.3)
       ignore: 7.0.5
       typebox: 1.1.38
       yaml: 2.9.0
@@ -1726,7 +1726,7 @@ packages:
       - ws
       - zod
 
-  /@earendil-works/pi-ai@0.80.10(patch_hash=g32uezaopl5m3omq2hw2kfs2sy)(@modelcontextprotocol/sdk@1.30.0)(zod@4.4.3):
+  /@earendil-works/pi-ai@0.80.10(patch_hash=l3r5u55za3ar27gexa6tbzgphu)(@modelcontextprotocol/sdk@1.30.0)(zod@4.4.3):
     resolution: {integrity: sha512-Moe/H8c87yacDGK9dPbWphZNjVsrb3nTrIHycOQJAkFEnY9PYxOOd74+ny44kATfPU9Dm7aTHefar3pZF+UKUA==}
     engines: {node: '>=22.19.0'}
     hasBin: true
@@ -2614,7 +2614,7 @@ packages:
     engines: {node: '>=22.19.0'}
     dependencies:
       '@earendil-works/pi-agent-core': 0.80.10(@modelcontextprotocol/sdk@1.30.0)(zod@4.4.3)
-      '@earendil-works/pi-ai': 0.80.10(patch_hash=g32uezaopl5m3omq2hw2kfs2sy)(@modelcontextprotocol/sdk@1.30.0)(zod@4.4.3)
+      '@earendil-works/pi-ai': 0.80.10(patch_hash=l3r5u55za3ar27gexa6tbzgphu)(@modelcontextprotocol/sdk@1.30.0)(zod@4.4.3)
       '@hono/node-server': 2.0.12(hono@4.12.34)
       '@hono/standard-validator': 0.2.3(@standard-schema/spec@1.1.0)(hono@4.12.34)
       '@modelcontextprotocol/sdk': 1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3)
