@@ -170,11 +170,10 @@ export const FLUE_2_0_2_FLARY_CAPABILITIES =
     approvalContinuation: true,
   });
 
-/** Return true when a package version must pass the stable Flue 2 gate. */
+/** Return true when a package version must pass the Flue 2 release gate. */
 export function requiresFlue2StableRelease(version: string): boolean {
   const match = /^(\d+)\.(\d+)\.(\d+)(-.+)?$/.exec(version);
   if (!match) throw new Error(`Invalid release version ${version}`);
-  if (match[4]) return false;
   return Number(match[1]) > 0 || Number(match[2]) >= 8;
 }
 

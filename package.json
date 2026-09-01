@@ -1,6 +1,6 @@
 {
   "name": "flary",
-  "version": "0.8.0-rc.45",
+  "version": "1.0.0-rc.1",
   "description": "Durable, provider-neutral AI agent harness for Cloudflare Workers",
   "main": "dist/index.js",
   "module": "dist/index.js",

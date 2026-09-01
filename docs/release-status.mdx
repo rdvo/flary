@@ -19,6 +19,19 @@ client contracts.
 
 See the repository tags and npm dist-tags for the exact published state.
 
+## 1.0 release path
+
+`1.0.0-rc.1` is the first 1.0 integration candidate. It includes the complete
+Flue 2 session engine, durable approval and user-input continuation, lazy tool
+search and Code Mode, protected secret collection, and default lazy web
+search. Test this exact candidate in production-like application staging
+before `1.0.0` moves to `latest`.
+
+Publishing uses npm trusted publishing from
+`.github/workflows/publish.yml`. The npm package must trust the `rdvo/flary`
+repository and the `publish.yml` workflow. Release jobs do not use a stored
+write token.
+
 ## What the npm tags mean
 
 | Tag | Use |

@@ -15,7 +15,7 @@ if (version !== manifest.version) {
     pathToFileURL(path.join(repository, "dist/harness/session/engine.js")).href
   );
   if (!engine.requiresFlue2StableRelease(version)) {
-    console.log(`Release gate accepts ${version} without the stable 0.8 engine gate.`);
+    console.log(`Release gate accepts ${version} without the Flue 2 engine gate.`);
     return;
   }
   const loaded = await engine.loadPinnedFlue2Runtime();
@@ -27,7 +27,7 @@ if (version !== manifest.version) {
     },
     capabilities: loaded.capabilities,
   });
-  console.log(`Stable ${version} uses a complete Flue ${loaded.version} session engine.`);
+  console.log(`Release ${version} uses a complete Flue ${loaded.version} session engine.`);
 })().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);

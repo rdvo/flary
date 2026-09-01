@@ -19,7 +19,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # A manual dispatch names the exact tag to release. Without this
           # ref, actions/checkout uses the default branch and can publish a
@@ -32,9 +32,9 @@ jobs:
           version: "8.15.4"
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: "22.19.0"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org/"
           cache: pnpm
 
@@ -157,13 +157,24 @@ jobs:
       - name: Publish to npm
         if: steps.package.outputs.publish == 'true'
         run: npm publish --access public --tag "${{ steps.release.outputs.npm_tag }}"
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Set npm distribution tag
-        run: npm dist-tag add "flary@${{ steps.release.outputs.version }}" "${{ steps.release.outputs.npm_tag }}"
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Verify npm distribution tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.release.outputs.version }}"
+          npm_tag="${{ steps.release.outputs.npm_tag }}"
+          for attempt in 1 2 3 4 5; do
+            published=$(npm view "flary@$npm_tag" version 2>/dev/null || true)
+            if [[ "$published" == "$version" ]]; then
+              exit 0
+            fi
+            if [[ "$attempt" != "5" ]]; then
+              sleep 5
+            fi
+          done
+          echo "npm tag $npm_tag points to ${published:-nothing} instead of $version." >&2
+          exit 1
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
