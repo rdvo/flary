@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -371,7 +378,9 @@ test("Wrangler secret JSON is normalized", () => {
 });
 
 test("deploy keeps required secrets that already exist on the Worker", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "flary-cli-remote-secrets-"));
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), "flary-cli-remote-secrets-")
+  );
   const target = path.join(root, "backend");
   const calls: string[] = [];
   const runner: CommandRunner = {
@@ -434,7 +443,10 @@ test("deploy keeps required secrets that already exist on the Worker", async () 
     assert.ok(calls.some((call) => call.includes("secret list")));
     assert.ok(
       calls.some(
-        (call) => call.includes(" deploy") && !call.includes("--dry-run") && !call.includes("--secrets-file")
+        (call) =>
+          call.includes(" deploy") &&
+          !call.includes("--dry-run") &&
+          !call.includes("--secrets-file")
       )
     );
   } finally {
@@ -509,7 +521,7 @@ test("deploy falls back from the keyring flag and persists the selected account"
     );
     assert.equal(state.accountId, "two");
     assert.ok(calls.some((call) => call.includes("login --use-keyring")));
-    assert.ok(calls.some((call) => /login$/.test(call)));
+    assert.ok(calls.some((call) => call.endsWith("login")));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -112,7 +112,9 @@ interface JsonRpcResponse {
 export class McpConnectionClient {
   readonly #endpoint: McpEndpoint;
   readonly #fetch: typeof fetch;
-  readonly #options: Required<Pick<McpClientOptions, "timeoutMs" | "maxRedirects" | "maxResponseBytes">> &
+  readonly #options: Required<
+    Pick<McpClientOptions, "timeoutMs" | "maxRedirects" | "maxResponseBytes">
+  > &
     Pick<McpClientOptions, "allowInsecureHttp">;
   #sessionId: string | undefined;
   #requestId = 0;
@@ -134,11 +136,11 @@ export class McpConnectionClient {
   }
 
   async listTools(
-    credentials?: McpCredentialProvider,
+    credentials?: McpCredentialProvider
   ): Promise<McpToolDescriptor[]> {
     const credential = await resolveCredential(
       credentials,
-      this.#endpoint.connectionId,
+      this.#endpoint.connectionId
     );
     const headers = credential ? credentialHeaders(credential) : undefined;
     await this.initialize(headers);
@@ -177,7 +179,7 @@ export class McpConnectionClient {
   async call(
     toolName: string,
     argumentsInput: Record<string, unknown>,
-    credentials?: McpCredentialProvider,
+    credentials?: McpCredentialProvider
   ): Promise<McpCallResult> {
     const name = McpToolNameSchema.parse(toolName);
     const args = z.record(z.string(), z.unknown()).parse(argumentsInput);
@@ -187,14 +189,14 @@ export class McpConnectionClient {
     }
     const credential = await resolveCredential(
       credentials,
-      this.#endpoint.connectionId,
+      this.#endpoint.connectionId
     );
     const headers = credential ? credentialHeaders(credential) : undefined;
     await this.initialize(headers);
     const response = await this.request(
       "tools/call",
       { name, arguments: args },
-      headers,
+      headers
     );
     return {
       content: response.result,
@@ -204,14 +206,20 @@ export class McpConnectionClient {
 
   private async initialize(extraHeaders?: Headers): Promise<void> {
     if (this.#sessionId) return;
-    const response = await this.request("initialize", {
-      protocolVersion: "2025-03-26",
-      capabilities: {},
-      clientInfo: { name: "flary", version: "0.3.0" },
-    }, extraHeaders);
+    const response = await this.request(
+      "initialize",
+      {
+        protocolVersion: "2025-03-26",
+        capabilities: {},
+        clientInfo: { name: "flary", version: "0.3.0" },
+      },
+      extraHeaders
+    );
     const result = asRecord(response.result);
     if (!result.protocolVersion) {
-      throw new Error("MCP initialize response did not contain protocolVersion");
+      throw new Error(
+        "MCP initialize response did not contain protocolVersion"
+      );
     }
     await this.request("notifications/initialized", {}, extraHeaders, true);
   }
@@ -220,7 +228,7 @@ export class McpConnectionClient {
     method: string,
     params: Record<string, unknown>,
     extraHeaders?: Headers,
-    notification = false,
+    notification = false
   ): Promise<JsonRpcResponse> {
     const body = JSON.stringify({
       jsonrpc: "2.0",
@@ -241,14 +249,17 @@ export class McpConnectionClient {
         body,
         signal: undefined,
       },
-      this.#options,
+      this.#options
     );
     const sessionId = response.headers.get("mcp-session-id");
     if (sessionId) this.#sessionId = sessionId;
     if (notification && (response.status === 202 || response.status === 204)) {
       return {};
     }
-    const text = await readBoundedText(response, this.#options.maxResponseBytes);
+    const text = await readBoundedText(
+      response,
+      this.#options.maxResponseBytes
+    );
     if (!text.trim()) return {};
     const parsed = parseMcpResponse(text, response.headers.get("content-type"));
     if (parsed.error) {
@@ -258,10 +269,11 @@ export class McpConnectionClient {
   }
 }
 
-function safeAnnotations(value: unknown):
-  | { readOnlyHint?: boolean; destructiveHint?: boolean }
-  | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+function safeAnnotations(
+  value: unknown
+): { readOnlyHint?: boolean; destructiveHint?: boolean } | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
   const record = value as Record<string, unknown>;
   const annotations = {
     ...(typeof record.readOnlyHint === "boolean"
@@ -285,13 +297,15 @@ export class McpToolCache {
     options: {
       namespace?: string;
       credentials?: McpCredentialProvider;
-    } = {},
+    } = {}
   ): Promise<readonly McpToolDescriptor[]> {
     const parsed = McpEndpointSchema.parse(endpoint);
     const key = cacheKey(parsed, options.namespace);
     const cached = this.#tools.get(key);
-    if (cached?.[0] && Date.parse(cached[0].expiresAt) > Date.now()) return cached;
-    const client = this.#clients.get(key) ?? new McpConnectionClient(parsed, this.options);
+    if (cached?.[0] && Date.parse(cached[0].expiresAt) > Date.now())
+      return cached;
+    const client =
+      this.#clients.get(key) ?? new McpConnectionClient(parsed, this.options);
     this.#clients.set(key, client);
     const tools = await client.listTools(options.credentials);
     this.#tools.set(key, tools);
@@ -301,7 +315,8 @@ export class McpToolCache {
   client(endpoint: McpEndpoint, namespace?: string): McpConnectionClient {
     const parsed = McpEndpointSchema.parse(endpoint);
     const key = cacheKey(parsed, namespace);
-    const client = this.#clients.get(key) ?? new McpConnectionClient(parsed, this.options);
+    const client =
+      this.#clients.get(key) ?? new McpConnectionClient(parsed, this.options);
     this.#clients.set(key, client);
     return client;
   }
@@ -323,23 +338,40 @@ export class McpToolCache {
 
 export function assertSafeMcpUrl(
   value: string | URL,
-  options: Pick<McpClientOptions, "allowInsecureHttp"> = {},
+  options: Pick<McpClientOptions, "allowInsecureHttp"> = {}
 ): URL {
   const url = new URL(value.toString());
   const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (url.username || url.password) throw new McpSecurityError("MCP URLs cannot contain user information");
-  if (url.protocol !== "https:" && !(options.allowInsecureHttp && url.protocol === "http:")) {
+  if (url.username || url.password)
+    throw new McpSecurityError("MCP URLs cannot contain user information");
+  if (
+    url.protocol !== "https:" &&
+    !(options.allowInsecureHttp && url.protocol === "http:")
+  ) {
     throw new McpSecurityError("Remote MCP endpoints must use HTTPS");
   }
   if (isPrivateHostname(hostname)) {
-    throw new McpSecurityError("Remote MCP endpoints cannot target private or local networks");
+    throw new McpSecurityError(
+      "Remote MCP endpoints cannot target private or local networks"
+    );
   }
   return url;
 }
 
 function isPrivateHostname(hostname: string): boolean {
-  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname === "0.0.0.0" || hostname === "::1") return true;
-  if (/^127\./.test(hostname) || /^10\./.test(hostname) || /^192\.168\./.test(hostname)) return true;
+  if (
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname === "0.0.0.0" ||
+    hostname === "::1"
+  )
+    return true;
+  if (
+    hostname.startsWith("127.") ||
+    hostname.startsWith("10.") ||
+    hostname.startsWith("192.168.")
+  )
+    return true;
   const match = hostname.match(/^172\.(\d{1,3})\./);
   if (match && Number(match[1]) >= 16 && Number(match[1]) <= 31) return true;
   if (/^(169\.254\.|100\.64\.)/.test(hostname)) return true;
@@ -360,7 +392,7 @@ function credentialHeaders(credential: McpCredential): Headers {
 
 async function resolveCredential(
   provider: McpCredentialProvider | undefined,
-  connectionId: string,
+  connectionId: string
 ): Promise<McpCredential | undefined> {
   if (!provider) return undefined;
   try {
@@ -379,23 +411,32 @@ async function fetchWithSafeRedirects(
   fetcher: typeof fetch,
   initialUrl: string,
   init: RequestInit,
-  options: Required<Pick<McpClientOptions, "timeoutMs" | "maxRedirects">> & Pick<McpClientOptions, "allowInsecureHttp">,
+  options: Required<Pick<McpClientOptions, "timeoutMs" | "maxRedirects">> &
+    Pick<McpClientOptions, "allowInsecureHttp">
 ): Promise<Response> {
   let url = assertSafeMcpUrl(initialUrl, options);
   for (let redirect = 0; redirect <= options.maxRedirects; redirect += 1) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), options.timeoutMs);
     try {
-      const response = await fetcher(url, { ...init, redirect: "manual", signal: controller.signal });
+      const response = await fetcher(url, {
+        ...init,
+        redirect: "manual",
+        signal: controller.signal,
+      });
       if (response.status < 300 || response.status >= 400) {
-        if (!response.ok) throw new Error(`MCP endpoint returned HTTP ${response.status}`);
+        if (!response.ok)
+          throw new Error(`MCP endpoint returned HTTP ${response.status}`);
         return response;
       }
       const location = response.headers.get("location");
-      if (!location) throw new McpSecurityError("MCP redirect did not contain a location");
+      if (!location)
+        throw new McpSecurityError("MCP redirect did not contain a location");
       const next = assertSafeMcpUrl(new URL(location, url), options);
       if (next.origin !== url.origin) {
-        throw new McpSecurityError("MCP redirects must stay on the same HTTPS origin");
+        throw new McpSecurityError(
+          "MCP redirects must stay on the same HTTPS origin"
+        );
       }
       url = next;
     } finally {
@@ -405,15 +446,23 @@ async function fetchWithSafeRedirects(
   throw new McpSecurityError("MCP endpoint exceeded the redirect limit");
 }
 
-async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
+async function readBoundedText(
+  response: Response,
+  maxBytes: number
+): Promise<string> {
   const length = response.headers.get("content-length");
-  if (length && Number(length) > maxBytes) throw new McpSecurityError("MCP response exceeds the size limit");
+  if (length && Number(length) > maxBytes)
+    throw new McpSecurityError("MCP response exceeds the size limit");
   const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.byteLength > maxBytes) throw new McpSecurityError("MCP response exceeds the size limit");
+  if (bytes.byteLength > maxBytes)
+    throw new McpSecurityError("MCP response exceeds the size limit");
   return new TextDecoder().decode(bytes);
 }
 
-function parseMcpResponse(text: string, contentType: string | null): JsonRpcResponse {
+function parseMcpResponse(
+  text: string,
+  contentType: string | null
+): JsonRpcResponse {
   if (contentType?.includes("text/event-stream")) {
     const data = text
       .split(/\r?\n/)
@@ -431,7 +480,9 @@ function asJsonRpcResponse(value: unknown): JsonRpcResponse {
   const record = asRecord(value);
   return {
     ...(record.result !== undefined ? { result: record.result } : {}),
-    ...(record.error !== undefined ? { error: asRecord(record.error) as JsonRpcResponse["error"] } : {}),
+    ...(record.error !== undefined
+      ? { error: asRecord(record.error) as JsonRpcResponse["error"] }
+      : {}),
   };
 }
 

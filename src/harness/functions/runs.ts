@@ -4,10 +4,7 @@ import {
   type RunEvent,
   type RunResult,
 } from "../contracts/index.js";
-import type {
-  FlaryRunService,
-  TrustedRunContext,
-} from "../host/runs.js";
+import type { FlaryRunService, TrustedRunContext } from "../host/runs.js";
 import type {
   FlaryEvent,
   FlaryRun,
@@ -68,7 +65,7 @@ export class DurableObjectFlaryFunctionRunStore implements FlaryRunStore {
 
   constructor(
     private readonly storage: FlaryRunStorage,
-    private readonly prefix = "flary:run",
+    private readonly prefix = "flary:run"
   ) {}
 
   async create<T>(input: {
@@ -117,7 +114,10 @@ export class DurableObjectFlaryFunctionRunStore implements FlaryRunStore {
             runId: run.runId,
             status: run.status,
             events,
-            error: { message: cause instanceof Error ? cause.message : "The run failed" },
+            error: {
+              message:
+                cause instanceof Error ? cause.message : "The run failed",
+            },
           } satisfies StoredRunSnapshot);
         }
       }
@@ -129,7 +129,11 @@ export class DurableObjectFlaryFunctionRunStore implements FlaryRunStore {
 
   private async read(runId: string): Promise<StoredRunSnapshot | undefined> {
     const value = await this.storage.get<unknown>(this.key(runId));
-    if (!isRecord(value) || typeof value.runId !== "string" || !Array.isArray(value.events)) {
+    if (
+      !isRecord(value) ||
+      typeof value.runId !== "string" ||
+      !Array.isArray(value.events)
+    ) {
       return undefined;
     }
     return value as unknown as StoredRunSnapshot;
@@ -156,7 +160,7 @@ export interface FlueBackedFlaryRunOptions<Output> {
  * input continuation. This adapter does not execute function code.
  */
 export function createFlueBackedFlaryRun<Output>(
-  options: FlueBackedFlaryRunOptions<Output>,
+  options: FlueBackedFlaryRunOptions<Output>
 ): FlaryRun<Output> {
   let status = mapRunStatus(options.initialStatus ?? "queued");
   const pollMs = options.pollMs ?? 100;
@@ -179,7 +183,9 @@ export function createFlueBackedFlaryRun<Output>(
           return options.parseOutput(value.output);
         }
         if (value.status === "failed") {
-          const error = new Error(value.error?.message ?? "The Flary run failed");
+          const error = new Error(
+            value.error?.message ?? "The Flary run failed"
+          );
           if (value.error?.code) {
             Object.defineProperty(error, "code", { value: value.error.code });
           }
@@ -198,7 +204,7 @@ export function createFlueBackedFlaryRun<Output>(
         {
           afterSequence: 0,
           signal: streamOptions.signal ?? new AbortController().signal,
-        },
+        }
       )) {
         const mapped = mapServiceEvent(event, options.parseOutput);
         if (mapped) {
@@ -218,7 +224,7 @@ export function createFlueBackedFlaryRun<Output>(
         {
           idempotencyKey: `cancel_${crypto.randomUUID()}`,
           ...(reason ? { reason } : {}),
-        },
+        }
       );
       status = mapRunStatus(value.status);
     },
@@ -248,7 +254,7 @@ export function createFlueBackedFlaryRun<Output>(
         options.trusted,
         options.runId,
         requestId,
-        UserInputAnswerRequestSchema.parse(inputValue),
+        UserInputAnswerRequestSchema.parse(inputValue)
       );
       status = mapRunStatus(value.status);
     },
@@ -263,7 +269,7 @@ export function createFlueBackedFlaryRun<Output>(
           ...(inputOptions.metadata
             ? { metadata: jsonObject(inputOptions.metadata) }
             : {}),
-        },
+        }
       );
       status = mapRunStatus(value.status);
     },
@@ -275,7 +281,7 @@ export function createFlueBackedFlaryRun<Output>(
     decisionOptions: {
       readonly comment?: string;
       readonly metadata?: Record<string, unknown>;
-    },
+    }
   ): Promise<void> {
     if (!options.service.decideApproval) {
       throw continuationUnavailable("Approval");
@@ -294,7 +300,7 @@ export function createFlueBackedFlaryRun<Output>(
         ...(decisionOptions.metadata
           ? { metadata: decisionOptions.metadata }
           : {}),
-      }),
+      })
     );
     status = mapRunStatus(value.status);
   }
@@ -315,7 +321,7 @@ class LocalRun<T> {
 
   constructor(
     readonly runId: string,
-    private readonly execute: (signal: AbortSignal) => Promise<T>,
+    private readonly execute: (signal: AbortSignal) => Promise<T>
   ) {
     this.#result = new Promise<T>((resolve, reject) => {
       this.#resolveResult = resolve;
@@ -332,8 +338,14 @@ class LocalRun<T> {
         if (this.#done) return;
         if (this.#abort.signal.aborted) {
           this.#status = "cancelled";
-          this.#rejectResult(this.#abort.signal.reason ?? new Error("The run was cancelled"));
-          this.emit({ type: "cancelled", runId: this.runId, occurredAt: now() });
+          this.#rejectResult(
+            this.#abort.signal.reason ?? new Error("The run was cancelled")
+          );
+          this.emit({
+            type: "cancelled",
+            runId: this.runId,
+            occurredAt: now(),
+          });
           this.finish();
           return;
         }
@@ -352,26 +364,36 @@ class LocalRun<T> {
         if (this.#abort.signal.aborted) {
           this.#status = "cancelled";
           this.#rejectResult(cause);
-          this.emit({ type: "cancelled", runId: this.runId, occurredAt: now() });
+          this.emit({
+            type: "cancelled",
+            runId: this.runId,
+            occurredAt: now(),
+          });
         } else {
           this.#status = "failed";
           const error = errorInfo(cause);
           this.#rejectResult(cause);
-          this.emit({ type: "failed", runId: this.runId, error, occurredAt: now() });
+          this.emit({
+            type: "failed",
+            runId: this.runId,
+            error,
+            occurredAt: now(),
+          });
         }
         this.finish();
-      },
+      }
     );
   }
 
   publicRun(): FlaryRun<T> {
-    const thisRun = this;
+    const runId = this.runId;
+    const status = () => this.#status;
     return {
       get runId() {
-        return thisRun.runId;
+        return runId;
       },
       get status() {
-        return thisRun.#status;
+        return status();
       },
       result: () => this.#result,
       stream: (options = {}) => this.stream(options.signal),
@@ -401,25 +423,31 @@ class LocalRun<T> {
     while (true) {
       while (index < this.#events.length) yield this.#events[index++]!;
       if (this.#done) return;
-      const next = await new Promise<IteratorResult<Event<T>>>((resolve, reject) => {
-        const waiter = { resolve, reject };
-        this.#waiters.add(waiter);
-        if (signal) {
-          if (signal.aborted) {
-            this.#waiters.delete(waiter);
-            reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
-          } else {
-            signal.addEventListener(
-              "abort",
-              () => {
-                this.#waiters.delete(waiter);
-                reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
-              },
-              { once: true },
-            );
+      const next = await new Promise<IteratorResult<Event<T>>>(
+        (resolve, reject) => {
+          const waiter = { resolve, reject };
+          this.#waiters.add(waiter);
+          if (signal) {
+            if (signal.aborted) {
+              this.#waiters.delete(waiter);
+              reject(
+                signal.reason ?? new DOMException("Aborted", "AbortError")
+              );
+            } else {
+              signal.addEventListener(
+                "abort",
+                () => {
+                  this.#waiters.delete(waiter);
+                  reject(
+                    signal.reason ?? new DOMException("Aborted", "AbortError")
+                  );
+                },
+                { once: true }
+              );
+            }
           }
         }
-      });
+      );
       if (next.done) return;
       if (next.value) yield next.value;
       index += 1;
@@ -428,13 +456,15 @@ class LocalRun<T> {
 
   private emit(event: Event<T>): void {
     this.#events.push(event);
-    for (const waiter of this.#waiters) waiter.resolve({ value: event, done: false });
+    for (const waiter of this.#waiters)
+      waiter.resolve({ value: event, done: false });
     this.#waiters.clear();
   }
 
   private finish(): void {
     this.#done = true;
-    for (const waiter of this.#waiters) waiter.resolve({ value: undefined, done: true });
+    for (const waiter of this.#waiters)
+      waiter.resolve({ value: undefined, done: true });
     this.#waiters.clear();
   }
 }
@@ -443,9 +473,12 @@ function restoredRun<T>(snapshot: StoredRunSnapshot): FlaryRun<T> {
   return {
     runId: snapshot.runId,
     status: snapshot.status,
-    result: () => snapshot.status === "completed"
-      ? Promise.resolve(snapshot.output as T)
-      : Promise.reject(new Error(snapshot.error?.message ?? "The run is not complete")),
+    result: () =>
+      snapshot.status === "completed"
+        ? Promise.resolve(snapshot.output as T)
+        : Promise.reject(
+            new Error(snapshot.error?.message ?? "The run is not complete")
+          ),
     stream: async function* () {
       for (const event of snapshot.events) yield event as Event<T>;
     },
@@ -468,7 +501,9 @@ function restoredRun<T>(snapshot: StoredRunSnapshot): FlaryRun<T> {
 }
 
 function isTerminal(status: FlaryRun<unknown>["status"]): boolean {
-  return status === "completed" || status === "failed" || status === "cancelled";
+  return (
+    status === "completed" || status === "failed" || status === "cancelled"
+  );
 }
 
 function now(): string {
@@ -477,9 +512,10 @@ function now(): string {
 
 function errorInfo(cause: unknown): { code: string; message: string } {
   return {
-    code: cause instanceof Error && "code" in cause
-      ? String((cause as { code: unknown }).code)
-      : "flary_function_failed",
+    code:
+      cause instanceof Error && "code" in cause
+        ? String((cause as { code: unknown }).code)
+        : "flary_function_failed",
     message: cause instanceof Error ? cause.message : "The function failed",
   };
 }
@@ -499,15 +535,23 @@ export function runId(prefix = "run"): string {
 export class DurableObjectFlaryStepStore implements FlaryStepStore {
   constructor(
     private readonly storage: FlaryStepStorage,
-    private readonly prefix = "flary:step",
+    private readonly prefix = "flary:step"
   ) {}
 
   async get(input: {
     readonly runId: string;
     readonly name: string;
-  }): Promise<{ readonly inputHash: string; readonly value: unknown } | undefined> {
-    const value = await this.storage.get<unknown>(this.key(input.runId, input.name));
-    if (!isRecord(value) || typeof value.inputHash !== "string" || !("value" in value)) {
+  }): Promise<
+    { readonly inputHash: string; readonly value: unknown } | undefined
+  > {
+    const value = await this.storage.get<unknown>(
+      this.key(input.runId, input.name)
+    );
+    if (
+      !isRecord(value) ||
+      typeof value.inputHash !== "string" ||
+      !("value" in value)
+    ) {
       return undefined;
     }
     return { inputHash: value.inputHash, value: value.value };
@@ -525,7 +569,9 @@ export class DurableObjectFlaryStepStore implements FlaryStepStore {
     try {
       value = JSON.parse(JSON.stringify(input.value)) as unknown;
     } catch {
-      throw new Error(`Step '${input.name}' returned a non-serializable value.`);
+      throw new Error(
+        `Step '${input.name}' returned a non-serializable value.`
+      );
     }
     await this.storage.put(this.key(input.runId, input.name), {
       inputHash: input.inputHash,
@@ -534,7 +580,9 @@ export class DurableObjectFlaryStepStore implements FlaryStepStore {
   }
 
   private key(runId: string, name: string): string {
-    return `${this.prefix}:${encodeURIComponent(runId)}:${encodeURIComponent(name)}`;
+    return `${this.prefix}:${encodeURIComponent(runId)}:${encodeURIComponent(
+      name
+    )}`;
   }
 }
 
@@ -549,7 +597,7 @@ interface FlaryStepSqlStorage {
 export class SqliteFlaryStepStore implements FlaryStepStore {
   constructor(
     private readonly sql: FlaryStepSqlStorage,
-    private readonly prefix = "flary:step",
+    private readonly prefix = "flary:step"
   ) {
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS flary_function_steps (
@@ -566,13 +614,17 @@ export class SqliteFlaryStepStore implements FlaryStepStore {
   async get(input: {
     readonly runId: string;
     readonly name: string;
-  }): Promise<{ readonly inputHash: string; readonly value: unknown } | undefined> {
-    const row = this.sql.exec<{ input_hash: string; value_json: string }>(
-      `SELECT input_hash, value_json FROM flary_function_steps
+  }): Promise<
+    { readonly inputHash: string; readonly value: unknown } | undefined
+  > {
+    const row = this.sql
+      .exec<{ input_hash: string; value_json: string }>(
+        `SELECT input_hash, value_json FROM flary_function_steps
        WHERE run_id = ? AND step_name = ? LIMIT 1`,
-      input.runId,
-      this.key(input.name),
-    ).toArray()[0];
+        input.runId,
+        this.key(input.name)
+      )
+      .toArray()[0];
     if (!row) return undefined;
     return {
       inputHash: row.input_hash,
@@ -590,7 +642,9 @@ export class SqliteFlaryStepStore implements FlaryStepStore {
     try {
       valueJson = JSON.stringify(input.value);
     } catch {
-      throw new Error(`Step '${input.name}' returned a non-serializable value.`);
+      throw new Error(
+        `Step '${input.name}' returned a non-serializable value.`
+      );
     }
     if (valueJson === undefined) {
       throw new Error(`Step '${input.name}' returned an undefined value.`);
@@ -607,7 +661,7 @@ export class SqliteFlaryStepStore implements FlaryStepStore {
       this.key(input.name),
       input.inputHash,
       valueJson,
-      new Date().toISOString(),
+      new Date().toISOString()
     );
   }
 
@@ -624,18 +678,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function localContinuationError(): Error {
   return new Error(
-    "Approval and input continuation require the Flue-backed run service.",
+    "Approval and input continuation require the Flue-backed run service."
   );
 }
 
 function continuationUnavailable(feature: string): Error {
   return new Error(
-    `${feature} continuation is not configured on the Flue run service.`,
+    `${feature} continuation is not configured on the Flue run service.`
   );
 }
 
 function mapRunStatus(
-  status: RunResult["status"],
+  status: RunResult["status"]
 ): FlaryRun<unknown>["status"] {
   if (status === "waiting") return "paused";
   return status;
@@ -643,7 +697,7 @@ function mapRunStatus(
 
 function mapServiceEvent<Output>(
   event: RunEvent,
-  parseOutput: (value: unknown) => Output,
+  parseOutput: (value: unknown) => Output
 ): FlaryEvent<Output> | undefined {
   switch (event.type) {
     case "run.queued":

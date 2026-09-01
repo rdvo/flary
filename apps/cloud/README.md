@@ -38,14 +38,14 @@ Only `/app/*` uses a single-page fallback. Other missing pages return a real
 
 The source layout is:
 
-- `src/pages/` — Astro website routes.
-- `src/components/` — React islands and the app shell.
-- `worker/site.ts` — small Hono website Worker.
-- `worker/` — Flary runtime API, Better Auth, Durable Objects, and integrations.
-- `migrations/` — additive D1 migrations.
-- `wrangler.site.jsonc` — website Worker configuration.
-- `wrangler.jsonc` — runtime Worker configuration.
-- `worker-configuration.d.ts` — generated Cloudflare binding types. Run
+- `src/pages/`: Astro website routes.
+- `src/components/`: React islands and the app shell.
+- `worker/site.ts`: small Hono website Worker.
+- `worker/`: Flary runtime API, Better Auth, Durable Objects, and integrations.
+- `migrations/`: additive D1 migrations.
+- `wrangler.site.jsonc`: website Worker configuration.
+- `wrangler.jsonc`: runtime Worker configuration.
+- `worker-configuration.d.ts`: generated Cloudflare binding types. Run
   `pnpm types` after changing Wrangler bindings.
 
 ## Local setup

@@ -10,7 +10,6 @@ import type {
 } from "../functions/types.js";
 import type {
   ThreadBinding,
-  ThreadCreateRequest,
   ThreadDeletion,
   ThreadForkRequest,
   ThreadHistoryDiffResponse,
@@ -53,16 +52,18 @@ export interface FlaryRemoteRun<Output> {
   readonly runId: string;
   readonly status: FlaryRun["status"];
   result(): Promise<Output>;
-  stream(options?: { readonly signal?: AbortSignal }): AsyncIterable<FlaryEvent<Output>>;
+  stream(options?: {
+    readonly signal?: AbortSignal;
+  }): AsyncIterable<FlaryEvent<Output>>;
   cancel(): Promise<void>;
   approvals(): Promise<readonly ApprovalRequest[]>;
   approve(
     approvalId: string,
-    options?: FlaryApprovalDecisionOptions,
+    options?: FlaryApprovalDecisionOptions
   ): Promise<void>;
   reject(
     approvalId: string,
-    options?: FlaryApprovalDecisionOptions,
+    options?: FlaryApprovalDecisionOptions
   ): Promise<void>;
   userInput(): Promise<readonly UserInputRecord[]>;
   respond(requestId: string, input: UserInputAnswerRequest): Promise<void>;
@@ -96,7 +97,10 @@ type FunctionClient<F> = F extends FlaryFunction<infer Input, infer Output, any>
   ? ((input: FlaryInput<Input>) => Promise<FlaryOutput<Output>>) & {
       start(
         input: FlaryInput<Input>,
-        options?: { readonly requestId?: string; readonly idempotencyKey?: string },
+        options?: {
+          readonly requestId?: string;
+          readonly idempotencyKey?: string;
+        }
       ): Promise<FlaryRemoteRun<FlaryOutput<Output>>>;
       stream(
         input: FlaryInput<Input>,
@@ -104,7 +108,7 @@ type FunctionClient<F> = F extends FlaryFunction<infer Input, infer Output, any>
           readonly requestId?: string;
           readonly idempotencyKey?: string;
           readonly signal?: AbortSignal;
-        },
+        }
       ): AsyncIterable<FlaryEvent<FlaryOutput<Output>>>;
     }
   : never;
@@ -113,16 +117,28 @@ export interface FlaryAgentThreadHandle {
   readonly ref: ThreadRef;
   readonly binding: ThreadBinding;
   history(options?: Record<string, unknown>): unknown;
-  turns(options?: { after?: number; limit?: number; types?: readonly string[] }): Promise<readonly unknown[]>;
+  turns(options?: {
+    after?: number;
+    limit?: number;
+    types?: readonly string[];
+  }): Promise<readonly unknown[]>;
   stream(options?: { after?: string; signal?: AbortSignal }): unknown;
-  connect(options?: { after?: number; includeChildren?: boolean }): Promise<FlaryRealtimeConnection>;
+  connect(options?: {
+    after?: number;
+    includeChildren?: boolean;
+  }): Promise<FlaryRealtimeConnection>;
   send(input: {
     message: string;
     mode?: "queue" | "steer";
     model?: ModelInput;
     thinkingLevel?: ReasoningEffort;
     cacheRetention?: "none" | "short" | "long";
-    images?: readonly { type: "image"; data: string; mimeType: string; filename?: string }[];
+    images?: readonly {
+      type: "image";
+      data: string;
+      mimeType: string;
+      filename?: string;
+    }[];
     idempotencyKey?: string;
   }): Promise<unknown>;
   edit(input: {
@@ -138,9 +154,10 @@ export interface FlaryAgentThreadHandle {
   cancel(): Promise<unknown>;
   fork(input?: ThreadForkRequest): Promise<FlaryAgentThreadHandle>;
   rollback(input: { turnId: string; reason?: string }): Promise<unknown>;
-  restore(input:
-    | { jsonl: string; replace?: boolean }
-    | { archive: ThreadPortableArchive; replace?: boolean }
+  restore(
+    input:
+      | { jsonl: string; replace?: boolean }
+      | { archive: ThreadPortableArchive; replace?: boolean }
   ): Promise<unknown>;
   export(): ReturnType<FlaryThreadClient["exportSession"]>;
   compact(input?: { reason?: string }): Promise<unknown>;
@@ -157,11 +174,11 @@ export interface FlaryAgentThreadHandle {
   sendInput(
     requestId: string,
     answers: Readonly<Record<string, string>>,
-    options?: { response?: string; canceled?: boolean },
+    options?: { response?: string; canceled?: boolean }
   ): Promise<unknown>;
   fulfillSecret(
     requestId: string,
-    input: { value: string; description?: string; expiresAt?: string },
+    input: { value: string; description?: string; expiresAt?: string }
   ): Promise<{
     secret: ConnectionSecretMetadata;
     result: SecretRequestResult;
@@ -200,31 +217,68 @@ export interface FlaryAgentThreadHandle {
       afterSequence?: number;
       timeoutMs?: number;
     }): Promise<FlarySubagentWaitResult>;
-    interrupt(input: { threadId: string; reason?: string }): Promise<FlarySubagentControlResult>;
+    interrupt(input: {
+      threadId: string;
+      reason?: string;
+    }): Promise<FlarySubagentControlResult>;
     resume(input: { threadId: string }): Promise<FlarySubagentControlResult>;
-    close(input: { threadId: string; reason?: string }): Promise<FlarySubagentControlResult>;
+    close(input: {
+      threadId: string;
+      reason?: string;
+    }): Promise<FlarySubagentControlResult>;
   };
   readonly audit: {
-    list(options?: { after?: number; limit?: number; types?: readonly string[] }): Promise<readonly unknown[]>;
+    list(options?: {
+      after?: number;
+      limit?: number;
+      types?: readonly string[];
+    }): Promise<readonly unknown[]>;
     export(): Promise<string>;
   };
   readonly checkpoints: {
     list(options?: { limit?: number }): Promise<ThreadHistoryListResponse>;
-    diff(input: { baseCommitId?: string; headCommitId: string }): Promise<ThreadHistoryDiffResponse>;
+    diff(input: {
+      baseCommitId?: string;
+      headCommitId: string;
+    }): Promise<ThreadHistoryDiffResponse>;
     restore(commitId: string): Promise<unknown>;
   };
   readonly processes: {
     list(): Promise<readonly unknown[]>;
-    start(input: { command: string; cwd?: string; processId?: string; requestId?: string }): Promise<unknown>;
-    attach(input: { processId: string; afterCursor?: number }): Promise<unknown>;
-    stdin(input: { processId: string; data: string; requestId?: string }): Promise<unknown>;
-    signal(input: { processId: string; signal: string; requestId?: string }): Promise<unknown>;
-    resize(input: { processId: string; cols: number; rows: number; requestId?: string }): Promise<unknown>;
+    start(input: {
+      command: string;
+      cwd?: string;
+      processId?: string;
+      requestId?: string;
+    }): Promise<unknown>;
+    attach(input: {
+      processId: string;
+      afterCursor?: number;
+    }): Promise<unknown>;
+    stdin(input: {
+      processId: string;
+      data: string;
+      requestId?: string;
+    }): Promise<unknown>;
+    signal(input: {
+      processId: string;
+      signal: string;
+      requestId?: string;
+    }): Promise<unknown>;
+    resize(input: {
+      processId: string;
+      cols: number;
+      rows: number;
+      requestId?: string;
+    }): Promise<unknown>;
     sleep(input: { processId: string; requestId?: string }): Promise<unknown>;
     wake(input: { processId: string; requestId?: string }): Promise<unknown>;
   };
   readonly terminal: {
-    connect(input?: { cols?: number; rows?: number }): Promise<FlaryTerminalTicket>;
+    connect(input?: {
+      cols?: number;
+      rows?: number;
+    }): Promise<FlaryTerminalTicket>;
   };
   readonly browser: {
     status(): Promise<unknown>;
@@ -247,10 +301,12 @@ type AgentClient<A> = A extends FlaryAgent<any>
   ? {
       readonly threads: {
         create(
-          input: Omit<FlaryThreadClientCreateOptions, "agentId">,
+          input: Omit<FlaryThreadClientCreateOptions, "agentId">
         ): Promise<FlaryAgentThreadHandle>;
         list(): Promise<ThreadBinding[]>;
-        open(ref: Omit<ThreadRef, "appId" | "agentId">): Promise<FlaryAgentThreadHandle>;
+        open(
+          ref: Omit<ThreadRef, "appId" | "agentId">
+        ): Promise<FlaryAgentThreadHandle>;
       };
     }
   : never;
@@ -258,7 +314,7 @@ type AgentClient<A> = A extends FlaryAgent<any>
 type RuntimeFunction = ((input: unknown) => Promise<unknown>) & {
   start(
     input: unknown,
-    options?: { readonly requestId?: string; readonly idempotencyKey?: string },
+    options?: { readonly requestId?: string; readonly idempotencyKey?: string }
   ): Promise<FlaryRemoteRun<unknown>>;
   stream(
     input: unknown,
@@ -266,7 +322,7 @@ type RuntimeFunction = ((input: unknown) => Promise<unknown>) & {
       readonly requestId?: string;
       readonly idempotencyKey?: string;
       readonly signal?: AbortSignal;
-    },
+    }
   ): AsyncIterable<FlaryEvent<unknown>>;
 };
 
@@ -278,7 +334,7 @@ export type FlaryClientFunctions<TFunctions extends Record<string, unknown>> = {
 
 /** Typed client for functions served by `app.serve()`. */
 export function flary<TFunctions extends Record<string, unknown>>(
-  options: FlaryFunctionClientOptions,
+  options: FlaryFunctionClientOptions
 ): FlaryClientFunctions<TFunctions> {
   const baseUrl = options.baseUrl.replace(/\/+$/, "");
   const request = options.fetch ?? globalThis.fetch;
@@ -287,7 +343,9 @@ export function flary<TFunctions extends Record<string, unknown>>(
     apiPath: "",
     mountPath: "/flue",
     fetch: options.fetch,
-    ...(options.webSocketFactory ? { webSocketFactory: options.webSocketFactory } : {}),
+    ...(options.webSocketFactory
+      ? { webSocketFactory: options.webSocketFactory }
+      : {}),
     ...(options.headers
       ? {
           headers: async () => {
@@ -303,11 +361,16 @@ export function flary<TFunctions extends Record<string, unknown>>(
   });
   const make = (name: string) => {
     const call = (async (input: unknown) => {
-      const response = await requestJson(request, `${baseUrl}/functions/${encodeURIComponent(name)}`, {
-        method: "POST",
-        headers: { "x-request-id": crypto.randomUUID() },
-        body: JSON.stringify(input),
-      }, options);
+      const response = await requestJson(
+        request,
+        `${baseUrl}/functions/${encodeURIComponent(name)}`,
+        {
+          method: "POST",
+          headers: { "x-request-id": crypto.randomUUID() },
+          body: JSON.stringify(input),
+        },
+        options
+      );
       return response.output;
     }) as RuntimeFunction;
     call.start = async (input: unknown, runOptions = {}) => {
@@ -324,7 +387,7 @@ export function flary<TFunctions extends Record<string, unknown>>(
           },
           body: JSON.stringify(input),
         },
-        options,
+        options
       );
       return remoteRun<unknown>(
         request,
@@ -332,13 +395,14 @@ export function flary<TFunctions extends Record<string, unknown>>(
         name,
         response.runId,
         response.status,
-        options,
+        options
       );
     };
-    call.stream = (input: unknown, runOptions = {}) => (async function* () {
-      const run = await call.start(input, runOptions);
-      yield* run.stream({ signal: runOptions.signal });
-    })();
+    call.stream = (input: unknown, runOptions = {}) =>
+      (async function* () {
+        const run = await call.start(input, runOptions);
+        yield* run.stream({ signal: runOptions.signal });
+      })();
     return call;
   };
 
@@ -353,7 +417,7 @@ export function flary<TFunctions extends Record<string, unknown>>(
         callable.threads = makeAgentThreads(threadClient, property);
         return callable;
       },
-    },
+    }
   ) as FlaryClientFunctions<TFunctions>;
 }
 
@@ -362,7 +426,7 @@ export const createFlaryFunctionClient = flary;
 function makeAgentThreads(client: FlaryThreadClient, agentName: string) {
   return {
     async create(
-      input: Omit<FlaryThreadClientCreateOptions, "agentId">,
+      input: Omit<FlaryThreadClientCreateOptions, "agentId">
     ): Promise<FlaryAgentThreadHandle> {
       const binding = await client.create({ ...input, agentId: agentName });
       return makeAgentThreadHandle(client, binding, agentName);
@@ -371,7 +435,7 @@ function makeAgentThreads(client: FlaryThreadClient, agentName: string) {
       return client.list(agentName);
     },
     async open(
-      ref: Omit<ThreadRef, "appId" | "agentId">,
+      ref: Omit<ThreadRef, "appId" | "agentId">
     ): Promise<FlaryAgentThreadHandle> {
       const complete = { ...ref, appId: agentName, agentId: agentName };
       const binding = await client.inspect(complete);
@@ -383,12 +447,19 @@ function makeAgentThreads(client: FlaryThreadClient, agentName: string) {
 function makeAgentThreadHandle(
   client: FlaryThreadClient,
   binding: ThreadBinding,
-  agentName = binding.agentId,
+  agentName = binding.agentId
 ): FlaryAgentThreadHandle {
   const ref = binding.thread;
   const subagent = (
-    action: "list" | "spawn" | "send" | "wait" | "interrupt" | "resume" | "close",
-    input: Readonly<Record<string, unknown>> = {},
+    action:
+      | "list"
+      | "spawn"
+      | "send"
+      | "wait"
+      | "interrupt"
+      | "resume"
+      | "close",
+    input: Readonly<Record<string, unknown>> = {}
   ) => client.subagent(ref, action, input);
   return {
     ref,
@@ -396,10 +467,14 @@ function makeAgentThreadHandle(
     history: (options) => client.history(ref, options as never, agentName),
     turns: (options) => client.turns(ref, options),
     stream: (options) =>
-      client.observe(ref, {
-        ...(options?.after ? { offset: options.after } : {}),
-        ...(options?.signal ? { signal: options.signal } : {}),
-      } as never, agentName),
+      client.observe(
+        ref,
+        {
+          ...(options?.after ? { offset: options.after } : {}),
+          ...(options?.signal ? { signal: options.signal } : {}),
+        } as never,
+        agentName
+      ),
     connect: (options) => client.connect(ref, options),
     send: (input) =>
       client.submit(ref, {
@@ -407,14 +482,17 @@ function makeAgentThreadHandle(
         mode: input.mode,
         ...(input.model !== undefined ? { model: input.model } : {}),
         ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
-        ...(input.cacheRetention ? { cacheRetention: input.cacheRetention } : {}),
+        ...(input.cacheRetention
+          ? { cacheRetention: input.cacheRetention }
+          : {}),
         ...(input.images ? { images: [...input.images] } : {}),
         idempotencyKey: input.idempotencyKey ?? crypto.randomUUID(),
       }),
-    edit: (input) => client.edit(ref, {
-      ...input,
-      idempotencyKey: input.idempotencyKey ?? crypto.randomUUID(),
-    }),
+    edit: (input) =>
+      client.edit(ref, {
+        ...input,
+        idempotencyKey: input.idempotencyKey ?? crypto.randomUUID(),
+      }),
     interrupt: () => client.interrupt(ref),
     cancel: () => client.abort(ref, undefined, agentName),
     async fork(input = {}) {
@@ -432,18 +510,20 @@ function makeAgentThreadHandle(
     markRead: (throughSequence) => client.markRead(ref, throughSequence),
     delete: () => client.delete(ref),
     approvals: () => client.approvals(ref),
-    approve: (approvalId, options = {}) => client.decideApproval(ref, approvalId, {
-      status: "approved",
-      decidedBy: binding.createdBy,
-      decidedAt: new Date().toISOString(),
-      ...(options.reason ? { comment: options.reason } : {}),
-    }),
-    reject: (approvalId, options = {}) => client.decideApproval(ref, approvalId, {
-      status: "rejected",
-      decidedBy: binding.createdBy,
-      decidedAt: new Date().toISOString(),
-      ...(options.reason ? { comment: options.reason } : {}),
-    }),
+    approve: (approvalId, options = {}) =>
+      client.decideApproval(ref, approvalId, {
+        status: "approved",
+        decidedBy: binding.createdBy,
+        decidedAt: new Date().toISOString(),
+        ...(options.reason ? { comment: options.reason } : {}),
+      }),
+    reject: (approvalId, options = {}) =>
+      client.decideApproval(ref, approvalId, {
+        status: "rejected",
+        decidedBy: binding.createdBy,
+        decidedAt: new Date().toISOString(),
+        ...(options.reason ? { comment: options.reason } : {}),
+      }),
     userInput: () => client.userInput(ref),
     sendInput: (requestId, answers, options = {}) =>
       client.respondToUserInput(ref, requestId, { answers, ...options }),
@@ -458,13 +538,20 @@ function makeAgentThreadHandle(
       history: () => client.modelHistory(ref),
     },
     subagents: {
-      list: (input) => subagent("list", input) as Promise<FlarySubagentListResult>,
-      spawn: (input) => subagent("spawn", input) as Promise<FlarySubagentSpawnResult>,
-      send: (input) => subagent("send", input) as Promise<FlarySubagentSendResult>,
-      wait: (input) => subagent("wait", input) as Promise<FlarySubagentWaitResult>,
-      interrupt: (input) => subagent("interrupt", input) as Promise<FlarySubagentControlResult>,
-      resume: (input) => subagent("resume", input) as Promise<FlarySubagentControlResult>,
-      close: (input) => subagent("close", input) as Promise<FlarySubagentControlResult>,
+      list: (input) =>
+        subagent("list", input) as Promise<FlarySubagentListResult>,
+      spawn: (input) =>
+        subagent("spawn", input) as Promise<FlarySubagentSpawnResult>,
+      send: (input) =>
+        subagent("send", input) as Promise<FlarySubagentSendResult>,
+      wait: (input) =>
+        subagent("wait", input) as Promise<FlarySubagentWaitResult>,
+      interrupt: (input) =>
+        subagent("interrupt", input) as Promise<FlarySubagentControlResult>,
+      resume: (input) =>
+        subagent("resume", input) as Promise<FlarySubagentControlResult>,
+      close: (input) =>
+        subagent("close", input) as Promise<FlarySubagentControlResult>,
     },
     audit: {
       list: (options) => client.audit(ref, options),
@@ -512,7 +599,7 @@ function remoteRun<Output>(
   functionName: string,
   runId: string,
   initialStatus: FlaryRun["status"],
-  options: FlaryFunctionClientOptions,
+  options: FlaryFunctionClientOptions
 ): FlaryRemoteRun<Output> {
   let latestStatus: FlaryRun["status"] = initialStatus;
   const runPath =
@@ -540,26 +627,55 @@ function remoteRun<Output>(
         if (streamOptions.signal?.aborted) throw streamOptions.signal.reason;
         const value = await requestJson(request, runPath, {}, options);
         latestStatus = value.status as FlaryRun["status"];
-        const marker = `${value.status}:${JSON.stringify(value.result ?? null)}`;
+        const marker = `${value.status}:${JSON.stringify(
+          value.result ?? null
+        )}`;
         if (marker !== last) {
           last = marker;
-          const event: FlaryEvent<Output> = value.status === "completed"
-            ? { type: "output", runId, output: value.result as Output, occurredAt: new Date().toISOString() }
-            : value.status === "failed"
-              ? { type: "failed", runId, error: value.error ?? { code: "flary_function_failed", message: "The function failed" }, occurredAt: new Date().toISOString() }
+          const event: FlaryEvent<Output> =
+            value.status === "completed"
+              ? {
+                  type: "output",
+                  runId,
+                  output: value.result as Output,
+                  occurredAt: new Date().toISOString(),
+                }
+              : value.status === "failed"
+              ? {
+                  type: "failed",
+                  runId,
+                  error: value.error ?? {
+                    code: "flary_function_failed",
+                    message: "The function failed",
+                  },
+                  occurredAt: new Date().toISOString(),
+                }
               : value.status === "cancelled"
-                ? { type: "cancelled", runId, occurredAt: new Date().toISOString() }
-                : value.status === "paused"
-                  ? {
-                      type: "paused",
-                      runId,
-                      reason: "The run is waiting for approval or input.",
-                      occurredAt: new Date().toISOString(),
-                    }
-                : { type: "started", runId, occurredAt: new Date().toISOString() };
+              ? {
+                  type: "cancelled",
+                  runId,
+                  occurredAt: new Date().toISOString(),
+                }
+              : value.status === "paused"
+              ? {
+                  type: "paused",
+                  runId,
+                  reason: "The run is waiting for approval or input.",
+                  occurredAt: new Date().toISOString(),
+                }
+              : {
+                  type: "started",
+                  runId,
+                  occurredAt: new Date().toISOString(),
+                };
           yield event;
         }
-        if (value.status === "completed" || value.status === "failed" || value.status === "cancelled") return;
+        if (
+          value.status === "completed" ||
+          value.status === "failed" ||
+          value.status === "cancelled"
+        )
+          return;
         await delay(options.pollMs ?? 250);
       }
     },
@@ -568,7 +684,7 @@ function remoteRun<Output>(
         request,
         `${runPath}/cancel`,
         { method: "POST", body: "{}" },
-        options,
+        options
       );
       latestStatus = "cancelled";
     },
@@ -577,7 +693,7 @@ function remoteRun<Output>(
         request,
         `${runPath}/approvals`,
         {},
-        options,
+        options
       );
       return value.approvals ?? [];
     },
@@ -592,7 +708,7 @@ function remoteRun<Output>(
         request,
         `${runPath}/user-input`,
         {},
-        options,
+        options
       );
       return value.requests ?? [];
     },
@@ -601,7 +717,7 @@ function remoteRun<Output>(
         request,
         `${runPath}/user-input/${encodeURIComponent(requestId)}`,
         { method: "POST", body: JSON.stringify(input) },
-        options,
+        options
       );
     },
     async sendInput(input, inputOptions = {}) {
@@ -620,7 +736,7 @@ function remoteRun<Output>(
               : {}),
           }),
         },
-        options,
+        options
       );
     },
   };
@@ -628,7 +744,7 @@ function remoteRun<Output>(
   async function decideApproval(
     status: "approved" | "rejected",
     approvalId: string,
-    decisionOptions: FlaryApprovalDecisionOptions,
+    decisionOptions: FlaryApprovalDecisionOptions
   ): Promise<void> {
     await requestJson(
       request,
@@ -637,7 +753,7 @@ function remoteRun<Output>(
         method: "POST",
         body: JSON.stringify({ status, ...decisionOptions }),
       },
-      options,
+      options
     );
   }
 }
@@ -646,17 +762,25 @@ async function requestJson(
   request: typeof fetch,
   url: string,
   init: RequestInit,
-  options: FlaryFunctionClientOptions,
+  options: FlaryFunctionClientOptions
 ): Promise<any> {
   const headers = new Headers(init.headers);
-  if (init.body !== undefined && !headers.has("content-type")) headers.set("content-type", "application/json");
+  if (init.body !== undefined && !headers.has("content-type"))
+    headers.set("content-type", "application/json");
   if (options.token) headers.set("authorization", `Bearer ${options.token}`);
-  const configured = typeof options.headers === "function" ? await options.headers() : options.headers;
-  for (const [key, value] of new Headers(configured).entries()) if (!headers.has(key)) headers.set(key, value);
+  const configured =
+    typeof options.headers === "function"
+      ? await options.headers()
+      : options.headers;
+  for (const [key, value] of new Headers(configured).entries())
+    if (!headers.has(key)) headers.set(key, value);
   const response = await request(url, { ...init, headers });
   const value = await response.json().catch(() => undefined);
   if (!response.ok) {
-    throw new Error(value?.error?.message ?? `Flary function request failed (${response.status})`);
+    throw new Error(
+      value?.error?.message ??
+        `Flary function request failed (${response.status})`
+    );
   }
   return value;
 }

@@ -121,13 +121,13 @@ test("app.agent compiles to Flue and serves durable thread controls", async () =
         mode: "steer",
         model: "anthropic/claude-sonnet",
       }),
-    },
+    }
   );
   assert.equal(send.status, 202);
   assert.equal(messages[0]?.mode, "steer");
   assert.equal(
     (messages[0] as { model?: string }).model,
-    "anthropic/claude-sonnet",
+    "anthropic/claude-sonnet"
   );
 });
 
@@ -258,14 +258,15 @@ test("durable subagents use their own provider and the root runtime binding", as
   const spawn = parent.tools.find((tool) => tool.name === "spawn_agent");
   assert.ok(spawn);
   await spawn.run({ input: { agent: "reviewer", task: "Review it." } });
+  assert.ok(actions[0]);
   assert.equal(actions[0]?.action, "spawn");
-  assert.deepEqual(actions[0]?.input.model, {
+  assert.deepEqual(actions[0].input.model, {
     provider: "openai",
     model: "gpt-5.6-sol",
   });
   assert.equal(
-    (actions[0]?.input.metadata as Record<string, unknown>).flaryRuntimeAgentId,
-    "coder",
+    (actions[0].input.metadata as Record<string, unknown>).flaryRuntimeAgentId,
+    "coder"
   );
 
   const child = await runtime.initialize({
@@ -284,7 +285,7 @@ test("durable subagents use their own provider and the root runtime binding", as
         agent: "reviewer",
         task: "Review through the API.",
       }),
-    },
+    }
   );
   assert.equal(response.status, 200, await response.clone().text());
   assert.equal(actions[1]?.input.agentId, "reviewer");
@@ -407,7 +408,7 @@ test("durable agent tools restore admitted roles and scopes", async () => {
   assert.notEqual(coder.revision, lazyCoder.revision);
   assert.throws(
     () => app.agent({ name: "invalid", tools, eagerTools: ["missing"] }),
-    /unknown catalog id/i,
+    /unknown catalog id/i
   );
   const worker = app.serve({ coder }, { prefix: "/api/flary" });
   const created = await worker.request(
@@ -419,7 +420,7 @@ test("durable agent tools restore admitted roles and scopes", async () => {
         threadId: "thread_1",
         workspace: binding().workspace,
       }),
-    },
+    }
   );
   assert.equal(created.status, 201, await created.clone().text());
   assert.deepEqual(stored.metadata?.flaryAdmittedRoles, ["admin"]);

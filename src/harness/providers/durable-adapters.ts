@@ -1,7 +1,4 @@
-import {
-  JsonObjectSchema,
-  type JsonObject,
-} from "../contracts/common.js";
+import { JsonObjectSchema, type JsonObject } from "../contracts/common.js";
 import {
   ModelRequestSchema,
   ModelResponseSchema,
@@ -48,9 +45,7 @@ export interface OpenAIResponsesRecoveryAdapterOptions {
   fetch?: typeof fetch;
 }
 
-export class OpenAIResponsesRecoveryAdapter
-  implements DurableProviderAdapter
-{
+export class OpenAIResponsesRecoveryAdapter implements DurableProviderAdapter {
   readonly id: string;
   readonly provider = "openai" as const;
   readonly #baseUrl: string;
@@ -69,7 +64,7 @@ export class OpenAIResponsesRecoveryAdapter
 
   start(
     requestValue: ModelRequest,
-    context: ProviderRecoveryContext,
+    context: ProviderRecoveryContext
   ): AsyncIterable<ModelStreamEvent> {
     const checkpoint = initialProviderCheckpoint(this, context);
     return checkpointProviderStream(
@@ -77,42 +72,40 @@ export class OpenAIResponsesRecoveryAdapter
       this.streamResponse(
         ModelRequestSchema.parse(requestValue),
         context,
-        checkpoint,
+        checkpoint
       ),
       context,
-      checkpoint,
+      checkpoint
     );
   }
 
   recover(
     requestValue: ModelRequest,
     checkpointValue: ProviderRecoveryCheckpoint,
-    context: ProviderRecoveryContext,
+    context: ProviderRecoveryContext
   ): AsyncIterable<ModelStreamEvent> {
-    const checkpoint =
-      ProviderRecoveryCheckpointSchema.parse(checkpointValue);
+    const checkpoint = ProviderRecoveryCheckpointSchema.parse(checkpointValue);
     return checkpointProviderStream(
       this,
       this.streamResponse(
         ModelRequestSchema.parse(requestValue),
         context,
-        checkpoint,
+        checkpoint
       ),
       context,
       ProviderRecoveryCheckpointSchema.parse({
         ...checkpoint,
         attempt: checkpoint.attempt + 1,
         updatedAt: new Date().toISOString(),
-      }),
+      })
     );
   }
 
   async cancel(
     checkpointValue: ProviderRecoveryCheckpoint,
-    context: ProviderRecoveryContext,
+    context: ProviderRecoveryContext
   ): Promise<void> {
-    const checkpoint =
-      ProviderRecoveryCheckpointSchema.parse(checkpointValue);
+    const checkpoint = ProviderRecoveryCheckpointSchema.parse(checkpointValue);
     this.#controllers
       .get(operationKey(context))
       ?.abort(new DOMException("Cancelled", "AbortError"));
@@ -120,12 +113,12 @@ export class OpenAIResponsesRecoveryAdapter
       const response = await this.#fetch(
         joinUrl(
           this.#baseUrl,
-          `/responses/${encodeURIComponent(checkpoint.resumeToken)}/cancel`,
+          `/responses/${encodeURIComponent(checkpoint.resumeToken)}/cancel`
         ),
         {
           method: "POST",
           headers: this.headers(context.headers),
-        },
+        }
       );
       if (!response.ok && response.status !== 409) {
         throw await providerErrorFromResponse(this.id, response);
@@ -137,7 +130,7 @@ export class OpenAIResponsesRecoveryAdapter
         status: "cancelled",
         failureClass: "cancelled",
         updatedAt: new Date().toISOString(),
-      }),
+      })
     );
   }
 
@@ -148,7 +141,7 @@ export class OpenAIResponsesRecoveryAdapter
   private async *streamResponse(
     request: ModelRequest,
     context: ProviderRecoveryContext,
-    checkpoint: ProviderRecoveryCheckpoint,
+    checkpoint: ProviderRecoveryCheckpoint
   ): AsyncIterable<ModelStreamEvent> {
     const controller = linkedController(context.signal);
     this.#controllers.set(operationKey(context), controller);
@@ -161,14 +154,13 @@ export class OpenAIResponsesRecoveryAdapter
             body: JSON.stringify(openAIResponsesBody(request)),
             signal: controller.signal,
           });
-      if (!response.ok) throw await providerErrorFromResponse(this.id, response);
-      if (
-        response.headers.get("content-type")?.includes("application/json")
-      ) {
+      if (!response.ok)
+        throw await providerErrorFromResponse(this.id, response);
+      if (response.headers.get("content-type")?.includes("application/json")) {
         const completed = openAIResponse(
           await response.json(),
           request.model,
-          this.id,
+          this.id
         );
         yield ProviderStreamEventSchema.parse({
           type: "start",
@@ -199,7 +191,7 @@ export class OpenAIResponsesRecoveryAdapter
         const responseValue = asRecord(root.response);
         responseId = asString(
           responseValue.id ?? root.response_id ?? root.id,
-          responseId ?? randomId("response"),
+          responseId ?? randomId("response")
         );
         model = asString(responseValue.model ?? root.model, model);
         const sequence = asNonNegativeInteger(root.sequence_number);
@@ -207,7 +199,7 @@ export class OpenAIResponsesRecoveryAdapter
           const stored =
             (await context.checkpoints.get(
               context.runId,
-              context.operationId,
+              context.operationId
             )) ?? checkpoint;
           await context.checkpoints.put(
             ProviderRecoveryCheckpointSchema.parse({
@@ -216,7 +208,7 @@ export class OpenAIResponsesRecoveryAdapter
               continuationToken: responseId,
               streamSequence: sequence,
               updatedAt: new Date().toISOString(),
-            }),
+            })
           );
         }
         if (type === "response.created" || type === "response.in_progress") {
@@ -285,7 +277,7 @@ export class OpenAIResponsesRecoveryAdapter
           terminal = true;
           const error = normalizedProviderError(
             responseValue.error ?? root.error ?? root,
-            this.id,
+            this.id
           );
           yield ProviderStreamEventSchema.parse({
             type: "error",
@@ -320,20 +312,17 @@ export class OpenAIResponsesRecoveryAdapter
   private resume(
     checkpoint: ProviderRecoveryCheckpoint,
     context: ProviderRecoveryContext,
-    signal: AbortSignal,
+    signal: AbortSignal
   ): Promise<Response> {
     const url = new URL(
       joinUrl(
         this.#baseUrl,
-        `/responses/${encodeURIComponent(checkpoint.resumeToken!)}`,
-      ),
+        `/responses/${encodeURIComponent(checkpoint.resumeToken!)}`
+      )
     );
     url.searchParams.set("stream", "true");
     if (checkpoint.streamSequence !== undefined) {
-      url.searchParams.set(
-        "starting_after",
-        String(checkpoint.streamSequence),
-      );
+      url.searchParams.set("starting_after", String(checkpoint.streamSequence));
     }
     return this.#fetch(url, {
       headers: this.headers(context.headers),
@@ -365,7 +354,7 @@ export class AnthropicRecoveryAdapter implements DurableProviderAdapter {
 
   start(
     request: ModelRequest,
-    context: ProviderRecoveryContext,
+    context: ProviderRecoveryContext
   ): AsyncIterable<ModelStreamEvent> {
     return this.run(request, context, initialProviderCheckpoint(this, context));
   }
@@ -373,10 +362,9 @@ export class AnthropicRecoveryAdapter implements DurableProviderAdapter {
   recover(
     request: ModelRequest,
     checkpointValue: ProviderRecoveryCheckpoint,
-    context: ProviderRecoveryContext,
+    context: ProviderRecoveryContext
   ): AsyncIterable<ModelStreamEvent> {
-    const checkpoint =
-      ProviderRecoveryCheckpointSchema.parse(checkpointValue);
+    const checkpoint = ProviderRecoveryCheckpointSchema.parse(checkpointValue);
     return this.run(
       continuationRequest(request, checkpoint),
       context,
@@ -386,13 +374,13 @@ export class AnthropicRecoveryAdapter implements DurableProviderAdapter {
         continuationToken:
           checkpoint.resumeToken ?? `continuation_${checkpoint.attempt + 1}`,
         updatedAt: new Date().toISOString(),
-      }),
+      })
     );
   }
 
   async cancel(
     checkpoint: ProviderRecoveryCheckpoint,
-    context: ProviderRecoveryContext,
+    context: ProviderRecoveryContext
   ): Promise<void> {
     this.#controllers
       .get(operationKey(context))
@@ -403,7 +391,7 @@ export class AnthropicRecoveryAdapter implements DurableProviderAdapter {
         status: "cancelled",
         failureClass: "cancelled",
         updatedAt: new Date().toISOString(),
-      }),
+      })
     );
   }
 
@@ -414,7 +402,7 @@ export class AnthropicRecoveryAdapter implements DurableProviderAdapter {
   private run(
     request: ModelRequest,
     context: ProviderRecoveryContext,
-    checkpoint: ProviderRecoveryCheckpoint,
+    checkpoint: ProviderRecoveryCheckpoint
   ): AsyncIterable<ModelStreamEvent> {
     const controller = linkedController(context.signal);
     this.#controllers.set(operationKey(context), controller);
@@ -428,10 +416,10 @@ export class AnthropicRecoveryAdapter implements DurableProviderAdapter {
     return checkpointProviderStream(
       this,
       finalizeStream(stream, () =>
-        this.#controllers.delete(operationKey(context)),
+        this.#controllers.delete(operationKey(context))
       ),
       context,
-      checkpoint,
+      checkpoint
     );
   }
 }
@@ -464,7 +452,7 @@ export class GeminiRecoveryAdapter implements DurableProviderAdapter {
 
   start(
     request: ModelRequest,
-    context: ProviderRecoveryContext,
+    context: ProviderRecoveryContext
   ): AsyncIterable<ModelStreamEvent> {
     return this.run(request, context, initialProviderCheckpoint(this, context));
   }
@@ -472,10 +460,9 @@ export class GeminiRecoveryAdapter implements DurableProviderAdapter {
   recover(
     request: ModelRequest,
     checkpointValue: ProviderRecoveryCheckpoint,
-    context: ProviderRecoveryContext,
+    context: ProviderRecoveryContext
   ): AsyncIterable<ModelStreamEvent> {
-    const checkpoint =
-      ProviderRecoveryCheckpointSchema.parse(checkpointValue);
+    const checkpoint = ProviderRecoveryCheckpointSchema.parse(checkpointValue);
     return this.run(
       continuationRequest(request, checkpoint),
       context,
@@ -485,13 +472,13 @@ export class GeminiRecoveryAdapter implements DurableProviderAdapter {
         continuationToken:
           checkpoint.resumeToken ?? `continuation_${checkpoint.attempt + 1}`,
         updatedAt: new Date().toISOString(),
-      }),
+      })
     );
   }
 
   async cancel(
     checkpoint: ProviderRecoveryCheckpoint,
-    context: ProviderRecoveryContext,
+    context: ProviderRecoveryContext
   ): Promise<void> {
     this.#controllers
       .get(operationKey(context))
@@ -502,7 +489,7 @@ export class GeminiRecoveryAdapter implements DurableProviderAdapter {
         status: "cancelled",
         failureClass: "cancelled",
         updatedAt: new Date().toISOString(),
-      }),
+      })
     );
   }
 
@@ -513,29 +500,29 @@ export class GeminiRecoveryAdapter implements DurableProviderAdapter {
   private run(
     requestValue: ModelRequest,
     context: ProviderRecoveryContext,
-    checkpoint: ProviderRecoveryCheckpoint,
+    checkpoint: ProviderRecoveryCheckpoint
   ): AsyncIterable<ModelStreamEvent> {
     const request = ModelRequestSchema.parse(requestValue);
     return checkpointProviderStream(
       this,
       this.streamGemini(request, context, checkpoint),
       context,
-      checkpoint,
+      checkpoint
     );
   }
 
   private async *streamGemini(
     request: ModelRequest,
     context: ProviderRecoveryContext,
-    checkpoint: ProviderRecoveryCheckpoint,
+    checkpoint: ProviderRecoveryCheckpoint
   ): AsyncIterable<ModelStreamEvent> {
     const controller = linkedController(context.signal);
     this.#controllers.set(operationKey(context), controller);
     const url = new URL(
       joinUrl(
         this.#baseUrl,
-        `/models/${encodeURIComponent(request.model)}:streamGenerateContent`,
-      ),
+        `/models/${encodeURIComponent(request.model)}:streamGenerateContent`
+      )
     );
     url.searchParams.set("alt", "sse");
     if (this.#apiKey) url.searchParams.set("key", this.#apiKey);
@@ -550,8 +537,10 @@ export class GeminiRecoveryAdapter implements DurableProviderAdapter {
         body: JSON.stringify(geminiBody(request)),
         signal: controller.signal,
       });
-      if (!response.ok) throw await providerErrorFromResponse(this.id, response);
-      if (!response.body) throw new Error("Gemini returned no response stream.");
+      if (!response.ok)
+        throw await providerErrorFromResponse(this.id, response);
+      if (!response.body)
+        throw new Error("Gemini returned no response stream.");
       let started = false;
       for await (const frame of parseServerSentEvents(response.body)) {
         if (!frame.data) continue;
@@ -640,7 +629,7 @@ export class GeminiRecoveryAdapter implements DurableProviderAdapter {
     headers.set("accept", "text/event-stream");
     headers.set("x-flary-idempotency-key", context.idempotencyKey);
     new Headers(context.headers).forEach((value, key) =>
-      headers.set(key, value),
+      headers.set(key, value)
     );
     return headers;
   }
@@ -653,7 +642,7 @@ export class InterruptedProviderAdapter implements DurableProviderAdapter {
 
   start(
     _request: ModelRequest,
-    context: ProviderRecoveryContext,
+    context: ProviderRecoveryContext
   ): AsyncIterable<ModelStreamEvent> {
     return this.interrupted(context, initialProviderCheckpoint(this, context));
   }
@@ -661,14 +650,14 @@ export class InterruptedProviderAdapter implements DurableProviderAdapter {
   recover(
     _request: ModelRequest,
     checkpoint: ProviderRecoveryCheckpoint,
-    context: ProviderRecoveryContext,
+    context: ProviderRecoveryContext
   ): AsyncIterable<ModelStreamEvent> {
     return this.interrupted(context, checkpoint);
   }
 
   async cancel(
     checkpoint: ProviderRecoveryCheckpoint,
-    context: ProviderRecoveryContext,
+    context: ProviderRecoveryContext
   ): Promise<void> {
     await context.checkpoints.put(
       ProviderRecoveryCheckpointSchema.parse({
@@ -676,7 +665,7 @@ export class InterruptedProviderAdapter implements DurableProviderAdapter {
         status: "cancelled",
         failureClass: "cancelled",
         updatedAt: new Date().toISOString(),
-      }),
+      })
     );
   }
 
@@ -686,7 +675,7 @@ export class InterruptedProviderAdapter implements DurableProviderAdapter {
 
   private async *interrupted(
     context: ProviderRecoveryContext,
-    checkpoint: ProviderRecoveryCheckpoint,
+    checkpoint: ProviderRecoveryCheckpoint
   ): AsyncIterable<ModelStreamEvent> {
     const error = ProviderErrorSchema.parse({
       code: "explicit_retry_required",
@@ -702,7 +691,7 @@ export class InterruptedProviderAdapter implements DurableProviderAdapter {
         failureClass: "interrupted",
         error,
         updatedAt: new Date().toISOString(),
-      }),
+      })
     );
     yield ProviderStreamEventSchema.parse({ type: "error", error });
   }
@@ -710,7 +699,7 @@ export class InterruptedProviderAdapter implements DurableProviderAdapter {
 
 function openAIResponsesBody(request: ModelRequest): Record<string, unknown> {
   const body: Record<string, unknown> = {
-    ...(request.parameters ?? {}),
+    ...request.parameters,
     model: request.model,
     input: request.messages.map((message) => ({
       role: message.role === "tool" ? "user" : message.role,
@@ -720,7 +709,11 @@ function openAIResponsesBody(request: ModelRequest): Record<string, unknown> {
           : message.content.map((part) =>
               part.type === "text"
                 ? { type: "input_text", text: part.text }
-                : { type: "input_image", image_url: part.url, detail: part.detail },
+                : {
+                    type: "input_image",
+                    image_url: part.url,
+                    detail: part.detail,
+                  }
             ),
     })),
     background: true,
@@ -754,7 +747,7 @@ function openAIResponsesBody(request: ModelRequest): Record<string, unknown> {
 function openAIResponse(
   value: unknown,
   requestedModel: string,
-  provider: string,
+  provider: string
 ): ModelResponse {
   const root = asRecord(value);
   const output = Array.isArray(root.output) ? root.output : [];
@@ -808,17 +801,13 @@ function openAIUsage(value: unknown): ProviderUsage | undefined {
 
 function geminiBody(request: ModelRequest): Record<string, unknown> {
   const system = request.messages
-    .filter((message) =>
-      ["system", "developer"].includes(message.role),
-    )
+    .filter((message) => ["system", "developer"].includes(message.role))
     .map((message) => messageText(message.content))
     .filter(Boolean)
     .join("\n\n");
   const body: Record<string, unknown> = {
     contents: request.messages
-      .filter(
-        (message) => !["system", "developer"].includes(message.role),
-      )
+      .filter((message) => !["system", "developer"].includes(message.role))
       .map((message) => ({
         role: message.role === "assistant" ? "model" : "user",
         parts: [{ text: messageText(message.content) }],
@@ -866,17 +855,16 @@ function geminiUsage(value: unknown): ProviderUsage | undefined {
   };
 }
 
-function messageText(content: ModelRequest["messages"][number]["content"]): string {
+function messageText(
+  content: ModelRequest["messages"][number]["content"]
+): string {
   if (typeof content === "string") return content;
   return content
     .map((part) => (part.type === "text" ? part.text : `[image: ${part.url}]`))
     .join("\n");
 }
 
-function normalizedProviderError(
-  value: unknown,
-  provider: string,
-) {
+function normalizedProviderError(value: unknown, provider: string) {
   const root = asRecord(value);
   return ProviderErrorSchema.parse({
     code: asString(root.code ?? root.type, "provider_error"),
@@ -903,11 +891,9 @@ function linkedController(signal?: AbortSignal): AbortController {
   if (signal?.aborted) {
     controller.abort(signal.reason);
   } else {
-    signal?.addEventListener(
-      "abort",
-      () => controller.abort(signal.reason),
-      { once: true },
-    );
+    signal?.addEventListener("abort", () => controller.abort(signal.reason), {
+      once: true,
+    });
   }
   return controller;
 }
@@ -922,7 +908,7 @@ function headersRecord(value?: HeadersInit): Record<string, string> {
 
 async function* finalizeStream<T>(
   stream: AsyncIterable<T>,
-  finalize: () => void,
+  finalize: () => void
 ): AsyncIterable<T> {
   try {
     yield* stream;

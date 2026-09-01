@@ -29,7 +29,7 @@ export interface NormalizeFlueEventOptions {
  */
 export function normalizeFlueEvent(
   event: FlueEvent,
-  options: NormalizeFlueEventOptions,
+  options: NormalizeFlueEventOptions
 ): RunEvent | undefined {
   const base = {
     id: `event_${options.runId}_${event.eventIndex}`,
@@ -102,9 +102,7 @@ export function normalizeFlueEvent(
             arguments: jsonObject(event.args),
             runId: options.runId,
             requestedAt: event.timestamp,
-            ...(event.operationId
-              ? { idempotencyKey: event.operationId }
-              : {}),
+            ...(event.operationId ? { idempotencyKey: event.operationId } : {}),
           },
         },
       });
@@ -122,7 +120,10 @@ export function normalizeFlueEvent(
               ? {
                   error: {
                     code: "tool_failed",
-                    message: errorMessage(event.result, "Tool execution failed"),
+                    message: errorMessage(
+                      event.result,
+                      "Tool execution failed"
+                    ),
                   },
                 }
               : { output: jsonObject(event.result) }),
@@ -143,21 +144,19 @@ export function normalizeFlueEvent(
           ...(stringValue(model.provider) || stringValue(response.provider)
             ? {
                 provider:
-                  stringValue(model.provider) ??
-                  stringValue(response.provider),
+                  stringValue(model.provider) ?? stringValue(response.provider),
               }
             : {}),
           ...(stringValue(model.id) || stringValue(response.model)
             ? {
-                model:
-                  stringValue(model.id) ?? stringValue(response.model),
+                model: stringValue(model.id) ?? stringValue(response.model),
               }
             : {}),
           ...(usage ? { usage } : {}),
           durationMs: Math.max(0, Math.floor(event.durationMs)),
           retryCount: Math.max(
             0,
-            Math.floor(numberValue(response.retryCount) ?? 0),
+            Math.floor(numberValue(response.retryCount) ?? 0)
           ),
         },
       });
@@ -174,11 +173,7 @@ export function normalizeFlueEvent(
         return RunEventSchema.parse({
           ...base,
           type: "run.cancelled",
-          payload: {
-            ...(event.error?.message
-              ? { reason: event.error.message }
-              : {}),
-          },
+          payload: event.error?.message ? { reason: event.error.message } : {},
         });
       }
       return RunEventSchema.parse({
@@ -258,9 +253,11 @@ function messageText(value: unknown): string {
   const message = asRecord(value);
   if (typeof message.content === "string") return redactText(message.content);
   if (!Array.isArray(message.content)) return "";
-  return redactText(message.content
-    .map((part) => stringValue(asRecord(part).text) ?? "")
-    .join(""));
+  return redactText(
+    message.content
+      .map((part) => stringValue(asRecord(part).text) ?? "")
+      .join("")
+  );
 }
 
 function messageRole(value: unknown): "user" | "assistant" | "system" | "tool" {

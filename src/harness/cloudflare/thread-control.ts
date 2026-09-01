@@ -13,10 +13,6 @@ import {
   UserInputRecordSchema,
   type ApprovalDecision,
   type ThreadBinding,
-  type ThreadCreateRequest,
-  type ThreadForkRequest,
-  type ThreadMessageRequest,
-  type ThreadModelSetRequest,
   type ThreadPortableArchive,
 } from "../contracts/index.js";
 import {
@@ -44,14 +40,14 @@ import {
   createCloudflareWorkspaceConnection,
 } from "./workspace.js";
 import { CloudflareSandboxWorkspaceBackend } from "./workspace-execution.js";
-import { createCloudflareFlueFetch, createCloudflareFlueGateway } from "./function-host.js";
+import {
+  createCloudflareFlueFetch,
+  createCloudflareFlueGateway,
+} from "./function-host.js";
 import { SqliteSubagentCoordinator } from "./subagent-coordinator.js";
 import { DurableSandboxProcessRuntime } from "./sandbox-process-runtime.js";
 import { SqliteSandboxProcessRegistry } from "./sandbox-process-registry.js";
-import {
-  D1ThreadCatalog,
-  type D1DatabaseLike,
-} from "./d1-thread-catalog.js";
+import { D1ThreadCatalog, type D1DatabaseLike } from "./d1-thread-catalog.js";
 import {
   exportSessionJsonl,
   importSessionJsonl,
@@ -127,7 +123,7 @@ interface ThreadControlStorage {
  * Local test doubles historically put both methods on storage.sql.
  */
 function normalizeThreadControlStorage(
-  input: ThreadControlStorage,
+  input: ThreadControlStorage
 ): ThreadControlStorage {
   const rawSql = input.sql as {
     exec<T = Record<string, unknown>>(
@@ -139,7 +135,7 @@ function normalizeThreadControlStorage(
   const transactionSync = input.transactionSync ?? rawSql.transactionSync;
   if (typeof transactionSync !== "function") {
     throw new Error(
-      "Thread Control needs Durable Object transactionSync support",
+      "Thread Control needs Durable Object transactionSync support"
     );
   }
   const owner = input.transactionSync ? input : rawSql;
@@ -158,7 +154,7 @@ function normalizeThreadControlStorage(
 }
 
 export interface CreateCloudflareThreadServiceOptions<
-  TEnv extends Record<string, unknown>,
+  TEnv extends Record<string, unknown>
 > {
   readonly env: TEnv;
   readonly namespace?: DurableObjectNamespace;
@@ -172,7 +168,10 @@ export interface CreateCloudflareThreadServiceOptions<
     readonly threadId: string;
     readonly connectionIds: readonly string[];
     readonly selection: ModelSelection;
-  }) => Promise<Partial<ResolvedModelPin> | void> | Partial<ResolvedModelPin> | void;
+  }) =>
+    | Promise<Partial<ResolvedModelPin> | void>
+    | Partial<ResolvedModelPin>
+    | void;
   /** Resolve trusted context for one turn without changing the public message. */
   readonly resolveTurnContext?: (input: {
     readonly bindings: TEnv;
@@ -188,7 +187,11 @@ export interface CreateCloudflareThreadServiceOptions<
 
 async function resolveTrustedTurnContext<TEnv extends Record<string, unknown>>(
   resolver: CreateCloudflareThreadServiceOptions<TEnv>["resolveTurnContext"],
-  input: Parameters<NonNullable<CreateCloudflareThreadServiceOptions<TEnv>["resolveTurnContext"]>>[0],
+  input: Parameters<
+    NonNullable<
+      CreateCloudflareThreadServiceOptions<TEnv>["resolveTurnContext"]
+    >
+  >[0]
 ): Promise<string | undefined> {
   if (!resolver) return undefined;
   const value = (await resolver(input))?.trim();
@@ -197,7 +200,7 @@ async function resolveTrustedTurnContext<TEnv extends Record<string, unknown>>(
     throw new FlaryHostError(
       500,
       "turn_context_too_large",
-      "Trusted turn context must not exceed 8,192 characters",
+      "Trusted turn context must not exceed 8,192 characters"
     );
   }
   return value;
@@ -214,10 +217,8 @@ interface ThreadControlExecutionContext {
  * only tenant ownership, mutable controls, and the rebuildable session view.
  */
 export function createCloudflareThreadService<
-  TEnv extends Record<string, unknown>,
->(
-  options: CreateCloudflareThreadServiceOptions<TEnv>,
-): FlaryThreadHostService {
+  TEnv extends Record<string, unknown>
+>(options: CreateCloudflareThreadServiceOptions<TEnv>): FlaryThreadHostService {
   const namespace =
     options.namespace ??
     (options.env[options.binding ?? "FLARY_THREAD_CONTROL"] as
@@ -235,40 +236,43 @@ export function createCloudflareThreadService<
   const runtime = options.env.FLARY_RUN_SERVICE as
     | DurableObjectNamespace
     | undefined;
-  const runtimeToken = typeof options.env.FLARY_INTERNAL_TOKEN === "string"
-    ? options.env.FLARY_INTERNAL_TOKEN
-    : undefined;
+  const runtimeToken =
+    typeof options.env.FLARY_INTERNAL_TOKEN === "string"
+      ? options.env.FLARY_INTERNAL_TOKEN
+      : undefined;
   const runtimeRpc = async (
     method: "listStoredUserInput" | "respondToStoredUserInput",
-    body: Record<string, unknown>,
+    body: Record<string, unknown>
   ): Promise<unknown> => {
     if (!runtime || !runtimeToken) {
       throw new FlaryHostError(
         503,
         "user_input_unavailable",
-        "User input is not configured for this thread host",
+        "User input is not configured for this thread host"
       );
     }
     const stub = runtime.get(runtime.idFromName("default"));
-    const response = await stub.fetch(new Request(
-      `https://flary.internal/rpc/${method}`,
-      {
+    const response = await stub.fetch(
+      new Request(`https://flary.internal/rpc/${method}`, {
         method: "POST",
         headers: {
           authorization: `Bearer ${runtimeToken}`,
           "content-type": "application/json",
         },
         body: JSON.stringify(body),
-      },
-    ));
+      })
+    );
     const value = await response.json().catch(() => undefined);
     if (!response.ok) {
       throw new FlaryHostError(
         response.status,
         "user_input_failed",
         value && typeof value === "object" && "error" in value
-          ? String((value as { error?: { message?: unknown } }).error?.message ?? "User input failed")
-          : "User input failed",
+          ? String(
+              (value as { error?: { message?: unknown } }).error?.message ??
+                "User input failed"
+            )
+          : "User input failed"
       );
     }
     return value;
@@ -277,7 +281,7 @@ export function createCloudflareThreadService<
   const rpc = async (
     name: string,
     method: string,
-    body: Record<string, unknown>,
+    body: Record<string, unknown>
   ): Promise<any> => {
     const stub = namespace.get(namespace.idFromName(name));
     const response = await stub.fetch(
@@ -285,14 +289,14 @@ export function createCloudflareThreadService<
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ method, ...body }),
-      }),
+      })
     );
     const value = await response.json().catch(() => undefined);
     if (!response.ok) {
       throw new Error(
         value && typeof value === "object" && "error" in value
           ? String((value as { error: unknown }).error)
-          : `Thread Control failed (${response.status})`,
+          : `Thread Control failed (${response.status})`
       );
     }
     return value;
@@ -306,17 +310,17 @@ export function createCloudflareThreadService<
     applicationId: scope.appId,
   });
   const d1 = options.env.FLARY_THREAD_CATALOG
-    ? new D1ThreadCatalog(
-        options.env.FLARY_THREAD_CATALOG as D1DatabaseLike,
-      )
+    ? new D1ThreadCatalog(options.env.FLARY_THREAD_CATALOG as D1DatabaseLike)
     : undefined;
   const projectionQueue = options.env.FLARY_SESSION_PROJECTION_QUEUE as
     | ProjectionQueue
     | undefined;
-  const purgeQueue = options.env.FLARY_THREAD_PURGE_QUEUE as PurgeQueue | undefined;
+  const purgeQueue = options.env.FLARY_THREAD_PURGE_QUEUE as
+    | PurgeQueue
+    | undefined;
   const completeDeletion = async (
     target: FlaryThreadTarget,
-    deletionId: string,
+    deletionId: string
   ): Promise<void> => {
     const existing = await d1?.getDeletion({
       tenantId: target.authorization.organizationId,
@@ -335,7 +339,7 @@ export function createCloudflareThreadService<
   };
   const trackAdmission = async (
     name: string,
-    body: Record<string, unknown>,
+    body: Record<string, unknown>
   ): Promise<void> => {
     try {
       // Start the live projection in the Thread Control object immediately.
@@ -388,7 +392,7 @@ export function createCloudflareThreadService<
         rpc(
           `thread:${scope.authorization.organizationId}:${scope.appId}:${threadId}`,
           "initialize",
-          { ...ownership(scope), binding },
+          { ...ownership(scope), binding }
         ),
         rpc(catalogName(scope), "catalogPut", {
           ...ownership(scope),
@@ -400,7 +404,9 @@ export function createCloudflareThreadService<
     },
     async realtimeTicket(target, rawInput, requestUrl) {
       const input = RealtimeTicketRequestSchema.parse(rawInput);
-      const ticket = `${target.authorization.organizationId}.${crypto.randomUUID()}.${crypto.randomUUID()}`;
+      const ticket = `${
+        target.authorization.organizationId
+      }.${crypto.randomUUID()}.${crypto.randomUUID()}`;
       const expiresAt = new Date(Date.now() + 60_000).toISOString();
       await rpc(controlName(target), "issueRealtimeTicket", {
         ...ownership(target),
@@ -419,18 +425,27 @@ export function createCloudflareThreadService<
     async realtimeConnect(appId, threadId, ticket) {
       const tenantId = ticket.split(".", 1)[0];
       if (!tenantId) {
-        return Response.json({ error: "The realtime ticket is invalid" }, { status: 401 });
+        return Response.json(
+          { error: "The realtime ticket is invalid" },
+          { status: 401 }
+        );
       }
       const name = `thread:${tenantId}:${appId}:${threadId}`;
       const stub = namespace.get(namespace.idFromName(name));
-      return stub.fetch(new Request(
-        `https://flary.internal/realtime?ticket=${encodeURIComponent(ticket)}`,
-        { headers: { upgrade: "websocket" } },
-      ));
+      return stub.fetch(
+        new Request(
+          `https://flary.internal/realtime?ticket=${encodeURIComponent(
+            ticket
+          )}`,
+          { headers: { upgrade: "websocket" } }
+        )
+      );
     },
     async terminalTicket(target, rawInput, requestUrl) {
       const input = rawInput ?? {};
-      const ticket = `${target.authorization.organizationId}.${crypto.randomUUID()}.${crypto.randomUUID()}`;
+      const ticket = `${
+        target.authorization.organizationId
+      }.${crypto.randomUUID()}.${crypto.randomUUID()}`;
       const expiresAt = new Date(Date.now() + 60_000).toISOString();
       await rpc(controlName(target), "issueTerminalTicket", {
         ...ownership(target),
@@ -452,21 +467,32 @@ export function createCloudflareThreadService<
         ticketHash: await sha256Text(ticket),
       });
       const sandboxBinding = options.env.SANDBOX;
-      if (!sandboxBinding) throw new Error("The SANDBOX binding is not configured");
+      if (!sandboxBinding)
+        throw new Error("The SANDBOX binding is not configured");
       const { getSandbox } = await import("@cloudflare/sandbox");
       const sandbox = getSandbox(
         sandboxBinding as never,
         `flary-${target.authorization.organizationId}-${target.threadId}`,
-        { transport: "rpc", sleepAfter: "10m", enableDefaultSession: true, normalizeId: true },
+        {
+          transport: "rpc",
+          sleepAfter: "10m",
+          enableDefaultSession: true,
+          normalizeId: true,
+        }
       );
-      const terminal = (sandbox as unknown as {
-        terminal?: (request: Request, input: { cols: number; rows: number }) => Promise<Response>;
-      }).terminal;
+      const terminal = (
+        sandbox as unknown as {
+          terminal?: (
+            request: Request,
+            input: { cols: number; rows: number }
+          ) => Promise<Response>;
+        }
+      ).terminal;
       if (typeof terminal !== "function") {
         throw new FlaryHostError(
           501,
           "sandbox_terminal_unavailable",
-          "This Sandbox SDK does not provide a WebSocket terminal",
+          "This Sandbox SDK does not provide a WebSocket terminal"
         );
       }
       return terminal.call(sandbox, request, {
@@ -475,7 +501,11 @@ export function createCloudflareThreadService<
       });
     },
     async inspect(target) {
-      const value = await rpc(controlName(target), "inspect", ownership(target));
+      const value = await rpc(
+        controlName(target),
+        "inspect",
+        ownership(target)
+      );
       return ThreadBindingSchema.parse(value.binding);
     },
     async archive(target) {
@@ -504,12 +534,14 @@ export function createCloudflareThreadService<
         acceptedAt,
         actor: target.authorization.actor,
       });
-      const deletion = ThreadDeletionSchema.parse(value.deletion ?? {
-        id: deletionId,
-        threadId: binding.thread.threadId,
-        status: "accepted",
-        acceptedAt,
-      });
+      const deletion = ThreadDeletionSchema.parse(
+        value.deletion ?? {
+          id: deletionId,
+          threadId: binding.thread.threadId,
+          status: "accepted",
+          acceptedAt,
+        }
+      );
       // Remove the list indexes at acknowledgement time. The durable purge
       // continues after the user can open another chat.
       await Promise.all([
@@ -561,7 +593,10 @@ export function createCloudflareThreadService<
         // A retry can arrive after deleteAll() succeeded but before D1 stored
         // the completion receipt. In that state all thread resources are
         // already gone, so complete the receipt instead of retrying forever.
-        if (error instanceof Error && error.message === "The thread was not found") {
+        if (
+          error instanceof Error &&
+          error.message === "The thread was not found"
+        ) {
           await completeDeletion(target, deletionId);
           return;
         }
@@ -585,7 +620,9 @@ export function createCloudflareThreadService<
         });
       }
       if (!gateway.delete) {
-        throw new Error("The canonical Flue transcript cannot be deleted by this host");
+        throw new Error(
+          "The canonical Flue transcript cannot be deleted by this host"
+        );
       }
       await gateway.delete(agentName, instanceId);
       await rpc(controlName(target), "delete", {
@@ -616,33 +653,34 @@ export function createCloudflareThreadService<
         limit: 1_000_000,
       });
       const records = Array.isArray(parentLedger.records)
-        ? parentLedger.records as Array<Record<string, unknown>>
+        ? (parentLedger.records as Array<Record<string, unknown>>)
         : [];
       const boundary = resolveForkBoundary(records, input.turnId);
       let canonicalArchive: unknown;
       if (boundary.turnId) {
-        const exported = await agentControlRpc(
-          options.env,
-          parent,
-          "export",
-          { turnId: boundary.turnId },
-        );
+        const exported = await agentControlRpc(options.env, parent, "export", {
+          turnId: boundary.turnId,
+        });
         if (objectValue(exported).runtimeUnavailable) {
           throw new FlaryHostError(
             503,
             "exact_fork_runtime_unavailable",
-            "The canonical session engine is not available for an exact fork",
+            "The canonical session engine is not available for an exact fork"
           );
         }
         canonicalArchive = exported;
       }
       const childThreadId = input.threadId ?? `thread_${crypto.randomUUID()}`;
-      const childWorkspace = input.workspace === "shared"
-        ? parent.workspace
-        : {
-            ...parent.workspace,
-            branch: forkWorkspaceBranch(parent.workspace.branch, childThreadId),
-          };
+      const childWorkspace =
+        input.workspace === "shared"
+          ? parent.workspace
+          : {
+              ...parent.workspace,
+              branch: forkWorkspaceBranch(
+                parent.workspace.branch,
+                childThreadId
+              ),
+            };
       const child = await service.create(target, {
         threadId: childThreadId,
         agentId: parent.agentId,
@@ -650,11 +688,10 @@ export function createCloudflareThreadService<
         persona: parent.persona,
         mode: input.mode ?? parent.defaultMode,
         model: input.model ?? parent.defaultModel,
-        thinkingLevel:
-          input.thinkingLevel ?? parent.defaultThinkingLevel,
+        thinkingLevel: input.thinkingLevel ?? parent.defaultThinkingLevel,
         connectionIds: parent.connectionIds,
         metadata: {
-          ...(input.metadata ?? {}),
+          ...input.metadata,
           parentThreadId: target.threadId,
           ...(boundary.turnId ? { forkTurnId: boundary.turnId } : {}),
           forkWorkspaceMode: input.workspace,
@@ -667,14 +704,18 @@ export function createCloudflareThreadService<
             turnId: boundary.turnId,
           });
         }
-        await rpc(controlName({
-          ...target,
-          threadId: child.thread.threadId,
-        }), "forkRecords", {
-          ...ownership(target),
-          records: boundary.records,
-          parentThreadId: target.threadId,
-        });
+        await rpc(
+          controlName({
+            ...target,
+            threadId: child.thread.threadId,
+          }),
+          "forkRecords",
+          {
+            ...ownership(target),
+            records: boundary.records,
+            parentThreadId: target.threadId,
+          }
+        );
         if (
           input.workspace === "snapshot" &&
           boundary.checkpointId &&
@@ -684,17 +725,22 @@ export function createCloudflareThreadService<
           await workspaceControl(options.env, child, "__fork", {
             sourceScope: parent.workspace,
             commitId: boundary.checkpointId,
-            id: `fork_${child.thread.threadId}_${boundary.checkpointId}`.slice(0, 200),
+            id: `fork_${child.thread.threadId}_${boundary.checkpointId}`.slice(
+              0,
+              200
+            ),
             parentThreadId: target.threadId,
             sessionId: child.thread.threadId,
           });
         }
       } catch (error) {
-        await service.delete?.({
-          authorization: target.authorization,
-          appId: target.appId,
-          threadId: child.thread.threadId,
-        }).catch(() => undefined);
+        await service
+          .delete?.({
+            authorization: target.authorization,
+            appId: target.appId,
+            threadId: child.thread.threadId,
+          })
+          .catch(() => undefined);
         throw error;
       }
       return child;
@@ -706,11 +752,19 @@ export function createCloudflareThreadService<
       return mutateBinding(target, "setConnections", { connectionIds });
     },
     async modelGet(target) {
-      const value = await rpc(controlName(target), "modelGet", ownership(target));
+      const value = await rpc(
+        controlName(target),
+        "modelGet",
+        ownership(target)
+      );
       return value.model;
     },
     async modelList(target) {
-      const value = await rpc(controlName(target), "modelList", ownership(target));
+      const value = await rpc(
+        controlName(target),
+        "modelList",
+        ownership(target)
+      );
       return Array.isArray(value.models) ? value.models : [];
     },
     async modelSet(target, input) {
@@ -729,7 +783,11 @@ export function createCloudflareThreadService<
       return value.model;
     },
     async modelHistory(target) {
-      const value = await rpc(controlName(target), "modelHistory", ownership(target));
+      const value = await rpc(
+        controlName(target),
+        "modelHistory",
+        ownership(target)
+      );
       return Array.isArray(value.history) ? value.history : [];
     },
     async submit(target, rawInput) {
@@ -737,9 +795,10 @@ export function createCloudflareThreadService<
       const binding = await service.inspect(target);
       const instanceId = threadName(binding.thread);
       const admissionId = input.idempotencyKey ?? crypto.randomUUID();
-      const selectedModel = input.model === undefined
-        ? undefined
-        : normalizeModelInput(input.model);
+      const selectedModel =
+        input.model === undefined
+          ? undefined
+          : normalizeModelInput(input.model);
       const requested = selectedModel
         ? {
             ...selectedModel,
@@ -751,7 +810,9 @@ export function createCloudflareThreadService<
               : {}),
           }
         : undefined;
-      const configured = requested ?? binding.defaultModel ??
+      const configured =
+        requested ??
+        binding.defaultModel ??
         (await rpc(controlName(target), "modelGet", ownership(target))).model;
       const baseSelection = configured
         ? normalizeModelInput(configured)
@@ -785,7 +846,9 @@ export function createCloudflareThreadService<
         ...(grant ? { grant } : {}),
       });
       const pin = ResolvedModelPinSchema.parse(pinnedValue.pin);
-      const segmentId = String(pinnedValue.segmentId ?? `segment_${admissionId}`);
+      const segmentId = String(
+        pinnedValue.segmentId ?? `segment_${admissionId}`
+      );
       await rpc(controlName(target), "admitTurn", {
         ...ownership(target),
         admissionId,
@@ -803,7 +866,9 @@ export function createCloudflareThreadService<
             recordedAt: new Date().toISOString(),
           },
         });
-        await gateway.abort(runtimeAgentId(binding), instanceId).catch(() => undefined);
+        await gateway
+          .abort(runtimeAgentId(binding), instanceId)
+          .catch(() => undefined);
       }
       const runtimeSelection = pin.runtimeSelection ?? pin.selection;
       const turnContext = await resolveTrustedTurnContext(
@@ -817,7 +882,7 @@ export function createCloudflareThreadService<
           threadId: binding.thread.threadId,
           message: input.message,
           admittedAt: new Date().toISOString(),
-        },
+        }
       );
       const admission = await gateway.send(
         runtimeAgentId(binding),
@@ -827,10 +892,14 @@ export function createCloudflareThreadService<
           idempotencyKey: admissionId,
           model: toFlueModelSpecifier(runtimeSelection),
           ...(input.images ? { images: input.images } : {}),
-          ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
-          ...(input.cacheRetention ? { cacheRetention: input.cacheRetention } : {}),
+          ...(input.thinkingLevel
+            ? { thinkingLevel: input.thinkingLevel }
+            : {}),
+          ...(input.cacheRetention
+            ? { cacheRetention: input.cacheRetention }
+            : {}),
           ...(turnContext ? { turnContext } : {}),
-        },
+        }
       );
       await rpc(controlName(target), "record", {
         ...ownership(target),
@@ -866,16 +935,17 @@ export function createCloudflareThreadService<
         throw new FlaryHostError(
           503,
           "session_engine_unavailable",
-          "The canonical session engine is not available",
+          "The canonical session engine is not available"
         );
       }
       const instanceId = threadName(binding.thread);
       try {
         return await gateway.history(runtimeAgentId(binding), instanceId);
       } catch (error) {
-        const status = error && typeof error === "object" && "status" in error
-          ? Number((error as { status?: unknown }).status)
-          : undefined;
+        const status =
+          error && typeof error === "object" && "status" in error
+            ? Number((error as { status?: unknown }).status)
+            : undefined;
         if (status !== 404) throw error;
         return {
           v: 1,
@@ -895,16 +965,22 @@ export function createCloudflareThreadService<
         live: input.live,
       });
       return createCloudflareFlueFetch(options.env)(
-        `https://flue.internal/agents/${encodeURIComponent(runtimeAgentId(binding))}/${encodeURIComponent(instanceId)}?${query}`,
-        { signal: input.signal },
+        `https://flue.internal/agents/${encodeURIComponent(
+          runtimeAgentId(binding)
+        )}/${encodeURIComponent(instanceId)}?${query}`,
+        { signal: input.signal }
       );
     },
     async attachment(target, attachmentId, input) {
       const binding = await service.inspect(target);
       const instanceId = threadName(binding.thread);
       return createCloudflareFlueFetch(options.env)(
-        `https://flue.internal/agents/${encodeURIComponent(runtimeAgentId(binding))}/${encodeURIComponent(instanceId)}/attachments/${encodeURIComponent(attachmentId)}`,
-        { signal: input.signal },
+        `https://flue.internal/agents/${encodeURIComponent(
+          runtimeAgentId(binding)
+        )}/${encodeURIComponent(instanceId)}/attachments/${encodeURIComponent(
+          attachmentId
+        )}`,
+        { signal: input.signal }
       );
     },
     async edit(target, rawInput) {
@@ -920,7 +996,7 @@ export function createCloudflareThreadService<
         options.env,
         binding,
         "rollback",
-        rollback,
+        rollback
       );
       await projectAgentSnapshot(options.env, binding, (event, sourceCursor) =>
         rpc(controlName(target), "project", {
@@ -942,9 +1018,7 @@ export function createCloudflareThreadService<
         ...(input.mode ? { mode: input.mode } : {}),
         ...(input.images ? { images: input.images } : {}),
         ...(input.model ? { model: input.model } : {}),
-        ...(input.thinkingLevel
-          ? { thinkingLevel: input.thinkingLevel }
-          : {}),
+        ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
         cacheRetention: input.cacheRetention,
         idempotencyKey: editId,
       });
@@ -969,7 +1043,7 @@ export function createCloudflareThreadService<
         options.env,
         binding,
         "compact",
-        input,
+        input
       );
       await projectAgentSnapshot(options.env, binding, (event, sourceCursor) =>
         rpc(controlName(target), "project", {
@@ -995,7 +1069,7 @@ export function createCloudflareThreadService<
         options.env,
         binding,
         "rollback",
-        input,
+        input
       );
       await projectAgentSnapshot(options.env, binding, (event, sourceCursor) =>
         rpc(controlName(target), "project", {
@@ -1025,14 +1099,14 @@ export function createCloudflareThreadService<
           throw new FlaryHostError(
             404,
             "archive_not_found",
-            "The session archive was not found",
+            "The session archive was not found"
           );
         }
-        if (archive.sha256 !== await portableArchiveHash(archive)) {
+        if (archive.sha256 !== (await portableArchiveHash(archive))) {
           throw new FlaryHostError(
             400,
             "archive_hash_mismatch",
-            "The session archive hash does not match its content",
+            "The session archive hash does not match its content"
           );
         }
         const imported = await agentControlRpc(options.env, binding, "import", {
@@ -1042,7 +1116,7 @@ export function createCloudflareThreadService<
           throw new FlaryHostError(
             503,
             "session_engine_unavailable",
-            "The canonical session engine is not available for restore",
+            "The canonical session engine is not available for restore"
           );
         }
       }
@@ -1060,18 +1134,22 @@ export function createCloudflareThreadService<
     },
     async exportSession(target) {
       const binding = await service.inspect(target);
-      const ledger = await rpc(controlName(target), "export", ownership(target));
+      const ledger = await rpc(
+        controlName(target),
+        "export",
+        ownership(target)
+      );
       const canonical = await agentControlRpc(
         options.env,
         binding,
         "export",
-        {},
+        {}
       );
       if (objectValue(canonical).runtimeUnavailable) {
         throw new FlaryHostError(
           503,
           "session_engine_unavailable",
-          "The canonical session engine is not available for export",
+          "The canonical session engine is not available for export"
         );
       }
       const unsigned = {
@@ -1135,15 +1213,14 @@ export function createCloudflareThreadService<
     async historyRestore(target, rawInput) {
       const input = ThreadHistoryRestoreRequestSchema.parse(rawInput);
       const binding = await service.inspect(target);
-      await gateway.abort(
-        runtimeAgentId(binding),
-        threadName(binding.thread),
-      ).catch(() => undefined);
+      await gateway
+        .abort(runtimeAgentId(binding), threadName(binding.thread))
+        .catch(() => undefined);
       const result = await workspaceControl(
         options.env,
         binding,
         "__restore",
-        input,
+        input
       );
       await rpc(controlName(target), "record", {
         ...ownership(target),
@@ -1186,7 +1263,7 @@ export function createCloudflareThreadService<
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           metadata: {
-            ...(parentBinding.metadata ?? {}),
+            ...parentBinding.metadata,
             ...childMetadata,
             parentThreadId: child.parentThreadId ?? target.threadId,
             flarySubagentRootThreadId: child.rootThreadId,
@@ -1195,8 +1272,7 @@ export function createCloudflareThreadService<
             subagent: true,
           },
         });
-        const childName =
-          `thread:${target.authorization.organizationId}:${target.appId}:${child.threadId}`;
+        const childName = `thread:${target.authorization.organizationId}:${target.appId}:${child.threadId}`;
         await rpc(childName, "initialize", {
           ...ownership(target),
           binding: childBinding,
@@ -1227,7 +1303,7 @@ export function createCloudflareThreadService<
                 ? { thinkingLevel: child.reasoningEffort as never }
                 : {}),
               idempotencyKey: `subagent_${child.threadId}`,
-            },
+            }
           );
           await rpc(controlName(target), "subagent", {
             ...ownership(target),
@@ -1261,8 +1337,7 @@ export function createCloudflareThreadService<
         };
         const child = value.thread as { agentId: string } | undefined;
         if (child) {
-          const childName =
-            `thread:${target.authorization.organizationId}:${target.appId}:${message.toThreadId}`;
+          const childName = `thread:${target.authorization.organizationId}:${target.appId}:${message.toThreadId}`;
           const childValue = await rpc(childName, "inspect", ownership(target));
           const childBinding = ThreadBindingSchema.parse(childValue.binding);
           const childInstanceId = threadName(childBinding.thread);
@@ -1276,15 +1351,16 @@ export function createCloudflareThreadService<
             {
               message: message.content,
               mode: message.mode === "interrupt" ? "steer" : "queue",
-              idempotencyKey: `mailbox_${String((value.message as { id?: unknown }).id ?? crypto.randomUUID())}`,
-            },
+              idempotencyKey: `mailbox_${String(
+                (value.message as { id?: unknown }).id ?? crypto.randomUUID()
+              )}`,
+            }
           );
         }
       }
       if (action === "interrupt" && value.thread) {
         const child = value.thread as { threadId: string; agentId: string };
-        const childName =
-          `thread:${target.authorization.organizationId}:${target.appId}:${child.threadId}`;
+        const childName = `thread:${target.authorization.organizationId}:${target.appId}:${child.threadId}`;
         const childValue = await rpc(childName, "inspect", ownership(target));
         const childBinding = ThreadBindingSchema.parse(childValue.binding);
         await gateway
@@ -1294,7 +1370,7 @@ export function createCloudflareThreadService<
       if (action === "wait") {
         const timeoutMs = Math.min(
           Math.max(Number(input.timeoutMs ?? 0), 0),
-          30_000,
+          30_000
         );
         const deadline = Date.now() + timeoutMs;
         while (!subagentWaitSettled(value) && Date.now() < deadline) {
@@ -1334,7 +1410,11 @@ export function createCloudflareThreadService<
       });
     },
     async listApprovals(target) {
-      const value = await agentApprovalRpc(options.env, await service.inspect(target), "approvals");
+      const value = await agentApprovalRpc(
+        options.env,
+        await service.inspect(target),
+        "approvals"
+      );
       return Array.isArray(value.approvals) ? value.approvals : [];
     },
     async decideApproval(target, decisionInput) {
@@ -1343,7 +1423,7 @@ export function createCloudflareThreadService<
         options.env,
         await service.inspect(target),
         "approval",
-        decision,
+        decision
       );
     },
     ...(runtime && runtimeToken
@@ -1363,7 +1443,7 @@ export function createCloudflareThreadService<
                 requestId,
                 input: UserInputAnswerRequestSchema.parse(responseInput),
                 answeredBy: target.authorization.actor,
-              }),
+              })
             );
             await rpc(controlName(target), "project", {
               ...ownership(target),
@@ -1373,7 +1453,8 @@ export function createCloudflareThreadService<
                 request: record.request,
                 response: record.response,
                 requestId,
-                timestamp: record.response?.answeredAt ?? new Date().toISOString(),
+                timestamp:
+                  record.response?.answeredAt ?? new Date().toISOString(),
               },
             });
             return { live: true };
@@ -1385,7 +1466,7 @@ export function createCloudflareThreadService<
   async function mutateBinding(
     target: FlaryThreadTarget,
     method: string,
-    input: unknown = {},
+    input: unknown = {}
   ): Promise<ThreadBinding> {
     const value = await rpc(controlName(target), method, {
       ...ownership(target),
@@ -1484,7 +1565,7 @@ export async function handleFlaryThreadControlObjectRequest(input: {
   if (input.request.headers.get("upgrade")?.toLowerCase() === "websocket") {
     return openThreadControlWebSocket(storage.sql, input);
   }
-  const body = await input.request.json() as Record<string, unknown>;
+  const body = (await input.request.json()) as Record<string, unknown>;
   const method = String(body.method ?? "");
   try {
     const result = await dispatchThreadControl(sql, method, body, {
@@ -1495,8 +1576,10 @@ export async function handleFlaryThreadControlObjectRequest(input: {
     return Response.json(result);
   } catch (error) {
     return Response.json(
-      { error: error instanceof Error ? error.message : "Thread Control failed" },
-      { status: 400 },
+      {
+        error: error instanceof Error ? error.message : "Thread Control failed",
+      },
+      { status: 400 }
     );
   }
 }
@@ -1510,14 +1593,17 @@ async function dispatchThreadControl(
     readonly execution?: ThreadControlExecutionContext;
     readonly storage?: ThreadControlStorage;
     readonly webSockets?: ThreadControlWebSocketHost;
-  },
+  }
 ): Promise<unknown> {
   if (method === "issueRealtimeTicket") {
     assertOwner(sql, body);
     assertThreadOpen(sql);
     const ticketHash = String(body.ticketHash ?? "");
     const expiresAt = String(body.expiresAt ?? "");
-    if (!/^[0-9a-f]{64}$/.test(ticketHash) || !Number.isFinite(Date.parse(expiresAt))) {
+    if (
+      !/^[0-9a-f]{64}$/.test(ticketHash) ||
+      !Number.isFinite(Date.parse(expiresAt))
+    ) {
       throw new Error("The realtime ticket is invalid");
     }
     sql.exec(
@@ -1528,7 +1614,7 @@ async function dispatchThreadControl(
       expiresAt,
       Math.max(0, Number(body.after ?? 0)),
       body.includeChildren === true ? 1 : 0,
-      JSON.stringify(body.actor ?? {}),
+      JSON.stringify(body.actor ?? {})
     );
     return { issued: true, expiresAt };
   }
@@ -1537,7 +1623,10 @@ async function dispatchThreadControl(
     assertThreadOpen(sql);
     const ticketHash = String(body.ticketHash ?? "");
     const expiresAt = String(body.expiresAt ?? "");
-    if (!/^[0-9a-f]{64}$/.test(ticketHash) || !Number.isFinite(Date.parse(expiresAt))) {
+    if (
+      !/^[0-9a-f]{64}$/.test(ticketHash) ||
+      !Number.isFinite(Date.parse(expiresAt))
+    ) {
       throw new Error("The terminal ticket is invalid");
     }
     sql.exec(
@@ -1548,7 +1637,7 @@ async function dispatchThreadControl(
       expiresAt,
       Math.min(400, Math.max(1, Number(body.cols ?? 80))),
       Math.min(200, Math.max(1, Number(body.rows ?? 24))),
-      JSON.stringify(body.actor ?? {}),
+      JSON.stringify(body.actor ?? {})
     );
     return { issued: true, expiresAt };
   }
@@ -1556,23 +1645,25 @@ async function dispatchThreadControl(
     assertOwner(sql, body);
     assertThreadOpen(sql);
     const ticketHash = String(body.ticketHash ?? "");
-    const row = sql.exec<{
-      expires_at: string;
-      cols: number;
-      rows: number;
-      consumed_at: string | null;
-    }>(
-      `SELECT expires_at, cols, rows, consumed_at
+    const row = sql
+      .exec<{
+        expires_at: string;
+        cols: number;
+        rows: number;
+        consumed_at: string | null;
+      }>(
+        `SELECT expires_at, cols, rows, consumed_at
        FROM flary_terminal_tickets WHERE ticket_hash = ?`,
-      ticketHash,
-    ).toArray()[0];
+        ticketHash
+      )
+      .toArray()[0];
     if (!row || row.consumed_at || Date.parse(row.expires_at) <= Date.now()) {
       throw new Error("The terminal ticket is invalid or expired");
     }
     sql.exec(
       "UPDATE flary_terminal_tickets SET consumed_at = ? WHERE ticket_hash = ?",
       new Date().toISOString(),
-      ticketHash,
+      ticketHash
     );
     return { cols: row.cols, rows: row.rows };
   }
@@ -1581,9 +1672,10 @@ async function dispatchThreadControl(
     assertThreadOpen(sql);
     const idempotencyKey = String(body.idempotencyKey ?? "");
     const requestId = String(body.requestId ?? "");
-    const error = body.error && typeof body.error === "object"
-      ? body.error as Record<string, unknown>
-      : undefined;
+    const error =
+      body.error && typeof body.error === "object"
+        ? (body.error as Record<string, unknown>)
+        : undefined;
     const result = error ? undefined : body.result;
     sql.exec(
       `UPDATE flary_realtime_commands
@@ -1592,7 +1684,7 @@ async function dispatchThreadControl(
       error ? "failed" : "completed",
       JSON.stringify(error ? { error } : { result }),
       new Date().toISOString(),
-      idempotencyKey,
+      idempotencyKey
     );
     const frame: RealtimeServerFrame = error
       ? {
@@ -1600,7 +1692,10 @@ async function dispatchThreadControl(
           type: "error",
           requestId,
           code: typeof error.code === "string" ? error.code : "command_failed",
-          message: typeof error.message === "string" ? error.message : "The realtime command failed",
+          message:
+            typeof error.message === "string"
+              ? error.message
+              : "The realtime command failed",
         }
       : { version: 1, type: "result", requestId, result };
     for (const socket of host?.webSockets?.getWebSockets() ?? []) {
@@ -1631,9 +1726,12 @@ async function dispatchThreadControl(
   if (method === "list") {
     assertOwner(sql, body, true);
     return {
-      bindings: sql.exec<{ value_json: string }>(
-        "SELECT value_json FROM flary_thread_control WHERE key LIKE 'catalog:%' ORDER BY key",
-      ).toArray().map((row) => JSON.parse(row.value_json)),
+      bindings: sql
+        .exec<{ value_json: string }>(
+          "SELECT value_json FROM flary_thread_control WHERE key LIKE 'catalog:%' ORDER BY key"
+        )
+        .toArray()
+        .map((row) => JSON.parse(row.value_json)),
     };
   }
   assertOwner(sql, body);
@@ -1671,9 +1769,8 @@ async function dispatchThreadControl(
   if (method === "recordPromptSnapshot") {
     const binding = requireBinding(sql);
     const promptHash = String(body.promptHash ?? "");
-    const instructions = typeof body.instructions === "string"
-      ? body.instructions
-      : "";
+    const instructions =
+      typeof body.instructions === "string" ? body.instructions : "";
     const promptBytes = new TextEncoder().encode(instructions).byteLength;
     if (!/^[0-9a-f]{64}$/.test(promptHash)) {
       throw new Error("The prompt snapshot hash is invalid");
@@ -1681,14 +1778,16 @@ async function dispatchThreadControl(
     if (!instructions || promptBytes > 1024 * 1024) {
       throw new Error("The prompt snapshot is empty or too large");
     }
-    if (await sha256Text(instructions) !== promptHash) {
+    if ((await sha256Text(instructions)) !== promptHash) {
       throw new Error("The prompt snapshot failed its hash check");
     }
     const snapshotKey = `prompt-snapshot:${promptHash}`;
-    const existing = sql.exec<{ value_json: string }>(
-      "SELECT value_json FROM flary_thread_control WHERE key = ?",
-      snapshotKey,
-    ).toArray()[0];
+    const existing = sql
+      .exec<{ value_json: string }>(
+        "SELECT value_json FROM flary_thread_control WHERE key = ?",
+        snapshotKey
+      )
+      .toArray()[0];
     if (existing) {
       return {
         recorded: true,
@@ -1697,9 +1796,10 @@ async function dispatchThreadControl(
       };
     }
     const capturedAt = new Date().toISOString();
-    const agentRevision = typeof body.agentRevision === "string"
-      ? body.agentRevision.slice(0, 512)
-      : typeof binding.metadata?.flaryAgentRevision === "string"
+    const agentRevision =
+      typeof body.agentRevision === "string"
+        ? body.agentRevision.slice(0, 512)
+        : typeof binding.metadata?.flaryAgentRevision === "string"
         ? binding.metadata.flaryAgentRevision
         : undefined;
     put(sql, snapshotKey, {
@@ -1726,7 +1826,7 @@ async function dispatchThreadControl(
               ...(agentRevision ? { agentRevision } : {}),
               instructions,
             }),
-            "prompt.instructions",
+            "prompt.instructions"
           )
         : undefined;
       put(sql, snapshotKey, {
@@ -1737,14 +1837,18 @@ async function dispatchThreadControl(
         pending: false,
         ...(agentRevision ? { agentRevision } : {}),
       });
-      await appendLedger(sql, binding, "prompt.snapshot", {
-        promptHash,
-        promptBytes,
-        capturedAt,
-        archived: Boolean(entry),
-        ...(agentRevision ? { agentRevision } : {}),
-      }, {
-        ...(entry
+      await appendLedger(
+        sql,
+        binding,
+        "prompt.snapshot",
+        {
+          promptHash,
+          promptBytes,
+          capturedAt,
+          archived: Boolean(entry),
+          ...(agentRevision ? { agentRevision } : {}),
+        },
+        entry
           ? {
               encryptedContentRef: {
                 storageKey: entry.storageKey,
@@ -1754,9 +1858,11 @@ async function dispatchThreadControl(
                 keyVersion: entry.keyVersion,
               },
             }
-          : {}),
-      });
-      await broadcastThreadRecords(sql, host?.webSockets).catch(() => undefined);
+          : {}
+      );
+      await broadcastThreadRecords(sql, host?.webSockets).catch(
+        () => undefined
+      );
     })().catch((error) => {
       sql.exec("DELETE FROM flary_thread_control WHERE key = ?", snapshotKey);
       throw error;
@@ -1772,44 +1878,53 @@ async function dispatchThreadControl(
     };
   }
   if (method === "catalogDelete") {
-    sql.exec("DELETE FROM flary_thread_control WHERE key = ?", `catalog:${String(body.threadId)}`);
+    sql.exec(
+      "DELETE FROM flary_thread_control WHERE key = ?",
+      `catalog:${String(body.threadId)}`
+    );
     return { ok: true };
   }
   if (method === "delete") {
     const binding = requireBinding(sql);
     await appendLedger(sql, binding, "terminal", { status: "deleted" });
-    const bucket = host?.env?.FLARY_SESSION_ARCHIVE as SessionArchiveBucket | undefined;
-    const secret = typeof host?.env?.FLARY_SESSION_ARCHIVE_KEY === "string"
-      ? host.env.FLARY_SESSION_ARCHIVE_KEY
-      : undefined;
+    const bucket = host?.env?.FLARY_SESSION_ARCHIVE as
+      | SessionArchiveBucket
+      | undefined;
+    const secret =
+      typeof host?.env?.FLARY_SESSION_ARCHIVE_KEY === "string"
+        ? host.env.FLARY_SESSION_ARCHIVE_KEY
+        : undefined;
     if (bucket && secret) {
       await new R2SessionArchive({ sql, bucket, secret }).deleteSession(
-        binding.thread.threadId,
+        binding.thread.threadId
       );
-      await new SqliteCanonicalSessionArchive({ sql, bucket, secret }).deleteSession(
-        binding.thread.threadId,
-      );
+      await new SqliteCanonicalSessionArchive({
+        sql,
+        bucket,
+        secret,
+      }).deleteSession(binding.thread.threadId);
     }
-    await bucket?.delete?.(browserStateObjectKey({
-      organizationId: binding.thread.organizationId,
-      appId: binding.thread.appId,
-      threadId: binding.thread.threadId,
-    }));
-    const browserStateRow = sql.exec<{ value_json: string }>(
-      "SELECT value_json FROM flary_thread_control WHERE key = 'browser-state'",
-    ).toArray()[0];
+    await bucket?.delete?.(
+      browserStateObjectKey({
+        organizationId: binding.thread.organizationId,
+        appId: binding.thread.appId,
+        threadId: binding.thread.threadId,
+      })
+    );
+    const browserStateRow = sql
+      .exec<{ value_json: string }>(
+        "SELECT value_json FROM flary_thread_control WHERE key = 'browser-state'"
+      )
+      .toArray()[0];
     const browserState = browserStateRow
       ? objectValue(JSON.parse(browserStateRow.value_json))
       : {};
-    if (
-      host?.env?.BROWSER &&
-      typeof browserState.sessionId === "string"
-    ) {
+    if (host?.env?.BROWSER && typeof browserState.sessionId === "string") {
       const playwright = await import("@cloudflare/playwright");
-      await playwright.connect(
-        host.env.BROWSER as never,
-        browserState.sessionId,
-      ).then((browser) => browser.close()).catch(() => undefined);
+      await playwright
+        .connect(host.env.BROWSER as never, browserState.sessionId)
+        .then((browser) => browser.close())
+        .catch(() => undefined);
     }
     await deleteStoredSandboxBackups(host?.env?.BACKUP_BUCKET, sql);
     for (const table of [
@@ -1852,16 +1967,18 @@ async function dispatchThreadControl(
       sql,
       requireBinding(sql),
       String(body.recordType ?? "runtime.event") as SessionRecordType,
-      objectValue(body.payload),
+      objectValue(body.payload)
     );
   }
   if (method === "project") {
     const binding = requireBinding(sql);
     const sourceCursor = String(body.sourceCursor ?? "");
-    const seen = sql.exec<{ source_cursor: string }>(
-      "SELECT source_cursor FROM flary_session_projection_dedupe WHERE source_cursor = ?",
-      sourceCursor,
-    ).toArray()[0];
+    const seen = sql
+      .exec<{ source_cursor: string }>(
+        "SELECT source_cursor FROM flary_session_projection_dedupe WHERE source_cursor = ?",
+        sourceCursor
+      )
+      .toArray()[0];
     if (seen) return { projected: false, replay: true };
     const record = await new FlarySessionProjector(
       new SqliteSessionLedger(sql),
@@ -1875,7 +1992,7 @@ async function dispatchThreadControl(
           typeof binding.metadata?.flaryAgentRevision === "string"
             ? binding.metadata.flaryAgentRevision
             : "flary-thread-control-v1",
-      },
+      }
     ).project({
       sourceCursor,
       event: objectValue(body.event),
@@ -1884,7 +2001,7 @@ async function dispatchThreadControl(
       `INSERT OR IGNORE INTO flary_session_projection_dedupe
         (source_cursor, recorded_at) VALUES (?, ?)`,
       sourceCursor,
-      new Date().toISOString(),
+      new Date().toISOString()
     );
     return { projected: true, record };
   }
@@ -1893,13 +2010,19 @@ async function dispatchThreadControl(
     const binding = requireBinding(sql);
     const childThreadId = String(body.childThreadId ?? "");
     const sourceCursor = String(body.sourceCursor ?? "");
-    if (!childThreadId || childThreadId === binding.thread.threadId || !sourceCursor) {
+    if (
+      !childThreadId ||
+      childThreadId === binding.thread.threadId ||
+      !sourceCursor
+    ) {
       throw new Error("The child projection identity is invalid");
     }
-    const seen = sql.exec<{ source_cursor: string }>(
-      "SELECT source_cursor FROM flary_session_projection_dedupe WHERE source_cursor = ?",
-      sourceCursor,
-    ).toArray()[0];
+    const seen = sql
+      .exec<{ source_cursor: string }>(
+        "SELECT source_cursor FROM flary_session_projection_dedupe WHERE source_cursor = ?",
+        sourceCursor
+      )
+      .toArray()[0];
     if (seen) return { projected: false, replay: true };
     const childAgentId = String(body.childAgentId ?? "subagent");
     const producer = safeProducer(body);
@@ -1911,10 +2034,14 @@ async function dispatchThreadControl(
       agentId: childAgentId,
       parentId: childThreadId,
       sourceCursor,
-      recordType: String(body.recordType ?? "runtime.event") as SessionRecordType,
+      recordType: String(
+        body.recordType ?? "runtime.event"
+      ) as SessionRecordType,
       recordedAt: String(body.recordedAt ?? new Date().toISOString()),
       attempt: nonnegative(body.attempt, 0),
-      sourceRevision: String(body.sourceRevision ?? "flary-child-projection-v1"),
+      sourceRevision: String(
+        body.sourceRevision ?? "flary-child-projection-v1"
+      ),
       ...(producer ? { producer } : {}),
       publicPayload: {
         ...objectValue(body.payload),
@@ -1925,36 +2052,60 @@ async function dispatchThreadControl(
       `INSERT OR IGNORE INTO flary_session_projection_dedupe
         (source_cursor, recorded_at) VALUES (?, ?)`,
       sourceCursor,
-      new Date().toISOString(),
+      new Date().toISOString()
     );
     return { projected: true, record };
   }
-  if (method === "modelGet" || method === "modelList" || method === "modelHistory") {
+  if (
+    method === "modelGet" ||
+    method === "modelList" ||
+    method === "modelHistory"
+  ) {
     const binding = requireBinding(sql);
     if (method === "modelHistory") {
-      const value = sql.exec<{ value_json: string }>(
-        "SELECT value_json FROM flary_thread_control WHERE key LIKE 'model-history:%' ORDER BY key",
-      ).toArray().map((row) => JSON.parse(row.value_json));
+      const value = sql
+        .exec<{ value_json: string }>(
+          "SELECT value_json FROM flary_thread_control WHERE key LIKE 'model-history:%' ORDER BY key"
+        )
+        .toArray()
+        .map((row) => JSON.parse(row.value_json));
       return { history: value };
     }
     const policy = modelPolicy(binding);
     if (method === "modelList") {
-      return { models: policy.allow.length > 0 ? policy.allow : (binding.defaultModel ? [binding.defaultModel] : []) };
+      return {
+        models:
+          policy.allow.length > 0
+            ? policy.allow
+            : binding.defaultModel
+            ? [binding.defaultModel]
+            : [],
+      };
     }
-    const stored = sql.exec<{ value_json: string }>(
-      "SELECT value_json FROM flary_thread_control WHERE key = 'model-state'",
-    ).toArray()[0];
-    return { model: stored ? JSON.parse(stored.value_json) : binding.defaultModel ?? policy.allow[0] };
+    const stored = sql
+      .exec<{ value_json: string }>(
+        "SELECT value_json FROM flary_thread_control WHERE key = 'model-state'"
+      )
+      .toArray()[0];
+    return {
+      model: stored
+        ? JSON.parse(stored.value_json)
+        : binding.defaultModel ?? policy.allow[0],
+    };
   }
   if (method === "modelSet") {
     const binding = requireBinding(sql);
     const requested = normalizeModelInput(
-      ThreadModelSetRequestSchema.parse(body.input).model,
+      ThreadModelSetRequestSchema.parse(body.input).model
     );
     const current = currentModel(sql, binding);
     assertAllowedModel(binding, requested);
     const policy = modelPolicy(binding);
-    if (policy.switching === "disabled" && current && !sameModel(current, requested)) {
+    if (
+      policy.switching === "disabled" &&
+      current &&
+      !sameModel(current, requested)
+    ) {
       throw new Error("Model switching is disabled for this agent");
     }
     binding.defaultModel = requested;
@@ -1990,10 +2141,12 @@ async function dispatchThreadControl(
     const binding = requireBinding(sql);
     const admissionId = String(body.admissionId ?? "");
     if (!admissionId) throw new Error("An admission id is required");
-    const existing = sql.exec<{ value_json: string }>(
-      "SELECT value_json FROM flary_thread_control WHERE key = ?",
-      `model-pin:${admissionId}`,
-    ).toArray()[0];
+    const existing = sql
+      .exec<{ value_json: string }>(
+        "SELECT value_json FROM flary_thread_control WHERE key = ?",
+        `model-pin:${admissionId}`
+      )
+      .toArray()[0];
     if (existing) {
       return {
         pin: JSON.parse(existing.value_json),
@@ -2006,9 +2159,10 @@ async function dispatchThreadControl(
       : currentModel(sql, binding);
     if (!requested) throw new Error("No model is configured for this agent");
     assertAllowedModel(binding, requested);
-    const grant = body.grant && typeof body.grant === "object" && !Array.isArray(body.grant)
-      ? body.grant as Record<string, unknown>
-      : {};
+    const grant =
+      body.grant && typeof body.grant === "object" && !Array.isArray(body.grant)
+        ? (body.grant as Record<string, unknown>)
+        : {};
     // The authored selection remains the public model identity. A trusted
     // host can add a secret-free, thread-unique alias for runtime dispatch.
     const runtimeSelection = grant.runtimeSelection
@@ -2024,7 +2178,9 @@ async function dispatchThreadControl(
       ...(typeof grant.credentialGeneration === "string"
         ? { credentialGeneration: grant.credentialGeneration }
         : {}),
-      ...(grant.billingMode === "managed" || grant.billingMode === "subscription" || grant.billingMode === "byok"
+      ...(grant.billingMode === "managed" ||
+      grant.billingMode === "subscription" ||
+      grant.billingMode === "byok"
         ? { billingMode: grant.billingMode }
         : {}),
       ...(typeof grant.modelCatalogRevision === "string"
@@ -2059,23 +2215,32 @@ async function dispatchThreadControl(
     for (const value of records) {
       if (!value || typeof value !== "object" || Array.isArray(value)) continue;
       const source = value as Record<string, unknown>;
-      if (source.recordType === "terminal" &&
-          objectValue(source.publicPayload).status === "deleted") continue;
+      if (
+        source.recordType === "terminal" &&
+        objectValue(source.publicPayload).status === "deleted"
+      )
+        continue;
       const recordType = String(source.recordType) as SessionRecordType;
       const payload = objectValue(source.publicPayload);
-      await appendLedger(sql, binding, recordType, {
-        ...payload,
-        _forkedFrom: {
-          sessionId: source.sessionId,
-          sequence: source.sequence,
-          recordHash: source.recordHash,
-          ...(typeof body.parentThreadId === "string"
-            ? { parentThreadId: body.parentThreadId }
-            : {}),
+      await appendLedger(
+        sql,
+        binding,
+        recordType,
+        {
+          ...payload,
+          _forkedFrom: {
+            sessionId: source.sessionId,
+            sequence: source.sequence,
+            recordHash: source.recordHash,
+            ...(typeof body.parentThreadId === "string"
+              ? { parentThreadId: body.parentThreadId }
+              : {}),
+          },
         },
-      }, {
-        producer: safeProducer(source),
-      });
+        {
+          producer: safeProducer(source),
+        }
+      );
       copied += 1;
     }
     return { copied };
@@ -2083,7 +2248,8 @@ async function dispatchThreadControl(
   if (method === "restore") {
     const binding = requireBinding(sql);
     const restoreInput = objectValue(body.input);
-    const jsonl = typeof restoreInput.jsonl === "string" ? restoreInput.jsonl : "";
+    const jsonl =
+      typeof restoreInput.jsonl === "string" ? restoreInput.jsonl : "";
     const retarget = restoreInput.retarget === true;
     if (!jsonl) throw new Error("A flary-jsonl archive is required");
     const imported = await importSessionJsonl(jsonl);
@@ -2091,26 +2257,30 @@ async function dispatchThreadControl(
       if (
         record.tenantId !== binding.thread.organizationId ||
         record.applicationId !== binding.thread.appId ||
-        (!retarget && (
-          record.sessionId !== binding.thread.threadId ||
-          record.threadId !== binding.thread.threadId
-        ))
+        (!retarget &&
+          (record.sessionId !== binding.thread.threadId ||
+            record.threadId !== binding.thread.threadId))
       ) {
         throw new Error("The archive does not belong to this thread");
       }
     }
     if (restoreInput.replace !== false) {
-      const bucket = host?.env?.FLARY_SESSION_ARCHIVE as SessionArchiveBucket | undefined;
-      const secret = typeof host?.env?.FLARY_SESSION_ARCHIVE_KEY === "string"
-        ? host.env.FLARY_SESSION_ARCHIVE_KEY
-        : undefined;
+      const bucket = host?.env?.FLARY_SESSION_ARCHIVE as
+        | SessionArchiveBucket
+        | undefined;
+      const secret =
+        typeof host?.env?.FLARY_SESSION_ARCHIVE_KEY === "string"
+          ? host.env.FLARY_SESSION_ARCHIVE_KEY
+          : undefined;
       if (bucket && secret) {
         await new R2SessionArchive({ sql, bucket, secret }).deleteSession(
-          binding.thread.threadId,
+          binding.thread.threadId
         );
-        await new SqliteCanonicalSessionArchive({ sql, bucket, secret }).deleteSession(
-          binding.thread.threadId,
-        );
+        await new SqliteCanonicalSessionArchive({
+          sql,
+          bucket,
+          secret,
+        }).deleteSession(binding.thread.threadId);
       }
       sql.exec("DROP TABLE IF EXISTS flary_session_ledger_records");
       sql.exec("DROP TABLE IF EXISTS flary_session_ledger_metadata");
@@ -2173,10 +2343,12 @@ async function dispatchThreadControl(
   if (method === "admitTurn") {
     const binding = requireBinding(sql);
     const admissionId = String(body.admissionId ?? "");
-    const existing = sql.exec<{ admission_id: string }>(
-      "SELECT admission_id FROM flary_interactive_admissions WHERE admission_id = ?",
-      admissionId,
-    ).toArray()[0];
+    const existing = sql
+      .exec<{ admission_id: string }>(
+        "SELECT admission_id FROM flary_interactive_admissions WHERE admission_id = ?",
+        admissionId
+      )
+      .toArray()[0];
     if (existing) return { admitted: true, replay: true };
     await reserveRootInteractiveUsage(sql, host?.env, binding, {
       reservationId: `turn_${admissionId}`,
@@ -2188,7 +2360,7 @@ async function dispatchThreadControl(
         `INSERT INTO flary_interactive_admissions
           (admission_id, admitted_at) VALUES (?, ?)`,
         admissionId,
-        new Date().toISOString(),
+        new Date().toISOString()
       );
       return { admitted: true, replay: false };
     });
@@ -2204,7 +2376,7 @@ async function dispatchThreadControl(
       host?.env,
       binding,
       method,
-      body,
+      body
     );
   }
   if (method === "recordToolActivity") {
@@ -2216,36 +2388,51 @@ async function dispatchThreadControl(
     }
     const toolCallId = String(body.toolCallId ?? "");
     const toolId = String(body.toolId ?? "");
-    if (!toolCallId || !toolId) throw new Error("Tool activity needs call and tool IDs");
+    if (!toolCallId || !toolId)
+      throw new Error("Tool activity needs call and tool IDs");
     const activityKey = `tool-activity:${toolCallId}:${state}`;
-    const existing = sql.exec<{ value_json: string }>(
-      "SELECT value_json FROM flary_thread_control WHERE key = ?",
-      activityKey,
-    ).toArray()[0];
+    const existing = sql
+      .exec<{ value_json: string }>(
+        "SELECT value_json FROM flary_thread_control WHERE key = ?",
+        activityKey
+      )
+      .toArray()[0];
     if (existing) return { recorded: true, replay: true };
-    const inputSummary = body.inputSummary && typeof body.inputSummary === "object" && !Array.isArray(body.inputSummary)
-      ? body.inputSummary as Record<string, unknown>
-      : {};
+    const inputSummary =
+      body.inputSummary &&
+      typeof body.inputSummary === "object" &&
+      !Array.isArray(body.inputSummary)
+        ? (body.inputSummary as Record<string, unknown>)
+        : {};
     if (state === "started") {
       await appendLedger(sql, binding, "tool.call", {
         call: {
           id: toolCallId,
           toolId,
           arguments: inputSummary,
-          ...(Number.isInteger(body.ordinal) ? { ordinal: Number(body.ordinal) } : {}),
+          ...(Number.isInteger(body.ordinal)
+            ? { ordinal: Number(body.ordinal) }
+            : {}),
         },
       });
     } else {
-      const failure = typeof body.error === "string"
-        ? publicAgentFailureMessage(body.error)
-        : undefined;
+      const failure =
+        typeof body.error === "string"
+          ? publicAgentFailureMessage(body.error)
+          : undefined;
       await appendLedger(sql, binding, "tool.result", {
         result: {
           callId: toolCallId,
           toolId,
           status: state === "completed" ? "succeeded" : "failed",
-          ...(typeof body.durationMs === "number" && Number.isFinite(body.durationMs)
-            ? { durationMs: Math.min(24 * 60 * 60 * 1_000, Math.max(0, Math.round(body.durationMs))) }
+          ...(typeof body.durationMs === "number" &&
+          Number.isFinite(body.durationMs)
+            ? {
+                durationMs: Math.min(
+                  24 * 60 * 60 * 1_000,
+                  Math.max(0, Math.round(body.durationMs))
+                ),
+              }
             : {}),
           ...(body.outputSummary !== undefined
             ? { output: body.outputSummary }
@@ -2258,7 +2445,9 @@ async function dispatchThreadControl(
       });
     }
     put(sql, activityKey, { state, toolCallId, toolId });
-    const broadcast = broadcastThreadRecords(sql, host?.webSockets).catch(() => undefined);
+    const broadcast = broadcastThreadRecords(sql, host?.webSockets).catch(
+      () => undefined
+    );
     if (host?.execution) host.execution.waitUntil(broadcast);
     else await broadcast;
     return { recorded: true, replay: false };
@@ -2282,15 +2471,19 @@ async function dispatchThreadControl(
     const activityId = String(body.activityId ?? "").slice(0, 512);
     if (!activityId) throw new Error("Runtime activity needs an activity ID");
     const activityKey = `runtime-activity:${activityId}`;
-    const existing = sql.exec<{ value_json: string }>(
-      "SELECT value_json FROM flary_thread_control WHERE key = ?",
-      activityKey,
-    ).toArray()[0];
+    const existing = sql
+      .exec<{ value_json: string }>(
+        "SELECT value_json FROM flary_thread_control WHERE key = ?",
+        activityKey
+      )
+      .toArray()[0];
     if (existing) return { recorded: true, replay: true };
     const payload = safeRuntimeActivityPayload(recordType, body.payload);
     await appendLedger(sql, binding, recordType, payload);
     put(sql, activityKey, { recordType, activityId });
-    const broadcast = broadcastThreadRecords(sql, host?.webSockets).catch(() => undefined);
+    const broadcast = broadcastThreadRecords(sql, host?.webSockets).catch(
+      () => undefined
+    );
     if (host?.execution) host.execution.waitUntil(broadcast);
     else await broadcast;
     return { recorded: true, replay: false };
@@ -2306,7 +2499,9 @@ async function dispatchThreadControl(
       ...(typeof body.admissionId === "string"
         ? { admissionId: body.admissionId }
         : {}),
-      ...(typeof body.segmentId === "string" ? { segmentId: body.segmentId } : {}),
+      ...(typeof body.segmentId === "string"
+        ? { segmentId: body.segmentId }
+        : {}),
       ...(typeof body.turnMessage === "string"
         ? { turnMessage: body.turnMessage }
         : {}),
@@ -2324,42 +2519,45 @@ async function dispatchThreadControl(
         admissionId:
           typeof body.admissionId === "string" ? body.admissionId : undefined,
         modelPin: body.modelPin as ResolvedModelPin | undefined,
-        segmentId: typeof body.segmentId === "string" ? body.segmentId : undefined,
+        segmentId:
+          typeof body.segmentId === "string" ? body.segmentId : undefined,
         turnMessage:
           typeof body.turnMessage === "string" ? body.turnMessage : undefined,
         webSockets: host.webSockets,
-      }),
+      })
     );
     await host.storage?.setAlarm?.(Date.now() + 30_000);
     return { tracked: true };
   }
   if (method === "accountUsage") {
     const binding = requireBinding(sql);
-    return accountInteractiveDelta(
-      sql,
-      binding,
-      {
-        steps: nonnegative(objectValue(body.delta).steps, 0),
-        toolCalls: nonnegative(objectValue(body.delta).toolCalls, 0),
-        tokens: nonnegative(objectValue(body.delta).tokens, 0),
-        costUsd: positiveNumber(objectValue(body.delta).costUsd, 0),
-        sandboxSeconds: nonnegative(objectValue(body.delta).sandboxSeconds, 0),
-        browserSeconds: nonnegative(objectValue(body.delta).browserSeconds, 0),
-      },
-    );
+    return accountInteractiveDelta(sql, binding, {
+      steps: nonnegative(objectValue(body.delta).steps, 0),
+      toolCalls: nonnegative(objectValue(body.delta).toolCalls, 0),
+      tokens: nonnegative(objectValue(body.delta).tokens, 0),
+      costUsd: positiveNumber(objectValue(body.delta).costUsd, 0),
+      sandboxSeconds: nonnegative(objectValue(body.delta).sandboxSeconds, 0),
+      browserSeconds: nonnegative(objectValue(body.delta).browserSeconds, 0),
+    });
   }
   if (method === "subagent") {
     const binding = requireBinding(sql);
     const action = String(body.action);
-    const result = subagentAction(sql, binding, action, objectValue(body.input));
+    const result = subagentAction(
+      sql,
+      binding,
+      action,
+      objectValue(body.input)
+    );
     if (action !== "list" && action !== "wait") {
-      const recordType: SessionRecordType = action === "spawn"
-        ? "subagent.spawned"
-        : action === "send"
+      const recordType: SessionRecordType =
+        action === "spawn"
+          ? "subagent.spawned"
+          : action === "send"
           ? "subagent.message"
           : action === "close"
-            ? "subagent.closed"
-            : "subagent.status";
+          ? "subagent.closed"
+          : "subagent.status";
       await appendLedger(sql, binding, recordType, {
         action,
         result: jsonValue(result),
@@ -2369,10 +2567,11 @@ async function dispatchThreadControl(
   }
   if (method === "process") {
     const binding = requireBinding(sql);
-    if (!host?.env) throw new Error("Sandbox processes need the generated Cloudflare host");
+    if (!host?.env)
+      throw new Error("Sandbox processes need the generated Cloudflare host");
     const processInput = objectValue(body.input);
     const reservationId = `sandbox_${String(
-      processInput.requestId ?? processInput.processId ?? crypto.randomUUID(),
+      processInput.requestId ?? processInput.processId ?? crypto.randomUUID()
     )}_${String(body.action ?? "control")}`;
     await reserveRootInteractiveUsage(sql, host.env, binding, {
       reservationId,
@@ -2387,7 +2586,7 @@ async function dispatchThreadControl(
         host.env,
         binding,
         String(body.action ?? ""),
-        processInput,
+        processInput
       );
     } catch (error) {
       await rootInteractiveReservationAction(
@@ -2395,7 +2594,7 @@ async function dispatchThreadControl(
         host.env,
         binding,
         "unknownUsage",
-        { reservationId },
+        { reservationId }
       ).catch(() => undefined);
       throw error;
     }
@@ -2413,7 +2612,7 @@ async function dispatchThreadControl(
         host.env,
         binding,
         "settleUsage",
-        { reservationId, actual: sandboxDelta },
+        { reservationId, actual: sandboxDelta }
       );
     } catch (error) {
       await rootInteractiveReservationAction(
@@ -2421,7 +2620,7 @@ async function dispatchThreadControl(
         host.env,
         binding,
         "unknownUsage",
-        { reservationId },
+        { reservationId }
       ).catch(() => undefined);
       throw error;
     }
@@ -2433,13 +2632,14 @@ async function dispatchThreadControl(
       if (localLimit.exceeded) throw new Error(localLimit.message);
     }
     const action = String(body.action ?? "");
-    const recordType: SessionRecordType = action === "start"
-      ? "process.started"
-      : action === "attach" || action === "list"
+    const recordType: SessionRecordType =
+      action === "start"
+        ? "process.started"
+        : action === "attach" || action === "list"
         ? "process.output"
         : action === "complete"
-          ? "process.completed"
-          : "process.control";
+        ? "process.completed"
+        : "process.control";
     await appendLedger(sql, binding, recordType, {
       action,
       processId: objectValue(body.input).processId,
@@ -2453,7 +2653,7 @@ async function dispatchThreadControl(
     const browserInput = objectValue(body.input);
     const accounted = action !== "status" && action !== "register";
     const reservationId = `browser_${String(
-      browserInput.requestId ?? crypto.randomUUID(),
+      browserInput.requestId ?? crypto.randomUUID()
     )}_${action}`;
     if (accounted) {
       await reserveRootInteractiveUsage(sql, host?.env, binding, {
@@ -2470,7 +2670,7 @@ async function dispatchThreadControl(
         host?.env,
         binding,
         action,
-        browserInput,
+        browserInput
       );
     } catch (error) {
       if (accounted) {
@@ -2479,7 +2679,7 @@ async function dispatchThreadControl(
           host?.env,
           binding,
           "unknownUsage",
-          { reservationId },
+          { reservationId }
         ).catch(() => undefined);
       }
       throw error;
@@ -2491,7 +2691,10 @@ async function dispatchThreadControl(
         tokens: 0,
         costUsd: 0,
         sandboxSeconds: 0,
-        browserSeconds: Math.max(1, Math.ceil((Date.now() - startedAt) / 1_000)),
+        browserSeconds: Math.max(
+          1,
+          Math.ceil((Date.now() - startedAt) / 1_000)
+        ),
       };
       try {
         await rootInteractiveReservationAction(
@@ -2499,7 +2702,7 @@ async function dispatchThreadControl(
           host?.env,
           binding,
           "settleUsage",
-          { reservationId, actual: browserDelta },
+          { reservationId, actual: browserDelta }
         );
       } catch (error) {
         await rootInteractiveReservationAction(
@@ -2507,7 +2710,7 @@ async function dispatchThreadControl(
           host?.env,
           binding,
           "unknownUsage",
-          { reservationId },
+          { reservationId }
         ).catch(() => undefined);
         throw error;
       }
@@ -2533,7 +2736,7 @@ async function dispatchThreadControl(
       sql,
       requireBinding(sql),
       String(body.action ?? ""),
-      objectValue(body.input),
+      objectValue(body.input)
     );
     await scheduleNextAlarm(sql, host?.storage);
     return result;
@@ -2545,7 +2748,7 @@ async function dispatchThreadControl(
       binding.thread.threadId,
       method === "records" ? numericValue(body.after, 0) : 0,
       method === "records" ? positive(body.limit, 100) : 1_000_000,
-      host?.env,
+      host?.env
     );
     if (method === "export") {
       return { jsonl: exportSessionJsonl(records) };
@@ -2555,31 +2758,31 @@ async function dispatchThreadControl(
       : [];
     const types = Array.isArray(body.types) ? body.types.map(String) : [];
     return {
-      records: records.filter((record) =>
-        (families.length === 0 ||
-          families.some((family) => record.recordType.startsWith(family))) &&
-        (types.length === 0 || types.includes(record.recordType))),
+      records: records.filter(
+        (record) =>
+          (families.length === 0 ||
+            families.some((family) => record.recordType.startsWith(family))) &&
+          (types.length === 0 || types.includes(record.recordType))
+      ),
     };
   }
   const binding = requireBinding(sql);
   const update = objectValue(body.input);
-  const metadata = { ...(binding.metadata ?? {}) };
+  const metadata = { ...binding.metadata };
   if (method === "archive") binding.status = "archived";
   if (method === "unarchive") binding.status = "active";
   if (method === "rename" && typeof update.title === "string") {
     metadata.title = update.title;
   }
   if (method === "pin") {
-    metadata.pinned =
-      typeof update.pinned === "boolean" ? update.pinned : true;
+    metadata.pinned = typeof update.pinned === "boolean" ? update.pinned : true;
   }
   if (method === "markRead") {
     metadata.readThroughSequence =
-      typeof update.throughSequence === "number"
-        ? update.throughSequence
-        : 0;
+      typeof update.throughSequence === "number" ? update.throughSequence : 0;
   }
-  if (method === "setMode") binding.defaultMode = String(update.mode) as ThreadBinding["defaultMode"];
+  if (method === "setMode")
+    binding.defaultMode = String(update.mode) as ThreadBinding["defaultMode"];
   if (method === "setConnections") {
     binding.connectionIds = Array.isArray(update.connectionIds)
       ? update.connectionIds.map(String)
@@ -2602,10 +2805,13 @@ export async function handleFlaryThreadControlAlarm(input: {
 }): Promise<void> {
   const storage = normalizeThreadControlStorage(input.storage);
   const binding = requireBinding(storage.sql);
-  const projections = storage.sql.exec<{ value_json: string }>(
-    `SELECT value_json FROM flary_thread_control
-     WHERE key LIKE 'projection:%'`,
-  ).toArray().map((row) => objectValue(JSON.parse(row.value_json)))
+  const projections = storage.sql
+    .exec<{ value_json: string }>(
+      `SELECT value_json FROM flary_thread_control
+     WHERE key LIKE 'projection:%'`
+    )
+    .toArray()
+    .map((row) => objectValue(JSON.parse(row.value_json)))
     .filter(projectionNeedsRecovery);
   for (const projection of projections) {
     const admission = projection.admission as FlueAdmission | undefined;
@@ -2620,7 +2826,10 @@ export async function handleFlaryThreadControlAlarm(input: {
           ? projection.admissionId
           : undefined,
       modelPin: projection.modelPin as ResolvedModelPin | undefined,
-      segmentId: typeof projection.segmentId === "string" ? projection.segmentId : undefined,
+      segmentId:
+        typeof projection.segmentId === "string"
+          ? projection.segmentId
+          : undefined,
       turnMessage:
         typeof projection.turnMessage === "string"
           ? projection.turnMessage
@@ -2630,18 +2839,20 @@ export async function handleFlaryThreadControlAlarm(input: {
     input.execution?.waitUntil(work);
   }
   const now = Date.now();
-  const due = storage.sql.exec<{
-    schedule_id: string;
-    schedule_json: string;
-    next_run_at: number;
-  }>(
-    `SELECT schedule_id, schedule_json, next_run_at
+  const due = storage.sql
+    .exec<{
+      schedule_id: string;
+      schedule_json: string;
+      next_run_at: number;
+    }>(
+      `SELECT schedule_id, schedule_json, next_run_at
      FROM flary_thread_schedules
      WHERE enabled = 1 AND next_run_at <= ?
      ORDER BY next_run_at ASC
      LIMIT 100`,
-    now,
-  ).toArray();
+      now
+    )
+    .toArray();
   const gateway = createCloudflareFlueGateway(input.env, {
     token:
       typeof input.env.FLARY_INTERNAL_TOKEN === "string"
@@ -2652,12 +2863,14 @@ export async function handleFlaryThreadControlAlarm(input: {
     const schedule = objectValue(JSON.parse(row.schedule_json));
     const scheduledFor = Number(row.next_run_at);
     const claimed = storage.sql.transactionSync(() => {
-      const existing = storage.sql.exec<{ status: string }>(
-        `SELECT status FROM flary_thread_schedule_runs
+      const existing = storage.sql
+        .exec<{ status: string }>(
+          `SELECT status FROM flary_thread_schedule_runs
          WHERE schedule_id = ? AND scheduled_for = ?`,
-        row.schedule_id,
-        scheduledFor,
-      ).toArray()[0];
+          row.schedule_id,
+          scheduledFor
+        )
+        .toArray()[0];
       if (existing) return false;
       const nextRunAt = nextScheduleTime(schedule, scheduledFor);
       storage.sql.exec(
@@ -2667,7 +2880,7 @@ export async function handleFlaryThreadControlAlarm(input: {
         row.schedule_id,
         scheduledFor,
         new Date().toISOString(),
-        new Date().toISOString(),
+        new Date().toISOString()
       );
       storage.sql.exec(
         `UPDATE flary_thread_schedules
@@ -2677,7 +2890,7 @@ export async function handleFlaryThreadControlAlarm(input: {
         nextRunAt === undefined ? 0 : 1,
         new Date().toISOString(),
         row.schedule_id,
-        scheduledFor,
+        scheduledFor
       );
       return true;
     });
@@ -2692,7 +2905,7 @@ export async function handleFlaryThreadControlAlarm(input: {
       const admission = await gateway.send(
         runtimeAgentId(binding),
         threadName(binding.thread),
-        String(schedule.message ?? ""),
+        String(schedule.message ?? "")
       );
       storage.sql.exec(
         `UPDATE flary_thread_schedule_runs
@@ -2701,7 +2914,7 @@ export async function handleFlaryThreadControlAlarm(input: {
         JSON.stringify(admission),
         new Date().toISOString(),
         row.schedule_id,
-        scheduledFor,
+        scheduledFor
       );
       const projection = projectAdmission({
         sql: storage.sql,
@@ -2724,7 +2937,7 @@ export async function handleFlaryThreadControlAlarm(input: {
         error instanceof Error ? error.message : String(error),
         new Date().toISOString(),
         row.schedule_id,
-        scheduledFor,
+        scheduledFor
       );
     }
   }
@@ -2735,7 +2948,9 @@ export async function handleFlaryThreadControlAlarm(input: {
 }
 
 /** Only an interrupted active projection is safe to resume after eviction. */
-export function projectionNeedsRecovery(projection: Record<string, unknown>): boolean {
+export function projectionNeedsRecovery(
+  projection: Record<string, unknown>
+): boolean {
   return projection.status === "active";
 }
 
@@ -2754,52 +2969,70 @@ async function openThreadControlWebSocket(
   input: {
     readonly request: Request;
     readonly webSockets?: ThreadControlWebSocketHost;
-  },
+  }
 ): Promise<Response> {
   if (!input.webSockets) {
     return Response.json(
       { error: "The Durable Object WebSocket host is not configured" },
-      { status: 501 },
+      { status: 501 }
     );
   }
   const ticket = new URL(input.request.url).searchParams.get("ticket") ?? "";
   const ticketHash = await sha256Text(ticket);
-  const row = sql.exec<{
-    expires_at: string;
-    after_sequence: number;
-    include_children: number;
-    actor_json: string;
-    consumed_at: string | null;
-  }>(
-    `SELECT expires_at, after_sequence, include_children, actor_json, consumed_at
+  const row = sql
+    .exec<{
+      expires_at: string;
+      after_sequence: number;
+      include_children: number;
+      actor_json: string;
+      consumed_at: string | null;
+    }>(
+      `SELECT expires_at, after_sequence, include_children, actor_json, consumed_at
      FROM flary_realtime_tickets WHERE ticket_hash = ?`,
-    ticketHash,
-  ).toArray()[0];
+      ticketHash
+    )
+    .toArray()[0];
   if (!row || row.consumed_at || Date.parse(row.expires_at) <= Date.now()) {
-    return Response.json({ error: "The realtime ticket is invalid or expired" }, { status: 401 });
+    return Response.json(
+      { error: "The realtime ticket is invalid or expired" },
+      { status: 401 }
+    );
   }
   const binding = requireBinding(sql);
   const consumed = sql.transactionSync(() => {
-    const current = sql.exec<{ consumed_at: string | null }>(
-      "SELECT consumed_at FROM flary_realtime_tickets WHERE ticket_hash = ?",
-      ticketHash,
-    ).toArray()[0];
+    const current = sql
+      .exec<{ consumed_at: string | null }>(
+        "SELECT consumed_at FROM flary_realtime_tickets WHERE ticket_hash = ?",
+        ticketHash
+      )
+      .toArray()[0];
     if (!current || current.consumed_at) return false;
     sql.exec(
       "UPDATE flary_realtime_tickets SET consumed_at = ? WHERE ticket_hash = ?",
       new Date().toISOString(),
-      ticketHash,
+      ticketHash
     );
     return true;
   });
   if (!consumed) {
-    return Response.json({ error: "The realtime ticket was already used" }, { status: 409 });
+    return Response.json(
+      { error: "The realtime ticket was already used" },
+      { status: 409 }
+    );
   }
-  const Pair = (globalThis as unknown as {
-    WebSocketPair?: new () => { 0: ThreadControlWebSocket; 1: ThreadControlWebSocket };
-  }).WebSocketPair;
+  const Pair = (
+    globalThis as unknown as {
+      WebSocketPair?: new () => {
+        0: ThreadControlWebSocket;
+        1: ThreadControlWebSocket;
+      };
+    }
+  ).WebSocketPair;
   if (!Pair) {
-    return Response.json({ error: "WebSocketPair is not available" }, { status: 501 });
+    return Response.json(
+      { error: "WebSocketPair is not available" },
+      { status: 501 }
+    );
   }
   const pair = new Pair();
   const client = pair[0];
@@ -2818,13 +3051,17 @@ async function openThreadControlWebSocket(
     `thread:${binding.thread.threadId}`,
     attachment.includeChildren ? "children:included" : "children:excluded",
   ]);
-  const metadata = await new SqliteSessionLedger(sql).metadata(binding.thread.threadId);
-  server.send(JSON.stringify({
-    version: 1,
-    type: "ready",
-    threadId: binding.thread.threadId,
-    cursor: metadata?.latestSequence ?? 0,
-  } satisfies RealtimeServerFrame));
+  const metadata = await new SqliteSessionLedger(sql).metadata(
+    binding.thread.threadId
+  );
+  server.send(
+    JSON.stringify({
+      version: 1,
+      type: "ready",
+      threadId: binding.thread.threadId,
+      cursor: metadata?.latestSequence ?? 0,
+    } satisfies RealtimeServerFrame)
+  );
   await sendThreadRecords(sql, server, attachment);
   return new Response(null, {
     status: 101,
@@ -2840,32 +3077,44 @@ export async function handleFlaryThreadControlWebSocketMessage(input: {
   readonly message: string | ArrayBuffer;
   readonly execution?: ThreadControlExecutionContext;
   readonly webSockets?: ThreadControlWebSocketHost;
-  readonly resolveModel?: CreateCloudflareThreadServiceOptions<Record<string, unknown>>["resolveModel"];
-  readonly resolveTurnContext?: CreateCloudflareThreadServiceOptions<Record<string, unknown>>["resolveTurnContext"];
+  readonly resolveModel?: CreateCloudflareThreadServiceOptions<
+    Record<string, unknown>
+  >["resolveModel"];
+  readonly resolveTurnContext?: CreateCloudflareThreadServiceOptions<
+    Record<string, unknown>
+  >["resolveTurnContext"];
 }): Promise<void> {
   const storage = normalizeThreadControlStorage(input.storage);
   const attachment = realtimeAttachment(input.socket);
   let frame: RealtimeClientFrame;
   try {
-    const text = typeof input.message === "string"
-      ? input.message
-      : new TextDecoder().decode(input.message);
+    const text =
+      typeof input.message === "string"
+        ? input.message
+        : new TextDecoder().decode(input.message);
     frame = RealtimeClientFrameSchema.parse(JSON.parse(text));
   } catch (error) {
-    input.socket.send(JSON.stringify({
-      version: 1,
-      type: "error",
-      code: "invalid_frame",
-      message: error instanceof Error ? error.message : "The realtime frame is invalid",
-    } satisfies RealtimeServerFrame));
+    input.socket.send(
+      JSON.stringify({
+        version: 1,
+        type: "error",
+        code: "invalid_frame",
+        message:
+          error instanceof Error
+            ? error.message
+            : "The realtime frame is invalid",
+      } satisfies RealtimeServerFrame)
+    );
     return;
   }
   if (frame.type === "ping") {
-    input.socket.send(JSON.stringify({
-      version: 1,
-      type: "pong",
-      ...(frame.requestId ? { requestId: frame.requestId } : {}),
-    } satisfies RealtimeServerFrame));
+    input.socket.send(
+      JSON.stringify({
+        version: 1,
+        type: "pong",
+        ...(frame.requestId ? { requestId: frame.requestId } : {}),
+      } satisfies RealtimeServerFrame)
+    );
     return;
   }
   if (frame.type === "ack") {
@@ -2876,29 +3125,47 @@ export async function handleFlaryThreadControlWebSocketMessage(input: {
     return;
   }
   const now = new Date().toISOString();
-  const existing = storage.sql.exec<{ status: string; result_json: string | null }>(
-    `SELECT status, result_json FROM flary_realtime_commands
+  const existing = storage.sql
+    .exec<{ status: string; result_json: string | null }>(
+      `SELECT status, result_json FROM flary_realtime_commands
      WHERE idempotency_key = ?`,
-    frame.idempotencyKey,
-  ).toArray()[0];
+      frame.idempotencyKey
+    )
+    .toArray()[0];
   if (existing) {
-    input.socket.send(JSON.stringify({
-      version: 1,
-      type: "accepted",
-      requestId: frame.requestId,
-      duplicate: true,
-    } satisfies RealtimeServerFrame));
+    input.socket.send(
+      JSON.stringify({
+        version: 1,
+        type: "accepted",
+        requestId: frame.requestId,
+        duplicate: true,
+      } satisfies RealtimeServerFrame)
+    );
     if (existing.result_json) {
       const stored = objectValue(JSON.parse(existing.result_json));
-      input.socket.send(JSON.stringify(stored.error
-        ? {
-            version: 1,
-            type: "error",
-            requestId: frame.requestId,
-            code: String(objectValue(stored.error).code ?? "command_failed"),
-            message: String(objectValue(stored.error).message ?? "The realtime command failed"),
-          }
-        : { version: 1, type: "result", requestId: frame.requestId, result: stored.result }));
+      input.socket.send(
+        JSON.stringify(
+          stored.error
+            ? {
+                version: 1,
+                type: "error",
+                requestId: frame.requestId,
+                code: String(
+                  objectValue(stored.error).code ?? "command_failed"
+                ),
+                message: String(
+                  objectValue(stored.error).message ??
+                    "The realtime command failed"
+                ),
+              }
+            : {
+                version: 1,
+                type: "result",
+                requestId: frame.requestId,
+                result: stored.result,
+              }
+        )
+      );
     }
     return;
   }
@@ -2910,14 +3177,16 @@ export async function handleFlaryThreadControlWebSocketMessage(input: {
     frame.requestId,
     frame.command,
     now,
-    now,
+    now
   );
-  input.socket.send(JSON.stringify({
-    version: 1,
-    type: "accepted",
-    requestId: frame.requestId,
-    duplicate: false,
-  } satisfies RealtimeServerFrame));
+  input.socket.send(
+    JSON.stringify({
+      version: 1,
+      type: "accepted",
+      requestId: frame.requestId,
+      duplicate: false,
+    } satisfies RealtimeServerFrame)
+  );
   if (
     (frame.command === "send" || frame.command === "steer") &&
     input.execution
@@ -2935,36 +3204,51 @@ export async function handleFlaryThreadControlWebSocketMessage(input: {
         resolveTurnContext: input.resolveTurnContext,
       });
       storeRealtimeCommandSuccess(storage.sql, frame, result);
-      input.socket.send(JSON.stringify({
-        version: 1,
-        type: "result",
-        requestId: frame.requestId,
-        result,
-      } satisfies RealtimeServerFrame));
+      input.socket.send(
+        JSON.stringify({
+          version: 1,
+          type: "result",
+          requestId: frame.requestId,
+          result,
+        } satisfies RealtimeServerFrame)
+      );
     } catch (cause) {
-      const code = cause instanceof FlaryHostError ? cause.code : "command_failed";
-      const message = cause instanceof Error ? cause.message : "The realtime command failed";
+      const code =
+        cause instanceof FlaryHostError ? cause.code : "command_failed";
+      const message =
+        cause instanceof Error ? cause.message : "The realtime command failed";
       await storeRealtimeCommandFailure(storage.sql, frame, code, message);
-      input.socket.send(JSON.stringify({
-        version: 1,
-        type: "error",
-        requestId: frame.requestId,
-        code,
-        message,
-      } satisfies RealtimeServerFrame));
+      input.socket.send(
+        JSON.stringify({
+          version: 1,
+          type: "error",
+          requestId: frame.requestId,
+          code,
+          message,
+        } satisfies RealtimeServerFrame)
+      );
     }
     return;
   }
-  const queue = input.env.FLARY_SESSION_PROJECTION_QUEUE as ProjectionQueue | undefined;
+  const queue = input.env.FLARY_SESSION_PROJECTION_QUEUE as
+    | ProjectionQueue
+    | undefined;
   if (!queue) {
-    await storeRealtimeCommandFailure(storage.sql, frame, "realtime_queue_missing", "The realtime command queue is not configured");
-    input.socket.send(JSON.stringify({
-      version: 1,
-      type: "error",
-      requestId: frame.requestId,
-      code: "realtime_queue_missing",
-      message: "The realtime command queue is not configured",
-    } satisfies RealtimeServerFrame));
+    await storeRealtimeCommandFailure(
+      storage.sql,
+      frame,
+      "realtime_queue_missing",
+      "The realtime command queue is not configured"
+    );
+    input.socket.send(
+      JSON.stringify({
+        version: 1,
+        type: "error",
+        requestId: frame.requestId,
+        code: "realtime_queue_missing",
+        message: "The realtime command queue is not configured",
+      } satisfies RealtimeServerFrame)
+    );
     return;
   }
   await queue.send({
@@ -2990,8 +3274,12 @@ async function submitRealtimeMessageDirect(input: {
   readonly webSockets?: ThreadControlWebSocketHost;
   readonly attachment: RealtimeSocketAttachment;
   readonly frame: Extract<RealtimeClientFrame, { type: "command" }>;
-  readonly resolveModel?: CreateCloudflareThreadServiceOptions<Record<string, unknown>>["resolveModel"];
-  readonly resolveTurnContext?: CreateCloudflareThreadServiceOptions<Record<string, unknown>>["resolveTurnContext"];
+  readonly resolveModel?: CreateCloudflareThreadServiceOptions<
+    Record<string, unknown>
+  >["resolveModel"];
+  readonly resolveTurnContext?: CreateCloudflareThreadServiceOptions<
+    Record<string, unknown>
+  >["resolveTurnContext"];
 }): Promise<FlueAdmission> {
   const binding = requireBinding(input.sql);
   const request = ThreadMessageRequestSchema.parse({
@@ -3000,16 +3288,24 @@ async function submitRealtimeMessageDirect(input: {
     idempotencyKey: input.frame.idempotencyKey,
   });
   const admissionId = request.idempotencyKey ?? crypto.randomUUID();
-  const selectedModel = request.model === undefined
-    ? undefined
-    : normalizeModelInput(request.model);
-  const configured = selectedModel ?? binding.defaultModel ?? currentModel(input.sql, binding);
-  const baseSelection = configured ? normalizeModelInput(configured) : undefined;
+  const selectedModel =
+    request.model === undefined
+      ? undefined
+      : normalizeModelInput(request.model);
+  const configured =
+    selectedModel ?? binding.defaultModel ?? currentModel(input.sql, binding);
+  const baseSelection = configured
+    ? normalizeModelInput(configured)
+    : undefined;
   const selection = baseSelection
     ? {
         ...baseSelection,
-        ...(request.thinkingLevel ? { reasoningEffort: request.thinkingLevel } : {}),
-        ...(request.cacheRetention ? { cacheRetention: request.cacheRetention } : {}),
+        ...(request.thinkingLevel
+          ? { reasoningEffort: request.thinkingLevel }
+          : {}),
+        ...(request.cacheRetention
+          ? { cacheRetention: request.cacheRetention }
+          : {}),
       }
     : undefined;
   const grant = selection
@@ -3023,18 +3319,25 @@ async function submitRealtimeMessageDirect(input: {
         selection,
       })
     : undefined;
-  const pinnedValue = objectValue(await dispatchThreadControl(
-    input.sql,
-    "pinModel",
-    {
-      tenantId: input.attachment.tenantId,
-      applicationId: input.attachment.applicationId,
-      admissionId,
-      ...(selection ? { model: selection } : {}),
-      ...(grant ? { grant } : {}),
-    },
-    { env: input.env, execution: input.execution, storage: input.storage, webSockets: input.webSockets },
-  ));
+  const pinnedValue = objectValue(
+    await dispatchThreadControl(
+      input.sql,
+      "pinModel",
+      {
+        tenantId: input.attachment.tenantId,
+        applicationId: input.attachment.applicationId,
+        admissionId,
+        ...(selection ? { model: selection } : {}),
+        ...(grant ? { grant } : {}),
+      },
+      {
+        env: input.env,
+        execution: input.execution,
+        storage: input.storage,
+        webSockets: input.webSockets,
+      }
+    )
+  );
   const pin = ResolvedModelPinSchema.parse(pinnedValue.pin);
   const segmentId = String(pinnedValue.segmentId ?? `segment_${admissionId}`);
   await dispatchThreadControl(
@@ -3045,12 +3348,18 @@ async function submitRealtimeMessageDirect(input: {
       applicationId: input.attachment.applicationId,
       admissionId,
     },
-    { env: input.env, execution: input.execution, storage: input.storage, webSockets: input.webSockets },
+    {
+      env: input.env,
+      execution: input.execution,
+      storage: input.storage,
+      webSockets: input.webSockets,
+    }
   );
   const gateway = createCloudflareFlueGateway(input.env, {
-    token: typeof input.env.FLARY_INTERNAL_TOKEN === "string"
-      ? input.env.FLARY_INTERNAL_TOKEN
-      : undefined,
+    token:
+      typeof input.env.FLARY_INTERNAL_TOKEN === "string"
+        ? input.env.FLARY_INTERNAL_TOKEN
+        : undefined,
   });
   if (request.mode === "steer") {
     await appendLedger(input.sql, binding, "turn.aborted", {
@@ -3058,7 +3367,9 @@ async function submitRealtimeMessageDirect(input: {
       reason: "steered",
       recordedAt: new Date().toISOString(),
     });
-    await gateway.abort(runtimeAgentId(binding), threadName(binding.thread)).catch(() => undefined);
+    await gateway
+      .abort(runtimeAgentId(binding), threadName(binding.thread))
+      .catch(() => undefined);
   }
   const runtimeSelection = pin.runtimeSelection ?? pin.selection;
   const turnContext = await resolveTrustedTurnContext(
@@ -3072,7 +3383,7 @@ async function submitRealtimeMessageDirect(input: {
       threadId: binding.thread.threadId,
       message: request.message,
       admittedAt: new Date().toISOString(),
-    },
+    }
   );
   const admission = await gateway.send(
     runtimeAgentId(binding),
@@ -3082,10 +3393,14 @@ async function submitRealtimeMessageDirect(input: {
       idempotencyKey: admissionId,
       model: toFlueModelSpecifier(runtimeSelection),
       ...(request.images ? { images: request.images } : {}),
-      ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
-      ...(request.cacheRetention ? { cacheRetention: request.cacheRetention } : {}),
+      ...(request.thinkingLevel
+        ? { thinkingLevel: request.thinkingLevel }
+        : {}),
+      ...(request.cacheRetention
+        ? { cacheRetention: request.cacheRetention }
+        : {}),
       ...(turnContext ? { turnContext } : {}),
-    },
+    }
   );
   await appendLedger(input.sql, binding, "turn.started", {
     admissionId,
@@ -3094,7 +3409,10 @@ async function submitRealtimeMessageDirect(input: {
     modelPin: pin,
     segmentId,
   });
-  await appendLedger(input.sql, binding, "turn.settings", { modelPin: pin, admissionId });
+  await appendLedger(input.sql, binding, "turn.settings", {
+    modelPin: pin,
+    admissionId,
+  });
   await dispatchThreadControl(
     input.sql,
     "track",
@@ -3109,7 +3427,12 @@ async function submitRealtimeMessageDirect(input: {
       segmentId,
       turnMessage: request.message,
     },
-    { env: input.env, execution: input.execution, storage: input.storage, webSockets: input.webSockets },
+    {
+      env: input.env,
+      execution: input.execution,
+      storage: input.storage,
+      webSockets: input.webSockets,
+    }
   );
   return admission;
 }
@@ -3125,7 +3448,7 @@ export function handleFlaryThreadControlWebSocketClose(input: {
 
 async function broadcastThreadRecords(
   sql: ThreadControlStorage["sql"],
-  host?: ThreadControlWebSocketHost,
+  host?: ThreadControlWebSocketHost
 ): Promise<void> {
   for (const socket of host?.getWebSockets() ?? []) {
     await sendThreadRecords(sql, socket, realtimeAttachment(socket));
@@ -3135,7 +3458,7 @@ async function broadcastThreadRecords(
 async function sendThreadRecords(
   sql: ThreadControlStorage["sql"],
   socket: ThreadControlWebSocket,
-  attachment: RealtimeSocketAttachment,
+  attachment: RealtimeSocketAttachment
 ): Promise<void> {
   const page = await new SqliteSessionLedger(sql).list(attachment.threadId, {
     ...(attachment.sent > 0 ? { after: `v1:${attachment.sent}` } : {}),
@@ -3147,24 +3470,30 @@ async function sendThreadRecords(
     ? page.items
     : page.items.filter((record) => !objectValue(record.publicPayload)._child);
   if (visible.length > 0) {
-    socket.send(JSON.stringify({
-      version: 1,
-      type: "events",
-      cursor,
-      records: visible,
-    } satisfies RealtimeServerFrame));
+    socket.send(
+      JSON.stringify({
+        version: 1,
+        type: "events",
+        cursor,
+        records: visible,
+      } satisfies RealtimeServerFrame)
+    );
   }
   socket.serializeAttachment?.({ ...attachment, sent: cursor });
   if (page.nextCursor) {
-    socket.send(JSON.stringify({
-      version: 1,
-      type: "resync_required",
-      cursor,
-    } satisfies RealtimeServerFrame));
+    socket.send(
+      JSON.stringify({
+        version: 1,
+        type: "resync_required",
+        cursor,
+      } satisfies RealtimeServerFrame)
+    );
   }
 }
 
-function realtimeAttachment(socket: ThreadControlWebSocket): RealtimeSocketAttachment {
+function realtimeAttachment(
+  socket: ThreadControlWebSocket
+): RealtimeSocketAttachment {
   const value = socket.deserializeAttachment?.();
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("The realtime connection has no durable attachment");
@@ -3176,28 +3505,28 @@ async function storeRealtimeCommandFailure(
   sql: ThreadControlStorage["sql"],
   frame: Extract<RealtimeClientFrame, { type: "command" }>,
   code: string,
-  message: string,
+  message: string
 ): Promise<void> {
   sql.exec(
     `UPDATE flary_realtime_commands SET status = 'failed', result_json = ?, updated_at = ?
      WHERE idempotency_key = ?`,
     JSON.stringify({ error: { code, message } }),
     new Date().toISOString(),
-    frame.idempotencyKey,
+    frame.idempotencyKey
   );
 }
 
 function storeRealtimeCommandSuccess(
   sql: ThreadControlStorage["sql"],
   frame: Extract<RealtimeClientFrame, { type: "command" }>,
-  result: unknown,
+  result: unknown
 ): void {
   sql.exec(
     `UPDATE flary_realtime_commands SET status = 'completed', result_json = ?, updated_at = ?
      WHERE idempotency_key = ?`,
     JSON.stringify({ result }),
     new Date().toISOString(),
-    frame.idempotencyKey,
+    frame.idempotencyKey
   );
 }
 
@@ -3206,9 +3535,13 @@ export async function handleFlarySessionProjectionQueue(input: {
   readonly messages: readonly ProjectionQueueMessage[];
   readonly env: Record<string, unknown>;
   /** Preserve trusted provider resolution for commands admitted by WebSocket. */
-  readonly resolveModel?: CreateCloudflareThreadServiceOptions<Record<string, unknown>>["resolveModel"];
+  readonly resolveModel?: CreateCloudflareThreadServiceOptions<
+    Record<string, unknown>
+  >["resolveModel"];
   /** Preserve trusted turn context for commands admitted by WebSocket. */
-  readonly resolveTurnContext?: CreateCloudflareThreadServiceOptions<Record<string, unknown>>["resolveTurnContext"];
+  readonly resolveTurnContext?: CreateCloudflareThreadServiceOptions<
+    Record<string, unknown>
+  >["resolveTurnContext"];
 }): Promise<void> {
   const namespace = input.env.FLARY_THREAD_CONTROL as
     | DurableObjectNamespace
@@ -3229,26 +3562,28 @@ export async function handleFlarySessionProjectionQueue(input: {
             body,
             controlName,
             input.resolveModel,
-            input.resolveTurnContext,
+            input.resolveTurnContext
           );
           message.ack();
           return;
         }
         const stub = namespace.get(namespace.idFromName(controlName));
-        const method = body.kind === "child.projection" ? "projectChild" : "track";
+        const method =
+          body.kind === "child.projection" ? "projectChild" : "track";
         const response = await stub.fetch(
           new Request("https://flary.internal/track", {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ ...body, method }),
-          }),
+          })
         );
-        if (!response.ok) throw new Error(`Projection failed (${response.status})`);
+        if (!response.ok)
+          throw new Error(`Projection failed (${response.status})`);
         message.ack();
       } catch {
         message.retry();
       }
-    }),
+    })
   );
 }
 
@@ -3260,56 +3595,67 @@ export async function handleFlaryThreadPurgeQueue(input: {
   const service = createCloudflareThreadService({ env: input.env });
   const database = input.env.FLARY_THREAD_CATALOG as D1DatabaseLike | undefined;
   const catalog = database ? new D1ThreadCatalog(database) : undefined;
-  await Promise.all(input.messages.map(async (message) => {
-    const body = objectValue(message.body);
-    const target = body.target as FlaryThreadTarget | undefined;
-    const deletionId = String(body.deletionId ?? "");
-    const children = Array.isArray(body.children)
-      ? body.children.filter((value): value is FlaryThreadTarget => {
-          if (!value || typeof value !== "object") return false;
-          const candidate = value as Record<string, unknown>;
-          const authorization = candidate.authorization;
-          return typeof candidate.appId === "string" &&
-            typeof candidate.threadId === "string" &&
-            Boolean(authorization && typeof authorization === "object");
-        })
-      : [];
-    if (!target || !deletionId || !service.purge) {
-      message.ack();
-      return;
-    }
-    try {
-      await service.purge(target, deletionId);
-      // Child deletion is admitted only after the parent is accepted. Each
-      // child creates its own idempotent purge record and queue message.
-      await Promise.all(children.map((child) => service.delete?.(child)));
-      message.ack();
-    } catch (error) {
-      const existing = await catalog?.getDeletion({
-        tenantId: target.authorization.organizationId,
-        applicationId: target.appId,
-        deletionId,
-      });
-      if (existing) {
-        await catalog!.putDeletion({
-          ...existing,
-          status: "failed",
-          errorCode: error instanceof Error ? "purge_failed" : "purge_failed",
+  await Promise.all(
+    input.messages.map(async (message) => {
+      const body = objectValue(message.body);
+      const target = body.target as FlaryThreadTarget | undefined;
+      const deletionId = String(body.deletionId ?? "");
+      const children = Array.isArray(body.children)
+        ? body.children.filter((value): value is FlaryThreadTarget => {
+            if (!value || typeof value !== "object") return false;
+            const candidate = value as Record<string, unknown>;
+            const authorization = candidate.authorization;
+            return (
+              typeof candidate.appId === "string" &&
+              typeof candidate.threadId === "string" &&
+              Boolean(authorization && typeof authorization === "object")
+            );
+          })
+        : [];
+      if (!target || !deletionId || !service.purge) {
+        message.ack();
+        return;
+      }
+      try {
+        await service.purge(target, deletionId);
+        // Child deletion is admitted only after the parent is accepted. Each
+        // child creates its own idempotent purge record and queue message.
+        await Promise.all(children.map((child) => service.delete?.(child)));
+        message.ack();
+      } catch (error) {
+        const existing = await catalog?.getDeletion({
           tenantId: target.authorization.organizationId,
           applicationId: target.appId,
-        }).catch(() => undefined);
+          deletionId,
+        });
+        if (existing) {
+          await catalog!
+            .putDeletion({
+              ...existing,
+              status: "failed",
+              errorCode:
+                error instanceof Error ? "purge_failed" : "purge_failed",
+              tenantId: target.authorization.organizationId,
+              applicationId: target.appId,
+            })
+            .catch(() => undefined);
+        }
+        message.retry();
       }
-      message.retry();
-    }
-  }));
+    })
+  );
 }
 
 async function executeRealtimeCommand(
   env: Record<string, unknown>,
   body: Record<string, unknown>,
   controlName: string,
-  resolveModel?: CreateCloudflareThreadServiceOptions<Record<string, unknown>>["resolveModel"],
-  resolveTurnContext?: CreateCloudflareThreadServiceOptions<Record<string, unknown>>["resolveTurnContext"],
+  resolveModel?: CreateCloudflareThreadServiceOptions<
+    Record<string, unknown>
+  >["resolveModel"],
+  resolveTurnContext?: CreateCloudflareThreadServiceOptions<
+    Record<string, unknown>
+  >["resolveTurnContext"]
 ): Promise<void> {
   const target = body.target as FlaryThreadTarget | undefined;
   const parsed = RealtimeClientFrameSchema.safeParse(body.frame);
@@ -3317,68 +3663,86 @@ async function executeRealtimeCommand(
     throw new Error("The queued realtime command is invalid");
   }
   const frame = parsed.data;
-  const service = createCloudflareThreadService({ env, resolveModel, resolveTurnContext });
+  const service = createCloudflareThreadService({
+    env,
+    resolveModel,
+    resolveTurnContext,
+  });
   let result: unknown;
   let error: { code: string; message: string } | undefined;
   try {
     if (frame.command === "send" || frame.command === "steer") {
-      result = await service.submit(target, ThreadMessageRequestSchema.parse({
-        ...frame.input,
-        mode: frame.command === "steer" ? "steer" : "queue",
-        idempotencyKey: frame.idempotencyKey,
-      }));
+      result = await service.submit(
+        target,
+        ThreadMessageRequestSchema.parse({
+          ...frame.input,
+          mode: frame.command === "steer" ? "steer" : "queue",
+          idempotencyKey: frame.idempotencyKey,
+        })
+      );
     } else if (frame.command === "interrupt") {
-      if (!service.interrupt) throw new Error("Thread interrupt is not configured");
+      if (!service.interrupt)
+        throw new Error("Thread interrupt is not configured");
       result = await service.interrupt(target);
     } else if (frame.command === "approve" || frame.command === "reject") {
       const requestId = String(frame.input.requestId ?? "");
-      await service.decideApproval(target, ApprovalDecisionSchema.parse({
-        requestId,
-        status: frame.command === "approve" ? "approved" : "rejected",
-        decidedBy: target.authorization.actor,
-        decidedAt: new Date().toISOString(),
-        ...(typeof frame.input.reason === "string" ? { comment: frame.input.reason } : {}),
-      }));
+      await service.decideApproval(
+        target,
+        ApprovalDecisionSchema.parse({
+          requestId,
+          status: frame.command === "approve" ? "approved" : "rejected",
+          decidedBy: target.authorization.actor,
+          decidedAt: new Date().toISOString(),
+          ...(typeof frame.input.reason === "string"
+            ? { comment: frame.input.reason }
+            : {}),
+        })
+      );
       result = { ok: true };
     } else if (frame.command === "user_input") {
-      if (!service.respondToUserInput) throw new Error("User input is not configured");
+      if (!service.respondToUserInput)
+        throw new Error("User input is not configured");
       result = await service.respondToUserInput(
         target,
         String(frame.input.requestId ?? ""),
-        UserInputAnswerRequestSchema.parse(frame.input.response),
+        UserInputAnswerRequestSchema.parse(frame.input.response)
       );
     } else if (frame.command === "subagent") {
-      if (!service.subagentAction) throw new Error("Subagent control is not configured");
+      if (!service.subagentAction)
+        throw new Error("Subagent control is not configured");
       result = await service.subagentAction(
         target,
         String(frame.input.action ?? ""),
-        objectValue(frame.input.input),
+        objectValue(frame.input.input)
       );
     } else if (frame.command.startsWith("process.")) {
-      if (!service.processAction) throw new Error("Sandbox process control is not configured");
+      if (!service.processAction)
+        throw new Error("Sandbox process control is not configured");
       result = await service.processAction(
         target,
         frame.command.slice("process.".length),
-        frame.input,
+        frame.input
       );
     } else if (frame.command.startsWith("browser.")) {
-      if (!service.browserAction) throw new Error("Browser Run control is not configured");
+      if (!service.browserAction)
+        throw new Error("Browser Run control is not configured");
       result = await service.browserAction(
         target,
         frame.command.slice("browser.".length),
-        frame.input,
+        frame.input
       );
     } else {
       throw new FlaryHostError(
         501,
         "realtime_command_not_configured",
-        `The '${frame.command}' realtime command is not configured`,
+        `The '${frame.command}' realtime command is not configured`
       );
     }
   } catch (cause) {
     error = {
       code: cause instanceof FlaryHostError ? cause.code : "command_failed",
-      message: cause instanceof Error ? cause.message : "The realtime command failed",
+      message:
+        cause instanceof Error ? cause.message : "The realtime command failed",
     };
   }
   const namespace = env.FLARY_THREAD_CONTROL as DurableObjectNamespace;
@@ -3394,7 +3758,7 @@ async function executeRealtimeCommand(
         requestId: frame.requestId,
         ...(error ? { error } : { result }),
       }),
-    }),
+    })
   );
   if (!response.ok) throw new Error("The realtime result was not stored");
 }
@@ -3404,7 +3768,7 @@ async function processAction(
   env: Record<string, unknown>,
   binding: ThreadBinding,
   action: string,
-  input: Record<string, unknown>,
+  input: Record<string, unknown>
 ): Promise<unknown> {
   const sandboxBinding = env.SANDBOX;
   if (!sandboxBinding) throw new Error("The SANDBOX binding is not configured");
@@ -3426,7 +3790,7 @@ async function processAction(
         sandbox,
         workspace: await createCloudflareWorkspaceConnection(
           workspaceNamespace as never,
-          binding.workspace,
+          binding.workspace
         ),
         sql,
         sessionId: binding.thread.threadId,
@@ -3449,7 +3813,9 @@ async function processAction(
       : undefined,
   });
   if (action === "list") {
-    return { processes: await registry.list({ runId: binding.thread.threadId }) };
+    return {
+      processes: await registry.list({ runId: binding.thread.threadId }),
+    };
   }
   const processId = String(input.processId ?? "");
   const requestId = String(input.requestId ?? `control_${crypto.randomUUID()}`);
@@ -3473,13 +3839,19 @@ async function processAction(
     return runtime.attach(processId, nonnegative(input.afterCursor, 0));
   }
   if (action === "stdin") {
-    return runtime.stdin({ requestId, processId, data: String(input.data ?? "") });
+    return runtime.stdin({
+      requestId,
+      processId,
+      data: String(input.data ?? ""),
+    });
   }
   if (action === "signal") {
     return runtime.signal({
       requestId,
       processId,
-      signal: String(input.signal ?? "SIGTERM") as Parameters<typeof runtime.signal>[0]["signal"],
+      signal: String(input.signal ?? "SIGTERM") as Parameters<
+        typeof runtime.signal
+      >[0]["signal"],
     });
   }
   if (action === "sleep") return runtime.sleep(processId, requestId);
@@ -3488,7 +3860,7 @@ async function processAction(
     throw new FlaryHostError(
       501,
       "process_resize_not_supported",
-      "Cloudflare Sandbox background processes do not expose PTY resize",
+      "Cloudflare Sandbox background processes do not expose PTY resize"
     );
   }
   throw new Error(`Unknown Sandbox process action '${action}'`);
@@ -3496,7 +3868,7 @@ async function processAction(
 
 async function destroyThreadSandbox(
   env: Record<string, unknown>,
-  binding: ThreadBinding,
+  binding: ThreadBinding
 ): Promise<void> {
   const sandboxBinding = env.SANDBOX;
   if (!sandboxBinding) return;
@@ -3514,14 +3886,20 @@ async function destroyThreadSandbox(
 
 async function deleteStoredSandboxBackups(
   bucket: unknown,
-  sql: ThreadControlStorage["sql"],
+  sql: ThreadControlStorage["sql"]
 ): Promise<void> {
-  if (!bucket || typeof bucket !== "object" ||
-      typeof (bucket as { delete?: unknown }).delete !== "function") return;
+  if (
+    !bucket ||
+    typeof bucket !== "object" ||
+    typeof (bucket as { delete?: unknown }).delete !== "function"
+  )
+    return;
   const r2 = bucket as { delete(key: string): Promise<unknown> };
-  const rows = sql.exec<{ value_json: string }>(
-    "SELECT value_json FROM flary_workspace_execution_state WHERE key = 'latest-backup'",
-  ).toArray();
+  const rows = sql
+    .exec<{ value_json: string }>(
+      "SELECT value_json FROM flary_workspace_execution_state WHERE key = 'latest-backup'"
+    )
+    .toArray();
   for (const row of rows) {
     const backup = objectValue(JSON.parse(row.value_json));
     const id = typeof backup.id === "string" ? backup.id : undefined;
@@ -3536,11 +3914,13 @@ async function browserAction(
   env: Record<string, unknown> | undefined,
   binding: ThreadBinding,
   action: string,
-  input: Record<string, unknown>,
+  input: Record<string, unknown>
 ): Promise<unknown> {
-  const currentRow = sql.exec<{ value_json: string }>(
-    "SELECT value_json FROM flary_thread_control WHERE key = 'browser-state'",
-  ).toArray()[0];
+  const currentRow = sql
+    .exec<{ value_json: string }>(
+      "SELECT value_json FROM flary_thread_control WHERE key = 'browser-state'"
+    )
+    .toArray()[0];
   const current = currentRow
     ? objectValue(JSON.parse(currentRow.value_json))
     : { control: "agent", status: "idle" };
@@ -3575,7 +3955,10 @@ async function browserAction(
       throw new Error("The Browser Run session is not available");
     }
     const playwright = await import("@cloudflare/playwright");
-    const browser = await playwright.connect(env.BROWSER as never, current.sessionId);
+    const browser = await playwright.connect(
+      env.BROWSER as never,
+      current.sessionId
+    );
     try {
       const context = browser.contexts()[0];
       const page = context?.pages()[0];
@@ -3584,11 +3967,17 @@ async function browserAction(
       if (kind === "click") {
         await page.locator(String(input.selector ?? "")).click();
       } else if (kind === "type") {
-        await page.locator(String(input.selector ?? "")).fill(String(input.text ?? "").slice(0, 100_000));
+        await page
+          .locator(String(input.selector ?? ""))
+          .fill(String(input.text ?? "").slice(0, 100_000));
       } else if (kind === "navigate") {
-        await page.goto(assertPublicBrowserUrl(String(input.url ?? "")).toString());
+        await page.goto(
+          assertPublicBrowserUrl(String(input.url ?? "")).toString()
+        );
       } else {
-        throw new Error("Human Browser Run input must be click, type, or navigate");
+        throw new Error(
+          "Human Browser Run input must be click, type, or navigate"
+        );
       }
       return { browser: current, url: page.url(), title: await page.title() };
     } finally {
@@ -3610,34 +3999,42 @@ async function scheduleAction(
   sql: ThreadControlStorage["sql"],
   binding: ThreadBinding,
   action: string,
-  input: Record<string, unknown>,
+  input: Record<string, unknown>
 ): Promise<unknown> {
   if (action === "list") {
     return {
-      schedules: sql.exec<{ schedule_json: string }>(
-        "SELECT schedule_json FROM flary_thread_schedules ORDER BY schedule_id",
-      ).toArray().map((row) => JSON.parse(row.schedule_json)),
+      schedules: sql
+        .exec<{ schedule_json: string }>(
+          "SELECT schedule_json FROM flary_thread_schedules ORDER BY schedule_id"
+        )
+        .toArray()
+        .map((row) => JSON.parse(row.schedule_json)),
     };
   }
   if (action === "history") {
     const scheduleId =
       typeof input.scheduleId === "string" ? input.scheduleId : undefined;
-    const rows = sql.exec<Record<string, unknown>>(
-      `SELECT run_sequence, schedule_id, scheduled_for, status,
+    const rows = sql
+      .exec<Record<string, unknown>>(
+        `SELECT run_sequence, schedule_id, scheduled_for, status,
               admission_json, error, created_at, updated_at
        FROM flary_thread_schedule_runs
        ${scheduleId ? "WHERE schedule_id = ?" : ""}
        ORDER BY run_sequence DESC
        LIMIT ?`,
-      ...(scheduleId ? [scheduleId] : []),
-      positive(input.limit, 100),
-    ).toArray();
+        ...(scheduleId ? [scheduleId] : []),
+        positive(input.limit, 100)
+      )
+      .toArray();
     return { runs: rows };
   }
   const scheduleId = String(input.scheduleId ?? input.id ?? "");
   if (!scheduleId) throw new Error("A schedule ID is required");
   if (action === "delete") {
-    sql.exec("DELETE FROM flary_thread_schedules WHERE schedule_id = ?", scheduleId);
+    sql.exec(
+      "DELETE FROM flary_thread_schedules WHERE schedule_id = ?",
+      scheduleId
+    );
     await appendLedger(sql, binding, "schedule.updated", {
       scheduleId,
       action: "deleted",
@@ -3651,7 +4048,7 @@ async function scheduleAction(
        WHERE schedule_id = ?`,
       action === "resume" ? 1 : 0,
       new Date().toISOString(),
-      scheduleId,
+      scheduleId
     );
     await appendLedger(sql, binding, "schedule.updated", {
       scheduleId,
@@ -3659,7 +4056,8 @@ async function scheduleAction(
     });
     return { scheduleId, enabled: action === "resume" };
   }
-  if (action !== "register") throw new Error(`Unknown schedule action '${action}'`);
+  if (action !== "register")
+    throw new Error(`Unknown schedule action '${action}'`);
   if (typeof input.message !== "string" || input.message.trim().length === 0) {
     throw new Error("A scheduled agent message is required");
   }
@@ -3672,7 +4070,8 @@ async function scheduleAction(
     updatedAt: new Date().toISOString(),
   };
   const nextRunAt = nextScheduleTime(schedule, Date.now() - 1);
-  if (nextRunAt === undefined) throw new Error("The schedule has no future run");
+  if (nextRunAt === undefined)
+    throw new Error("The schedule has no future run");
   sql.exec(
     `INSERT INTO flary_thread_schedules
       (schedule_id, schedule_json, next_run_at, enabled, updated_at)
@@ -3686,7 +4085,7 @@ async function scheduleAction(
     JSON.stringify(schedule),
     nextRunAt,
     schedule.enabled ? 1 : 0,
-    schedule.updatedAt,
+    schedule.updatedAt
   );
   await appendLedger(sql, binding, "schedule.updated", {
     scheduleId,
@@ -3707,13 +4106,20 @@ function scheduleTrigger(value: unknown): Record<string, unknown> {
   }
   if (trigger.kind === "once") {
     const at = Date.parse(String(trigger.at ?? ""));
-    if (!Number.isFinite(at)) throw new Error("A one-time schedule needs a valid date");
+    if (!Number.isFinite(at))
+      throw new Error("A one-time schedule needs a valid date");
     return { kind: "once", at };
   }
   if (trigger.kind === "cron") {
     const expression = String(trigger.expression ?? "").trim();
-    if (!/^(\*|\*\/[1-9][0-9]*|[0-5]?[0-9]) (\*|\*\/[1-9][0-9]*|(?:[01]?[0-9]|2[0-3])) \* \* \*$/.test(expression)) {
-      throw new Error("Cron supports minute and hour fields with '*', '*/n', or a fixed value");
+    if (
+      !/^(\*|\*\/[1-9][0-9]*|[0-5]?[0-9]) (\*|\*\/[1-9][0-9]*|(?:[01]?[0-9]|2[0-3])) \* \* \*$/.test(
+        expression
+      )
+    ) {
+      throw new Error(
+        "Cron supports minute and hour fields with '*', '*/n', or a fixed value"
+      );
     }
     return { kind: "cron", expression, timeZone: "UTC" };
   }
@@ -3722,7 +4128,7 @@ function scheduleTrigger(value: unknown): Record<string, unknown> {
 
 function nextScheduleTime(
   schedule: Record<string, unknown>,
-  after: number,
+  after: number
 ): number | undefined {
   const trigger = objectValue(schedule.trigger);
   if (trigger.kind === "interval") {
@@ -3737,7 +4143,10 @@ function nextScheduleTime(
     let candidate = Math.floor(after / 60_000) * 60_000 + 60_000;
     for (let count = 0; count < 527_040; count += 1, candidate += 60_000) {
       const date = new Date(candidate);
-      if (cronPart(minute!, date.getUTCMinutes()) && cronPart(hour!, date.getUTCHours())) {
+      if (
+        cronPart(minute!, date.getUTCMinutes()) &&
+        cronPart(hour!, date.getUTCHours())
+      ) {
         return candidate;
       }
     }
@@ -3753,13 +4162,15 @@ function cronPart(pattern: string, value: number): boolean {
 
 async function scheduleNextAlarm(
   sql: ThreadControlStorage["sql"],
-  storage?: ThreadControlStorage,
+  storage?: ThreadControlStorage
 ): Promise<void> {
   if (!storage?.setAlarm) return;
-  const row = sql.exec<{ next_run_at: number }>(
-    `SELECT next_run_at FROM flary_thread_schedules
-     WHERE enabled = 1 ORDER BY next_run_at ASC LIMIT 1`,
-  ).toArray()[0];
+  const row = sql
+    .exec<{ next_run_at: number }>(
+      `SELECT next_run_at FROM flary_thread_schedules
+     WHERE enabled = 1 ORDER BY next_run_at ASC LIMIT 1`
+    )
+    .toArray()[0];
   if (row) await storage.setAlarm(Number(row.next_run_at));
 }
 
@@ -3799,12 +4210,14 @@ async function projectAdmission(input: {
       providerFailure = providerFailureFromFlueEvent(event) ?? providerFailure;
       const sourceCursor = canonicalEventCursor(
         input.admission.submissionId,
-        event as unknown as Record<string, unknown>,
+        event as unknown as Record<string, unknown>
       );
-      const seen = input.sql.exec<{ source_cursor: string }>(
-        "SELECT source_cursor FROM flary_session_projection_dedupe WHERE source_cursor = ?",
-        sourceCursor,
-      ).toArray()[0];
+      const seen = input.sql
+        .exec<{ source_cursor: string }>(
+          "SELECT source_cursor FROM flary_session_projection_dedupe WHERE source_cursor = ?",
+          sourceCursor
+        )
+        .toArray()[0];
       if (seen) return;
       const providerStepEvent =
         String((event as unknown as Record<string, unknown>).type ?? "") ===
@@ -3820,7 +4233,7 @@ async function projectAdmission(input: {
           {
             reservationId: `turn_${input.admissionId}`,
             actual: emptyUsage({ steps: 1 }),
-          },
+          }
         );
         providerStepSettled = true;
       }
@@ -3836,15 +4249,16 @@ async function projectAdmission(input: {
               ...(event as unknown as Record<string, unknown>),
               type: providerStepEvent ? "reserved-provider-step" : event.type,
             }
-          : event as unknown as Record<string, unknown>,
+          : (event as unknown as Record<string, unknown>)
       );
-      const rootDelta = providerStepSettled && providerStepEvent
-        ? { ...limit.delta, steps: 0 }
-        : limit.delta;
+      const rootDelta =
+        providerStepSettled && providerStepEvent
+          ? { ...limit.delta, steps: 0 }
+          : limit.delta;
       const rootLimit = await accountRootInteractiveEvent(
         input.env,
         input.binding,
-        rootDelta,
+        rootDelta
       );
       const projectedEvent = input.modelPin
         ? {
@@ -3857,7 +4271,7 @@ async function projectAdmission(input: {
                 : {}),
             },
           }
-        : event as unknown as Record<string, unknown>;
+        : (event as unknown as Record<string, unknown>);
       const projected = await projector.project({
         sourceCursor,
         event: projectedEvent,
@@ -3882,21 +4296,21 @@ async function projectAdmission(input: {
         `INSERT OR IGNORE INTO flary_session_projection_dedupe
           (source_cursor, recorded_at) VALUES (?, ?)`,
         sourceCursor,
-        new Date().toISOString(),
+        new Date().toISOString()
       );
       await broadcastThreadRecords(input.sql, input.webSockets);
       const appliedLimit = limit.exceeded ? limit : rootLimit;
       if (appliedLimit.exceeded) {
         await gateway.abort(
           runtimeAgentId(input.binding),
-          threadName(input.binding.thread),
+          threadName(input.binding.thread)
         );
         throw new Error(appliedLimit.message);
       }
       await sealSessionArchiveIfNeeded(
         input.sql,
         input.env,
-        input.binding.thread.threadId,
+        input.binding.thread.threadId
       );
     });
     const resultValue = objectValue(result);
@@ -3906,16 +4320,21 @@ async function projectAdmission(input: {
     ) {
       throw new Error(
         providerFailure ??
-          "The model completed without returning an assistant message.",
+          "The model completed without returning an assistant message."
       );
     }
     if (input.modelPin) {
-      await appendLedger(input.sql, input.binding, "provider.segment.completed", {
-        ...(input.segmentId ? { segmentId: input.segmentId } : {}),
-        submissionId: input.admission.submissionId,
-        pin: input.modelPin,
-        completionReason: "completed",
-      });
+      await appendLedger(
+        input.sql,
+        input.binding,
+        "provider.segment.completed",
+        {
+          ...(input.segmentId ? { segmentId: input.segmentId } : {}),
+          submissionId: input.admission.submissionId,
+          pin: input.modelPin,
+          completionReason: "completed",
+        }
+      );
       // A provider segment completion is a public turn boundary for realtime
       // clients. Broadcast it now instead of waiting for the next model or
       // tool event to wake the socket.
@@ -3932,7 +4351,7 @@ async function projectAdmission(input: {
     const childResult = subagentResult(
       result,
       checkpoint,
-      interactiveUsage(input.sql),
+      interactiveUsage(input.sql)
     );
     await settleSubagent(input, "complete", { output: childResult });
     await recordSubagentTurn(input, result);
@@ -3949,7 +4368,7 @@ async function projectAdmission(input: {
         input.env,
         input.binding,
         "unknownUsage",
-        { reservationId: `turn_${input.admissionId}` },
+        { reservationId: `turn_${input.admissionId}` }
       ).catch(() => undefined);
     }
     put(input.sql, `projection:${input.admission.submissionId}`, {
@@ -3958,12 +4377,17 @@ async function projectAdmission(input: {
       error: error instanceof Error ? error.message : String(error),
     });
     if (input.modelPin) {
-      await appendLedger(input.sql, input.binding, "provider.segment.completed", {
-        ...(input.segmentId ? { segmentId: input.segmentId } : {}),
-        submissionId: input.admission.submissionId,
-        pin: input.modelPin,
-        completionReason: "failed",
-      }).catch(() => undefined);
+      await appendLedger(
+        input.sql,
+        input.binding,
+        "provider.segment.completed",
+        {
+          ...(input.segmentId ? { segmentId: input.segmentId } : {}),
+          submissionId: input.admission.submissionId,
+          pin: input.modelPin,
+          completionReason: "failed",
+        }
+      ).catch(() => undefined);
     }
     await appendLedger(input.sql, input.binding, "terminal", {
       status: "failed",
@@ -3975,7 +4399,9 @@ async function projectAdmission(input: {
         message: publicAgentFailureMessage(error),
       },
     }).catch(() => undefined);
-    await broadcastThreadRecords(input.sql, input.webSockets).catch(() => undefined);
+    await broadcastThreadRecords(input.sql, input.webSockets).catch(
+      () => undefined
+    );
     await settleSubagent(input, "fail", {
       error: {
         code: "subagent_execution_failed",
@@ -3987,7 +4413,9 @@ async function projectAdmission(input: {
   }
 }
 
-export function providerFailureFromFlueEvent(event: unknown): string | undefined {
+export function providerFailureFromFlueEvent(
+  event: unknown
+): string | undefined {
   const value = objectValue(event);
   const response = objectValue(value.response);
   const candidates = [
@@ -4004,13 +4432,16 @@ export function providerFailureFromFlueEvent(event: unknown): string | undefined
   ];
   return candidates.find(
     (candidate): candidate is string =>
-      typeof candidate === "string" && candidate.trim().length > 0,
+      typeof candidate === "string" && candidate.trim().length > 0
   );
 }
 
 /** Keep provider HTML, credentials, and oversized transport errors out of public session records. */
 export function publicAgentFailureMessage(error: unknown): string {
-  const message = redactErrorMessage(error, "The provider request failed.").trim();
+  const message = redactErrorMessage(
+    error,
+    "The provider request failed."
+  ).trim();
   if (
     /<\/?(?:html|head|body|style|svg)\b/i.test(message) ||
     /unable to load site|ray id:/i.test(message)
@@ -4026,15 +4457,15 @@ async function mirrorChildProjection(
     readonly binding: ThreadBinding;
   },
   record: SessionRecord,
-  sourceCursor: string,
+  sourceCursor: string
 ): Promise<void> {
   const rootThreadId = input.binding.metadata?.flarySubagentRootThreadId;
   if (
     typeof rootThreadId !== "string" ||
     rootThreadId === input.binding.thread.threadId
-  ) return;
-  const controlName =
-    `thread:${input.binding.thread.organizationId}:${input.binding.thread.appId}:${rootThreadId}`;
+  )
+    return;
+  const controlName = `thread:${input.binding.thread.organizationId}:${input.binding.thread.appId}:${rootThreadId}`;
   const body = {
     kind: "child.projection",
     controlName,
@@ -4068,7 +4499,7 @@ async function mirrorChildProjection(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ ...body, method: "projectChild" }),
-    }),
+    })
   );
   if (!response.ok) throw new Error("The root thread rejected a child event");
 }
@@ -4081,7 +4512,7 @@ async function recordSubagentTurn(
     readonly admission: FlueAdmission;
     readonly turnMessage?: string;
   },
-  result: unknown,
+  result: unknown
 ): Promise<void> {
   const turn = {
     id: `turn_${input.admission.submissionId}`.slice(0, 200),
@@ -4108,8 +4539,7 @@ async function recordSubagentTurn(
     | DurableObjectNamespace
     | undefined;
   if (!namespace) return;
-  const name =
-    `thread:${input.binding.thread.organizationId}:${input.binding.thread.appId}:${rootThreadId}`;
+  const name = `thread:${input.binding.thread.organizationId}:${input.binding.thread.appId}:${rootThreadId}`;
   const response = await namespace.get(namespace.idFromName(name)).fetch(
     new Request("https://flary.internal/subagent", {
       method: "POST",
@@ -4121,7 +4551,7 @@ async function recordSubagentTurn(
         action: "turn",
         input: { turn },
       }),
-    }),
+    })
   );
   if (!response.ok) throw new Error("The parent did not accept the child turn");
 }
@@ -4147,8 +4577,14 @@ async function checkpointWorkspace(input: {
 async function workspaceControl(
   env: Record<string, unknown>,
   binding: ThreadBinding,
-  method: "__checkpoint" | "__history" | "__diff" | "__restore" | "__fork" | "__destroy",
-  value: unknown,
+  method:
+    | "__checkpoint"
+    | "__history"
+    | "__diff"
+    | "__restore"
+    | "__fork"
+    | "__destroy",
+  value: unknown
 ): Promise<any> {
   const namespace = env.FLARY_WORKSPACE as DurableObjectNamespace | undefined;
   if (!namespace) throw new Error("FLARY_WORKSPACE is not configured");
@@ -4158,14 +4594,14 @@ async function workspaceControl(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ scope: binding.workspace, input: value }),
-    }),
+    })
   );
   const body = await response.json().catch(() => undefined);
   if (!response.ok || !objectValue(body).output) {
     throw new Error(
       typeof objectValue(objectValue(body).error).message === "string"
         ? String(objectValue(objectValue(body).error).message)
-        : "Workspace history operation failed",
+        : "Workspace history operation failed"
     );
   }
   return objectValue(body).output;
@@ -4178,13 +4614,13 @@ async function settleSubagent(
     readonly admission: FlueAdmission;
   },
   action: "complete" | "fail",
-  value: Record<string, unknown>,
+  value: Record<string, unknown>
 ): Promise<void> {
   await updateSubagentAtRoot(
     input,
     action,
     `settle_${input.admission.submissionId}`,
-    value,
+    value
   );
   const parentThreadId = input.binding.metadata?.flarySubagentParentThreadId;
   if (action === "complete" && typeof parentThreadId === "string") {
@@ -4192,7 +4628,7 @@ async function settleSubagent(
       input,
       parentThreadId,
       `result_${input.admission.submissionId}`,
-      value.output,
+      value.output
     );
   }
 }
@@ -4205,7 +4641,7 @@ async function updateSubagentAtRoot(
   },
   action: "wait" | "resume" | "complete" | "fail",
   idempotencyKey: string,
-  value: Record<string, unknown>,
+  value: Record<string, unknown>
 ): Promise<void> {
   const rootThreadId = input.binding.metadata?.flarySubagentRootThreadId;
   if (typeof rootThreadId !== "string") return;
@@ -4213,9 +4649,11 @@ async function updateSubagentAtRoot(
     | DurableObjectNamespace
     | undefined;
   if (!namespace) return;
-  const rootName =
-    `thread:${input.binding.thread.organizationId}:${input.binding.thread.appId}:${rootThreadId}`;
-  const call = async (requestAction: string, requestInput: Record<string, unknown>) => {
+  const rootName = `thread:${input.binding.thread.organizationId}:${input.binding.thread.appId}:${rootThreadId}`;
+  const call = async (
+    requestAction: string,
+    requestInput: Record<string, unknown>
+  ) => {
     const response = await namespace.get(namespace.idFromName(rootName)).fetch(
       new Request("https://flary.internal/subagent", {
         method: "POST",
@@ -4227,7 +4665,7 @@ async function updateSubagentAtRoot(
           action: requestAction,
           input: requestInput,
         }),
-      }),
+      })
     );
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
@@ -4249,7 +4687,7 @@ async function sendSubagentResultToParent(
   },
   parentThreadId: string,
   idempotencyKey: string,
-  output: unknown,
+  output: unknown
 ): Promise<void> {
   const rootThreadId = input.binding.metadata?.flarySubagentRootThreadId;
   if (typeof rootThreadId !== "string") return;
@@ -4257,8 +4695,7 @@ async function sendSubagentResultToParent(
     | DurableObjectNamespace
     | undefined;
   if (!namespace) return;
-  const rootName =
-    `thread:${input.binding.thread.organizationId}:${input.binding.thread.appId}:${rootThreadId}`;
+  const rootName = `thread:${input.binding.thread.organizationId}:${input.binding.thread.appId}:${rootThreadId}`;
   const response = await namespace.get(namespace.idFromName(rootName)).fetch(
     new Request("https://flary.internal/subagent", {
       method: "POST",
@@ -4278,9 +4715,10 @@ async function sendSubagentResultToParent(
           content: summarizeSubagentResult(output),
         },
       }),
-    }),
+    })
   );
-  if (!response.ok) throw new Error("The parent did not accept the child result");
+  if (!response.ok)
+    throw new Error("The parent did not accept the child result");
 }
 
 function jsonValue(value: unknown): unknown {
@@ -4300,27 +4738,36 @@ function summarizeSubagentResult(value: unknown): string {
       return record[key].slice(0, 100_000);
     }
   }
-  return JSON.stringify(jsonValue(value)).slice(0, 100_000) || "Subagent completed.";
+  return (
+    JSON.stringify(jsonValue(value)).slice(0, 100_000) || "Subagent completed."
+  );
 }
 
 function subagentResult(
   value: unknown,
   checkpoint: unknown,
-  usage: InteractiveUsage,
+  usage: InteractiveUsage
 ): Record<string, unknown> {
   const result = objectValue(value);
   const changedFiles = Array.isArray(result.changedFiles)
-    ? result.changedFiles.filter((item): item is string => typeof item === "string").slice(0, 10_000)
+    ? result.changedFiles
+        .filter((item): item is string => typeof item === "string")
+        .slice(0, 10_000)
     : [];
   const checks = Array.isArray(result.checks)
-    ? result.checks.flatMap((item) => {
-        const check = objectValue(item);
-        if (typeof check.command !== "string") return [];
-        const status = check.status === "passed" || check.status === "failed" || check.status === "skipped"
-          ? check.status
-          : "skipped";
-        return [{ command: check.command.slice(0, 16_384), status }];
-      }).slice(0, 1_000)
+    ? result.checks
+        .flatMap((item) => {
+          const check = objectValue(item);
+          if (typeof check.command !== "string") return [];
+          const status =
+            check.status === "passed" ||
+            check.status === "failed" ||
+            check.status === "skipped"
+              ? check.status
+              : "skipped";
+          return [{ command: check.command.slice(0, 16_384), status }];
+        })
+        .slice(0, 1_000)
     : [];
   return {
     summary: summarizeSubagentResult(value),
@@ -4336,7 +4783,7 @@ function subagentResult(
 function accountInteractiveEvent(
   sql: ThreadControlStorage["sql"],
   binding: ThreadBinding,
-  event: Record<string, unknown>,
+  event: Record<string, unknown>
 ): {
   exceeded: boolean;
   message: string;
@@ -4350,7 +4797,7 @@ function accountInteractiveEvent(
       ? objectValue(event.usage)
       : objectValue(
           objectValue(event.message).metadata &&
-            objectValue(objectValue(event.message).metadata).usage,
+            objectValue(objectValue(event.message).metadata).usage
         );
   const cost = objectValue(usage.cost);
   const costDelta =
@@ -4376,7 +4823,7 @@ function accountInteractiveEvent(
 function accountInteractiveDelta(
   sql: ThreadControlStorage["sql"],
   binding: ThreadBinding,
-  delta: InteractiveUsage,
+  delta: InteractiveUsage
 ): { exceeded: boolean; message: string; delta: InteractiveUsage } {
   const next = sql.transactionSync(() => {
     const current = interactiveUsage(sql);
@@ -4397,7 +4844,7 @@ function accountInteractiveDelta(
 function interactiveLimitResult(
   binding: ThreadBinding,
   next: InteractiveUsage,
-  delta: InteractiveUsage,
+  delta: InteractiveUsage
 ): { exceeded: boolean; message: string; delta: InteractiveUsage } {
   const limits = objectValue(binding.metadata?.flaryLimits);
   const maxSteps = positive(limits.steps, Number.MAX_SAFE_INTEGER);
@@ -4414,10 +4861,18 @@ function interactiveLimitResult(
     };
   }
   if (next.toolCalls > maxToolCalls) {
-    return { exceeded: true, message: `The interactive tool-call limit of ${maxToolCalls} was exceeded`, delta };
+    return {
+      exceeded: true,
+      message: `The interactive tool-call limit of ${maxToolCalls} was exceeded`,
+      delta,
+    };
   }
   if (next.tokens > maxTokens) {
-    return { exceeded: true, message: `The interactive token limit of ${maxTokens} was exceeded`, delta };
+    return {
+      exceeded: true,
+      message: `The interactive token limit of ${maxTokens} was exceeded`,
+      delta,
+    };
   }
   if (next.costUsd > maxCost) {
     return {
@@ -4427,10 +4882,18 @@ function interactiveLimitResult(
     };
   }
   if (next.sandboxSeconds > maxSandbox) {
-    return { exceeded: true, message: `The interactive Sandbox limit of ${maxSandbox} seconds was exceeded`, delta };
+    return {
+      exceeded: true,
+      message: `The interactive Sandbox limit of ${maxSandbox} seconds was exceeded`,
+      delta,
+    };
   }
   if (next.browserSeconds > maxBrowser) {
-    return { exceeded: true, message: `The interactive browser limit of ${maxBrowser} seconds was exceeded`, delta };
+    return {
+      exceeded: true,
+      message: `The interactive browser limit of ${maxBrowser} seconds was exceeded`,
+      delta,
+    };
   }
   return { exceeded: false, message: "", delta };
 }
@@ -4440,7 +4903,7 @@ async function rootInteractiveReservationAction(
   env: Record<string, unknown> | undefined,
   binding: ThreadBinding,
   method: "reserveUsage" | "settleUsage" | "unknownUsage",
-  body: Record<string, unknown>,
+  body: Record<string, unknown>
 ): Promise<unknown> {
   const rootThreadId = binding.metadata?.flarySubagentRootThreadId;
   if (
@@ -4453,8 +4916,7 @@ async function rootInteractiveReservationAction(
     if (!namespace) {
       throw new Error("Root usage reservations need FLARY_THREAD_CONTROL");
     }
-    const name =
-      `thread:${binding.thread.organizationId}:${binding.thread.appId}:${rootThreadId}`;
+    const name = `thread:${binding.thread.organizationId}:${binding.thread.appId}:${rootThreadId}`;
     const response = await namespace.get(namespace.idFromName(name)).fetch(
       new Request("https://flary.internal/usage-reservation", {
         method: "POST",
@@ -4465,14 +4927,14 @@ async function rootInteractiveReservationAction(
           tenantId: binding.thread.organizationId,
           applicationId: binding.thread.appId,
         }),
-      }),
+      })
     );
     const result = await response.json().catch(() => ({}));
     if (!response.ok) {
       throw new Error(
         typeof objectValue(result).error === "string"
           ? String(objectValue(result).error)
-          : "Root usage reservation failed",
+          : "Root usage reservation failed"
       );
     }
     return result;
@@ -4491,7 +4953,7 @@ async function rootInteractiveReservationAction(
       sql,
       binding,
       reservationId,
-      body.actual === undefined ? undefined : usageValue(body.actual),
+      body.actual === undefined ? undefined : usageValue(body.actual)
     );
   }
   return markInteractiveUsageUnknown(sql, reservationId);
@@ -4505,7 +4967,7 @@ async function reserveRootInteractiveUsage(
     readonly reservationId: string;
     readonly kind: string;
     readonly delta: InteractiveUsage;
-  },
+  }
 ): Promise<unknown> {
   return rootInteractiveReservationAction(sql, env, binding, "reserveUsage", {
     reservationId: input.reservationId,
@@ -4521,20 +4983,26 @@ function reserveInteractiveUsage(
     readonly reservationId: string;
     readonly kind: string;
     readonly delta: InteractiveUsage;
-  },
+  }
 ): { reserved: true; replay: boolean; usage: InteractiveUsage } {
   return sql.transactionSync(() => {
-    const existing = sql.exec<{ state: string; reserved_json: string }>(
-      `SELECT state, reserved_json FROM flary_interactive_reservations
+    const existing = sql
+      .exec<{ state: string; reserved_json: string }>(
+        `SELECT state, reserved_json FROM flary_interactive_reservations
        WHERE reservation_id = ?`,
-      input.reservationId,
-    ).toArray()[0];
+        input.reservationId
+      )
+      .toArray()[0];
     if (existing) {
       const stored = usageValue(JSON.parse(existing.reserved_json));
       if (JSON.stringify(stored) !== JSON.stringify(input.delta)) {
         throw new Error("A usage reservation changed during replay");
       }
-      return { reserved: true as const, replay: true, usage: interactiveUsage(sql) };
+      return {
+        reserved: true as const,
+        replay: true,
+        usage: interactiveUsage(sql),
+      };
     }
     const current = interactiveUsage(sql);
     const held = reservedInteractiveUsage(sql);
@@ -4550,7 +5018,7 @@ function reserveInteractiveUsage(
       input.kind.slice(0, 100),
       JSON.stringify(input.delta),
       now,
-      now,
+      now
     );
     return { reserved: true as const, replay: false, usage: projected };
   });
@@ -4560,24 +5028,30 @@ function settleInteractiveUsage(
   sql: ThreadControlStorage["sql"],
   binding: ThreadBinding,
   reservationId: string,
-  actual?: InteractiveUsage,
+  actual?: InteractiveUsage
 ): { settled: true; replay: boolean; usage: InteractiveUsage } {
   return sql.transactionSync(() => {
-    const row = sql.exec<{
-      state: string;
-      reserved_json: string;
-      actual_json: string | null;
-    }>(
-      `SELECT state, reserved_json, actual_json
+    const row = sql
+      .exec<{
+        state: string;
+        reserved_json: string;
+        actual_json: string | null;
+      }>(
+        `SELECT state, reserved_json, actual_json
        FROM flary_interactive_reservations WHERE reservation_id = ?`,
-      reservationId,
-    ).toArray()[0];
+        reservationId
+      )
+      .toArray()[0];
     if (!row) throw new Error("The usage reservation was not found");
     if (row.state === "unknown") {
       throw new Error("An unknown usage outcome needs operator resolution");
     }
     if (row.state === "settled") {
-      return { settled: true as const, replay: true, usage: interactiveUsage(sql) };
+      return {
+        settled: true as const,
+        replay: true,
+        usage: interactiveUsage(sql),
+      };
     }
     const applied = actual ?? usageValue(JSON.parse(row.reserved_json));
     const next = addUsage(interactiveUsage(sql), applied);
@@ -4590,7 +5064,7 @@ function settleInteractiveUsage(
        WHERE reservation_id = ? AND state = 'held'`,
       JSON.stringify(applied),
       new Date().toISOString(),
-      reservationId,
+      reservationId
     );
     return { settled: true as const, replay: false, usage: next };
   });
@@ -4598,28 +5072,31 @@ function settleInteractiveUsage(
 
 function markInteractiveUsageUnknown(
   sql: ThreadControlStorage["sql"],
-  reservationId: string,
+  reservationId: string
 ): { unknown: true } {
   sql.exec(
     `UPDATE flary_interactive_reservations
      SET state = 'unknown', updated_at = ?
      WHERE reservation_id = ? AND state = 'held'`,
     new Date().toISOString(),
-    reservationId,
+    reservationId
   );
   return { unknown: true };
 }
 
 function reservedInteractiveUsage(
-  sql: ThreadControlStorage["sql"],
+  sql: ThreadControlStorage["sql"]
 ): InteractiveUsage {
-  return sql.exec<{ reserved_json: string }>(
-    `SELECT reserved_json FROM flary_interactive_reservations
-     WHERE state IN ('held', 'unknown')`,
-  ).toArray().reduce(
-    (sum, row) => addUsage(sum, usageValue(JSON.parse(row.reserved_json))),
-    emptyUsage(),
-  );
+  return sql
+    .exec<{ reserved_json: string }>(
+      `SELECT reserved_json FROM flary_interactive_reservations
+     WHERE state IN ('held', 'unknown')`
+    )
+    .toArray()
+    .reduce(
+      (sum, row) => addUsage(sum, usageValue(JSON.parse(row.reserved_json))),
+      emptyUsage()
+    );
 }
 
 function usageValue(value: unknown): InteractiveUsage {
@@ -4645,7 +5122,10 @@ function emptyUsage(input: Partial<InteractiveUsage> = {}): InteractiveUsage {
   };
 }
 
-function addUsage(left: InteractiveUsage, right: InteractiveUsage): InteractiveUsage {
+function addUsage(
+  left: InteractiveUsage,
+  right: InteractiveUsage
+): InteractiveUsage {
   return {
     steps: left.steps + right.steps,
     toolCalls: left.toolCalls + right.toolCalls,
@@ -4659,7 +5139,7 @@ function addUsage(left: InteractiveUsage, right: InteractiveUsage): InteractiveU
 async function accountRootInteractiveEvent(
   env: Record<string, unknown>,
   binding: ThreadBinding,
-  delta: InteractiveUsage,
+  delta: InteractiveUsage
 ): Promise<{ exceeded: boolean; message: string }> {
   const rootThreadId = binding.metadata?.flarySubagentRootThreadId;
   if (typeof rootThreadId !== "string") {
@@ -4668,10 +5148,11 @@ async function accountRootInteractiveEvent(
   if (Object.values(delta).every((value) => value === 0)) {
     return { exceeded: false, message: "" };
   }
-  const namespace = env.FLARY_THREAD_CONTROL as DurableObjectNamespace | undefined;
+  const namespace = env.FLARY_THREAD_CONTROL as
+    | DurableObjectNamespace
+    | undefined;
   if (!namespace) return { exceeded: false, message: "" };
-  const name =
-    `thread:${binding.thread.organizationId}:${binding.thread.appId}:${rootThreadId}`;
+  const name = `thread:${binding.thread.organizationId}:${binding.thread.appId}:${rootThreadId}`;
   const response = await namespace.get(namespace.idFromName(name)).fetch(
     new Request("https://flary.internal/accountUsage", {
       method: "POST",
@@ -4682,7 +5163,7 @@ async function accountRootInteractiveEvent(
         applicationId: binding.thread.appId,
         delta,
       }),
-    }),
+    })
   );
   const value = objectValue(await response.json().catch(() => ({})));
   if (!response.ok) throw new Error("Root usage accounting failed");
@@ -4702,9 +5183,11 @@ interface InteractiveUsage {
 }
 
 function interactiveUsage(sql: ThreadControlStorage["sql"]): InteractiveUsage {
-  const row = sql.exec<{ value_json: string }>(
-    "SELECT value_json FROM flary_thread_control WHERE key = 'interactiveUsage'",
-  ).toArray()[0];
+  const row = sql
+    .exec<{ value_json: string }>(
+      "SELECT value_json FROM flary_thread_control WHERE key = 'interactiveUsage'"
+    )
+    .toArray()[0];
   const value = row ? objectValue(JSON.parse(row.value_json)) : {};
   return {
     steps: nonnegative(value.steps, 0),
@@ -4721,7 +5204,7 @@ function interactiveUsage(sql: ThreadControlStorage["sql"]): InteractiveUsage {
 
 function canonicalEventCursor(
   submissionId: string,
-  event: Record<string, unknown>,
+  event: Record<string, unknown>
 ): string {
   const position = objectValue(event.position);
   if (
@@ -4739,7 +5222,7 @@ function canonicalEventCursor(
 
 function initializeSubagents(
   sql: ThreadControlStorage["sql"],
-  binding: ThreadBinding,
+  binding: ThreadBinding
 ): SqliteSubagentCoordinator {
   const delegation = objectValue(binding.metadata?.flaryDelegation);
   return new SqliteSubagentCoordinator({
@@ -4784,19 +5267,20 @@ function subagentAction(
   sql: ThreadControlStorage["sql"],
   binding: ThreadBinding,
   action: string,
-  input: Record<string, unknown>,
+  input: Record<string, unknown>
 ): unknown {
   const coordinator = initializeSubagents(sql, binding);
   const sessionId = binding.thread.threadId;
   if (action === "list") {
-    const currentThreadId = typeof input.currentThreadId === "string"
-      ? input.currentThreadId
-      : binding.thread.threadId;
+    const currentThreadId =
+      typeof input.currentThreadId === "string"
+        ? input.currentThreadId
+        : binding.thread.threadId;
     return {
       threads: coordinator.listThreads(),
       messages: coordinator.readMessages(
         currentThreadId,
-        numericValue(input.afterSequence, 0),
+        numericValue(input.afterSequence, 0)
       ),
       activity: coordinator.readActivity(numericValue(input.afterSequence, 0)),
     };
@@ -4816,7 +5300,10 @@ function subagentAction(
             : binding.thread.threadId,
         agentId:
           typeof input.agentId === "string" ? input.agentId : binding.agentId,
-        task: typeof input.task === "string" ? input.task : "Complete the delegated task.",
+        task:
+          typeof input.task === "string"
+            ? input.task
+            : "Complete the delegated task.",
         seedTurns: numericValue(input.seedTurns, 0),
       }),
     };
@@ -4842,12 +5329,13 @@ function subagentAction(
       : [];
     return {
       threads: ids.map((id) => coordinator.getThread(id)).filter(Boolean),
-      messages: typeof input.currentThreadId === "string"
-        ? coordinator.readMessages(
-            input.currentThreadId,
-            numericValue(input.afterSequence, 0),
-          )
-        : [],
+      messages:
+        typeof input.currentThreadId === "string"
+          ? coordinator.readMessages(
+              input.currentThreadId,
+              numericValue(input.afterSequence, 0)
+            )
+          : [],
       activity: coordinator.readActivity(numericValue(input.afterSequence, 0)),
     };
   }
@@ -4856,15 +5344,15 @@ function subagentAction(
     action === "interrupt"
       ? "cancel"
       : action === "close" ||
-          action === "resume" ||
-          action === "start" ||
-          action === "wait" ||
-          action === "complete" ||
-          action === "fail" ||
-          action === "cancel" ||
-          action === "handoff"
-        ? action
-        : undefined;
+        action === "resume" ||
+        action === "start" ||
+        action === "wait" ||
+        action === "complete" ||
+        action === "fail" ||
+        action === "cancel" ||
+        action === "handoff"
+      ? action
+      : undefined;
   if (!controlAction) throw new Error(`Unknown subagent action '${action}'`);
   return {
     thread: coordinator.control({
@@ -4896,7 +5384,7 @@ async function appendLedger(
   options: {
     readonly producer?: SessionRecord["producer"];
     readonly encryptedContentRef?: SessionRecord["encryptedContentRef"];
-  } = {},
+  } = {}
 ) {
   const ledger = new SqliteSessionLedger(sql);
   return ledger.append({
@@ -4905,8 +5393,9 @@ async function appendLedger(
     sessionId: binding.thread.threadId,
     threadId: binding.thread.threadId,
     agentId: binding.agentId,
-    sourceCursor:
-      `control:${Date.now()}:${crypto.randomUUID().replaceAll("-", "")}`,
+    sourceCursor: `control:${Date.now()}:${crypto
+      .randomUUID()
+      .replaceAll("-", "")}`,
     recordType,
     recordedAt: new Date().toISOString(),
     attempt: 0,
@@ -4924,7 +5413,7 @@ async function appendLedger(
 
 function safeRuntimeActivityPayload(
   recordType: SessionRecordType,
-  value: unknown,
+  value: unknown
 ): Record<string, unknown> {
   const input = objectValue(value);
   const text = (candidate: unknown, max = 512) =>
@@ -4943,10 +5432,12 @@ function safeRuntimeActivityPayload(
   };
   if (recordType === "tool.search") {
     const resultIds = Array.isArray(input.resultIds)
-      ? input.resultIds.flatMap((item) => {
-          const id = text(item, 256);
-          return id ? [id] : [];
-        }).slice(0, 50)
+      ? input.resultIds
+          .flatMap((item) => {
+            const id = text(item, 256);
+            return id ? [id] : [];
+          })
+          .slice(0, 50)
       : [];
     return {
       ...base,
@@ -5006,20 +5497,25 @@ function safeRuntimeActivityPayload(
 }
 
 function safeProducer(
-  value: Record<string, unknown>,
+  value: Record<string, unknown>
 ): SessionRecord["producer"] | undefined {
   const producer = value.producer;
   if (!producer || typeof producer !== "object" || Array.isArray(producer)) {
     return undefined;
   }
   const candidate = producer as Record<string, unknown>;
-  if (typeof candidate.provider !== "string" || typeof candidate.model !== "string") {
+  if (
+    typeof candidate.provider !== "string" ||
+    typeof candidate.model !== "string"
+  ) {
     return undefined;
   }
   return {
     provider: candidate.provider,
     model: candidate.model,
-    ...(typeof candidate.variant === "string" ? { variant: candidate.variant } : {}),
+    ...(typeof candidate.variant === "string"
+      ? { variant: candidate.variant }
+      : {}),
   };
 }
 
@@ -5028,23 +5524,21 @@ async function readLedger(
   sessionId: string,
   after: number,
   limit: number,
-  env?: Record<string, unknown>,
+  env?: Record<string, unknown>
 ) {
   const ledger = new SqliteSessionLedger(sql);
   const records = [];
-  const bucket = env?.FLARY_SESSION_ARCHIVE as
-    | SessionArchiveBucket
-    | undefined;
+  const bucket = env?.FLARY_SESSION_ARCHIVE as SessionArchiveBucket | undefined;
   const secret =
     typeof env?.FLARY_SESSION_ARCHIVE_KEY === "string"
       ? env.FLARY_SESSION_ARCHIVE_KEY
       : undefined;
   if (bucket && secret) {
     records.push(
-      ...await new R2SessionArchive({ sql, bucket, secret }).read(sessionId, {
+      ...(await new R2SessionArchive({ sql, bucket, secret }).read(sessionId, {
         after,
         limit,
-      }),
+      }))
     );
   }
   let cursor = after > 0 ? `v1:${after}` : undefined;
@@ -5065,7 +5559,7 @@ async function readLedger(
 async function sealSessionArchiveIfNeeded(
   sql: ThreadControlStorage["sql"],
   env: Record<string, unknown>,
-  sessionId: string,
+  sessionId: string
 ): Promise<void> {
   const bucket = env.FLARY_SESSION_ARCHIVE as SessionArchiveBucket | undefined;
   const secret =
@@ -5073,17 +5567,20 @@ async function sealSessionArchiveIfNeeded(
       ? env.FLARY_SESSION_ARCHIVE_KEY
       : undefined;
   if (!bucket || !secret) return;
-  await new R2SessionArchive({ sql, bucket, secret }).sealColdRecords(sessionId);
+  await new R2SessionArchive({ sql, bucket, secret }).sealColdRecords(
+    sessionId
+  );
 }
 
 function canonicalArchiveFor(
   sql: ThreadControlStorage["sql"],
-  env: Record<string, unknown> | undefined,
+  env: Record<string, unknown> | undefined
 ): SqliteCanonicalSessionArchive | undefined {
   const bucket = env?.FLARY_SESSION_ARCHIVE as SessionArchiveBucket | undefined;
-  const secret = typeof env?.FLARY_SESSION_ARCHIVE_KEY === "string"
-    ? env.FLARY_SESSION_ARCHIVE_KEY
-    : undefined;
+  const secret =
+    typeof env?.FLARY_SESSION_ARCHIVE_KEY === "string"
+      ? env.FLARY_SESSION_ARCHIVE_KEY
+      : undefined;
   if (!bucket || !secret) return undefined;
   return new SqliteCanonicalSessionArchive({ sql, bucket, secret });
 }
@@ -5098,16 +5595,13 @@ async function captureCanonicalSnapshot(
     readonly modelPin?: ResolvedModelPin;
     readonly segmentId?: string;
   },
-  gateway: FlueAgentGateway,
+  gateway: FlueAgentGateway
 ): Promise<void> {
-  const archive = canonicalArchiveFor(
-    input.sql,
-    input.env,
-  );
+  const archive = canonicalArchiveFor(input.sql, input.env);
   if (!archive || !gateway.history) return;
   const snapshot = await gateway.history(
     runtimeAgentId(input.binding),
-    threadName(input.binding.thread),
+    threadName(input.binding.thread)
   );
   await archive.append(
     input.binding.thread.threadId,
@@ -5120,7 +5614,7 @@ async function captureCanonicalSnapshot(
       ...(input.segmentId ? { segmentId: input.segmentId } : {}),
       ...(input.modelPin ? { modelPin: input.modelPin } : {}),
       snapshot,
-    }),
+    })
   );
 }
 
@@ -5134,11 +5628,12 @@ async function captureCanonicalSnapshot(
 async function subagentChildren(
   service: FlaryThreadHostService,
   target: FlaryThreadTarget,
-  binding: ThreadBinding,
+  binding: ThreadBinding
 ): Promise<FlaryThreadTarget[]> {
-  const rootThreadId = typeof binding.metadata?.flarySubagentRootThreadId === "string"
-    ? binding.metadata.flarySubagentRootThreadId
-    : target.threadId;
+  const rootThreadId =
+    typeof binding.metadata?.flarySubagentRootThreadId === "string"
+      ? binding.metadata.flarySubagentRootThreadId
+      : target.threadId;
   let bindings: ThreadBinding[];
   try {
     bindings = await service.list(target);
@@ -5158,28 +5653,34 @@ async function subagentChildren(
     ) {
       return [];
     }
-    return [{
-      authorization: target.authorization,
-      appId: target.appId,
-      threadId: candidate.thread.threadId,
-    }];
+    return [
+      {
+        authorization: target.authorization,
+        appId: target.appId,
+        threadId: candidate.thread.threadId,
+      },
+    ];
   });
 }
 
 function requireBinding(sql: ThreadControlStorage["sql"]): ThreadBinding {
-  const row = sql.exec<{ value_json: string }>(
-    "SELECT value_json FROM flary_thread_control WHERE key = 'binding'",
-  ).toArray()[0];
+  const row = sql
+    .exec<{ value_json: string }>(
+      "SELECT value_json FROM flary_thread_control WHERE key = 'binding'"
+    )
+    .toArray()[0];
   if (!row) throw new Error("The thread was not found");
   return ThreadBindingSchema.parse(JSON.parse(row.value_json));
 }
 
 function readDeletion(
-  sql: ThreadControlStorage["sql"],
+  sql: ThreadControlStorage["sql"]
 ): ThreadDeletion | undefined {
-  const row = sql.exec<{ value_json: string }>(
-    "SELECT value_json FROM flary_thread_control WHERE key = 'deletion'",
-  ).toArray()[0];
+  const row = sql
+    .exec<{ value_json: string }>(
+      "SELECT value_json FROM flary_thread_control WHERE key = 'deletion'"
+    )
+    .toArray()[0];
   if (!row) return undefined;
   return ThreadDeletionSchema.parse(JSON.parse(row.value_json));
 }
@@ -5187,7 +5688,9 @@ function readDeletion(
 function assertThreadOpen(sql: ThreadControlStorage["sql"]): void {
   const deletion = readDeletion(sql);
   if (deletion) {
-    throw new Error(`The thread is ${deletion.status} and does not accept new work`);
+    throw new Error(
+      `The thread is ${deletion.status} and does not accept new work`
+    );
   }
 }
 
@@ -5207,7 +5710,11 @@ interface StoredModelPolicy {
 function modelPolicy(binding: ThreadBinding): StoredModelPolicy {
   const value = binding.metadata?.flaryModelPolicy;
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { allow: binding.defaultModel ? [binding.defaultModel] : [], switching: "user", fallback: "none" };
+    return {
+      allow: binding.defaultModel ? [binding.defaultModel] : [],
+      switching: "user",
+      fallback: "none",
+    };
   }
   const candidate = value as Record<string, unknown>;
   const allow = Array.isArray(candidate.allow)
@@ -5231,12 +5738,13 @@ interface ForkBoundary {
 
 function resolveForkBoundary(
   records: readonly Record<string, unknown>[],
-  requestedTurnId?: string,
+  requestedTurnId?: string
 ): ForkBoundary {
-  const completed = records.filter((record) =>
-    record.recordType === "turn.completed" &&
-    objectValue(record.publicPayload).type !== "message-completed" &&
-    recordTurnId(record),
+  const completed = records.filter(
+    (record) =>
+      record.recordType === "turn.completed" &&
+      objectValue(record.publicPayload).type !== "message-completed" &&
+      recordTurnId(record)
   );
   const latest = completed.at(-1);
   const selected = requestedTurnId
@@ -5250,14 +5758,13 @@ function resolveForkBoundary(
       requestedTurnId
         ? `The fork turn '${requestedTurnId}' is not a completed turn`
         : "The thread has no completed turn to fork",
-      { latestCompletedTurnId: latest ? recordTurnId(latest) : undefined },
+      { latestCompletedTurnId: latest ? recordTurnId(latest) : undefined }
     );
   }
   const turnId = recordTurnId(selected)!;
   const completionIndex = records.indexOf(selected);
-  const sourceCursor = typeof selected.sourceCursor === "string"
-    ? selected.sourceCursor
-    : "";
+  const sourceCursor =
+    typeof selected.sourceCursor === "string" ? selected.sourceCursor : "";
   const submissionId = sourceCursor.startsWith("flue:")
     ? sourceCursor.slice(5).split(":", 1)[0]
     : undefined;
@@ -5265,7 +5772,10 @@ function resolveForkBoundary(
   let checkpointId: string | undefined;
   for (let index = completionIndex + 1; index < records.length; index += 1) {
     const record = records[index]!;
-    if (record.recordType === "turn.started" && recordTurnId(record) !== turnId) {
+    if (
+      record.recordType === "turn.started" &&
+      recordTurnId(record) !== turnId
+    ) {
       break;
     }
     const payload = objectValue(record.publicPayload);
@@ -5294,19 +5804,22 @@ function recordTurnId(record: Record<string, unknown>): string | undefined {
   return typeof payload.turnId === "string"
     ? payload.turnId
     : typeof payload.messageId === "string"
-      ? payload.messageId
-      : undefined;
+    ? payload.messageId
+    : undefined;
 }
 
 function forkWorkspaceBranch(parent: string, threadId: string): string {
   const suffix = threadId.replace(/[^A-Za-z0-9_-]/g, "-").slice(-48);
-  return `${parent.slice(0, Math.max(1, 200 - suffix.length - 6))}-fork-${suffix}`;
+  return `${parent.slice(
+    0,
+    Math.max(1, 200 - suffix.length - 6)
+  )}-fork-${suffix}`;
 }
 
 async function sha256Text(value: string): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(value),
+    new TextEncoder().encode(value)
   );
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -5318,7 +5831,7 @@ async function sha256Json(value: unknown): Promise<string> {
 }
 
 async function portableArchiveHash(
-  archive: ThreadPortableArchive,
+  archive: ThreadPortableArchive
 ): Promise<string> {
   const { sha256: _sha256, ...unsigned } = archive;
   return sha256Json(unsigned);
@@ -5326,11 +5839,13 @@ async function portableArchiveHash(
 
 function currentModel(
   sql: ThreadControlStorage["sql"],
-  binding: ThreadBinding,
+  binding: ThreadBinding
 ): ModelSelection | undefined {
-  const row = sql.exec<{ value_json: string }>(
-    "SELECT value_json FROM flary_thread_control WHERE key = 'model-state'",
-  ).toArray()[0];
+  const row = sql
+    .exec<{ value_json: string }>(
+      "SELECT value_json FROM flary_thread_control WHERE key = 'model-state'"
+    )
+    .toArray()[0];
   if (row) {
     const parsed = ModelSelectionSchema.safeParse(JSON.parse(row.value_json));
     if (parsed.success) return parsed.data;
@@ -5339,25 +5854,39 @@ function currentModel(
 }
 
 function sameModel(left: ModelSelection, right: ModelSelection): boolean {
-  return left.provider === right.provider &&
+  return (
+    left.provider === right.provider &&
     left.model === right.model &&
     left.deployment === right.deployment &&
-    left.variant === right.variant;
+    left.variant === right.variant
+  );
 }
 
-function assertAllowedModel(binding: ThreadBinding, selection: ModelSelection): void {
+function assertAllowedModel(
+  binding: ThreadBinding,
+  selection: ModelSelection
+): void {
   const policy = modelPolicy(binding);
   if (policy.allow.length === 0) return;
   if (!policy.allow.some((allowed) => sameModel(allowed, selection))) {
-    throw new Error(`The model '${toFlueModelSpecifier(selection)}' is not allowed for this agent`);
+    throw new Error(
+      `The model '${toFlueModelSpecifier(
+        selection
+      )}' is not allowed for this agent`
+    );
   }
 }
 
-function nextControlSequence(sql: ThreadControlStorage["sql"], prefix: string): number {
-  const rows = sql.exec<{ key: string }>(
-    "SELECT key FROM flary_thread_control WHERE key LIKE ? ORDER BY key DESC LIMIT 1",
-    `${prefix}%`,
-  ).toArray();
+function nextControlSequence(
+  sql: ThreadControlStorage["sql"],
+  prefix: string
+): number {
+  const rows = sql
+    .exec<{ key: string }>(
+      "SELECT key FROM flary_thread_control WHERE key LIKE ? ORDER BY key DESC LIMIT 1",
+      `${prefix}%`
+    )
+    .toArray();
   const value = rows[0]?.key.slice(prefix.length);
   const parsed = value ? Number(value) : 0;
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed + 1 : 1;
@@ -5365,20 +5894,23 @@ function nextControlSequence(sql: ThreadControlStorage["sql"], prefix: string): 
 
 function resolvedModelPin(
   binding: ThreadBinding,
-  selection: ModelSelection,
+  selection: ModelSelection
 ): ResolvedModelPin {
   const metadata = binding.metadata ?? {};
   const grants = binding.connectionIds;
-  const credentialGeneration = typeof metadata.credentialGeneration === "string"
-    ? metadata.credentialGeneration
-    : undefined;
+  const credentialGeneration =
+    typeof metadata.credentialGeneration === "string"
+      ? metadata.credentialGeneration
+      : undefined;
   return {
     selection,
     provider: selection.provider,
     model: selection.model,
     ...(selection.deployment ? { deployment: selection.deployment } : {}),
     ...(selection.variant ? { variant: selection.variant } : {}),
-    ...(selection.reasoningEffort ? { reasoning: selection.reasoningEffort } : {}),
+    ...(selection.reasoningEffort
+      ? { reasoning: selection.reasoningEffort }
+      : {}),
     capabilitySnapshot: [...(selection.capabilities ?? [])],
     ...(typeof metadata.modelCatalogRevision === "string"
       ? { modelCatalogRevision: metadata.modelCatalogRevision }
@@ -5395,11 +5927,13 @@ function resolvedModelPin(
 function assertOwner(
   sql: ThreadControlStorage["sql"],
   body: Record<string, unknown>,
-  initialize = false,
+  initialize = false
 ): void {
-  const row = sql.exec<{ value_json: string }>(
-    "SELECT value_json FROM flary_thread_control WHERE key = 'owner'",
-  ).toArray()[0];
+  const row = sql
+    .exec<{ value_json: string }>(
+      "SELECT value_json FROM flary_thread_control WHERE key = 'owner'"
+    )
+    .toArray()[0];
   if (!row) {
     if (initialize) {
       put(sql, "owner", {
@@ -5422,14 +5956,14 @@ function assertOwner(
 function put(
   sql: ThreadControlStorage["sql"],
   key: string,
-  value: unknown,
+  value: unknown
 ): void {
   sql.exec(
     `INSERT INTO flary_thread_control (key, value_json)
      VALUES (?, ?)
      ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json`,
     key,
-    JSON.stringify(value),
+    JSON.stringify(value)
   );
 }
 
@@ -5437,7 +5971,7 @@ async function agentApprovalRpc(
   env: Record<string, unknown>,
   binding: ThreadBinding,
   action: "approvals" | "approval",
-  decision?: ApprovalDecision,
+  decision?: ApprovalDecision
 ): Promise<any> {
   const fetcher = createCloudflareFlueFetch(env);
   const headers = new Headers({ "content-type": "application/json" });
@@ -5446,15 +5980,18 @@ async function agentApprovalRpc(
   }
   const instanceId = threadName(binding.thread);
   const response = await fetcher(
-    `https://flue.internal/agents/${encodeURIComponent(runtimeAgentId(binding))}/${encodeURIComponent(instanceId)}?flary=${action}`,
+    `https://flue.internal/agents/${encodeURIComponent(
+      runtimeAgentId(binding)
+    )}/${encodeURIComponent(instanceId)}?flary=${action}`,
     {
       method: action === "approval" ? "POST" : "GET",
       headers,
       ...(decision ? { body: JSON.stringify(decision) } : {}),
-    },
+    }
   );
   const value = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(`Agent approval request failed (${response.status})`);
+  if (!response.ok)
+    throw new Error(`Agent approval request failed (${response.status})`);
   return value;
 }
 
@@ -5462,7 +5999,7 @@ async function agentControlRpc(
   env: Record<string, unknown>,
   binding: ThreadBinding,
   action: "compact" | "rollback" | "export" | "import",
-  input: unknown,
+  input: unknown
 ): Promise<unknown> {
   const agentId = runtimeAgentId(binding);
   const namespace = env[
@@ -5478,24 +6015,24 @@ async function agentControlRpc(
       : undefined;
   const headers = new Headers({ "content-type": "application/json" });
   if (token) headers.set("authorization", `Bearer ${token}`);
-  const response = await namespace
-    .get(namespace.idFromName(instanceId))
-    .fetch(
-      new Request(
-        `https://flue.internal/agents/${encodeURIComponent(agentId)}/${encodeURIComponent(instanceId)}?flary=${action}`,
-        {
-          method: "POST",
-          headers,
-          body: JSON.stringify(input ?? {}),
-        },
-      ),
-    );
+  const response = await namespace.get(namespace.idFromName(instanceId)).fetch(
+    new Request(
+      `https://flue.internal/agents/${encodeURIComponent(
+        agentId
+      )}/${encodeURIComponent(instanceId)}?flary=${action}`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify(input ?? {}),
+      }
+    )
+  );
   const value = await response.json().catch(() => undefined);
   if (!response.ok) {
     throw new Error(
       value && typeof value === "object" && "error" in value
         ? String((value as { error: unknown }).error)
-        : `Flue ${action} failed (${response.status})`,
+        : `Flue ${action} failed (${response.status})`
     );
   }
   return value;
@@ -5506,8 +6043,8 @@ async function projectAgentSnapshot(
   binding: ThreadBinding,
   project: (
     event: Record<string, unknown>,
-    sourceCursor: string,
-  ) => Promise<unknown>,
+    sourceCursor: string
+  ) => Promise<unknown>
 ): Promise<void> {
   const agentId = runtimeAgentId(binding);
   const namespace = env[
@@ -5517,8 +6054,10 @@ async function projectAgentSnapshot(
   const instanceId = threadName(binding.thread);
   const fetcher = createCloudflareFlueFetch(env);
   const response = await fetcher(
-    `https://flue.internal/agents/${encodeURIComponent(agentId)}/${encodeURIComponent(instanceId)}?view=history`,
-    { method: "GET" },
+    `https://flue.internal/agents/${encodeURIComponent(
+      agentId
+    )}/${encodeURIComponent(instanceId)}?view=history`,
+    { method: "GET" }
   );
   if (!response.ok) {
     throw new Error(`Flue conversation snapshot failed (${response.status})`);
@@ -5532,23 +6071,31 @@ async function projectAgentSnapshot(
       snapshot,
       timestamp: new Date().toISOString(),
     },
-    `flue:control:${agentId}:${instanceId}:${offset}`,
+    `flue:control:${agentId}:${instanceId}:${offset}`
   );
 }
 
 function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : {};
 }
 
 function subagentWaitSettled(value: unknown): boolean {
   const threads = objectValue(value).threads;
-  return Array.isArray(threads) && threads.length > 0 && threads.every((thread) => {
-    const status = objectValue(thread).status;
-    return status === "completed" || status === "failed" ||
-      status === "cancelled" || status === "closed";
-  });
+  return (
+    Array.isArray(threads) &&
+    threads.length > 0 &&
+    threads.every((thread) => {
+      const status = objectValue(thread).status;
+      return (
+        status === "completed" ||
+        status === "failed" ||
+        status === "cancelled" ||
+        status === "closed"
+      );
+    })
+  );
 }
 
 function positive(value: unknown, fallback: number): number {

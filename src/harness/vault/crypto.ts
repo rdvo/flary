@@ -25,7 +25,10 @@ type CryptoGlobal = {
   btoa?: (value: string) => string;
   atob?: (value: string) => string;
   Buffer?: {
-    from(value: string, encoding: string): { toString(encoding: string): string };
+    from(
+      value: string,
+      encoding: string
+    ): { toString(encoding: string): string };
     from(value: Uint8Array): { toString(encoding: string): string };
   };
 };
@@ -42,13 +45,6 @@ function copyBytes(value: Uint8Array): Uint8Array {
   const copy = new Uint8Array(value.byteLength);
   copy.set(value);
   return copy;
-}
-
-function asBytes(value: Uint8Array | ArrayBuffer): Uint8Array {
-  if (value instanceof Uint8Array) {
-    return copyBytes(value);
-  }
-  return new Uint8Array(value.slice(0));
 }
 
 function asArrayBuffer(value: Uint8Array): ArrayBuffer {
@@ -78,7 +74,9 @@ function isCryptoKey(value: Uint8Array | Aes256GcmKey): value is Aes256GcmKey {
   return !(value instanceof Uint8Array);
 }
 
-async function resolveKey(key: Uint8Array | Aes256GcmKey): Promise<Aes256GcmKey> {
+async function resolveKey(
+  key: Uint8Array | Aes256GcmKey
+): Promise<Aes256GcmKey> {
   if (isCryptoKey(key)) {
     return key;
   }
@@ -87,7 +85,7 @@ async function resolveKey(key: Uint8Array | Aes256GcmKey): Promise<Aes256GcmKey>
 
 export async function importAes256GcmKey(
   rawKey: Uint8Array,
-  extractable = false,
+  extractable = false
 ): Promise<Aes256GcmKey> {
   const bytes = validateAes256KeyBytes(copyBytes(rawKey));
   return getCrypto().subtle.importKey(
@@ -95,7 +93,7 @@ export async function importAes256GcmKey(
     asBufferSource(bytes),
     { name: WEB_CRYPTO_AES_GCM },
     extractable,
-    ["encrypt", "decrypt"],
+    ["encrypt", "decrypt"]
   );
 }
 
@@ -119,7 +117,7 @@ export function randomAesGcmIv(): Uint8Array {
 export async function encryptAes256Gcm(
   plaintext: Uint8Array,
   key: Uint8Array | Aes256GcmKey,
-  options: { iv?: Uint8Array; additionalData?: Uint8Array } = {},
+  options: { iv?: Uint8Array; additionalData?: Uint8Array } = {}
 ): Promise<AesGcmCiphertext> {
   const iv = validateIv(options.iv ? copyBytes(options.iv) : randomAesGcmIv());
   const cryptoKey = await resolveKey(key);
@@ -135,7 +133,7 @@ export async function encryptAes256Gcm(
   const ciphertext = await getCrypto().subtle.encrypt(
     algorithm,
     cryptoKey,
-    asBufferSource(plaintext),
+    asBufferSource(plaintext)
   );
   return { iv, ciphertext: new Uint8Array(ciphertext) };
 }
@@ -144,7 +142,7 @@ export async function decryptAes256Gcm(
   ciphertext: Uint8Array,
   key: Uint8Array | Aes256GcmKey,
   iv: Uint8Array,
-  options: { additionalData?: Uint8Array } = {},
+  options: { additionalData?: Uint8Array } = {}
 ): Promise<Uint8Array> {
   const validatedIv = validateIv(copyBytes(iv));
   const cryptoKey = await resolveKey(key);
@@ -160,7 +158,7 @@ export async function decryptAes256Gcm(
   const plaintext = await getCrypto().subtle.decrypt(
     algorithm,
     cryptoKey,
-    asBufferSource(ciphertext),
+    asBufferSource(ciphertext)
   );
   return new Uint8Array(plaintext);
 }
@@ -171,7 +169,7 @@ export const aes256GcmDecrypt = decryptAes256Gcm;
 export async function encryptStringAes256Gcm(
   plaintext: string,
   key: Uint8Array | Aes256GcmKey,
-  options: { iv?: Uint8Array; additionalData?: Uint8Array } = {},
+  options: { iv?: Uint8Array; additionalData?: Uint8Array } = {}
 ): Promise<AesGcmCiphertext> {
   return encryptAes256Gcm(new TextEncoder().encode(plaintext), key, options);
 }
@@ -180,7 +178,7 @@ export async function decryptStringAes256Gcm(
   ciphertext: Uint8Array,
   key: Uint8Array | Aes256GcmKey,
   iv: Uint8Array,
-  options: { additionalData?: Uint8Array } = {},
+  options: { additionalData?: Uint8Array } = {}
 ): Promise<string> {
   const plaintext = await decryptAes256Gcm(ciphertext, key, iv, options);
   return new TextDecoder().decode(plaintext);
@@ -192,7 +190,9 @@ function base64Encode(bytes: Uint8Array): string {
     let binary = "";
     const chunkSize = 0x8000;
     for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-      binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+      binary += String.fromCharCode(
+        ...bytes.subarray(offset, offset + chunkSize)
+      );
     }
     return global.btoa(binary);
   }
@@ -233,7 +233,10 @@ function base64Decode(value: string): Uint8Array {
 }
 
 export function encodeBase64Url(bytes: Uint8Array): string {
-  return base64Encode(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  return base64Encode(bytes)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 }
 
 export function decodeBase64Url(value: string): Uint8Array {
@@ -245,10 +248,9 @@ export function decodeBase64Url(value: string): Uint8Array {
   return base64Decode(padded);
 }
 
-export function encodeEncryptedEnvelopeBytes(value: AesGcmCiphertext): Pick<
-  EncryptedEnvelope,
-  "iv" | "ciphertext"
-> {
+export function encodeEncryptedEnvelopeBytes(
+  value: AesGcmCiphertext
+): Pick<EncryptedEnvelope, "iv" | "ciphertext"> {
   return {
     iv: encodeBase64Url(value.iv),
     ciphertext: encodeBase64Url(value.ciphertext),
@@ -264,7 +266,7 @@ export class Aes256GcmEnvelopeEncryptor implements EnvelopeEncryptor {
 
   async encrypt(
     plaintext: Uint8Array,
-    options: EnvelopeEncryptOptions,
+    options: EnvelopeEncryptOptions
   ): Promise<EncryptedEnvelope> {
     const key = await this.keyProvider.getKey(options.keyId);
     if (key === undefined) {
@@ -297,14 +299,17 @@ export class Aes256GcmEnvelopeEncryptor implements EnvelopeEncryptor {
 
   async decrypt(
     envelopeInput: EncryptedEnvelope,
-    options: EnvelopeDecryptOptions = {},
+    options: EnvelopeDecryptOptions = {}
   ): Promise<Uint8Array> {
     const envelope = EncryptedEnvelopeSchema.parse(envelopeInput);
     const key = await this.keyProvider.getKey(envelope.keyId);
     if (key === undefined) {
       throw new Error(`Encryption key is not available: ${envelope.keyId}`);
     }
-    if (envelope.wrappedKey === undefined || envelope.wrappedKeyIv === undefined) {
+    if (
+      envelope.wrappedKey === undefined ||
+      envelope.wrappedKeyIv === undefined
+    ) {
       throw new Error("Envelope does not contain a wrapped data key");
     }
 
@@ -312,7 +317,7 @@ export class Aes256GcmEnvelopeEncryptor implements EnvelopeEncryptor {
       decodeBase64Url(envelope.wrappedKey),
       key,
       decodeBase64Url(envelope.wrappedKeyIv),
-      { additionalData: new TextEncoder().encode(envelope.keyId) },
+      { additionalData: new TextEncoder().encode(envelope.keyId) }
     );
 
     const expectedAdditionalData =
@@ -325,7 +330,7 @@ export class Aes256GcmEnvelopeEncryptor implements EnvelopeEncryptor {
         decodeBase64Url(envelope.ciphertext),
         dataKey,
         decodeBase64Url(envelope.iv),
-        { additionalData: expectedAdditionalData },
+        { additionalData: expectedAdditionalData }
       );
     } finally {
       dataKey.fill(0);

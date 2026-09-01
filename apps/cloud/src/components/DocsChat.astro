@@ -855,7 +855,8 @@
       const waiter = settlementWaiters.get(submissionId);
       if (!waiter) return;
       settlementWaiters.delete(submissionId);
-      error ? waiter.reject(error) : waiter.resolve();
+      if (error) waiter.reject(error);
+      else waiter.resolve();
     };
 
     const waitForRealtimeSubmission = (submissionId: string) => {
@@ -1034,7 +1035,8 @@
           window.clearTimeout(timeout);
           source.close();
           if (activeStream === source) activeStream = undefined;
-          error ? reject(error) : resolve();
+          if (error) reject(error);
+          else resolve();
         };
         source.addEventListener("data", (event) => {
           if (generation !== sessionGeneration) {

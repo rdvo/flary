@@ -32,13 +32,20 @@ Publishing uses npm trusted publishing from
 repository and the `publish.yml` workflow. Release jobs do not use a stored
 write token.
 
+The repository vendors the `dmmulroy/anti-slop` Oxlint rules. `npm run lint`
+enforces the high-signal rules during release checks. `npm run lint:audit`
+shows the full boundary-contract migration report. `npm run lint:strict`
+turns every audit warning into an error. Rules that reject all unknown input,
+runtime type guards, and conditional properties remain audit warnings because
+Flary must parse untrusted provider and network data at runtime.
+
 ## What the npm tags mean
 
-| Tag | Use |
-| --- | --- |
-| `latest` | The production release that passed the stable release gates. |
-| `next` | A release candidate for integration and staging tests. |
-| Repository source | Development code. It can be ahead of both npm tags. |
+| Tag               | Use                                                          |
+| ----------------- | ------------------------------------------------------------ |
+| `latest`          | The production release that passed the stable release gates. |
+| `next`            | A release candidate for integration and staging tests.       |
+| Repository source | Development code. It can be ahead of both npm tags.          |
 
 Pin an exact release candidate when you test a product integration. Do not
 assume that a Git tag is available on npm.

@@ -26,11 +26,15 @@ test("prompt functions expose one execute tool and validate the final output", a
           id: "response-1",
           model: request.model,
           content: "",
-          toolCalls: [{
-            id: "call-1",
-            name: "execute",
-            arguments: { code: "return { value: await tools.call({ id: 'lookup', input: { query: 'x' } }) };" },
-          }],
+          toolCalls: [
+            {
+              id: "call-1",
+              name: "execute",
+              arguments: {
+                code: "return { value: await tools.call({ id: 'lookup', input: { query: 'x' } }) };",
+              },
+            },
+          ],
           finishReason: "tool_call",
         };
       }
@@ -55,12 +59,16 @@ test("prompt functions expose one execute tool and validate the final output", a
     tools: app.tools({ lookup }),
     prompt: ({ question }) => question,
   });
-  app.options.code;
-
   // The code bridge is deliberately supplied as a host closure in this unit
   // test. Production uses app.codemode() and the Cloudflare Worker Loader.
   (app.options as { code?: unknown }).code = {
-    execute: async ({ tools, context }: { tools: { entries: Record<string, unknown> }; context: unknown }) => {
+    execute: async ({
+      tools,
+      context,
+    }: {
+      tools: { entries: Record<string, unknown> };
+      context: unknown;
+    }) => {
       const fn = tools.entries.lookup as (input: unknown) => Promise<unknown>;
       return { value: await fn({ query: "x" }), context: Boolean(context) };
     },
@@ -71,19 +79,27 @@ test("prompt functions expose one execute tool and validate the final output", a
   const first = requests[0] as {
     tools?: readonly { name: string; description?: string }[];
   };
-  assert.deepEqual(first.tools?.map((tool) => tool.name), ["execute"]);
+  assert.deepEqual(
+    first.tools?.map((tool) => tool.name),
+    ["execute"]
+  );
   assert.match(first.tools?.[0]?.description ?? "", /tools\.search/);
-  assert.doesNotMatch(first.tools?.[0]?.description ?? "", /lookup\.inputSchema/);
+  assert.doesNotMatch(
+    first.tools?.[0]?.description ?? "",
+    /lookup\.inputSchema/
+  );
 });
 
 test("Codemode approvals map to Flue continuation and replay", async () => {
-  let pending = [{
-    executionId: "exec_1",
-    seq: 2,
-    connector: "github",
-    method: "create_pull_request",
-    args: { owner: "acme", repo: "api" },
-  }];
+  let pending = [
+    {
+      executionId: "exec_1",
+      seq: 2,
+      connector: "github",
+      method: "create_pull_request",
+      args: { owner: "acme", repo: "api" },
+    },
+  ];
   let approved = false;
   const runtime: FlaryCodemodeApprovalRuntime = {
     async pending() {
@@ -100,7 +116,13 @@ test("Codemode approvals map to Flue continuation and replay", async () => {
       return true;
     },
     async executions() {
-      return [{ id: "exec_1", status: approved ? "completed" : "paused", result: { number: 10 } }];
+      return [
+        {
+          id: "exec_1",
+          status: approved ? "completed" : "paused",
+          result: { number: 10 },
+        },
+      ];
     },
   };
   const bridge = createFlaryCodemodeApprovalBridge({
@@ -115,17 +137,23 @@ test("Codemode approvals map to Flue continuation and replay", async () => {
     decidedBy: { id: "user_1", kind: "user", version: "1" },
     decidedAt: new Date().toISOString(),
   });
-  assert.equal(await bridge.continuation.inspect({
-    toolCallId: "execute_1",
-    toolName: "execute",
-    arguments: {},
-  }), "ready");
+  assert.equal(
+    await bridge.continuation.inspect({
+      toolCallId: "execute_1",
+      toolName: "execute",
+      arguments: {},
+    }),
+    "ready"
+  );
   const result = await bridge.continuation.resume({
     toolCallId: "execute_1",
     toolName: "execute",
     arguments: {},
   });
-  assert.equal(result.output && (result.output as { number: number }).number, 10);
+  assert.equal(
+    result.output && (result.output as { number: number }).number,
+    10
+  );
 });
 
 test("the protected Flue agent route exposes Codemode approvals", async () => {
@@ -133,15 +161,17 @@ test("the protected Flue agent route exposes Codemode approvals", async () => {
   let decided: unknown;
   const bridge = {
     async list() {
-      return [{
-        id: "codemode_exec_1_0",
-        runId: "agent-instance",
-        action: "tool-call" as const,
-        reason: "Approval is required",
-        requestedBy: { id: "flary", kind: "agent" as const, version: "1" },
-        requestedAt: "2026-01-01T00:00:00.000Z",
-        context: {},
-      }];
+      return [
+        {
+          id: "codemode_exec_1_0",
+          runId: "agent-instance",
+          action: "tool-call" as const,
+          reason: "Approval is required",
+          requestedBy: { id: "flary", kind: "agent" as const, version: "1" },
+          requestedAt: "2026-01-01T00:00:00.000Z",
+          context: {},
+        },
+      ];
     },
     async decide(value: unknown) {
       decided = value;
@@ -175,7 +205,7 @@ test("the protected Flue agent route exposes Codemode approvals", async () => {
   const route = flaryInternalRoute(fn);
   const request = new Request(
     "https://flue.internal/agents/support/agent-instance?flary=approvals",
-    { headers: { authorization: `Bearer ${token}` } },
+    { headers: { authorization: `Bearer ${token}` } }
   );
   const context = {
     env: { FLARY_INTERNAL_TOKEN: token },
@@ -211,7 +241,7 @@ test("the protected Flue agent route exposes Codemode approvals", async () => {
         decidedBy: { id: "operator", kind: "user", version: "1" },
         decidedAt: new Date().toISOString(),
       }),
-    },
+    }
   );
   const decisionContext = {
     ...context,

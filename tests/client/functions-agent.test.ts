@@ -54,7 +54,9 @@ test("the typed function client exposes persistent agent thread handles", async 
       return Response.json({ history: [] });
     }
     if (request.url.endsWith("/models")) {
-      return Response.json({ models: [{ provider: "openai", model: "gpt-5" }] });
+      return Response.json({
+        models: [{ provider: "openai", model: "gpt-5" }],
+      });
     }
     if (request.url.endsWith("/model")) {
       return Response.json({ model: { provider: "openai", model: "gpt-5" } });
@@ -88,7 +90,8 @@ test("the typed function client exposes persistent agent thread handles", async 
       "/api/flary/apps/coder/threads/thread_1/models",
       "/api/flary/apps/coder/threads/thread_1/model/history",
       "/api/flary/apps/coder/threads/thread_1/audit",
-    ],
+    ]
   );
-  assert.equal((requests[1]?.body as { mode?: string }).mode, "steer");
+  assert.ok(requests[1]);
+  assert.equal((requests[1].body as { mode?: string }).mode, "steer");
 });

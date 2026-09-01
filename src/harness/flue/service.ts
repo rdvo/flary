@@ -27,7 +27,6 @@ import {
   type CreateRunRequest,
   type RunEvent,
   type RunHandle,
-  type RunInput,
   type RunResult,
   type UserInputAnswerRequest,
   type UserInputRecord,
@@ -80,24 +79,24 @@ export type RunEventDraft = RunEvent extends infer Event
 export interface FlaryRunRepository {
   findByIdempotency(
     trusted: TrustedRunContext,
-    idempotencyKey: string,
+    idempotencyKey: string
   ): Promise<FlaryRunRecord | undefined>;
   create(record: FlaryRunRecord): Promise<FlaryRunRecord>;
   get(runId: string): Promise<FlaryRunRecord | undefined>;
   findInputAdmission(
     runId: string,
-    idempotencyKey: string,
+    idempotencyKey: string
   ): Promise<FlueAdmission | undefined>;
   setAdmission(
     runId: string,
     idempotencyKey: string,
-    admission: FlueAdmission,
+    admission: FlueAdmission
   ): Promise<boolean>;
   setResult(runId: string, result: RunResult): Promise<FlaryRunRecord>;
   appendEvent(
     runId: string,
     dedupeKey: string,
-    event: RunEventDraft,
+    event: RunEventDraft
   ): Promise<RunEvent | undefined>;
   events(runId: string, afterSequence: number): Promise<RunEvent[]>;
 }
@@ -116,7 +115,7 @@ export class InMemoryFlaryRunRepository implements FlaryRunRepository {
 
   async findByIdempotency(
     trusted: TrustedRunContext,
-    idempotencyKey: string,
+    idempotencyKey: string
   ): Promise<FlaryRunRecord | undefined> {
     for (const record of this.#runs.values()) {
       if (
@@ -146,7 +145,7 @@ export class InMemoryFlaryRunRepository implements FlaryRunRepository {
 
   async findInputAdmission(
     runId: string,
-    idempotencyKey: string,
+    idempotencyKey: string
   ): Promise<FlueAdmission | undefined> {
     this.required(runId);
     const admission = this.#inputs.get(`${runId}:${idempotencyKey}`);
@@ -156,7 +155,7 @@ export class InMemoryFlaryRunRepository implements FlaryRunRepository {
   async setAdmission(
     runId: string,
     idempotencyKey: string,
-    admissionInput: FlueAdmission,
+    admissionInput: FlueAdmission
   ): Promise<boolean> {
     const key = `${runId}:${idempotencyKey}`;
     if (this.#inputs.has(key)) return false;
@@ -169,14 +168,14 @@ export class InMemoryFlaryRunRepository implements FlaryRunRepository {
         ...record,
         admission,
         updatedAt: new Date().toISOString(),
-      }),
+      })
     );
     return true;
   }
 
   async setResult(
     runId: string,
-    resultInput: RunResult,
+    resultInput: RunResult
   ): Promise<FlaryRunRecord> {
     const record = this.required(runId);
     const result = RunResultSchema.parse(resultInput);
@@ -192,7 +191,7 @@ export class InMemoryFlaryRunRepository implements FlaryRunRepository {
   async appendEvent(
     runId: string,
     dedupeKey: string,
-    eventInput: RunEventDraft,
+    eventInput: RunEventDraft
   ): Promise<RunEvent | undefined> {
     const key = `${runId}:${dedupeKey}`;
     if (this.#dedupe.has(key)) return undefined;
@@ -216,7 +215,7 @@ export class InMemoryFlaryRunRepository implements FlaryRunRepository {
           lastSequence: sequence,
         },
         updatedAt: new Date().toISOString(),
-      }),
+      })
     );
     return clone(event);
   }
@@ -255,35 +254,29 @@ export interface FlueAgentGateway {
       readonly cacheRetention?: "none" | "short" | "long";
       /** Trusted context for this turn. It is not part of the user transcript. */
       readonly turnContext?: string;
-    },
+    }
   ): Promise<FlueAdmission>;
   wait(
     admission: FlueAdmission,
-    onEvent: (event: ConversationStreamChunk) => Promise<void> | void,
+    onEvent: (event: ConversationStreamChunk) => Promise<void> | void
   ): Promise<unknown>;
   /** Read the provider-neutral Flue conversation projection for archiving. */
-  history?(
-    agentName: string,
-    instanceId: string,
-  ): Promise<unknown>;
+  history?(agentName: string, instanceId: string): Promise<unknown>;
   /** Permanently erase one generated agent instance and its transcript. */
   delete?(agentName: string, instanceId: string): Promise<void>;
   abort(agentName: string, instanceId: string): Promise<{ aborted: boolean }>;
   /** Start a generated Flue workflow for a native function. */
-  invokeWorkflow?(
-    workflowName: string,
-    input: unknown,
-  ): Promise<FlueAdmission>;
+  invokeWorkflow?(workflowName: string, input: unknown): Promise<FlueAdmission>;
   /** Wait for the same durable workflow after a host restart. */
   waitWorkflow?(
     admission: FlueAdmission,
     onEvent: (event: FlueEvent) => Promise<void> | void,
-    workflowName?: string,
+    workflowName?: string
   ): Promise<unknown>;
   /** Cancel the generated durable workflow. */
   abortWorkflow?(
     workflowName: string,
-    runId: string,
+    runId: string
   ): Promise<{ aborted: boolean }>;
 }
 
@@ -292,33 +285,33 @@ export interface CreateFlueRunServiceOptions {
   readonly gateway: FlueAgentGateway;
   readonly agentName?: (
     trusted: TrustedRunContext,
-    request: CreateRunRequest,
+    request: CreateRunRequest
   ) => string;
   readonly instanceId?: (
     trusted: TrustedRunContext,
-    request: CreateRunRequest,
+    request: CreateRunRequest
   ) => string;
   readonly schedule?: (work: Promise<void>) => void;
   readonly pollMs?: number;
   readonly createRunId?: () => string;
   /** Durable host bridge for approval records owned by the Flue agent. */
   readonly listApprovals?: (
-    record: FlaryRunRecord,
+    record: FlaryRunRecord
   ) => Promise<readonly ApprovalRequest[]> | readonly ApprovalRequest[];
   /** Persist the decision and wake the same Flue submission. */
   readonly decideApproval?: (
     record: FlaryRunRecord,
-    decision: ApprovalDecision,
+    decision: ApprovalDecision
   ) => Promise<void> | void;
   /** Durable host bridge for user-input records owned by the Flue agent. */
   readonly listUserInput?: (
-    record: FlaryRunRecord,
+    record: FlaryRunRecord
   ) => Promise<readonly UserInputRecord[]> | readonly UserInputRecord[];
   /** Persist the answer and wake the same Flue submission. */
   readonly respondToUserInput?: (
     record: FlaryRunRecord,
     requestId: string,
-    input: UserInputAnswerRequest,
+    input: UserInputAnswerRequest
   ) => Promise<void> | void;
 }
 
@@ -330,7 +323,7 @@ export interface CreateFlueRunServiceOptions {
  * A new request can restart projection from the stored Flue admission receipt.
  */
 export function createFlueRunService(
-  options: CreateFlueRunServiceOptions,
+  options: CreateFlueRunServiceOptions
 ): FlaryRunService {
   const active = new Map<string, Promise<void>>();
   const pollMs = options.pollMs ?? 100;
@@ -359,7 +352,7 @@ export function createFlueRunService(
           `projection-failed:${record.admission.submissionId}`,
           eventDraft(record, "run.failed", {
             error: failed.error!,
-          }),
+          })
         );
       })
       .finally(() => active.delete(trackingId));
@@ -371,7 +364,7 @@ export function createFlueRunService(
 
   const load = async (
     trusted: TrustedRunContext,
-    runId: string,
+    runId: string
   ): Promise<FlaryRunRecord> => {
     const record = await options.repository.get(runId);
     if (!record || !sameScope(record.trusted, trusted)) {
@@ -388,7 +381,7 @@ export function createFlueRunService(
    * callers and persist it before the next Worker request.
    */
   const refreshWaiting = async (
-    record: FlaryRunRecord,
+    record: FlaryRunRecord
   ): Promise<FlaryRunRecord> => {
     if (isTerminal(record.result.status)) return record;
     const approvals = options.listApprovals
@@ -407,17 +400,19 @@ export function createFlueRunService(
       RunResultSchema.parse({
         ...record.result,
         status: "waiting",
-      }),
+      })
     );
     await options.repository.appendEvent(
       record.runId,
-      `waiting:${approval ? "approval" : "input"}:${approval?.id ?? request?.request.id ?? "pending"}`,
+      `waiting:${approval ? "approval" : "input"}:${
+        approval?.id ?? request?.request.id ?? "pending"
+      }`,
       eventDraft(record, "run.waiting", {
         reason: approval
           ? approval.reason
           : "The function is waiting for user input.",
         ...(approval ? { approvalId: approval.id } : {}),
-      }),
+      })
     );
     return next;
   };
@@ -429,7 +424,7 @@ export function createFlueRunService(
       if (request.idempotencyKey) {
         const existing = await options.repository.findByIdempotency(
           trusted,
-          request.idempotencyKey,
+          request.idempotencyKey
         );
         if (existing) return handle(existing);
       }
@@ -440,7 +435,7 @@ export function createFlueRunService(
       // journal. Legacy low-level callers keep the older channel-scoped
       // instance behaviour for backwards compatibility.
       const runId = IdentifierSchema.parse(
-        options.createRunId?.() ?? `run_${crypto.randomUUID()}`,
+        options.createRunId?.() ?? `run_${crypto.randomUUID()}`
       );
 
       const agentName =
@@ -466,20 +461,20 @@ export function createFlueRunService(
                     revisionId: trusted.revisionId,
                   },
                   input: request.input,
-                },
+                }
               )
             : (() => {
                 throw new FlaryHostError(
                   501,
                   "workflow_gateway_missing",
-                  "Native Flary functions need a Flue workflow gateway",
+                  "Native Flary functions need a Flue workflow gateway"
                 );
               })()
           : await options.gateway.send(
               IdentifierSchema.parse(agentName),
               IdentifierSchema.parse(instanceId),
-              inputMessage(request.input),
-            ),
+              inputMessage(request.input)
+            )
       );
       const now = new Date().toISOString();
       const result = RunResultSchema.parse({
@@ -510,14 +505,14 @@ export function createFlueRunService(
         eventDraft(stored, "run.queued", {
           requestId: request.requestId,
           target: { kind: "agent", agentId: trusted.agentId },
-        }),
+        })
       );
       await options.repository.appendEvent(
         runId,
         "run-started",
         eventDraft(stored, "run.started", {
           requestId: request.requestId,
-        }),
+        })
       );
       track(stored);
       return handle(stored);
@@ -532,7 +527,7 @@ export function createFlueRunService(
     async *observe(
       trusted,
       runId,
-      observeOptions: ObserveRunOptions,
+      observeOptions: ObserveRunOptions
     ): AsyncIterable<RunEvent> {
       let cursor = observeOptions.afterSequence;
       let record = await refreshWaiting(await load(trusted, runId));
@@ -561,26 +556,25 @@ export function createFlueRunService(
         throw new FlaryHostError(
           409,
           "run_is_terminal",
-          "A terminal run cannot accept more input",
+          "A terminal run cannot accept more input"
         );
       }
-      const existingAdmission =
-        await options.repository.findInputAdmission(
-          runId,
-          input.idempotencyKey,
-        );
+      const existingAdmission = await options.repository.findInputAdmission(
+        runId,
+        input.idempotencyKey
+      );
       if (existingAdmission) return record.result;
       const admission = FlueAdmissionSchema.parse(
         await options.gateway.send(
           record.agentName,
           record.instanceId,
-          inputMessage(input.input),
-        ),
+          inputMessage(input.input)
+        )
       );
       const accepted = await options.repository.setAdmission(
         runId,
         input.idempotencyKey,
-        admission,
+        admission
       );
       if (accepted) {
         await options.repository.appendEvent(
@@ -588,7 +582,7 @@ export function createFlueRunService(
           `input:${input.idempotencyKey}`,
           eventDraft(record, "run.input.accepted", {
             idempotencyKey: input.idempotencyKey,
-          }),
+          })
         );
         const next = await load(trusted, runId);
         track(next);
@@ -605,12 +599,12 @@ export function createFlueRunService(
           throw new FlaryHostError(
             501,
             "workflow_cancel_unavailable",
-            "This Flue host does not support durable workflow cancellation",
+            "This Flue host does not support durable workflow cancellation"
           );
         }
         await options.gateway.abortWorkflow(
           record.agentName,
-          record.admission.submissionId,
+          record.admission.submissionId
         );
       } else {
         await options.gateway.abort(record.agentName, record.instanceId);
@@ -625,9 +619,11 @@ export function createFlueRunService(
       await options.repository.appendEvent(
         runId,
         `cancel:${input.idempotencyKey}`,
-        eventDraft(record, "run.cancelled", {
-          ...(input.reason ? { reason: input.reason } : {}),
-        }),
+        eventDraft(
+          record,
+          "run.cancelled",
+          input.reason ? { reason: input.reason } : {}
+        )
       );
       return result;
     },
@@ -636,12 +632,12 @@ export function createFlueRunService(
       ? {
           async listApprovals(
             trusted: TrustedRunContext,
-            runId: string,
+            runId: string
           ): Promise<ApprovalRequest[]> {
             const record = await load(trusted, runId);
             const current = await refreshWaiting(record);
             return (await options.listApprovals!(current)).map((value) =>
-              ApprovalRequestSchema.parse(value),
+              ApprovalRequestSchema.parse(value)
             );
           },
         }
@@ -652,7 +648,7 @@ export function createFlueRunService(
           async decideApproval(
             trusted: TrustedRunContext,
             runId: string,
-            decisionInput: ApprovalDecision,
+            decisionInput: ApprovalDecision
           ): Promise<RunResult> {
             const record = await load(trusted, runId);
             const decision = ApprovalDecisionSchema.parse(decisionInput);
@@ -660,15 +656,19 @@ export function createFlueRunService(
             await options.repository.appendEvent(
               runId,
               `approval:${decision.requestId}:${decision.status}`,
-              eventDraft(record, "approval.resolved", { decision }),
+              eventDraft(record, "approval.resolved", { decision })
             );
             const latest = await load(trusted, runId);
-            const resumed = latest.result.status === "waiting"
-              ? await options.repository.setResult(
-                  latest.runId,
-                  RunResultSchema.parse({ ...latest.result, status: "running" }),
-                )
-              : latest;
+            const resumed =
+              latest.result.status === "waiting"
+                ? await options.repository.setResult(
+                    latest.runId,
+                    RunResultSchema.parse({
+                      ...latest.result,
+                      status: "running",
+                    })
+                  )
+                : latest;
             if (!isTerminal(resumed.result.status)) track(resumed);
             return resumed.result;
           },
@@ -679,12 +679,12 @@ export function createFlueRunService(
       ? {
           async listUserInput(
             trusted: TrustedRunContext,
-            runId: string,
+            runId: string
           ): Promise<UserInputRecord[]> {
             const record = await load(trusted, runId);
             const current = await refreshWaiting(record);
             return (await options.listUserInput!(current)).map((value) =>
-              UserInputRecordSchema.parse(value),
+              UserInputRecordSchema.parse(value)
             );
           },
         }
@@ -696,22 +696,26 @@ export function createFlueRunService(
             trusted: TrustedRunContext,
             runId: string,
             requestId: string,
-            inputValue: UserInputAnswerRequest,
+            inputValue: UserInputAnswerRequest
           ): Promise<RunResult> {
             const record = await load(trusted, runId);
             const input = UserInputAnswerRequestSchema.parse(inputValue);
             await options.respondToUserInput!(
               record,
               IdentifierSchema.parse(requestId),
-              input,
+              input
             );
             const latest = await load(trusted, runId);
-            const resumed = latest.result.status === "waiting"
-              ? await options.repository.setResult(
-                  latest.runId,
-                  RunResultSchema.parse({ ...latest.result, status: "running" }),
-                )
-              : latest;
+            const resumed =
+              latest.result.status === "waiting"
+                ? await options.repository.setResult(
+                    latest.runId,
+                    RunResultSchema.parse({
+                      ...latest.result,
+                      status: "running",
+                    })
+                  )
+                : latest;
             if (!isTerminal(resumed.result.status)) track(resumed);
             return resumed.result;
           },
@@ -721,7 +725,7 @@ export function createFlueRunService(
 }
 
 export function createFlueAgentGateway(
-  options: CreateFlueClientOptions | FlueClient,
+  options: CreateFlueClientOptions | FlueClient
 ): FlueAgentGateway {
   const client = "agents" in options ? options : createFlueClient(options);
   const baseUrl =
@@ -731,11 +735,13 @@ export function createFlueAgentGateway(
   return {
     async send(agentName, instanceId, message, options = {}) {
       return FlueAdmissionSchema.parse(
-        await (client.agents.send as unknown as (
-          name: string,
-          id: string,
-          input: Record<string, unknown>,
-        ) => Promise<unknown>)(agentName, instanceId, {
+        await (
+          client.agents.send as unknown as (
+            name: string,
+            id: string,
+            input: Record<string, unknown>
+          ) => Promise<unknown>
+        )(agentName, instanceId, {
           message,
           ...(options.images ? { images: options.images } : {}),
           ...(options.idempotencyKey
@@ -748,7 +754,7 @@ export function createFlueAgentGateway(
           ...(options.cacheRetention
             ? { cacheRetention: options.cacheRetention }
             : {}),
-        }),
+        })
       );
     },
     async wait(admission, onEvent) {
@@ -790,7 +796,7 @@ export function createFlueAgentGateway(
 
 async function trackAdmission(
   record: FlaryRunRecord,
-  options: CreateFlueRunServiceOptions,
+  options: CreateFlueRunServiceOptions
 ): Promise<void> {
   if (record.request.execution === "workflow") {
     await trackWorkflowAdmission(record, options);
@@ -813,9 +819,14 @@ async function trackAdmission(
       const mapped = mapChunk(record, chunk, toolNames, toolInputs);
       if (chunk.type === "message-started") {
         modelSteps += 1;
-        await enforceFunctionLimit(limits.steps, modelSteps, "steps", async () => {
-          await options.gateway.abort(record.agentName, record.instanceId);
-        });
+        await enforceFunctionLimit(
+          limits.steps,
+          modelSteps,
+          "steps",
+          async () => {
+            await options.gateway.abort(record.agentName, record.instanceId);
+          }
+        );
       }
       if (chunk.type === "tool-input") {
         toolCalls += 1;
@@ -825,7 +836,7 @@ async function trackAdmission(
           "tool calls",
           async () => {
             await options.gateway.abort(record.agentName, record.instanceId);
-          },
+          }
         );
         if (chunk.toolName === "task") {
           totalDelegations += 1;
@@ -835,7 +846,7 @@ async function trackAdmission(
             activeDelegations.size + 1,
             async () => {
               await options.gateway.abort(record.agentName, record.instanceId);
-            },
+            }
           );
           activeDelegations.add(chunk.toolCallId);
         }
@@ -855,7 +866,7 @@ async function trackAdmission(
           async () => {
             await options.gateway.abort(record.agentName, record.instanceId);
           },
-          "USD",
+          "USD"
         );
         const billingMode = record.request.metadata?.billingMode;
         const subscription = billingMode === "subscription";
@@ -868,33 +879,27 @@ async function trackAdmission(
             readTokens: chunk.usage.cacheRead,
             writeTokens: chunk.usage.cacheWrite,
           },
-          cost: {
-            ...(subscription && chunk.usage.cost.total === 0
+          cost:
+            subscription && chunk.usage.cost.total === 0
               ? {
                   state: "unknown" as const,
                   reason: "Subscription provider did not report a cost",
                 }
               : {
                   state: "known" as const,
-                  microUnits: Math.max(
-                    0,
-                    Math.round(costUsd * 1_000_000),
-                  ),
+                  microUnits: Math.max(0, Math.round(costUsd * 1_000_000)),
                   unit: "USD" as const,
-                }),
-          },
-          ...(subscription && chunk.usage.cost.total === 0
-            ? {}
-            : { costUsd }),
+                },
+          ...(subscription && chunk.usage.cost.total === 0 ? {} : { costUsd }),
         };
       }
       if (!mapped) return;
       await options.repository.appendEvent(
         record.runId,
         chunkKey(chunk),
-        mapped,
+        mapped
       );
-    },
+    }
   );
   const latest = await options.repository.get(record.runId);
   if (!latest || latest.result.status === "cancelled") return;
@@ -910,13 +915,13 @@ async function trackAdmission(
   await options.repository.appendEvent(
     record.runId,
     `completed:${record.admission.submissionId}`,
-    eventDraft(record, "run.completed", { output: result.output! }),
+    eventDraft(record, "run.completed", { output: result.output! })
   );
 }
 
 async function trackWorkflowAdmission(
   record: FlaryRunRecord,
-  options: CreateFlueRunServiceOptions,
+  options: CreateFlueRunServiceOptions
 ): Promise<void> {
   const wait = options.gateway.waitWorkflow;
   if (!wait) {
@@ -941,9 +946,12 @@ async function trackWorkflowAdmission(
           "steps",
           async () => {
             if (options.gateway.abortWorkflow) {
-              await options.gateway.abortWorkflow(record.agentName, record.admission.submissionId);
+              await options.gateway.abortWorkflow(
+                record.agentName,
+                record.admission.submissionId
+              );
             }
-          },
+          }
         );
       } else if (event.type === "tool_start") {
         toolCalls += 1;
@@ -953,9 +961,12 @@ async function trackWorkflowAdmission(
           "tool calls",
           async () => {
             if (options.gateway.abortWorkflow) {
-              await options.gateway.abortWorkflow(record.agentName, record.admission.submissionId);
+              await options.gateway.abortWorkflow(
+                record.agentName,
+                record.admission.submissionId
+              );
             }
-          },
+          }
         );
       } else if (event.type === "task_start") {
         totalDelegations += 1;
@@ -966,14 +977,20 @@ async function trackWorkflowAdmission(
           activeDelegations.size,
           async () => {
             if (options.gateway.abortWorkflow) {
-              await options.gateway.abortWorkflow(record.agentName, record.admission.submissionId);
+              await options.gateway.abortWorkflow(
+                record.agentName,
+                record.admission.submissionId
+              );
             }
-          },
+          }
         );
       } else if (event.type === "task") {
         activeDelegations.delete(event.taskId);
       }
-      if (event.type === "turn" && event.response.usage?.cost?.total !== undefined) {
+      if (
+        event.type === "turn" &&
+        event.response.usage?.cost?.total !== undefined
+      ) {
         costUsd += Math.max(0, Number(event.response.usage.cost.total));
         await enforceFunctionLimit(
           limits.costUsd,
@@ -981,10 +998,13 @@ async function trackWorkflowAdmission(
           "cost",
           async () => {
             if (options.gateway.abortWorkflow) {
-              await options.gateway.abortWorkflow(record.agentName, record.admission.submissionId);
+              await options.gateway.abortWorkflow(
+                record.agentName,
+                record.admission.submissionId
+              );
             }
           },
-          "USD",
+          "USD"
         );
       }
       const mapped = mapWorkflowEvent(record, event);
@@ -992,10 +1012,10 @@ async function trackWorkflowAdmission(
       await options.repository.appendEvent(
         record.runId,
         `workflow:${record.admission.submissionId}:${event.eventIndex}`,
-        mapped,
+        mapped
       );
     },
-    record.agentName,
+    record.agentName
   );
   const latest = await options.repository.get(record.runId);
   if (!latest || latest.result.status === "cancelled") return;
@@ -1004,7 +1024,7 @@ async function trackWorkflowAdmission(
     status: "completed",
     output: JsonValueSchema.parse(jsonValue(output)),
     usage: {
-      ...(latest.result.usage ?? {}),
+      ...latest.result.usage,
       ...(toolCalls > 0 ? { toolCalls } : {}),
       ...(costUsd > 0 ? { costUsd } : {}),
     },
@@ -1014,7 +1034,7 @@ async function trackWorkflowAdmission(
   await options.repository.appendEvent(
     record.runId,
     `completed:${record.admission.submissionId}`,
-    eventDraft(record, "run.completed", { output: result.output! }),
+    eventDraft(record, "run.completed", { output: result.output! })
   );
 }
 
@@ -1043,7 +1063,9 @@ function functionDelegation(record: FlaryRunRecord): FunctionDelegation {
   const value = record.request.metadata?.flaryDelegation;
   if (!isRecord(value)) return {};
   return {
-    ...(positiveNumber(value.maxConcurrent) ? { maxConcurrent: value.maxConcurrent } : {}),
+    ...(positiveNumber(value.maxConcurrent)
+      ? { maxConcurrent: value.maxConcurrent }
+      : {}),
     ...(positiveNumber(value.maxTotal) ? { maxTotal: value.maxTotal } : {}),
   };
 }
@@ -1052,20 +1074,22 @@ async function enforceDelegationLimit(
   policy: FunctionDelegation,
   total: number,
   concurrent: number,
-  abort: () => Promise<void>,
+  abort: () => Promise<void>
 ): Promise<void> {
   if (policy.maxTotal !== undefined && total > policy.maxTotal) {
     await abort();
     throw Object.assign(
       new Error("The function exceeded its total subagent delegation limit."),
-      { code: "delegation_limit_exceeded" },
+      { code: "delegation_limit_exceeded" }
     );
   }
   if (policy.maxConcurrent !== undefined && concurrent > policy.maxConcurrent) {
     await abort();
     throw Object.assign(
-      new Error("The function exceeded its concurrent subagent delegation limit."),
-      { code: "delegation_limit_exceeded" },
+      new Error(
+        "The function exceeded its concurrent subagent delegation limit."
+      ),
+      { code: "delegation_limit_exceeded" }
     );
   }
 }
@@ -1075,15 +1099,15 @@ async function enforceFunctionLimit(
   value: number,
   label: string,
   abort: () => Promise<void>,
-  unit = "",
+  unit = ""
 ): Promise<void> {
   if (limit === undefined || value <= limit) return;
   await abort();
   throw Object.assign(
     new Error(
-      `The function exceeded its ${label} limit${unit ? ` in ${unit}` : ""}.`,
+      `The function exceeded its ${label} limit${unit ? ` in ${unit}` : ""}.`
     ),
-    { code: "function_limit_exceeded" },
+    { code: "function_limit_exceeded" }
   );
 }
 
@@ -1100,7 +1124,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function errorCode(cause: unknown): string {
-  if (isRecord(cause) && typeof cause.code === "string" && cause.code.length > 0) {
+  if (
+    isRecord(cause) &&
+    typeof cause.code === "string" &&
+    cause.code.length > 0
+  ) {
     return cause.code;
   }
   return "flue_projection_failed";
@@ -1108,7 +1136,7 @@ function errorCode(cause: unknown): string {
 
 function mapWorkflowEvent(
   record: FlaryRunRecord,
-  event: FlueEvent,
+  event: FlueEvent
 ): RunEventDraft | undefined {
   switch (event.type) {
     case "text_delta":
@@ -1174,14 +1202,14 @@ function mapChunk(
   record: FlaryRunRecord,
   chunk: ConversationStreamChunk,
   toolNames: Map<string, string>,
-  toolInputs: Map<string, unknown>,
+  toolInputs: Map<string, unknown>
 ): RunEventDraft | undefined {
   switch (chunk.type) {
     case "message-delta":
       return eventDraft(
         record,
         chunk.kind === "reasoning" ? "reasoning.delta" : "message.delta",
-        { delta: chunk.delta, messageId: chunk.messageId },
+        { delta: chunk.delta, messageId: chunk.messageId }
       );
     case "tool-input":
       toolNames.set(chunk.toolCallId, chunk.toolName);
@@ -1203,8 +1231,7 @@ function mapChunk(
           id: `result_${chunk.toolCallId}`,
           callId: chunk.toolCallId,
           toolId,
-          status:
-            chunk.type === "tool-output" ? "succeeded" : "failed",
+          status: chunk.type === "tool-output" ? "succeeded" : "failed",
           ...(chunk.type === "tool-output"
             ? { output: jsonObject(chunk.output) }
             : {
@@ -1218,8 +1245,7 @@ function mapChunk(
         },
       });
     }
-    case "message-completed":
-      {
+    case "message-completed": {
       const billingValue = record.request.metadata?.billingMode;
       const billingMode =
         billingValue === "subscription" ||
@@ -1229,9 +1255,7 @@ function mapChunk(
           : undefined;
       const cacheValue = record.request.metadata?.cacheRetention;
       const cacheRetention =
-        cacheValue === "none" ||
-        cacheValue === "short" ||
-        cacheValue === "long"
+        cacheValue === "none" || cacheValue === "short" || cacheValue === "long"
           ? cacheValue
           : undefined;
       const credentialConnectionRef =
@@ -1252,28 +1276,25 @@ function mapChunk(
                   readTokens: chunk.usage.cacheRead,
                   writeTokens: chunk.usage.cacheWrite,
                 },
-                cost: {
-                  ...(billingMode === "subscription" &&
-                  chunk.usage.cost.total === 0
+                cost:
+                  billingMode === "subscription" && chunk.usage.cost.total === 0
                     ? {
                         state: "unknown" as const,
-                        reason:
-                          "Subscription provider did not report a cost",
+                        reason: "Subscription provider did not report a cost",
                       }
                     : {
                         state: "known" as const,
                         microUnits: Math.max(
                           0,
-                          Math.round(chunk.usage.cost.total * 1_000_000),
+                          Math.round(chunk.usage.cost.total * 1_000_000)
                         ),
                         unit: "USD" as const,
-                      }),
-                },
+                      },
               },
             }
           : {}),
       });
-      }
+    }
     case "submission-settled":
       if (chunk.outcome === "aborted") {
         return eventDraft(record, "run.cancelled", {});
@@ -1295,7 +1316,7 @@ function mapChunk(
 function eventDraft<T extends RunEvent["type"]>(
   record: FlaryRunRecord,
   type: T,
-  payload: Extract<RunEvent, { type: T }>["payload"],
+  payload: Extract<RunEvent, { type: T }>["payload"]
 ): RunEventDraft {
   return {
     runId: record.runId,
@@ -1324,10 +1345,7 @@ function handle(record: FlaryRunRecord): RunHandle {
   });
 }
 
-function sameScope(
-  left: TrustedRunContext,
-  right: TrustedRunContext,
-): boolean {
+function sameScope(left: TrustedRunContext, right: TrustedRunContext): boolean {
   return (
     left.tenantId === right.tenantId &&
     left.applicationId === right.applicationId &&
@@ -1337,7 +1355,9 @@ function sameScope(
     // Hosts that do not pin a revision (legacy low-level callers) keep the
     // previous behaviour, while function-first callers fail closed after a
     // deployment changes the build or tool catalog.
-    (!left.revisionId || !right.revisionId || left.revisionId === right.revisionId)
+    (!left.revisionId ||
+      !right.revisionId ||
+      left.revisionId === right.revisionId)
   );
 }
 
@@ -1390,7 +1410,7 @@ function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
         clearTimeout(timeout);
         resolve();
       },
-      { once: true },
+      { once: true }
     );
   });
 }

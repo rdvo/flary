@@ -2,7 +2,6 @@ import { z } from "zod";
 
 import {
   IdentifierSchema,
-  JsonObjectSchema,
   JsonValueSchema,
   MetadataSchema,
   NonEmptyStringSchema,

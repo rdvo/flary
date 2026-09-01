@@ -48,7 +48,7 @@ export function resolveProviderRequestTuning(
   const providerKind = ProviderKindSchema.parse(input.providerKind);
   const api = ProviderApiStyleSchema.parse(input.api);
   const selection = ModelSelectionSchema.parse(input.selection);
-  const parameters: JsonObject = { ...(selection.parameters ?? {}) };
+  const parameters: JsonObject = { ...selection.parameters };
   const instructions: string[] = [];
   const warnings: string[] = [];
 

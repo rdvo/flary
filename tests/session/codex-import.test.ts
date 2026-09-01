@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  importCodexRollout,
-} from "../../src/harness/session/codex-import.ts";
+import { importCodexRollout } from "../../src/harness/session/codex-import.ts";
 import { verifySessionChain } from "../../src/harness/session/integrity.ts";
 
 const rollout = [
@@ -42,7 +40,9 @@ const rollout = [
       nested: { password: "must-not-leak" },
     },
   },
-].map((value) => JSON.stringify(value)).join("\n");
+]
+  .map((value) => JSON.stringify(value))
+  .join("\n");
 
 test("maps known Codex records and keeps unknown records as opaque data", async () => {
   const records = await importCodexRollout(rollout, {
@@ -52,34 +52,37 @@ test("maps known Codex records and keeps unknown records as opaque data", async 
 
   assert.deepEqual(
     records.map(({ recordType }) => recordType),
-    ["session.manifest", "message.user", "usage", "codex.opaque"],
+    ["session.manifest", "message.user", "usage", "codex.opaque"]
   );
   assert.equal(records[0]?.sessionId, "session_codex");
   assert.equal(records[0]?.threadId, "thread_codex");
   assert.equal(records[1]?.turnId, "turn_1");
+  assert.ok(records[0]);
+  assert.ok(records[2]);
+  assert.ok(records[3]);
   assert.equal(
     (
-      records[0]?.publicPayload.source as {
+      records[0].publicPayload.source as {
         payload?: { api_key?: string };
       }
     ).payload?.api_key,
-    "[REDACTED]",
+    "[REDACTED]"
   );
   assert.equal(
     (
-      records[3]?.publicPayload.source as {
+      records[3].publicPayload.source as {
         payload?: { nested?: { password?: string } };
       }
     ).payload?.nested?.password,
-    "[REDACTED]",
+    "[REDACTED]"
   );
   assert.equal(
     (
-      records[2]?.publicPayload.source as {
+      records[2].publicPayload.source as {
         payload?: { info?: { total_tokens?: number } };
       }
     ).payload?.info?.total_tokens,
-    12,
+    12
   );
   await verifySessionChain(records);
 });
@@ -99,7 +102,7 @@ test("produces the same hashes and can attach encrypted source references", asyn
 
   assert.deepEqual(
     first.map(({ recordHash }) => recordHash),
-    second.map(({ recordHash }) => recordHash),
+    second.map(({ recordHash }) => recordHash)
   );
   assert.equal(first[0]?.encryptedContentRef?.storageKey, "sessions/source-1");
 });

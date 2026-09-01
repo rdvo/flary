@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 import {
-  ErrorInfoSchema,
   IdentifierSchema,
   JsonObjectSchema,
   TimestampSchema,
@@ -17,7 +16,6 @@ import {
   type ModelStreamEvent,
   type ProviderError,
   type ProviderToolCall,
-  type ProviderUsage,
 } from "./contracts.js";
 
 export const ProviderOperationStatusSchema = z.enum([
@@ -75,7 +73,7 @@ export type ProviderRecoveryCheckpoint = z.infer<
 export interface ProviderCheckpointStore {
   get(
     runId: string,
-    operationId: string,
+    operationId: string
   ): Promise<ProviderRecoveryCheckpoint | undefined>;
   put(checkpoint: ProviderRecoveryCheckpoint): Promise<void>;
 }
@@ -87,18 +85,17 @@ export class InMemoryProviderCheckpointStore
 
   async get(
     runId: string,
-    operationId: string,
+    operationId: string
   ): Promise<ProviderRecoveryCheckpoint | undefined> {
     const value = this.#values.get(`${runId}:${operationId}`);
     return value ? ProviderRecoveryCheckpointSchema.parse(value) : undefined;
   }
 
   async put(checkpointValue: ProviderRecoveryCheckpoint): Promise<void> {
-    const checkpoint =
-      ProviderRecoveryCheckpointSchema.parse(checkpointValue);
+    const checkpoint = ProviderRecoveryCheckpointSchema.parse(checkpointValue);
     this.#values.set(
       `${checkpoint.runId}:${checkpoint.operationId}`,
-      checkpoint,
+      checkpoint
     );
   }
 }
@@ -118,18 +115,18 @@ export interface DurableProviderAdapter {
 
   start(
     request: ModelRequest,
-    context: ProviderRecoveryContext,
+    context: ProviderRecoveryContext
   ): AsyncIterable<ModelStreamEvent>;
 
   recover(
     request: ModelRequest,
     checkpoint: ProviderRecoveryCheckpoint,
-    context: ProviderRecoveryContext,
+    context: ProviderRecoveryContext
   ): AsyncIterable<ModelStreamEvent>;
 
   cancel(
     checkpoint: ProviderRecoveryCheckpoint,
-    context: ProviderRecoveryContext,
+    context: ProviderRecoveryContext
   ): Promise<void>;
 
   classifyError(error: unknown): ProviderFailureClass;
@@ -138,7 +135,7 @@ export interface DurableProviderAdapter {
 export function initialProviderCheckpoint(
   adapter: Pick<DurableProviderAdapter, "id" | "provider">,
   context: ProviderRecoveryContext,
-  attempt = 1,
+  attempt = 1
 ): ProviderRecoveryCheckpoint {
   return ProviderRecoveryCheckpointSchema.parse({
     runId: IdentifierSchema.parse(context.runId),
@@ -159,23 +156,21 @@ export async function* checkpointProviderStream(
   adapter: Pick<DurableProviderAdapter, "id" | "provider" | "classifyError">,
   stream: AsyncIterable<ModelStreamEvent>,
   context: ProviderRecoveryContext,
-  initial?: ProviderRecoveryCheckpoint,
+  initial?: ProviderRecoveryCheckpoint
 ): AsyncIterable<ModelStreamEvent> {
-  let checkpoint =
-    initial ?? initialProviderCheckpoint(adapter, context);
+  let checkpoint = initial ?? initialProviderCheckpoint(adapter, context);
   await context.checkpoints.put(checkpoint);
   try {
     for await (const eventValue of stream) {
       const event = ProviderStreamEventSchema.parse(eventValue);
       const persisted = await context.checkpoints.get(
         checkpoint.runId,
-        checkpoint.operationId,
+        checkpoint.operationId
       );
       if (persisted) {
         checkpoint = ProviderRecoveryCheckpointSchema.parse({
           ...checkpoint,
-          streamSequence:
-            persisted.streamSequence ?? checkpoint.streamSequence,
+          streamSequence: persisted.streamSequence ?? checkpoint.streamSequence,
           continuationToken:
             persisted.continuationToken ?? checkpoint.continuationToken,
         });
@@ -203,15 +198,12 @@ export async function* checkpointProviderStream(
 
 export function continuationRequest(
   requestValue: ModelRequest,
-  checkpoint: ProviderRecoveryCheckpoint,
+  checkpoint: ProviderRecoveryCheckpoint
 ): ModelRequest {
   const request = ModelRequestSchema.parse(requestValue);
   if (!checkpoint.partialText) return request;
   let insertAt = request.messages.length;
-  while (
-    insertAt > 0 &&
-    request.messages[insertAt - 1]?.role === "tool"
-  ) {
+  while (insertAt > 0 && request.messages[insertAt - 1]?.role === "tool") {
     insertAt -= 1;
   }
   const messages = [...request.messages];
@@ -227,9 +219,7 @@ export function continuationRequest(
   });
 }
 
-export function classifyHttpFailure(
-  error: unknown,
-): ProviderFailureClass {
+export function classifyHttpFailure(error: unknown): ProviderFailureClass {
   if (error instanceof DOMException && error.name === "AbortError") {
     return "cancelled";
   }
@@ -240,17 +230,21 @@ export function classifyHttpFailure(
     typeof error.status === "number"
       ? error.status
       : typeof error === "object" &&
-          error !== null &&
-          "error" in error &&
-          typeof error.error === "object" &&
-          error.error !== null &&
-          "status" in error.error &&
-          typeof error.error.status === "number"
-        ? error.error.status
-        : undefined;
+        error !== null &&
+        "error" in error &&
+        typeof error.error === "object" &&
+        error.error !== null &&
+        "status" in error.error &&
+        typeof error.error.status === "number"
+      ? error.error.status
+      : undefined;
   if (status === 401 || status === 403) return "authentication";
   if (status === 429) return "rate_limit";
-  if (status === 408 || status === 409 || (status !== undefined && status >= 500)) {
+  if (
+    status === 408 ||
+    status === 409 ||
+    (status !== undefined && status >= 500)
+  ) {
     return "transient";
   }
   if (status !== undefined && status >= 400) return "invalid_request";
@@ -260,7 +254,7 @@ export function classifyHttpFailure(
 function checkpointForEvent(
   checkpoint: ProviderRecoveryCheckpoint,
   event: ModelStreamEvent,
-  adapter: Pick<DurableProviderAdapter, "id" | "provider" | "classifyError">,
+  adapter: Pick<DurableProviderAdapter, "id" | "provider" | "classifyError">
 ): ProviderRecoveryCheckpoint {
   const base = {
     ...checkpoint,
@@ -325,7 +319,7 @@ function checkpointForEvent(
 
 function mergeToolCallDelta(
   calls: ProviderToolCall[],
-  event: Extract<ModelStreamEvent, { type: "tool_call_delta" }>,
+  event: Extract<ModelStreamEvent, { type: "tool_call_delta" }>
 ): ProviderToolCall[] {
   const next = [...calls];
   const current = next[event.index] ?? {

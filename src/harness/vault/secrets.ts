@@ -5,9 +5,6 @@ import {
   createRecordId,
   nowIsoTimestamp,
   EventRecordSchema,
-  type EventRecord,
-  type EventSeverity,
-  type EventStatus,
 } from "../storage/records";
 import {
   SecretRefSchema,
@@ -16,7 +13,8 @@ import {
   type SecretValue,
 } from "./types";
 
-export const MISSING_SECRET_PAUSE_EVENT_TYPE = "run.paused.missing-secret" as const;
+export const MISSING_SECRET_PAUSE_EVENT_TYPE =
+  "run.paused.missing-secret" as const;
 export const MISSING_SECRET_REASON = "missing-secret" as const;
 
 export const MissingSecretPauseEventSchema = EventRecordSchema.extend({
@@ -32,7 +30,9 @@ export const MissingSecretPauseEventSchema = EventRecordSchema.extend({
     .strict(),
 });
 
-export type MissingSecretPauseEvent = z.infer<typeof MissingSecretPauseEventSchema>;
+export type MissingSecretPauseEvent = z.infer<
+  typeof MissingSecretPauseEventSchema
+>;
 
 export interface MissingSecretPauseOptions {
   id?: string;
@@ -45,7 +45,7 @@ export interface MissingSecretPauseOptions {
 /** Creates a pause event that contains a reference, never the secret value. */
 export function createMissingSecretPauseEvent(
   refInput: SecretRef | string,
-  options: MissingSecretPauseOptions = {},
+  options: MissingSecretPauseOptions = {}
 ): MissingSecretPauseEvent {
   const secretRef = SecretRefSchema.parse(refInput);
   return MissingSecretPauseEventSchema.parse(
@@ -63,7 +63,7 @@ export function createMissingSecretPauseEvent(
         secretRef,
         resumable: true,
       },
-    }),
+    })
   );
 }
 
@@ -93,13 +93,13 @@ export interface SecretsContext {
   with<T>(
     ref: SecretRef | string,
     callback: (value: SecretValue) => T | PromiseLike<T>,
-    options?: SecretAccessOptions,
+    options?: SecretAccessOptions
   ): Promise<T>;
   /** A non-throwing form for runners that pause instead of handling errors. */
   withResult<T>(
     ref: SecretRef | string,
     callback: (value: SecretValue) => T | PromiseLike<T>,
-    options?: SecretAccessOptions,
+    options?: SecretAccessOptions
   ): Promise<SecretWithResult<T>>;
 }
 
@@ -116,8 +116,12 @@ function normalizeRef(ref: SecretRef | string): SecretRef {
   return SecretRefSchema.parse(ref);
 }
 
-export function createSecretsContext(options: SecretsContextOptions): SecretsContext {
-  const resolve = async (refInput: SecretRef | string): Promise<SecretValue | undefined> => {
+export function createSecretsContext(
+  options: SecretsContextOptions
+): SecretsContext {
+  const resolve = async (
+    refInput: SecretRef | string
+  ): Promise<SecretValue | undefined> => {
     const ref = normalizeRef(refInput);
     const value = await options.provider.get(ref);
     return value === undefined ? undefined : cloneSecret(value);
@@ -132,7 +136,7 @@ export function createSecretsContext(options: SecretsContextOptions): SecretsCon
   const withSecret = async <T>(
     refInput: SecretRef | string,
     callback: (value: SecretValue) => T | PromiseLike<T>,
-    accessOptions?: SecretAccessOptions,
+    accessOptions?: SecretAccessOptions
   ): Promise<T> => {
     const ref = normalizeRef(refInput);
     const value = await resolve(ref);
@@ -153,11 +157,14 @@ export function createSecretsContext(options: SecretsContextOptions): SecretsCon
   const withResult = async <T>(
     refInput: SecretRef | string,
     callback: (value: SecretValue) => T | PromiseLike<T>,
-    accessOptions?: SecretAccessOptions,
+    accessOptions?: SecretAccessOptions
   ): Promise<SecretWithResult<T>> => {
     const ref = normalizeRef(refInput);
     try {
-      return { status: "ok", value: await withSecret(ref, callback, accessOptions) };
+      return {
+        status: "ok",
+        value: await withSecret(ref, callback, accessOptions),
+      };
     } catch (error) {
       if (error instanceof MissingSecretError) {
         return { status: "paused", event: error.event };
@@ -173,14 +180,17 @@ export interface HarnessContext {
   readonly secrets: SecretsContext;
 }
 
-export function createHarnessContext(options: SecretsContextOptions): HarnessContext {
+export function createHarnessContext(
+  options: SecretsContextOptions
+): HarnessContext {
   return { secrets: createSecretsContext(options) };
 }
 
-export function isMissingSecretPauseEvent(value: unknown): value is MissingSecretPauseEvent {
+export function isMissingSecretPauseEvent(
+  value: unknown
+): value is MissingSecretPauseEvent {
   return MissingSecretPauseEventSchema.safeParse(value).success;
 }
 
 export type MissingSecretEvent = MissingSecretPauseEvent;
 export const MissingSecretEventSchema = MissingSecretPauseEventSchema;
-

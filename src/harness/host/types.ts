@@ -17,19 +17,10 @@ import {
 import {
   ThreadBindingSchema,
   ThreadCreateRequestSchema,
-  ThreadCompactRequestSchema,
   ThreadForkRequestSchema,
-  ThreadGoalRequestSchema,
   ThreadHistoryDiffResponseSchema,
   ThreadHistoryListResponseSchema,
-  ThreadPinRequestSchema,
-  ThreadReadRequestSchema,
-  ThreadRecordListRequestSchema,
-  ThreadRenameRequestSchema,
-  ThreadRollbackRequestSchema,
-  ThreadRestoreRequestSchema,
   ThreadMessageRequestSchema,
-  ThreadModelSetRequestSchema,
   type ThreadBinding,
   type ThreadDeletion,
   type ThreadCreateRequest,
@@ -68,9 +59,7 @@ import type {
   ProviderOAuthSession,
   ProviderOAuthStartInput,
 } from "../contracts/connections.js";
-import type {
-  ConnectionSecretInput,
-} from "../contracts/secrets.js";
+import type { ConnectionSecretInput } from "../contracts/secrets.js";
 import type { ConnectionSecretMetadata } from "../contracts/connections.js";
 
 export const FlaryHostAuthorizationSchema = z
@@ -93,9 +82,7 @@ export const FlaryThreadAdmissionSchema = z
     duplicate: z.boolean().optional(),
   })
   .strict();
-export type FlaryThreadAdmission = z.infer<
-  typeof FlaryThreadAdmissionSchema
->;
+export type FlaryThreadAdmission = z.infer<typeof FlaryThreadAdmissionSchema>;
 
 export const FlaryRecallSearchRequestSchema = z
   .object({
@@ -103,15 +90,7 @@ export const FlaryRecallSearchRequestSchema = z
     mode: z.enum(["exact", "semantic", "hybrid"]).default("hybrid"),
     kinds: z
       .array(
-        z.enum([
-          "message",
-          "plan",
-          "decision",
-          "file",
-          "tool",
-          "run",
-          "event",
-        ]),
+        z.enum(["message", "plan", "decision", "file", "tool", "run", "event"])
       )
       .max(7)
       .optional(),
@@ -142,7 +121,7 @@ export interface FlaryHostRequest<TBindings> {
 }
 
 export type ResolveFlaryHostAuthorization<TBindings> = (
-  input: FlaryHostRequest<TBindings>,
+  input: FlaryHostRequest<TBindings>
 ) => Promise<FlaryHostAuthorization> | FlaryHostAuthorization;
 
 export interface FlaryThreadScope {
@@ -158,25 +137,25 @@ export interface FlaryThreadTarget extends FlaryThreadScope {
 export interface FlaryProviderOAuthHostService {
   start(
     scope: FlaryThreadScope,
-    input: ProviderOAuthStartInput,
+    input: ProviderOAuthStartInput
   ): Promise<ProviderOAuthSession>;
   inspect(
     scope: FlaryThreadScope,
     sessionId: string,
-    options: { poll: boolean },
+    options: { poll: boolean }
   ): Promise<ProviderOAuthSession>;
   complete(
     scope: FlaryThreadScope,
     sessionId: string,
-    input: ProviderOAuthCompleteInput,
+    input: ProviderOAuthCompleteInput
   ): Promise<ProviderOAuthSession>;
   cancel(
     scope: FlaryThreadScope,
-    sessionId: string,
+    sessionId: string
   ): Promise<ProviderOAuthSession>;
   importEncrypted(
     scope: FlaryThreadScope,
-    input: ProviderEncryptedCredentialHandoff,
+    input: ProviderEncryptedCredentialHandoff
   ): Promise<ProviderCredentialLifecycle>;
   /** Remove the local credential. Remote provider revocation is optional. */
   disconnect(scope: FlaryThreadScope, connectionId: string): Promise<void>;
@@ -190,12 +169,12 @@ export interface FlarySecretHostService {
   put(
     scope: FlaryThreadScope,
     connectionId: string,
-    input: ConnectionSecretInput,
+    input: ConnectionSecretInput
   ): Promise<ConnectionSecretMetadata>;
   delete(
     scope: FlaryThreadScope,
     connectionId: string,
-    secretName: string,
+    secretName: string
   ): Promise<void>;
 }
 
@@ -209,70 +188,73 @@ export interface FlaryThreadHostService {
   list(scope: FlaryThreadScope): Promise<ThreadBinding[]>;
   create(
     scope: FlaryThreadScope,
-    input: z.output<typeof ThreadCreateRequestSchema>,
+    input: z.output<typeof ThreadCreateRequestSchema>
   ): Promise<ThreadBinding>;
   inspect(target: FlaryThreadTarget): Promise<ThreadBinding>;
   realtimeTicket?(
     target: FlaryThreadTarget,
     input: RealtimeTicketRequest,
-    requestUrl: string,
+    requestUrl: string
   ): Promise<RealtimeTicketResponse>;
   realtimeConnect?(
     appId: string,
     threadId: string,
-    ticket: string,
+    ticket: string
   ): Promise<Response>;
   terminalTicket?(
     target: FlaryThreadTarget,
     input: { readonly cols?: number; readonly rows?: number },
-    requestUrl: string,
+    requestUrl: string
   ): Promise<{ readonly url: string; readonly expiresAt: string }>;
   terminalConnect?(
     target: FlaryThreadTarget,
     ticket: string,
-    request: Request,
+    request: Request
   ): Promise<Response>;
   archive(target: FlaryThreadTarget): Promise<ThreadBinding>;
   unarchive?(target: FlaryThreadTarget): Promise<ThreadBinding>;
   rename?(
     target: FlaryThreadTarget,
-    input: ThreadRenameRequest,
+    input: ThreadRenameRequest
   ): Promise<ThreadBinding>;
   pin?(
     target: FlaryThreadTarget,
-    input: ThreadPinRequest,
+    input: ThreadPinRequest
   ): Promise<ThreadBinding>;
   markRead?(
     target: FlaryThreadTarget,
-    input: ThreadReadRequest,
+    input: ThreadReadRequest
   ): Promise<ThreadBinding>;
   delete?(target: FlaryThreadTarget): Promise<ThreadDeletion>;
-  deletion?(target: FlaryThreadTarget, deletionId: string): Promise<ThreadDeletion>;
+  deletion?(
+    target: FlaryThreadTarget,
+    deletionId: string
+  ): Promise<ThreadDeletion>;
   /** Internal queue consumer hook. It is not exposed as a public route. */
   purge?(target: FlaryThreadTarget, deletionId: string): Promise<void>;
   fork(
     target: FlaryThreadTarget,
-    input: ThreadForkRequest,
+    input: ThreadForkRequest
   ): Promise<ThreadBinding>;
   setMode(
     target: FlaryThreadTarget,
     mode: AgentModeId,
-    reason?: string,
+    reason?: string
   ): Promise<ThreadBinding>;
   setConnections(
     target: FlaryThreadTarget,
-    connectionIds: string[],
+    connectionIds: string[]
   ): Promise<ThreadBinding>;
   modelGet?(target: FlaryThreadTarget): Promise<unknown>;
   modelList?(target: FlaryThreadTarget): Promise<readonly unknown[]>;
   modelSet?(
     target: FlaryThreadTarget,
-    input: ThreadModelSetRequest,
+    input: ThreadModelSetRequest
   ): Promise<unknown>;
   modelHistory?(target: FlaryThreadTarget): Promise<readonly unknown[]>;
   submit(
     target: FlaryThreadTarget,
-    input: ThreadMessageRequest,
+    input: ThreadMessageRequest
   ): Promise<FlaryThreadAdmission>;
   /** Read the safe, provider-neutral conversation through tenant authorization. */
   conversation?(target: FlaryThreadTarget): Promise<unknown>;
@@ -283,102 +265,104 @@ export interface FlaryThreadHostService {
       readonly offset: string;
       readonly live: "long-poll" | "sse";
       readonly signal?: AbortSignal;
-    },
+    }
   ): Promise<Response>;
   /** Read one Flue attachment after the host resolves tenant ownership. */
   attachment?(
     target: FlaryThreadTarget,
     attachmentId: string,
-    input: { readonly signal?: AbortSignal },
+    input: { readonly signal?: AbortSignal }
   ): Promise<Response>;
   edit?(
     target: FlaryThreadTarget,
-    input: import("../contracts/threads.js").ThreadEditRequest,
+    input: import("../contracts/threads.js").ThreadEditRequest
   ): Promise<FlaryThreadAdmission>;
   interrupt?(target: FlaryThreadTarget): Promise<void>;
   compact?(
     target: FlaryThreadTarget,
-    input: ThreadCompactRequest,
+    input: ThreadCompactRequest
   ): Promise<unknown>;
   rollback?(
     target: FlaryThreadTarget,
-    input: ThreadRollbackRequest,
+    input: ThreadRollbackRequest
   ): Promise<unknown>;
   restore?(
     target: FlaryThreadTarget,
-    input: ThreadRestoreRequest,
+    input: ThreadRestoreRequest
   ): Promise<unknown>;
   exportSession?(target: FlaryThreadTarget): Promise<ThreadPortableArchive>;
   setGoal?(
     target: FlaryThreadTarget,
-    input: ThreadGoalRequest,
+    input: ThreadGoalRequest
   ): Promise<unknown>;
   clearGoal?(target: FlaryThreadTarget): Promise<unknown>;
   turns?(
     target: FlaryThreadTarget,
-    input: ThreadRecordListRequest,
+    input: ThreadRecordListRequest
   ): Promise<readonly unknown[]>;
   auditList?(
     target: FlaryThreadTarget,
-    input: ThreadRecordListRequest,
+    input: ThreadRecordListRequest
   ): Promise<readonly unknown[]>;
-  auditExport?(target: FlaryThreadTarget): Promise<ReadableStream<Uint8Array> | string>;
+  auditExport?(
+    target: FlaryThreadTarget
+  ): Promise<ReadableStream<Uint8Array> | string>;
   subagentAction?(
     target: FlaryThreadTarget,
     action: string,
-    input: Readonly<Record<string, unknown>>,
+    input: Readonly<Record<string, unknown>>
   ): Promise<unknown>;
   scheduleAction?(
     target: FlaryThreadTarget,
     action: string,
-    input: Readonly<Record<string, unknown>>,
+    input: Readonly<Record<string, unknown>>
   ): Promise<unknown>;
   processAction?(
     target: FlaryThreadTarget,
     action: string,
-    input: Readonly<Record<string, unknown>>,
+    input: Readonly<Record<string, unknown>>
   ): Promise<unknown>;
   browserAction?(
     target: FlaryThreadTarget,
     action: string,
-    input: Readonly<Record<string, unknown>>,
+    input: Readonly<Record<string, unknown>>
   ): Promise<unknown>;
   listApprovals(target: FlaryThreadTarget): Promise<unknown[]>;
   decideApproval(
     target: FlaryThreadTarget,
-    decision: ApprovalDecision,
+    decision: ApprovalDecision
   ): Promise<void>;
   listUserInput?(target: FlaryThreadTarget): Promise<UserInputRecord[]>;
   respondToUserInput?(
     target: FlaryThreadTarget,
     requestId: string,
-    response: UserInputAnswerRequest,
+    response: UserInputAnswerRequest
   ): Promise<{ live: boolean; admission?: FlaryThreadAdmission }>;
   operationalState?(
-    target: FlaryThreadTarget,
+    target: FlaryThreadTarget
   ): Promise<z.output<typeof ThreadOperationalStateSchema>>;
   history?(
     target: FlaryThreadTarget,
-    limit: number,
+    limit: number
   ): Promise<ThreadHistoryListResponse>;
   historyDiff?(
     target: FlaryThreadTarget,
     input: {
       baseCommitId?: string;
       headCommitId: string;
-    },
+    }
   ): Promise<ThreadHistoryDiffResponse>;
   historyRestore?(
     target: FlaryThreadTarget,
-    input: import("../contracts/threads.js").ThreadHistoryRestoreRequest,
+    input: import("../contracts/threads.js").ThreadHistoryRestoreRequest
   ): Promise<unknown>;
   recallSearch?(
     target: FlaryThreadTarget,
-    input: FlaryRecallSearchRequest,
+    input: FlaryRecallSearchRequest
   ): Promise<RecallSearchResponse>;
   recallOpen?(
     target: FlaryThreadTarget,
-    input: FlaryRecallOpenRequest,
+    input: FlaryRecallOpenRequest
   ): Promise<RecallDocument | undefined>;
 }
 

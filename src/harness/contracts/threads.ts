@@ -1,16 +1,12 @@
 import { z } from "zod";
 
-import {
-  AgentModeIdSchema,
-  type AgentModeId,
-} from "./modes";
+import { AgentModeIdSchema, type AgentModeId } from "./modes";
 import {
   ModelSelectionSchema,
   ModelInputSchema,
   PromptCacheRetentionSchema,
   ReasoningEffortSchema,
   type ModelSelection,
-  type ModelInput,
   type PromptCacheRetention,
   type ReasoningEffort,
 } from "./provider";
@@ -38,9 +34,7 @@ export const ThreadLifecycleStatusSchema = z.enum([
   "archived",
   "forked",
 ]);
-export type ThreadLifecycleStatus = z.infer<
-  typeof ThreadLifecycleStatusSchema
->;
+export type ThreadLifecycleStatus = z.infer<typeof ThreadLifecycleStatusSchema>;
 
 /**
  * The durable identity of one Flary thread.
@@ -216,11 +210,13 @@ export const ThreadPortableArchiveSchema = z
   .object({
     format: z.literal("flary-thread-archive"),
     version: z.literal(1),
-    source: z.object({
-      tenantId: IdentifierSchema,
-      applicationId: IdentifierSchema,
-      threadId: IdentifierSchema,
-    }).strict(),
+    source: z
+      .object({
+        tenantId: IdentifierSchema,
+        applicationId: IdentifierSchema,
+        threadId: IdentifierSchema,
+      })
+      .strict(),
     exportedAt: TimestampSchema,
     ledgerJsonl: z.string().min(1).max(50_000_000),
     canonical: z.unknown(),
@@ -281,9 +277,7 @@ export const ThreadBindingResponseSchema = z
     approvals: z.array(ThreadApprovalRecordSchema).optional(),
   })
   .strict();
-export type ThreadBindingResponse = z.infer<
-  typeof ThreadBindingResponseSchema
->;
+export type ThreadBindingResponse = z.infer<typeof ThreadBindingResponseSchema>;
 
 export type ThreadModel = ModelSelection;
 export type ThreadThinkingLevel = ReasoningEffort;

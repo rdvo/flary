@@ -65,12 +65,15 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
     const request = ModelRequestSchema.parse(input);
     const signalState = requestSignal(options);
     try {
-      const fetchResponse = await this.fetchImpl(joinUrl(this.baseUrl, this.path), {
-        method: "POST",
-        headers: this.headersFor(options.headers, "application/json"),
-        body: JSON.stringify(this.toRequestBody(request, false)),
-        signal: signalState.signal,
-      });
+      const fetchResponse = await this.fetchImpl(
+        joinUrl(this.baseUrl, this.path),
+        {
+          method: "POST",
+          headers: this.headersFor(options.headers, "application/json"),
+          body: JSON.stringify(this.toRequestBody(request, false)),
+          signal: signalState.signal,
+        }
+      );
       if (!fetchResponse.ok) {
         throw await providerErrorFromResponse(this.id, fetchResponse);
       }
@@ -104,12 +107,15 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
     let sequenceStarted = false;
 
     try {
-      const fetchResponse = await this.fetchImpl(joinUrl(this.baseUrl, this.path), {
-        method: "POST",
-        headers: this.headersFor(options.headers, "text/event-stream"),
-        body: JSON.stringify(this.toRequestBody(request, true)),
-        signal: signalState.signal,
-      });
+      const fetchResponse = await this.fetchImpl(
+        joinUrl(this.baseUrl, this.path),
+        {
+          method: "POST",
+          headers: this.headersFor(options.headers, "text/event-stream"),
+          body: JSON.stringify(this.toRequestBody(request, true)),
+          signal: signalState.signal,
+        }
+      );
       if (!fetchResponse.ok) {
         throw await providerErrorFromResponse(this.id, fetchResponse);
       }
@@ -243,11 +249,15 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
     } catch (error) {
       const normalized = this.normalizeError(error);
       const providerError =
-        normalized instanceof Error && normalized.name === "ProviderAdapterError"
+        normalized instanceof Error &&
+        normalized.name === "ProviderAdapterError"
           ? (normalized as typeof normalized & { error: ProviderError }).error
           : createProviderError(this.id, {
               code: "provider_request_failed",
-              message: normalized instanceof Error ? normalized.message : String(normalized),
+              message:
+                normalized instanceof Error
+                  ? normalized.message
+                  : String(normalized),
             }).error;
       yield ProviderStreamEventSchema.parse({
         type: "error",
@@ -272,7 +282,7 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
     request: ModelRequest,
     stream: boolean
   ): Record<string, unknown> {
-    const parameters = { ...(request.parameters ?? {}) };
+    const parameters = { ...request.parameters };
     delete parameters.max_tokens;
     delete parameters.max_completion_tokens;
     delete parameters.stream;
@@ -286,7 +296,8 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
     if (request.maxOutputTokens !== undefined) {
       body.max_completion_tokens = request.maxOutputTokens;
     }
-    if (request.temperature !== undefined) body.temperature = request.temperature;
+    if (request.temperature !== undefined)
+      body.temperature = request.temperature;
     if (request.topP !== undefined) body.top_p = request.topP;
     if (request.stop !== undefined) body.stop = request.stop;
     if (request.reasoningEffort && request.reasoningEffort !== "none") {
@@ -302,7 +313,8 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
         },
       }));
     }
-    if (request.toolChoice) body.tool_choice = toOpenAIToolChoice(request.toolChoice);
+    if (request.toolChoice)
+      body.tool_choice = toOpenAIToolChoice(request.toolChoice);
     if (request.responseFormat) {
       body.response_format =
         request.responseFormat === "text"
@@ -312,9 +324,14 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
     return body;
   }
 
-  private fromResponse(payload: unknown, requestedModel: string): ModelResponse {
+  private fromResponse(
+    payload: unknown,
+    requestedModel: string
+  ): ModelResponse {
     const root = asRecord(payload);
-    const choice = asRecord(Array.isArray(root.choices) ? root.choices[0] : undefined);
+    const choice = asRecord(
+      Array.isArray(root.choices) ? root.choices[0] : undefined
+    );
     const message = asRecord(choice.message);
     return this.buildResponse({
       id: asString(root.id, randomId("response")),
@@ -332,7 +349,9 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
     model: string;
     content: string;
     reasoning?: string;
-    toolCalls: Map<number, { id: string; name: string; arguments: string }> | ProviderToolCall[];
+    toolCalls:
+      | Map<number, { id: string; name: string; arguments: string }>
+      | ProviderToolCall[];
     finishReason: ModelResponse["finishReason"];
     usage?: ProviderUsage;
     requestedModel: string;
@@ -387,7 +406,8 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
   }
 
   private normalizeError(error: unknown): unknown {
-    if (error instanceof Error && error.name === "ProviderAdapterError") return error;
+    if (error instanceof Error && error.name === "ProviderAdapterError")
+      return error;
     if (error instanceof TypeError) {
       return createProviderError(this.id, {
         code: "network_error",
@@ -441,8 +461,14 @@ function toOpenAIToolChoice(
   return { type: "function", function: { name: choice.name } };
 }
 
-function parseToolCall(id: string, name: string, rawArguments: string): ProviderToolCall {
-  const argumentsValue = JsonObjectSchema.safeParse(parseJsonObject(rawArguments));
+function parseToolCall(
+  id: string,
+  name: string,
+  rawArguments: string
+): ProviderToolCall {
+  const argumentsValue = JsonObjectSchema.safeParse(
+    parseJsonObject(rawArguments)
+  );
   return {
     id,
     name,

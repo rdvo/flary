@@ -9,7 +9,6 @@ import {
   TimestampSchema,
 } from "./common";
 import { AgentModeIdSchema } from "./modes";
-import { ModelSelectionSchema } from "./provider";
 import { NormalizedUsageSchema } from "./telemetry";
 import { StorageScopeSchema, ThreadRefSchema } from "./tenancy";
 

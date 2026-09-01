@@ -33,11 +33,15 @@ export function FlaryUserInput(props: FlaryUserInputProps) {
   if (secureRequest) {
     return (
       <div
-        className={`flary-user-input flary-secret-input-required ${props.className ?? ""}`.trim()}
+        className={`flary-user-input flary-secret-input-required ${
+          props.className ?? ""
+        }`.trim()}
         data-state={props.record.response ? "answered" : "waiting"}
       >
         <strong>{secureRequest.label}</strong>
-        <p>Use the secure credential form. Do not paste this value into chat.</p>
+        <p>
+          Use the secure credential form. Do not paste this value into chat.
+        </p>
       </div>
     );
   }
@@ -84,8 +88,14 @@ function FlaryRegularUserInput({
       onSubmit={submit}
     >
       {questions.map((question) => (
-        <fieldset key={question.header} disabled={disabled || resolved || submitting}>
-          <legend><span>{question.header}</span>{question.question}</legend>
+        <fieldset
+          key={question.header}
+          disabled={disabled || resolved || submitting}
+        >
+          <legend>
+            <span>{question.header}</span>
+            {question.question}
+          </legend>
           <div className="flary-user-input__options">
             {question.options.map((option) => (
               <label key={option.label}>
@@ -93,20 +103,40 @@ function FlaryRegularUserInput({
                   type={question.multiSelect ? "checkbox" : "radio"}
                   name={question.header}
                   value={option.label}
-                  checked={question.multiSelect
-                    ? (answers[question.header] ?? "").split(", ").includes(option.label)
-                    : answers[question.header] === option.label && !other[question.header]}
+                  checked={
+                    question.multiSelect
+                      ? (answers[question.header] ?? "")
+                          .split(", ")
+                          .includes(option.label)
+                      : answers[question.header] === option.label &&
+                        !other[question.header]
+                  }
                   onChange={(event) => {
-                    setOther((current) => ({ ...current, [question.header]: "" }));
+                    setOther((current) => ({
+                      ...current,
+                      [question.header]: "",
+                    }));
                     setAnswers((current) => {
-                      if (!question.multiSelect) return { ...current, [question.header]: option.label };
-                      const selected = new Set((current[question.header] ?? "").split(", ").filter(Boolean));
-                      event.target.checked ? selected.add(option.label) : selected.delete(option.label);
-                      return { ...current, [question.header]: [...selected].join(", ") };
+                      if (!question.multiSelect)
+                        return { ...current, [question.header]: option.label };
+                      const selected = new Set(
+                        (current[question.header] ?? "")
+                          .split(", ")
+                          .filter(Boolean)
+                      );
+                      if (event.target.checked) selected.add(option.label);
+                      else selected.delete(option.label);
+                      return {
+                        ...current,
+                        [question.header]: [...selected].join(", "),
+                      };
                     });
                   }}
                 />
-                <span><strong>{option.label}</strong>{option.description && <small>{option.description}</small>}</span>
+                <span>
+                  <strong>{option.label}</strong>
+                  {option.description && <small>{option.description}</small>}
+                </span>
               </label>
             ))}
             <label className="flary-user-input__other">
@@ -116,14 +146,25 @@ function FlaryRegularUserInput({
               <input
                 type="text"
                 value={other[question.header] ?? ""}
-                onChange={(event) => setOther((current) => ({ ...current, [question.header]: event.target.value }))}
-                placeholder={question.options.length > 0 ? otherLabel : "Type your answer"}
+                onChange={(event) =>
+                  setOther((current) => ({
+                    ...current,
+                    [question.header]: event.target.value,
+                  }))
+                }
+                placeholder={
+                  question.options.length > 0 ? otherLabel : "Type your answer"
+                }
               />
             </label>
           </div>
         </fieldset>
       ))}
-      {!resolved && <button type="submit" disabled={disabled || submitting}>{submitting ? "Sending…" : submitLabel}</button>}
+      {!resolved && (
+        <button type="submit" disabled={disabled || submitting}>
+          {submitting ? "Sending…" : submitLabel}
+        </button>
+      )}
     </form>
   );
 }
@@ -132,7 +173,7 @@ export interface FlarySecretInputProps {
   record: UserInputRecord;
   onSubmit(
     requestId: string,
-    input: { value: string; description?: string; expiresAt?: string },
+    input: { value: string; description?: string; expiresAt?: string }
   ): Promise<void> | void;
   className?: string;
   disabled?: boolean;
@@ -200,10 +241,10 @@ export function FlarySecretInput({
 }
 
 export function getSecretRequest(
-  record: UserInputRecord,
+  record: UserInputRecord
 ): SecretRequestMetadata | undefined {
   const parsed = SecretRequestMetadataSchema.safeParse(
-    record.request.metadata?.flarySecretRequest,
+    record.request.metadata?.flarySecretRequest
   );
   return parsed.success ? parsed.data : undefined;
 }
