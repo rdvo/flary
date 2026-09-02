@@ -7,10 +7,7 @@ import {
   NonEmptyStringSchema,
   PositiveIntegerSchema,
 } from "../contracts/common.js";
-import {
-  ReasoningEffortSchema,
-  TextVerbositySchema,
-} from "../contracts/provider.js";
+import { ReasoningEffortSchema, TextVerbositySchema } from "../contracts/provider.js";
 
 export const ProviderMessageRoleSchema = z.enum([
   "system",
@@ -71,9 +68,7 @@ export const ProviderToolDefinitionSchema = z
     inputSchema: JsonObjectSchema,
   })
   .strict();
-export type ProviderToolDefinition = z.infer<
-  typeof ProviderToolDefinitionSchema
->;
+export type ProviderToolDefinition = z.infer<typeof ProviderToolDefinitionSchema>;
 
 export const ProviderToolChoiceSchema = z.union([
   z.enum(["auto", "none", "required"]),
@@ -94,9 +89,7 @@ export const ProviderResponseFormatSchema = z.union([
     })
     .strict(),
 ]);
-export type ProviderResponseFormat = z.infer<
-  typeof ProviderResponseFormatSchema
->;
+export type ProviderResponseFormat = z.infer<typeof ProviderResponseFormatSchema>;
 
 export const NormalizedModelRequestSchema = z
   .object({
@@ -115,9 +108,7 @@ export const NormalizedModelRequestSchema = z
     metadata: MetadataSchema.optional(),
   })
   .strict();
-export type NormalizedModelRequest = z.infer<
-  typeof NormalizedModelRequestSchema
->;
+export type NormalizedModelRequest = z.infer<typeof NormalizedModelRequestSchema>;
 
 export const ProviderUsageSchema = z
   .object({
@@ -137,9 +128,7 @@ export const NormalizedFinishReasonSchema = z.enum([
   "error",
   "unknown",
 ]);
-export type NormalizedFinishReason = z.infer<
-  typeof NormalizedFinishReasonSchema
->;
+export type NormalizedFinishReason = z.infer<typeof NormalizedFinishReasonSchema>;
 
 export const NormalizedModelResponseSchema = z
   .object({
@@ -154,9 +143,7 @@ export const NormalizedModelResponseSchema = z
     metadata: MetadataSchema.optional(),
   })
   .strict();
-export type NormalizedModelResponse = z.infer<
-  typeof NormalizedModelResponseSchema
->;
+export type NormalizedModelResponse = z.infer<typeof NormalizedModelResponseSchema>;
 
 export const ProviderErrorSchema = z
   .object({

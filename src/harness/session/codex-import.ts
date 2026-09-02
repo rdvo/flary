@@ -48,10 +48,7 @@ const SENSITIVE_KEY =
   /authorization|cookie|credential|password|secret|api[_-]?key|encrypted[_-]?content|(?:^|[_-])(?:access|refresh|id|session|auth|bearer)?[_-]?token$/i;
 
 /** Remove common secret values before source data enters a public ledger. */
-export function redactCodexRolloutValue(
-  value: SessionJsonValue,
-  key = "",
-): SessionJsonValue {
+export function redactCodexRolloutValue(value: SessionJsonValue, key = ""): SessionJsonValue {
   if (key && SENSITIVE_KEY.test(key)) return "[REDACTED]";
   if (Array.isArray(value)) {
     return value.map((item) => redactCodexRolloutValue(item));
@@ -75,10 +72,7 @@ function textValue(value: SessionJsonValue | undefined): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function nestedText(
-  value: SessionJsonObject,
-  path: readonly string[],
-): string | undefined {
+function nestedText(value: SessionJsonObject, path: readonly string[]): string | undefined {
   let current: SessionJsonValue = value;
   for (const key of path) {
     if (current === null || Array.isArray(current) || typeof current !== "object") {
@@ -89,10 +83,7 @@ function nestedText(
   return textValue(current);
 }
 
-function mapCodexType(
-  topLevelType: string,
-  payload: SessionJsonObject,
-): SessionRecordType {
+function mapCodexType(topLevelType: string, payload: SessionJsonObject): SessionRecordType {
   const nestedType = textValue(payload.type);
   if (topLevelType === "session_meta") return "session.manifest";
   if (topLevelType === "world_state") return "session.world_state";
@@ -110,10 +101,7 @@ function mapCodexType(
     if (nestedType === "function_call" || nestedType === "custom_tool_call") {
       return "tool.call";
     }
-    if (
-      nestedType === "function_call_output" ||
-      nestedType === "custom_tool_call_output"
-    ) {
+    if (nestedType === "function_call_output" || nestedType === "custom_tool_call_output") {
       return "tool.result";
     }
     return "codex.opaque";
@@ -135,7 +123,7 @@ function mapCodexType(
       approval_request: "approval.requested",
       approval_response: "approval.resolved",
     };
-    return nestedType ? mapping[nestedType] ?? "codex.opaque" : "codex.opaque";
+    return nestedType ? (mapping[nestedType] ?? "codex.opaque") : "codex.opaque";
   }
   return "codex.opaque";
 }
@@ -202,8 +190,7 @@ export async function importCodexRollout(
     textValue(manifestPayload.id) ??
     textValue(manifestPayload.session_id) ??
     sessionId;
-  const fallbackTimestamp =
-    options.fallbackTimestamp ?? "1970-01-01T00:00:00.000Z";
+  const fallbackTimestamp = options.fallbackTimestamp ?? "1970-01-01T00:00:00.000Z";
   const sourceRevision = options.sourceRevision ?? "codex-rollout/v1";
   const output: SessionRecord[] = [];
   let previousHash: string | null = null;
@@ -211,9 +198,7 @@ export async function importCodexRollout(
   for (const { lineNumber, record, source } of sources) {
     const payload = objectValue(record.payload);
     const topLevelType =
-      typeof record.type === "string" && record.type.length > 0
-        ? record.type
-        : "unknown";
+      typeof record.type === "string" && record.type.length > 0 ? record.type : "unknown";
     const redactedSource = redactCodexRolloutValue(source);
     const publicPayload = SessionJsonObjectSchema.parse({
       codexType: topLevelType,
@@ -226,18 +211,14 @@ export async function importCodexRollout(
     const recordedAt =
       typeof record.timestamp === "string"
         ? record.timestamp
-        : textValue(payload.timestamp) ?? fallbackTimestamp;
+        : (textValue(payload.timestamp) ?? fallbackTimestamp);
     const recordType = mapCodexType(topLevelType, payload);
     const turnId = firstIdentifier(payload, [
       ["turn_id"],
       ["internal_chat_message_metadata_passthrough", "turn_id"],
     ]);
     const toolCallId = recordType.startsWith("tool.")
-      ? firstIdentifier(payload, [
-          ["call_id"],
-          ["tool_call_id"],
-          ["id"],
-        ])
+      ? firstIdentifier(payload, [["call_id"], ["tool_call_id"], ["id"]])
       : undefined;
     const agentId = firstIdentifier(payload, [
       ["agent_id"],
@@ -270,11 +251,7 @@ export async function importCodexRollout(
         ...(parentId ? { parentId } : {}),
         ...(encryptedContentRef ? { encryptedContentRef } : {}),
       };
-      sealed = await sealSessionRecord(
-        draft,
-        output.length + 1,
-        previousHash,
-      );
+      sealed = await sealSessionRecord(draft, output.length + 1, previousHash);
     } catch (error) {
       throw new CodexRolloutImportError(
         lineNumber,

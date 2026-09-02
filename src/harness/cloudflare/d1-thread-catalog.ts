@@ -26,7 +26,9 @@ export class D1ThreadCatalog {
   }
 
   async initialize(): Promise<void> {
-    await this.#database.prepare(`
+    await this.#database
+      .prepare(
+        `
       CREATE TABLE IF NOT EXISTS flary_thread_catalog (
         tenant_id TEXT NOT NULL,
         application_id TEXT NOT NULL,
@@ -37,8 +39,12 @@ export class D1ThreadCatalog {
         binding_json TEXT NOT NULL,
         PRIMARY KEY (tenant_id, application_id, thread_id)
       );
-    `).run();
-    await this.#database.prepare(`
+    `,
+      )
+      .run();
+    await this.#database
+      .prepare(
+        `
       CREATE TABLE IF NOT EXISTS flary_thread_deletions (
         deletion_id TEXT PRIMARY KEY,
         tenant_id TEXT NOT NULL,
@@ -49,23 +55,34 @@ export class D1ThreadCatalog {
         completed_at TEXT,
         error_code TEXT
       )
-    `).run();
-    await this.#database.prepare(`
+    `,
+      )
+      .run();
+    await this.#database
+      .prepare(
+        `
       CREATE INDEX IF NOT EXISTS flary_thread_deletions_owner
       ON flary_thread_deletions (tenant_id, application_id, accepted_at DESC)
-    `).run();
-    await this.#database.prepare(`
+    `,
+      )
+      .run();
+    await this.#database
+      .prepare(
+        `
       CREATE INDEX IF NOT EXISTS flary_thread_catalog_list
       ON flary_thread_catalog
         (tenant_id, application_id, agent_id, status, updated_at DESC);
-    `).run();
+    `,
+      )
+      .run();
   }
 
   async put(bindingInput: ThreadBinding): Promise<ThreadBinding> {
     const binding = ThreadBindingSchema.parse(bindingInput);
     await this.initialize();
-    await this.#database.prepare(
-      `INSERT INTO flary_thread_catalog (
+    await this.#database
+      .prepare(
+        `INSERT INTO flary_thread_catalog (
          tenant_id, application_id, thread_id, agent_id, status,
          updated_at, binding_json
        ) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -74,15 +91,17 @@ export class D1ThreadCatalog {
          status = excluded.status,
          updated_at = excluded.updated_at,
          binding_json = excluded.binding_json`,
-    ).bind(
-      binding.thread.organizationId,
-      binding.thread.appId,
-      binding.thread.threadId,
-      binding.agentId,
-      binding.status,
-      binding.updatedAt,
-      JSON.stringify(binding),
-    ).run();
+      )
+      .bind(
+        binding.thread.organizationId,
+        binding.thread.appId,
+        binding.thread.threadId,
+        binding.agentId,
+        binding.status,
+        binding.updatedAt,
+        JSON.stringify(binding),
+      )
+      .run();
     return binding;
   }
 
@@ -92,19 +111,19 @@ export class D1ThreadCatalog {
     readonly agentId?: string;
   }): Promise<ThreadBinding[]> {
     await this.initialize();
-    const result = await this.#database.prepare(
-      `SELECT binding_json
+    const result = await this.#database
+      .prepare(
+        `SELECT binding_json
        FROM flary_thread_catalog
        WHERE tenant_id = ? AND application_id = ?
          ${input.agentId ? "AND agent_id = ?" : ""}
        ORDER BY updated_at DESC, thread_id ASC`,
-    ).bind(
-      input.tenantId,
-      input.applicationId,
-      ...(input.agentId ? [input.agentId] : []),
-    ).all<{ binding_json: string }>();
+      )
+      .bind(input.tenantId, input.applicationId, ...(input.agentId ? [input.agentId] : []))
+      .all<{ binding_json: string }>();
     return (result.results ?? []).map((row) =>
-      ThreadBindingSchema.parse(JSON.parse(row.binding_json)));
+      ThreadBindingSchema.parse(JSON.parse(row.binding_json)),
+    );
   }
 
   async delete(input: {
@@ -113,16 +132,21 @@ export class D1ThreadCatalog {
     readonly threadId: string;
   }): Promise<void> {
     await this.initialize();
-    await this.#database.prepare(
-      `DELETE FROM flary_thread_catalog
+    await this.#database
+      .prepare(
+        `DELETE FROM flary_thread_catalog
        WHERE tenant_id = ? AND application_id = ? AND thread_id = ?`,
-    ).bind(input.tenantId, input.applicationId, input.threadId).run();
+      )
+      .bind(input.tenantId, input.applicationId, input.threadId)
+      .run();
   }
 
-  async putDeletion(input: ThreadDeletion & {
-    readonly tenantId: string;
-    readonly applicationId: string;
-  }): Promise<ThreadDeletion> {
+  async putDeletion(
+    input: ThreadDeletion & {
+      readonly tenantId: string;
+      readonly applicationId: string;
+    },
+  ): Promise<ThreadDeletion> {
     // The tenant and application fields are storage routing data, not part of
     // the public deletion contract. Parse only the strict public shape so a
     // D1 write cannot reject an otherwise valid deletion acknowledgement.
@@ -135,8 +159,9 @@ export class D1ThreadCatalog {
       ...(input.errorCode === undefined ? {} : { errorCode: input.errorCode }),
     });
     await this.initialize();
-    await this.#database.prepare(
-      `INSERT INTO flary_thread_deletions
+    await this.#database
+      .prepare(
+        `INSERT INTO flary_thread_deletions
         (deletion_id, tenant_id, application_id, thread_id, status,
          accepted_at, completed_at, error_code)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -144,16 +169,18 @@ export class D1ThreadCatalog {
          status = excluded.status,
          completed_at = excluded.completed_at,
          error_code = excluded.error_code`,
-    ).bind(
-      deletion.id,
-      input.tenantId,
-      input.applicationId,
-      deletion.threadId,
-      deletion.status,
-      deletion.acceptedAt,
-      deletion.completedAt ?? null,
-      deletion.errorCode ?? null,
-    ).run();
+      )
+      .bind(
+        deletion.id,
+        input.tenantId,
+        input.applicationId,
+        deletion.threadId,
+        deletion.status,
+        deletion.acceptedAt,
+        deletion.completedAt ?? null,
+        deletion.errorCode ?? null,
+      )
+      .run();
     return deletion;
   }
 
@@ -163,11 +190,13 @@ export class D1ThreadCatalog {
     readonly deletionId: string;
   }): Promise<ThreadDeletion | undefined> {
     await this.initialize();
-    const row = await this.#database.prepare(
-      `SELECT deletion_id, thread_id, status, accepted_at, completed_at, error_code
+    const row = await this.#database
+      .prepare(
+        `SELECT deletion_id, thread_id, status, accepted_at, completed_at, error_code
        FROM flary_thread_deletions
        WHERE tenant_id = ? AND application_id = ? AND deletion_id = ?`,
-    ).bind(input.tenantId, input.applicationId, input.deletionId)
+      )
+      .bind(input.tenantId, input.applicationId, input.deletionId)
       .first<{
         deletion_id: string;
         thread_id: string;

@@ -3,7 +3,5 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   publicDir: false,
-  plugins: [
-    cloudflare({ configPath: ".flue-vite.wrangler.jsonc" }),
-  ],
+  plugins: [cloudflare({ configPath: ".flue-vite.wrangler.jsonc" })],
 });

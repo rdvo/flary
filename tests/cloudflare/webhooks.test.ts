@@ -31,13 +31,7 @@ test("deduplicates verified webhook events", async () => {
     },
   };
 
-  assert.equal(
-    await ingestVerifiedChannelEvent(event, receipts, dispatcher),
-    "accepted",
-  );
-  assert.equal(
-    await ingestVerifiedChannelEvent(event, receipts, dispatcher),
-    "duplicate",
-  );
+  assert.equal(await ingestVerifiedChannelEvent(event, receipts, dispatcher), "accepted");
+  assert.equal(await ingestVerifiedChannelEvent(event, receipts, dispatcher), "duplicate");
   assert.deepEqual(dispatched, ["channel:github:delivery-1"]);
 });

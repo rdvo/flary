@@ -20,10 +20,7 @@ export interface ChannelReceiptStore {
 }
 
 export interface ChannelEventDispatcher {
-  dispatch(
-    event: VerifiedChannelEvent,
-    idempotencyKey: string,
-  ): Promise<void>;
+  dispatch(event: VerifiedChannelEvent, idempotencyKey: string): Promise<void>;
 }
 
 export type ChannelIngestResult = "accepted" | "duplicate";
@@ -38,17 +35,10 @@ export async function ingestVerifiedChannelEvent(
   dispatcher: ChannelEventDispatcher,
 ): Promise<ChannelIngestResult> {
   const event = VerifiedChannelEventSchema.parse(input);
-  const claimed = await receipts.claim(
-    event.provider,
-    event.eventId,
-    event.receivedAt,
-  );
+  const claimed = await receipts.claim(event.provider, event.eventId, event.receivedAt);
 
   if (!claimed) return "duplicate";
 
-  await dispatcher.dispatch(
-    event,
-    `channel:${event.provider}:${event.eventId}`,
-  );
+  await dispatcher.dispatch(event, `channel:${event.provider}:${event.eventId}`);
   return "accepted";
 }

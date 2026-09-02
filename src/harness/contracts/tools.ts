@@ -8,13 +8,13 @@ import {
   NonEmptyStringSchema,
   ReferenceSchema,
   TimestampSchema,
-} from "./common";
+} from "./common.js";
 import {
   RedactedReferenceSchema,
   SpanKindSchema,
   TraceContextSchema,
   TelemetryIntegerSchema,
-} from "./telemetry";
+} from "./telemetry.js";
 
 // Identify how a tool is hosted.
 export const ToolKindSchema = z.enum(["function", "http", "mcp", "native"]);
@@ -48,9 +48,7 @@ export const ToolCatalogDefinitionSchema = ToolDefinitionSchema.extend({
   capabilities: z.array(IdentifierSchema).max(64).default([]),
 }).strict();
 export type ToolCatalogDefinition = z.infer<typeof ToolCatalogDefinitionSchema>;
-export type ToolCatalogDefinitionInput = z.input<
-  typeof ToolCatalogDefinitionSchema
->;
+export type ToolCatalogDefinitionInput = z.input<typeof ToolCatalogDefinitionSchema>;
 
 export const ToolCatalogSearchRequestSchema = z
   .object({
@@ -71,12 +69,8 @@ export const ToolCatalogSearchRequestSchema = z
       });
     }
   });
-export type ToolCatalogSearchRequest = z.infer<
-  typeof ToolCatalogSearchRequestSchema
->;
-export type ToolCatalogSearchRequestInput = z.input<
-  typeof ToolCatalogSearchRequestSchema
->;
+export type ToolCatalogSearchRequest = z.infer<typeof ToolCatalogSearchRequestSchema>;
+export type ToolCatalogSearchRequestInput = z.input<typeof ToolCatalogSearchRequestSchema>;
 
 export const ToolCatalogMatchFieldSchema = z.enum([
   "id",
@@ -95,9 +89,7 @@ export const ToolCatalogSearchResultSchema = z
     matchedOn: z.array(ToolCatalogMatchFieldSchema).min(1).max(6),
   })
   .strict();
-export type ToolCatalogSearchResult = z.infer<
-  typeof ToolCatalogSearchResultSchema
->;
+export type ToolCatalogSearchResult = z.infer<typeof ToolCatalogSearchResultSchema>;
 
 export const ToolCatalogSearchResponseSchema = z
   .object({
@@ -105,9 +97,7 @@ export const ToolCatalogSearchResponseSchema = z
     nextCursor: z.string().trim().max(500).optional(),
   })
   .strict();
-export type ToolCatalogSearchResponse = z.infer<
-  typeof ToolCatalogSearchResponseSchema
->;
+export type ToolCatalogSearchResponse = z.infer<typeof ToolCatalogSearchResponseSchema>;
 
 export const ToolCapabilityDescriptorSchema = z
   .object({
@@ -121,21 +111,15 @@ export const ToolCapabilityDescriptorSchema = z
     requiresApproval: z.boolean(),
   })
   .strict();
-export type ToolCapabilityDescriptor = z.infer<
-  typeof ToolCapabilityDescriptorSchema
->;
+export type ToolCapabilityDescriptor = z.infer<typeof ToolCapabilityDescriptorSchema>;
 
 export const ToolCatalogLoadRequestSchema = z
   .object({
     id: IdentifierSchema,
   })
   .strict();
-export type ToolCatalogLoadRequest = z.infer<
-  typeof ToolCatalogLoadRequestSchema
->;
-export type ToolCatalogLoadRequestInput = z.input<
-  typeof ToolCatalogLoadRequestSchema
->;
+export type ToolCatalogLoadRequest = z.infer<typeof ToolCatalogLoadRequestSchema>;
+export type ToolCatalogLoadRequestInput = z.input<typeof ToolCatalogLoadRequestSchema>;
 
 export const ToolCatalogLoadResponseSchema = z
   .object({
@@ -143,9 +127,7 @@ export const ToolCatalogLoadResponseSchema = z
     capability: ToolCapabilityDescriptorSchema,
   })
   .strict();
-export type ToolCatalogLoadResponse = z.infer<
-  typeof ToolCatalogLoadResponseSchema
->;
+export type ToolCatalogLoadResponse = z.infer<typeof ToolCatalogLoadResponseSchema>;
 
 export const LazyToolCallSchema = z
   .object({
@@ -234,9 +216,7 @@ export const ToolResultSchema = z
       });
     }
     if (
-      ["failed", "outcome_unknown", "rejected", "cancelled"].includes(
-        value.status,
-      ) &&
+      ["failed", "outcome_unknown", "rejected", "cancelled"].includes(value.status) &&
       value.error === undefined
     ) {
       context.addIssue({
@@ -285,10 +265,7 @@ export const ToolExecutionJournalRecordSchema = z
         message: "A state-changing tool needs an idempotency key",
       });
     }
-    if (
-      ["failed", "outcome_unknown"].includes(value.state) &&
-      value.error === undefined
-    ) {
+    if (["failed", "outcome_unknown"].includes(value.state) && value.error === undefined) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["error"],
@@ -296,9 +273,7 @@ export const ToolExecutionJournalRecordSchema = z
       });
     }
   });
-export type ToolExecutionJournalRecord = z.infer<
-  typeof ToolExecutionJournalRecordSchema
->;
+export type ToolExecutionJournalRecord = z.infer<typeof ToolExecutionJournalRecordSchema>;
 
 export const ToolLifecycleFailureStatusSchema = z.enum([
   "rejected",
@@ -308,9 +283,7 @@ export const ToolLifecycleFailureStatusSchema = z.enum([
   "cancelled",
   "outcome_unknown",
 ]);
-export type ToolLifecycleFailureStatus = z.infer<
-  typeof ToolLifecycleFailureStatusSchema
->;
+export type ToolLifecycleFailureStatus = z.infer<typeof ToolLifecycleFailureStatusSchema>;
 
 const ToolLifecycleEventBaseSchema = z
   .object({

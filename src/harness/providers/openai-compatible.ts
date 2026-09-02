@@ -60,27 +60,21 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
 
   async complete(
     input: ModelRequest,
-    options: ProviderRequestOptions = {}
+    options: ProviderRequestOptions = {},
   ): Promise<ModelResponse> {
     const request = ModelRequestSchema.parse(input);
     const signalState = requestSignal(options);
     try {
-      const fetchResponse = await this.fetchImpl(
-        joinUrl(this.baseUrl, this.path),
-        {
-          method: "POST",
-          headers: this.headersFor(options.headers, "application/json"),
-          body: JSON.stringify(this.toRequestBody(request, false)),
-          signal: signalState.signal,
-        }
-      );
+      const fetchResponse = await this.fetchImpl(joinUrl(this.baseUrl, this.path), {
+        method: "POST",
+        headers: this.headersFor(options.headers, "application/json"),
+        body: JSON.stringify(this.toRequestBody(request, false)),
+        signal: signalState.signal,
+      });
       if (!fetchResponse.ok) {
         throw await providerErrorFromResponse(this.id, fetchResponse);
       }
-      return this.fromResponse(
-        (await fetchResponse.json()) as unknown,
-        request.model
-      );
+      return this.fromResponse((await fetchResponse.json()) as unknown, request.model);
     } catch (error) {
       throw this.normalizeError(error);
     } finally {
@@ -90,7 +84,7 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
 
   async *stream(
     input: ModelRequest,
-    options: ProviderRequestOptions = {}
+    options: ProviderRequestOptions = {},
   ): AsyncGenerator<ModelStreamEvent> {
     const request = ModelRequestSchema.parse(input);
     const signalState = requestSignal(options);
@@ -100,22 +94,16 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
     let reasoning = "";
     let finishReason: ModelResponse["finishReason"] = "unknown";
     let usage: ProviderUsage | undefined;
-    const toolCalls = new Map<
-      number,
-      { id: string; name: string; arguments: string }
-    >();
+    const toolCalls = new Map<number, { id: string; name: string; arguments: string }>();
     let sequenceStarted = false;
 
     try {
-      const fetchResponse = await this.fetchImpl(
-        joinUrl(this.baseUrl, this.path),
-        {
-          method: "POST",
-          headers: this.headersFor(options.headers, "text/event-stream"),
-          body: JSON.stringify(this.toRequestBody(request, true)),
-          signal: signalState.signal,
-        }
-      );
+      const fetchResponse = await this.fetchImpl(joinUrl(this.baseUrl, this.path), {
+        method: "POST",
+        headers: this.headersFor(options.headers, "text/event-stream"),
+        body: JSON.stringify(this.toRequestBody(request, true)),
+        signal: signalState.signal,
+      });
       if (!fetchResponse.ok) {
         throw await providerErrorFromResponse(this.id, fetchResponse);
       }
@@ -167,9 +155,7 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
           });
         }
 
-        const reasoningDelta = asString(
-          delta.reasoning_content ?? delta.reasoning
-        );
+        const reasoningDelta = asString(delta.reasoning_content ?? delta.reasoning);
         if (reasoningDelta) {
           reasoning += reasoningDelta;
           yield ProviderStreamEventSchema.parse({
@@ -179,9 +165,7 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
           });
         }
 
-        const toolDeltas = Array.isArray(delta.tool_calls)
-          ? delta.tool_calls
-          : [];
+        const toolDeltas = Array.isArray(delta.tool_calls) ? delta.tool_calls : [];
         for (const rawToolDelta of toolDeltas) {
           const toolDelta = asRecord(rawToolDelta);
           const index = Number.isInteger(toolDelta.index)
@@ -249,15 +233,11 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
     } catch (error) {
       const normalized = this.normalizeError(error);
       const providerError =
-        normalized instanceof Error &&
-        normalized.name === "ProviderAdapterError"
+        normalized instanceof Error && normalized.name === "ProviderAdapterError"
           ? (normalized as typeof normalized & { error: ProviderError }).error
           : createProviderError(this.id, {
               code: "provider_request_failed",
-              message:
-                normalized instanceof Error
-                  ? normalized.message
-                  : String(normalized),
+              message: normalized instanceof Error ? normalized.message : String(normalized),
             }).error;
       yield ProviderStreamEventSchema.parse({
         type: "error",
@@ -278,10 +258,7 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
     return headers;
   }
 
-  private toRequestBody(
-    request: ModelRequest,
-    stream: boolean
-  ): Record<string, unknown> {
+  private toRequestBody(request: ModelRequest, stream: boolean): Record<string, unknown> {
     const parameters = { ...request.parameters };
     delete parameters.max_tokens;
     delete parameters.max_completion_tokens;
@@ -296,8 +273,7 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
     if (request.maxOutputTokens !== undefined) {
       body.max_completion_tokens = request.maxOutputTokens;
     }
-    if (request.temperature !== undefined)
-      body.temperature = request.temperature;
+    if (request.temperature !== undefined) body.temperature = request.temperature;
     if (request.topP !== undefined) body.top_p = request.topP;
     if (request.stop !== undefined) body.stop = request.stop;
     if (request.reasoningEffort && request.reasoningEffort !== "none") {
@@ -313,25 +289,17 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
         },
       }));
     }
-    if (request.toolChoice)
-      body.tool_choice = toOpenAIToolChoice(request.toolChoice);
+    if (request.toolChoice) body.tool_choice = toOpenAIToolChoice(request.toolChoice);
     if (request.responseFormat) {
       body.response_format =
-        request.responseFormat === "text"
-          ? { type: "text" }
-          : { type: "json_object" };
+        request.responseFormat === "text" ? { type: "text" } : { type: "json_object" };
     }
     return body;
   }
 
-  private fromResponse(
-    payload: unknown,
-    requestedModel: string
-  ): ModelResponse {
+  private fromResponse(payload: unknown, requestedModel: string): ModelResponse {
     const root = asRecord(payload);
-    const choice = asRecord(
-      Array.isArray(root.choices) ? root.choices[0] : undefined
-    );
+    const choice = asRecord(Array.isArray(root.choices) ? root.choices[0] : undefined);
     const message = asRecord(choice.message);
     return this.buildResponse({
       id: asString(root.id, randomId("response")),
@@ -349,9 +317,7 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
     model: string;
     content: string;
     reasoning?: string;
-    toolCalls:
-      | Map<number, { id: string; name: string; arguments: string }>
-      | ProviderToolCall[];
+    toolCalls: Map<number, { id: string; name: string; arguments: string }> | ProviderToolCall[];
     finishReason: ModelResponse["finishReason"];
     usage?: ProviderUsage;
     requestedModel: string;
@@ -381,33 +347,24 @@ export class OpenAICompatibleAdapter implements ModelAdapter {
       return parseToolCall(
         asString(record.id, `tool_${index}`),
         asString(functionValue.name, "unknown"),
-        asString(functionValue.arguments)
+        asString(functionValue.arguments),
       );
     });
   }
 
   private fromUsage(value: unknown): ProviderUsage | undefined {
     const usage = asRecord(value);
-    const inputTokens = asNonNegativeInteger(
-      usage.prompt_tokens ?? usage.input_tokens
-    );
-    const outputTokens = asNonNegativeInteger(
-      usage.completion_tokens ?? usage.output_tokens
-    );
+    const inputTokens = asNonNegativeInteger(usage.prompt_tokens ?? usage.input_tokens);
+    const outputTokens = asNonNegativeInteger(usage.completion_tokens ?? usage.output_tokens);
     const totalTokens = asNonNegativeInteger(usage.total_tokens);
-    if (
-      inputTokens === undefined &&
-      outputTokens === undefined &&
-      totalTokens === undefined
-    ) {
+    if (inputTokens === undefined && outputTokens === undefined && totalTokens === undefined) {
       return undefined;
     }
     return { inputTokens, outputTokens, totalTokens };
   }
 
   private normalizeError(error: unknown): unknown {
-    if (error instanceof Error && error.name === "ProviderAdapterError")
-      return error;
+    if (error instanceof Error && error.name === "ProviderAdapterError") return error;
     if (error instanceof TypeError) {
       return createProviderError(this.id, {
         code: "network_error",
@@ -441,7 +398,7 @@ function toOpenAIMessage(message: ProviderMessage): Record<string, unknown> {
 }
 
 function messageContentForOpenAI(
-  content: ProviderMessage["content"]
+  content: ProviderMessage["content"],
 ): string | Record<string, unknown>[] {
   if (typeof content === "string") return content;
   return content.map((part) =>
@@ -450,25 +407,17 @@ function messageContentForOpenAI(
       : {
           type: "image_url",
           image_url: { url: part.url, detail: part.detail },
-        }
+        },
   );
 }
 
-function toOpenAIToolChoice(
-  choice: NonNullable<ModelRequest["toolChoice"]>
-): unknown {
+function toOpenAIToolChoice(choice: NonNullable<ModelRequest["toolChoice"]>): unknown {
   if (typeof choice === "string") return choice;
   return { type: "function", function: { name: choice.name } };
 }
 
-function parseToolCall(
-  id: string,
-  name: string,
-  rawArguments: string
-): ProviderToolCall {
-  const argumentsValue = JsonObjectSchema.safeParse(
-    parseJsonObject(rawArguments)
-  );
+function parseToolCall(id: string, name: string, rawArguments: string): ProviderToolCall {
+  const argumentsValue = JsonObjectSchema.safeParse(parseJsonObject(rawArguments));
   return {
     id,
     name,

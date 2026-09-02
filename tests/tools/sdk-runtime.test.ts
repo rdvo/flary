@@ -5,10 +5,7 @@ import { z } from "zod";
 import { resolveAgentMode } from "../../src/harness/contracts/modes.js";
 import { InMemoryToolCatalog } from "../../src/harness/tools/catalog.js";
 import { LazyToolRuntime } from "../../src/harness/tools/runtime.js";
-import {
-  defineFlaryTool,
-  defineFlaryToolset,
-} from "../../src/harness/tools/sdk.js";
+import { defineFlaryTool, defineFlaryToolset } from "../../src/harness/tools/sdk.js";
 
 test("Zod tools stay private until search and describe load them", async () => {
   const catalog = new InMemoryToolCatalog();
@@ -178,11 +175,10 @@ test("lazy catalog actions emit redacted queryable audit records", async () => {
     arguments: { query: "private phrase" },
   });
 
-  assert.deepEqual(audits.map(({ action }) => action), [
-    "search",
-    "describe",
-    "call",
-  ]);
+  assert.deepEqual(
+    audits.map(({ action }) => action),
+    ["search", "describe", "call"],
+  );
   assert.ok(audits[0]?.inputHash?.match(/^[0-9a-f]{64}$/));
   assert.equal(JSON.stringify(audits).includes("private phrase"), false);
   assert.ok(audits.every(({ state }) => state === "completed"));

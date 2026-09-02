@@ -26,11 +26,7 @@ test("workspace unified patches apply multiple exact hunks", () => {
 
 test("workspace unified patches reject stale context", () => {
   assert.throws(
-    () => applyWorkspaceUnifiedPatch(
-      "current\n",
-      "@@ -1 +1 @@\n-old\n+new",
-      "example.txt",
-    ),
+    () => applyWorkspaceUnifiedPatch("current\n", "@@ -1 +1 @@\n-old\n+new", "example.txt"),
     /did not match/,
   );
 });

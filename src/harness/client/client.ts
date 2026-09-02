@@ -76,7 +76,10 @@ export interface FlaryClientOptions {
 }
 
 export class FlaryHttpError extends Error {
-  constructor(readonly status: number, readonly body: unknown) {
+  constructor(
+    readonly status: number,
+    readonly body: unknown,
+  ) {
     super(`Flary request failed with HTTP ${status}.`);
     this.name = "FlaryHttpError";
   }
@@ -89,24 +92,19 @@ export class FlaryClient {
 
   constructor(private readonly options: FlaryClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
-    this.apiPrefix = `/${(options.apiPrefix ?? "/v1").replace(
-      /^\/+|\/+$/g,
-      ""
-    )}`;
+    this.apiPrefix = `/${(options.apiPrefix ?? "/v1").replace(/^\/+|\/+$/g, "")}`;
     this.request = options.fetch ?? globalThis.fetch.bind(globalThis);
   }
 
   async savePrompt(input: SavePromptInput): Promise<SavePromptResponse> {
     const body = SavePromptInputSchema.parse(input);
     const response = await this.fetchJson(
-      `${this.apiPrefix}/apps/${encodeURIComponent(
-        this.options.appId
-      )}/prompts`,
+      `${this.apiPrefix}/apps/${encodeURIComponent(this.options.appId)}/prompts`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-      }
+      },
     );
     return SavePromptResponseSchema.parse(response);
   }
@@ -158,16 +156,11 @@ export class FlaryClient {
     return ConnectionSecretResponseSchema.parse(response).secret;
   }
 
-  async deleteConnectionSecret(
-    connectionId: string,
-    secretName: string,
-  ): Promise<void> {
+  async deleteConnectionSecret(connectionId: string, secretName: string): Promise<void> {
     await this.fetchJson(
       `${this.apiPrefix}/apps/${encodeURIComponent(
         this.options.appId,
-      )}/connections/${encodeURIComponent(
-        connectionId,
-      )}/secrets/${encodeURIComponent(secretName)}`,
+      )}/connections/${encodeURIComponent(connectionId)}/secrets/${encodeURIComponent(secretName)}`,
       { method: "DELETE" },
     );
   }
@@ -190,14 +183,10 @@ export class FlaryClient {
     );
   }
 
-  async startProviderOAuth(
-    input: ProviderOAuthStartInput,
-  ): Promise<ProviderOAuthSession> {
+  async startProviderOAuth(input: ProviderOAuthStartInput): Promise<ProviderOAuthSession> {
     const body = ProviderOAuthStartInputSchema.parse(input);
     const response = await this.fetchJson(
-      `${this.apiPrefix}/apps/${encodeURIComponent(
-        this.options.appId,
-      )}/provider-oauth/start`,
+      `${this.apiPrefix}/apps/${encodeURIComponent(this.options.appId)}/provider-oauth/start`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -238,9 +227,7 @@ export class FlaryClient {
     return ProviderOAuthResponseSchema.parse(response).oauth;
   }
 
-  async cancelProviderOAuth(
-    sessionId: string,
-  ): Promise<ProviderOAuthSession> {
+  async cancelProviderOAuth(sessionId: string): Promise<ProviderOAuthSession> {
     const response = await this.fetchJson(
       `${this.apiPrefix}/apps/${encodeURIComponent(
         this.options.appId,
@@ -255,9 +242,7 @@ export class FlaryClient {
   ): Promise<ProviderCredentialLifecycle> {
     const body = ProviderEncryptedCredentialHandoffSchema.parse(input);
     const response = await this.fetchJson(
-      `${this.apiPrefix}/apps/${encodeURIComponent(
-        this.options.appId,
-      )}/provider-oauth/handoff`,
+      `${this.apiPrefix}/apps/${encodeURIComponent(this.options.appId)}/provider-oauth/handoff`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -271,9 +256,7 @@ export class FlaryClient {
     await this.fetchJson(
       `${this.apiPrefix}/apps/${encodeURIComponent(
         this.options.appId,
-      )}/provider-oauth/connections/${encodeURIComponent(
-        connectionId,
-      )}/disconnect`,
+      )}/provider-oauth/connections/${encodeURIComponent(connectionId)}/disconnect`,
       { method: "POST" },
     );
   }
@@ -281,8 +264,8 @@ export class FlaryClient {
   async listPromptRevisions(slug: string): Promise<PromptRevisionSummary[]> {
     const response = await this.fetchJson(
       `${this.apiPrefix}/apps/${encodeURIComponent(
-        this.options.appId
-      )}/prompts/${encodeURIComponent(slug)}/revisions`
+        this.options.appId,
+      )}/prompts/${encodeURIComponent(slug)}/revisions`,
     );
     return PromptRevisionsResponseSchema.parse(response).revisions;
   }
@@ -290,40 +273,38 @@ export class FlaryClient {
   async listPromptVariants(slug: string): Promise<PromptVariantSummary[]> {
     const response = await this.fetchJson(
       `${this.apiPrefix}/apps/${encodeURIComponent(
-        this.options.appId
-      )}/prompts/${encodeURIComponent(slug)}/variants`
+        this.options.appId,
+      )}/prompts/${encodeURIComponent(slug)}/variants`,
     );
     return PromptVariantsResponseSchema.parse(response).variants;
   }
 
   async getPromptRevisionSource(
     slug: string,
-    revisionId: string
+    revisionId: string,
   ): Promise<PromptRevisionSourceResponse> {
     const response = await this.fetchJson(
       `${this.apiPrefix}/apps/${encodeURIComponent(
-        this.options.appId
-      )}/prompts/${encodeURIComponent(slug)}/revisions/${encodeURIComponent(
-        revisionId
-      )}/source`
+        this.options.appId,
+      )}/prompts/${encodeURIComponent(slug)}/revisions/${encodeURIComponent(revisionId)}/source`,
     );
     return PromptRevisionSourceResponseSchema.parse(response);
   }
 
   async createPromptRollout(
     slug: string,
-    input: CreatePromptRolloutInput
+    input: CreatePromptRolloutInput,
   ): Promise<{ ok: true; rolloutId: string }> {
     const body = CreatePromptRolloutInputSchema.parse(input);
     const response = await this.fetchJson(
       `${this.apiPrefix}/apps/${encodeURIComponent(
-        this.options.appId
+        this.options.appId,
       )}/prompts/${encodeURIComponent(slug)}/variants`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-      }
+      },
     );
     return CreatePromptRolloutResponseSchema.parse(response);
   }
@@ -393,15 +374,8 @@ export class FlaryClient {
     workspaceId: string,
     path: string,
   ): Promise<ReturnType<typeof ProjectFileEntrySchema.parse>> {
-    const response = await this.workspaceFileRequest(
-      projectId,
-      workspaceId,
-      "stat",
-      { path },
-    );
-    return ProjectFileEntrySchema.parse(
-      (response as { file?: unknown }).file,
-    );
+    const response = await this.workspaceFileRequest(projectId, workspaceId, "stat", { path });
+    return ProjectFileEntrySchema.parse((response as { file?: unknown }).file);
   }
 
   async createWorkspaceUploadTicket(
@@ -411,14 +385,11 @@ export class FlaryClient {
   ): Promise<WorkspaceTransferTicketResponse> {
     const body = WorkspaceUploadTicketRequestSchema.parse(input);
     return WorkspaceTransferTicketResponseSchema.parse(
-      await this.fetchJson(
-        this.workspaceTransferPath(projectId, workspaceId, "upload-ticket"),
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-        },
-      ),
+      await this.fetchJson(this.workspaceTransferPath(projectId, workspaceId, "upload-ticket"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
     );
   }
 
@@ -429,14 +400,11 @@ export class FlaryClient {
   ): Promise<WorkspaceTransferTicketResponse> {
     const body = WorkspaceDownloadTicketRequestSchema.parse(input);
     return WorkspaceTransferTicketResponseSchema.parse(
-      await this.fetchJson(
-        this.workspaceTransferPath(projectId, workspaceId, "download-ticket"),
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-        },
-      ),
+      await this.fetchJson(this.workspaceTransferPath(projectId, workspaceId, "download-ticket"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
     );
   }
 
@@ -450,20 +418,14 @@ export class FlaryClient {
       expiresInSeconds?: number;
     },
   ): Promise<ProjectFileMutationResponse> {
-    const bytes = input.bytes instanceof Uint8Array
-      ? input.bytes
-      : new Uint8Array(input.bytes);
-    const ticket = await this.createWorkspaceUploadTicket(
-      projectId,
-      workspaceId,
-      {
-        path: input.path,
-        size: bytes.byteLength,
-        sha256: await sha256Hex(bytes),
-        mediaType: input.mediaType,
-        expiresInSeconds: input.expiresInSeconds,
-      },
-    );
+    const bytes = input.bytes instanceof Uint8Array ? input.bytes : new Uint8Array(input.bytes);
+    const ticket = await this.createWorkspaceUploadTicket(projectId, workspaceId, {
+      path: input.path,
+      size: bytes.byteLength,
+      sha256: await sha256Hex(bytes),
+      mediaType: input.mediaType,
+      expiresInSeconds: input.expiresInSeconds,
+    });
     if (!ticket.uploadUrl) throw new Error("The server did not return uploadUrl");
     const response = await this.fetchResponse(ticket.uploadUrl, {
       method: "PUT",
@@ -480,11 +442,10 @@ export class FlaryClient {
     path: string,
     expiresInSeconds?: number,
   ): Promise<{ bytes: Uint8Array; mediaType?: string; sha256?: string }> {
-    const ticket = await this.createWorkspaceDownloadTicket(
-      projectId,
-      workspaceId,
-      { path, expiresInSeconds },
-    );
+    const ticket = await this.createWorkspaceDownloadTicket(projectId, workspaceId, {
+      path,
+      expiresInSeconds,
+    });
     if (!ticket.downloadUrl) {
       throw new Error("The server did not return downloadUrl");
     }
@@ -497,7 +458,7 @@ export class FlaryClient {
     if (ticket.size !== undefined && ticket.size !== bytes.byteLength) {
       throw new Error("Downloaded workspace bytes failed the size check");
     }
-    if (ticket.sha256 && ticket.sha256 !== await sha256Hex(bytes)) {
+    if (ticket.sha256 && ticket.sha256 !== (await sha256Hex(bytes))) {
       throw new Error("Downloaded workspace bytes failed the SHA-256 check");
     }
     return {
@@ -539,10 +500,7 @@ export class FlaryClient {
     )}/files/${operation}`;
   }
 
-  private async fetchJson(
-    path: string,
-    init: RequestInit = {}
-  ): Promise<unknown> {
+  private async fetchJson(path: string, init: RequestInit = {}): Promise<unknown> {
     const headers = new Headers(init.headers);
     if (this.options.token) {
       headers.set("authorization", `Bearer ${this.options.token}`);
@@ -559,22 +517,17 @@ export class FlaryClient {
     if (this.options.token) {
       headers.set("authorization", `Bearer ${this.options.token}`);
     }
-    return this.request(
-      path.startsWith("http") ? path : `${this.baseUrl}${path}`,
-      { ...init, headers },
-    );
+    return this.request(path.startsWith("http") ? path : `${this.baseUrl}${path}`, {
+      ...init,
+      headers,
+    });
   }
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
-    bytes.buffer.slice(
-      bytes.byteOffset,
-      bytes.byteOffset + bytes.byteLength,
-    ) as ArrayBuffer,
+    bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
   );
-  return [...new Uint8Array(digest)]
-    .map((value) => value.toString(16).padStart(2, "0"))
-    .join("");
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
 }

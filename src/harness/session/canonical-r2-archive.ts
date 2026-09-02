@@ -13,15 +13,17 @@ export interface CanonicalArchiveBucket {
 }
 
 /** Public metadata for one encrypted canonical archive segment. */
-export const CanonicalArchiveEntrySchema = z.object({
-  sessionId: z.string().min(1),
-  storageKey: z.string().min(1),
-  sha256: SessionSha256Schema,
-  size: z.number().int().nonnegative(),
-  nonceBase64: z.string().min(1),
-  keyVersion: z.string().min(1),
-  createdAt: z.string().datetime({ offset: true }),
-}).strict();
+export const CanonicalArchiveEntrySchema = z
+  .object({
+    sessionId: z.string().min(1),
+    storageKey: z.string().min(1),
+    sha256: SessionSha256Schema,
+    size: z.number().int().nonnegative(),
+    nonceBase64: z.string().min(1),
+    keyVersion: z.string().min(1),
+    createdAt: z.string().datetime({ offset: true }),
+  })
+  .strict();
 export type CanonicalArchiveEntry = z.infer<typeof CanonicalArchiveEntrySchema>;
 
 /**
@@ -52,17 +54,21 @@ export class R2CanonicalSessionArchive {
     content: string | Uint8Array,
     suffix = "jsonl",
   ): Promise<CanonicalArchiveEntry> {
-    const plaintext = typeof content === "string"
-      ? new TextEncoder().encode(content)
-      : content;
+    const plaintext = typeof content === "string" ? new TextEncoder().encode(content) : content;
     const compressed = await gzip(plaintext);
     const nonce = crypto.getRandomValues(new Uint8Array(12));
     const key = await deriveKey(this.#secret);
-    const ciphertext = new Uint8Array(await crypto.subtle.encrypt(
-      { name: "AES-GCM", iv: arrayBuffer(nonce), additionalData: arrayBuffer(new TextEncoder().encode(`${sessionId}:${this.#keyVersion}`)) },
-      key,
-      arrayBuffer(compressed),
-    ));
+    const ciphertext = new Uint8Array(
+      await crypto.subtle.encrypt(
+        {
+          name: "AES-GCM",
+          iv: arrayBuffer(nonce),
+          additionalData: arrayBuffer(new TextEncoder().encode(`${sessionId}:${this.#keyVersion}`)),
+        },
+        key,
+        arrayBuffer(compressed),
+      ),
+    );
     const digest = await sha256(ciphertext);
     const storageKey = `canonical-sessions/${encodeURIComponent(sessionId)}/${Date.now()}-${digest}.${suffix}.gz.aes`;
     await this.#bucket.put(storageKey, ciphertext, {
@@ -89,14 +95,16 @@ export class R2CanonicalSessionArchive {
     const object = await this.#bucket.get(entry.storageKey);
     if (!object) throw new Error(`Canonical archive '${entry.storageKey}' is missing`);
     const ciphertext = new Uint8Array(await object.arrayBuffer());
-    if (await sha256(ciphertext) !== entry.sha256) {
+    if ((await sha256(ciphertext)) !== entry.sha256) {
       throw new Error(`Canonical archive '${entry.storageKey}' failed its hash check`);
     }
     const plaintext = await crypto.subtle.decrypt(
       {
         name: "AES-GCM",
         iv: arrayBuffer(base64ToBytes(entry.nonceBase64)),
-        additionalData: arrayBuffer(new TextEncoder().encode(`${entry.sessionId}:${entry.keyVersion}`)),
+        additionalData: arrayBuffer(
+          new TextEncoder().encode(`${entry.sessionId}:${entry.keyVersion}`),
+        ),
       },
       await deriveKey(this.#secret),
       arrayBuffer(ciphertext),
@@ -183,12 +191,15 @@ export class SqliteCanonicalSessionArchive {
   }
 
   async list(sessionId: string): Promise<readonly CanonicalArchiveEntry[]> {
-    return this.#sql.exec<CanonicalArchiveManifestRow>(
-      `SELECT archive_id, session_id, kind, entry_json
+    return this.#sql
+      .exec<CanonicalArchiveManifestRow>(
+        `SELECT archive_id, session_id, kind, entry_json
        FROM flary_canonical_session_archives
        WHERE session_id = ? ORDER BY archive_id ASC`,
-      sessionId,
-    ).toArray().map((row) => CanonicalArchiveEntrySchema.parse(JSON.parse(row.entry_json)));
+        sessionId,
+      )
+      .toArray()
+      .map((row) => CanonicalArchiveEntrySchema.parse(JSON.parse(row.entry_json)));
   }
 
   async read(sessionId: string): Promise<Uint8Array[]> {
@@ -199,19 +210,18 @@ export class SqliteCanonicalSessionArchive {
   }
 
   async deleteSession(sessionId: string): Promise<number> {
-    const rows = this.#sql.exec<CanonicalArchiveManifestRow>(
-      `SELECT archive_id, session_id, kind, entry_json
+    const rows = this.#sql
+      .exec<CanonicalArchiveManifestRow>(
+        `SELECT archive_id, session_id, kind, entry_json
        FROM flary_canonical_session_archives
        WHERE session_id = ? ORDER BY archive_id ASC`,
-      sessionId,
-    ).toArray();
+        sessionId,
+      )
+      .toArray();
     for (const row of rows) {
       await this.#archive.delete(CanonicalArchiveEntrySchema.parse(JSON.parse(row.entry_json)));
     }
-    this.#sql.exec(
-      "DELETE FROM flary_canonical_session_archives WHERE session_id = ?",
-      sessionId,
-    );
+    this.#sql.exec("DELETE FROM flary_canonical_session_archives WHERE session_id = ?", sessionId);
     return rows.length;
   }
 }
@@ -262,8 +272,5 @@ function base64ToBytes(value: string): Uint8Array {
 }
 
 function arrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  return bytes.buffer.slice(
-    bytes.byteOffset,
-    bytes.byteOffset + bytes.byteLength,
-  ) as ArrayBuffer;
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }

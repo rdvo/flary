@@ -19,10 +19,10 @@ test("model operations validate and parse structured output", async () => {
     schema: z.object({ answer: z.string(), count: z.number() }),
   });
   assert.deepEqual(value, { answer: "ok", count: 2 });
-  assert.deepEqual(
-    await operations.embed({ input: "hello", model: "openai/text-embedding" }),
-    { embeddings: [[0.1, 0.2]], model: "embed" },
-  );
+  assert.deepEqual(await operations.embed({ input: "hello", model: "openai/text-embedding" }), {
+    embeddings: [[0.1, 0.2]],
+    model: "embed",
+  });
 });
 
 test("missing non-chat operation handlers fail closed", async () => {

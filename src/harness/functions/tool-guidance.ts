@@ -1,14 +1,7 @@
 import { z } from "zod";
 import type { FlaryToolRegistry } from "./types.js";
 
-const WORKSPACE_READS = [
-  "list",
-  "stat",
-  "glob",
-  "grep",
-  "read",
-  "diff",
-] as const;
+const WORKSPACE_READS = ["list", "stat", "glob", "grep", "read", "diff"] as const;
 const WORKSPACE_WRITES = [
   "write",
   "edit",
@@ -41,27 +34,27 @@ export function coreToolGuidance(
       groups.push(
         `${namespace}: ${[...WORKSPACE_READS, ...WORKSPACE_WRITES]
           .map((name) => `${namespace}.${name}`)
-          .join(", ")}, and ${namespace}.git_*`
+          .join(", ")}, and ${namespace}.git_*`,
       );
     } else if (source.kind === "sandbox") {
-      groups.push(
-        `${namespace}: ${namespace}.exec and durable ${namespace}.process* controls`
-      );
+      groups.push(`${namespace}: ${namespace}.exec and durable ${namespace}.process* controls`);
     } else if (source.kind === "browser") {
       groups.push(
-        `${namespace}: navigation, page inspection, input, screenshots, downloads, and session control`
+        `${namespace}: navigation, page inspection, input, screenshots, downloads, and session control`,
       );
     } else if (source.kind === "r2") {
       groups.push(
-        `${namespace}: tenant-scoped R2 file list, stat, glob, grep, read, diff, write, edit, move, and delete`
+        `${namespace}: tenant-scoped R2 file list, stat, glob, grep, read, diff, write, edit, move, and delete`,
       );
     }
   }
   const eagerLocalToolIds = eagerTools.filter((id) => localToolIds.has(id));
   if (eagerLocalToolIds.length > 0) {
-    groups.push(`eager application tools: ${eagerLocalToolIds.map((id) =>
-      eagerToolSignature(id, registry.entries[id])
-    ).join(", ")}`);
+    groups.push(
+      `eager application tools: ${eagerLocalToolIds
+        .map((id) => eagerToolSignature(id, registry.entries[id]))
+        .join(", ")}`,
+    );
   }
   if (localToolIds.size > eagerLocalToolIds.length) {
     groups.push("other application tools are available through tools.search");
@@ -95,11 +88,12 @@ function eagerToolSignature(
     const required = new Set(schema.required ?? []);
     const fields = properties.slice(0, 12).map(([name, property]) => {
       const optional = required.has(name) ? "" : "?";
-      const values = Array.isArray(property.enum) && property.enum.length <= 8
-        ? `: ${property.enum.map((value) => JSON.stringify(value)).join(" | ")}`
-        : property.type === "string" || property.type === "number" || property.type === "boolean"
-          ? `: ${property.type}`
-          : "";
+      const values =
+        Array.isArray(property.enum) && property.enum.length <= 8
+          ? `: ${property.enum.map((value) => JSON.stringify(value)).join(" | ")}`
+          : property.type === "string" || property.type === "number" || property.type === "boolean"
+            ? `: ${property.type}`
+            : "";
       return `${name}${optional}${values}`;
     });
     if (properties.length > fields.length) fields.push("...");

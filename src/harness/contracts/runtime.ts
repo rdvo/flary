@@ -7,10 +7,10 @@ import {
   NonEmptyStringSchema,
   NonNegativeIntegerSchema,
   TimestampSchema,
-} from "./common";
-import { AgentModeIdSchema } from "./modes";
-import { NormalizedUsageSchema } from "./telemetry";
-import { StorageScopeSchema, ThreadRefSchema } from "./tenancy";
+} from "./common.js";
+import { AgentModeIdSchema } from "./modes.js";
+import { NormalizedUsageSchema } from "./telemetry.js";
+import { StorageScopeSchema, ThreadRefSchema } from "./tenancy.js";
 
 /**
  * A capability handle is safe to pass through model context. It is not a
@@ -93,8 +93,8 @@ export type UsageRecord = z.infer<typeof UsageRecordSchema>;
  * Flary's public event contract. Flue's canonical transcript events are
  * normalized into RunEvent before they cross the Flary API boundary.
  */
-export { RunEventSchema as FlaryEventSchema } from "./events";
-export type { RunEvent as FlaryEvent } from "./events";
+export { RunEventSchema as FlaryEventSchema } from "./events.js";
+export type { RunEvent as FlaryEvent } from "./events.js";
 
 export const ThreadCursorSchema = z
   .object({
@@ -119,9 +119,7 @@ export const ThreadOperationalStateSchema = z
     updatedAt: TimestampSchema,
   })
   .strict();
-export type ThreadOperationalState = z.infer<
-  typeof ThreadOperationalStateSchema
->;
+export type ThreadOperationalState = z.infer<typeof ThreadOperationalStateSchema>;
 
 export const ThreadMetadataPatchSchema = z
   .object({

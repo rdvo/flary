@@ -59,34 +59,28 @@ test("web MCP calls receive one stable non-secret session UUID", async () => {
             serverInfo: { name: "test", version: "1" },
           }
         : method === "tools/list"
-        ? {
-            tools: [
-              {
-                name: "web_search",
-                description: "Search the web",
-                inputSchema: { type: "object", properties: {} },
-              },
-            ],
-          }
-        : method === "tools/call"
-        ? { content: [{ type: "text", text: "ok" }], isError: false }
-        : {};
-    return new Response(
-      JSON.stringify({ jsonrpc: "2.0", id: body.id, result }),
-      {
-        headers: {
-          "content-type": "application/json",
-          "mcp-session-id": "server_session",
-        },
+          ? {
+              tools: [
+                {
+                  name: "web_search",
+                  description: "Search the web",
+                  inputSchema: { type: "object", properties: {} },
+                },
+              ],
+            }
+          : method === "tools/call"
+            ? { content: [{ type: "text", text: "ok" }], isError: false }
+            : {};
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result }), {
+      headers: {
+        "content-type": "application/json",
+        "mcp-session-id": "server_session",
       },
-    );
+    });
   };
   const app = flary();
   const sessionId = await mcpSessionUuid("tenant:app:agent:thread_1");
-  assert.match(
-    sessionId,
-    /^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-  );
+  assert.match(sessionId, /^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   assert.equal(await mcpSessionUuid("tenant:app:agent:thread_1"), sessionId);
   assert.notEqual(await mcpSessionUuid("tenant:app:agent:thread_2"), sessionId);
 
@@ -156,22 +150,16 @@ test("R2 file sources resolve a tenant prefix and never expose the bucket", asyn
         value instanceof Uint8Array
           ? Uint8Array.from(value)
           : new Uint8Array(await new Response(value as BodyInit).arrayBuffer());
-      const httpMetadata = options?.httpMetadata as
-        | { contentType?: string }
-        | undefined;
+      const httpMetadata = options?.httpMetadata as { contentType?: string } | undefined;
       objects.set(key, {
         bytes,
         contentType: httpMetadata?.contentType ?? "application/octet-stream",
         uploaded: new Date(),
-        customMetadata: (options?.customMetadata ?? {}) as Record<
-          string,
-          string
-        >,
+        customMetadata: (options?.customMetadata ?? {}) as Record<string, string>,
       });
     },
     async delete(keys: string | readonly string[]) {
-      for (const key of Array.isArray(keys) ? keys : [keys])
-        objects.delete(key);
+      for (const key of Array.isArray(keys) ? keys : [keys]) objects.delete(key);
     },
     async list(options?: Record<string, unknown>) {
       const prefix = typeof options?.prefix === "string" ? options.prefix : "";
@@ -209,16 +197,12 @@ test("R2 file sources resolve a tenant prefix and never expose the bucket", asyn
     access: "read-write",
   });
   assert.equal(source.kind, "r2");
-  const connection = await createR2FileConnection(
-    source,
-    { CUSTOMER_FILES: bucket },
-    { identity: { tenantId: "acme", userId: "editor" } } as never,
-  );
+  const connection = await createR2FileConnection(source, { CUSTOMER_FILES: bucket }, {
+    identity: { tenantId: "acme", userId: "editor" },
+  } as never);
   const listed = await connection.call("list", { prefix: "" });
   assert.deepEqual(
-    (listed as { files: Array<{ path: string }> }).files.map(
-      (file) => file.path,
-    ),
+    (listed as { files: Array<{ path: string }> }).files.map((file) => file.path),
     ["index.html"],
   );
   const before = await connection.call("read", {
@@ -236,9 +220,7 @@ test("R2 file sources resolve a tenant prefix and never expose the bucket", asyn
   });
   assert.equal((after as { content: string }).content, "<h1>New</h1>");
   assert.equal(objects.has("customers/other/html/forge/private.html"), true);
-  await assert.rejects(() =>
-    connection.call("read", { path: "../private.html" }),
-  );
+  await assert.rejects(() => connection.call("read", { path: "../private.html" }));
 });
 
 test("OpenAPI runtime uses a host request closure", async () => {

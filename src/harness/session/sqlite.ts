@@ -23,10 +23,7 @@ interface SqlRows<T> {
 }
 
 interface SqlStorage {
-  exec<T = Record<string, unknown>>(
-    query: string,
-    ...bindings: unknown[]
-  ): SqlRows<T>;
+  exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): SqlRows<T>;
   transactionSync<T>(closure: () => T): T;
 }
 
@@ -59,17 +56,11 @@ export class SqliteSessionLedger {
 
   constructor(sql: unknown, options: SqliteSessionLedgerOptions = {}) {
     const storage = sql as Partial<SqlStorage>;
-    if (
-      typeof storage?.exec !== "function" ||
-      typeof storage.transactionSync !== "function"
-    ) {
-      throw new Error(
-        "The session ledger needs Durable Object SQLite with transactionSync",
-      );
+    if (typeof storage?.exec !== "function" || typeof storage.transactionSync !== "function") {
+      throw new Error("The session ledger needs Durable Object SQLite with transactionSync");
     }
     this.#sql = storage as SqlStorage;
-    this.#hotRecordLimit =
-      options.hotRecordLimit ?? DEFAULT_SESSION_HOT_RECORD_LIMIT;
+    this.#hotRecordLimit = options.hotRecordLimit ?? DEFAULT_SESSION_HOT_RECORD_LIMIT;
     if (!Number.isInteger(this.#hotRecordLimit) || this.#hotRecordLimit < 1) {
       throw new Error("The hot record limit must be a positive integer");
     }
@@ -114,11 +105,7 @@ export class SqliteSessionLedger {
       const metadata = this.#metadataRow(draft.sessionId);
       this.#assertScope(metadata, draft);
       const sequence = (metadata?.latest_sequence ?? 0) + 1;
-      const record = await sealSessionRecord(
-        draft,
-        sequence,
-        metadata?.latest_hash ?? null,
-      );
+      const record = await sealSessionRecord(draft, sequence, metadata?.latest_hash ?? null);
       const inserted = this.#sql.transactionSync(() => {
         const current = this.#metadataRow(draft.sessionId);
         this.#assertScope(current, draft);
@@ -139,7 +126,7 @@ export class SqliteSessionLedger {
   /** Append a pre-sealed record during a verified import. */
   async appendRecord(recordInput: SessionRecord): Promise<SessionRecord> {
     const record = SessionRecordSchema.parse(recordInput);
-    if (!await verifySessionRecord(record)) {
+    if (!(await verifySessionRecord(record))) {
       throw new SessionIntegrityError(
         `The record hash does not match at sequence ${record.sequence}`,
         record.sequence,
@@ -150,10 +137,7 @@ export class SqliteSessionLedger {
       this.#assertScope(metadata, record);
       const expectedSequence = (metadata?.latest_sequence ?? 0) + 1;
       const expectedHash = metadata?.latest_hash ?? null;
-      if (
-        record.sequence !== expectedSequence ||
-        record.previousHash !== expectedHash
-      ) {
+      if (record.sequence !== expectedSequence || record.previousHash !== expectedHash) {
         throw new SessionIntegrityError(
           `The imported record does not continue session ${record.sessionId}`,
           record.sequence,
@@ -173,37 +157,33 @@ export class SqliteSessionLedger {
     if (!Number.isInteger(limit) || limit < 1 || limit > 1_000) {
       throw new Error("The session page limit must be from 1 through 1000");
     }
-    const rows = this.#sql.exec<{ record_json: string }>(
-      `SELECT record_json
+    const rows = this.#sql
+      .exec<{ record_json: string }>(
+        `SELECT record_json
        FROM flary_session_ledger_records
        WHERE session_id = ? AND sequence > ?
        ORDER BY sequence ASC
        LIMIT ?`,
-      sessionId,
-      after,
-      limit + 1,
-    ).toArray();
+        sessionId,
+        after,
+        limit + 1,
+      )
+      .toArray();
     const hasMore = rows.length > limit;
     const items = rows
       .slice(0, limit)
-      .map(({ record_json }) =>
-        SessionRecordSchema.parse(JSON.parse(record_json)));
+      .map(({ record_json }) => SessionRecordSchema.parse(JSON.parse(record_json)));
     const last = items.at(-1);
     return {
       items,
-      ...(hasMore && last
-        ? { nextCursor: encodeSessionCursor(last.sequence) }
-        : {}),
+      ...(hasMore && last ? { nextCursor: encodeSessionCursor(last.sequence) } : {}),
     };
   }
 
   async metadata(sessionId: string): Promise<SessionLedgerMetadata | undefined> {
     const row = this.#metadataRow(sessionId);
     if (!row) return undefined;
-    const recordsPastHotLimit = Math.max(
-      0,
-      row.record_count - row.hot_record_limit,
-    );
+    const recordsPastHotLimit = Math.max(0, row.record_count - row.hot_record_limit);
     return SessionLedgerMetadataSchema.parse({
       tenantId: row.tenant_id,
       applicationId: row.application_id,
@@ -213,23 +193,16 @@ export class SqliteSessionLedger {
       latestSequence: row.latest_sequence,
       latestHash: row.latest_hash,
       hotRecordLimit: row.hot_record_limit,
-      hotStartSequence: Math.max(
-        1,
-        row.latest_sequence - row.hot_record_limit + 1,
-      ),
+      hotStartSequence: Math.max(1, row.latest_sequence - row.hot_record_limit + 1),
       hotRecordCount: Math.min(row.record_count, row.hot_record_limit),
       recordsPastHotLimit,
-      archiveRequired:
-        recordsPastHotLimit > row.sealed_through_sequence,
+      archiveRequired: recordsPastHotLimit > row.sealed_through_sequence,
       sealedThroughSequence: row.sealed_through_sequence,
       updatedAt: row.updated_at,
     });
   }
 
-  async markSealedThrough(
-    sessionId: string,
-    sequence: number,
-  ): Promise<SessionLedgerMetadata> {
+  async markSealedThrough(sessionId: string, sequence: number): Promise<SessionLedgerMetadata> {
     if (!Number.isInteger(sequence) || sequence < 0) {
       throw new Error("The sealed sequence must be a non-negative integer");
     }
@@ -253,30 +226,29 @@ export class SqliteSessionLedger {
   }
 
   async verify(sessionId: string): Promise<void> {
-    const records = this.#sql.exec<{ record_json: string }>(
-      `SELECT record_json
+    const records = this.#sql
+      .exec<{ record_json: string }>(
+        `SELECT record_json
        FROM flary_session_ledger_records
        WHERE session_id = ?
        ORDER BY sequence ASC`,
-      sessionId,
-    ).toArray().map(({ record_json }) =>
-      SessionRecordSchema.parse(JSON.parse(record_json)));
+        sessionId,
+      )
+      .toArray()
+      .map(({ record_json }) => SessionRecordSchema.parse(JSON.parse(record_json)));
     const metadata = this.#metadataRow(sessionId);
     if ((metadata?.sealed_through_sequence ?? 0) === 0) {
       await verifySessionChain(records);
     } else {
       for (let index = 0; index < records.length; index += 1) {
         const record = records[index]!;
-        if (!await verifySessionRecord(record)) {
+        if (!(await verifySessionRecord(record))) {
           throw new SessionIntegrityError(
             `The record hash does not match at sequence ${record.sequence}`,
             record.sequence,
           );
         }
-        if (
-          index > 0 &&
-          record.previousHash !== records[index - 1]!.recordHash
-        ) {
+        if (index > 0 && record.previousHash !== records[index - 1]!.recordHash) {
           throw new SessionIntegrityError(
             `The hot record chain breaks at sequence ${record.sequence}`,
             record.sequence,
@@ -288,8 +260,7 @@ export class SqliteSessionLedger {
     const last = records.at(-1);
     if (
       !metadata ||
-      (metadata.sealed_through_sequence === 0 &&
-        metadata.record_count !== records.length) ||
+      (metadata.sealed_through_sequence === 0 && metadata.record_count !== records.length) ||
       metadata.latest_sequence !== (last?.sequence ?? 0) ||
       metadata.latest_hash !== (last?.recordHash ?? null)
     ) {
@@ -338,15 +309,17 @@ export class SqliteSessionLedger {
   }
 
   #metadataRow(sessionId: string): MetadataRow | undefined {
-    return this.#sql.exec<MetadataRow>(
-      `SELECT tenant_id, application_id, session_id, thread_id, record_count,
+    return this.#sql
+      .exec<MetadataRow>(
+        `SELECT tenant_id, application_id, session_id, thread_id, record_count,
               latest_sequence, latest_hash, hot_record_limit,
               sealed_through_sequence, updated_at
        FROM flary_session_ledger_metadata
        WHERE session_id = ?
        LIMIT 1`,
-      sessionId,
-    ).toArray()[0];
+        sessionId,
+      )
+      .toArray()[0];
   }
 
   #assertScope(
@@ -360,11 +333,9 @@ export class SqliteSessionLedger {
   ): void {
     if (
       metadata &&
-      (
-        metadata.tenant_id !== record.tenantId ||
+      (metadata.tenant_id !== record.tenantId ||
         metadata.application_id !== record.applicationId ||
-        metadata.thread_id !== record.threadId
-      )
+        metadata.thread_id !== record.threadId)
     ) {
       throw new SessionIntegrityError(
         `Session ${record.sessionId} is already owned by a different scope`,

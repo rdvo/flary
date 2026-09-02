@@ -7,15 +7,10 @@ import {
   type CodeExecutionRequest,
   type CodeExecutionRequestInput,
   type CodeExecutionResult,
-} from "../contracts/code-execution";
-import {
-  JsonValueSchema,
-  type JsonValue,
-} from "../contracts/common";
+} from "../contracts/code-execution.js";
+import { JsonValueSchema, type JsonValue } from "../contracts/common.js";
 
-export type ExecutionTool = (
-  ...args: unknown[]
-) => unknown | Promise<unknown>;
+export type ExecutionTool = (...args: unknown[]) => unknown | Promise<unknown>;
 
 export interface CodeExecutionContext {
   signal?: AbortSignal;
@@ -25,8 +20,7 @@ export interface CodeExecutionContext {
     tools: Record<string, ExecutionTool>;
   }>;
   environment?: Record<string, string>;
-  onOutput?: (stream: "stdout" | "stderr" | "log", text: string) =>
-    void | Promise<void>;
+  onOutput?: (stream: "stdout" | "stderr" | "log", text: string) => void | Promise<void>;
 }
 
 export interface CodeExecutionAdapter {
@@ -47,9 +41,7 @@ export class CodeExecutionRouter {
   private readonly adapters: Map<CodeExecutionEngine, CodeExecutionAdapter>;
 
   constructor(private readonly options: CodeExecutionRouterOptions) {
-    this.adapters = new Map(
-      options.adapters.map((adapter) => [adapter.engine, adapter]),
-    );
+    this.adapters = new Map(options.adapters.map((adapter) => [adapter.engine, adapter]));
   }
 
   async execute(
@@ -100,10 +92,7 @@ export class CodeExecutionRouter {
         runId: result.runId,
         engine: result.engine,
         operation: result.operation,
-        type:
-          result.status === "completed"
-            ? "execution.completed"
-            : "execution.failed",
+        type: result.status === "completed" ? "execution.completed" : "execution.failed",
         occurredAt: result.completedAt,
         payload:
           result.status === "completed"
@@ -117,8 +106,7 @@ export class CodeExecutionRouter {
       return result;
     } catch (cause) {
       const completedAt = new Date().toISOString();
-      const message =
-        cause instanceof Error ? cause.message : "Execution failed";
+      const message = cause instanceof Error ? cause.message : "Execution failed";
       const result = CodeExecutionResultSchema.parse({
         executionId: request.executionId,
         runId: request.runId,
@@ -133,8 +121,7 @@ export class CodeExecutionRouter {
         logs: [],
         startedAt,
         completedAt,
-        durationMs:
-          new Date(completedAt).getTime() - new Date(startedAt).getTime(),
+        durationMs: new Date(completedAt).getTime() - new Date(startedAt).getTime(),
         metadata: request.metadata,
       });
       await this.emit({
@@ -155,8 +142,7 @@ export class CodeExecutionRouter {
   private resolve(request: CodeExecutionRequest): CodeExecutionAdapter {
     if (request.engine !== "auto") {
       if (
-        (request.runtime === "isolate" &&
-          request.engine !== "dynamic-worker") ||
+        (request.runtime === "isolate" && request.engine !== "dynamic-worker") ||
         (request.runtime === "linux" && request.engine !== "sandbox")
       ) {
         throw new Error(
@@ -165,14 +151,10 @@ export class CodeExecutionRouter {
       }
       const adapter = this.adapters.get(request.engine);
       if (!adapter) {
-        throw new Error(
-          `Execution engine ${request.engine} is not configured`,
-        );
+        throw new Error(`Execution engine ${request.engine} is not configured`);
       }
       if (!adapter.supports(request)) {
-        throw new Error(
-          `Execution engine ${request.engine} does not support ${request.operation}`,
-        );
+        throw new Error(`Execution engine ${request.engine} does not support ${request.operation}`);
       }
       return adapter;
     }
@@ -217,9 +199,7 @@ export class FunctionExecutionAdapter implements CodeExecutionAdapter {
 
   constructor(private readonly options: FunctionExecutionAdapterOptions) {
     this.engine = options.engine;
-    this.operations = options.operations
-      ? new Set(options.operations)
-      : undefined;
+    this.operations = options.operations ? new Set(options.operations) : undefined;
   }
 
   supports(request: CodeExecutionRequest): boolean {
@@ -232,12 +212,7 @@ export class FunctionExecutionAdapter implements CodeExecutionAdapter {
   ): Promise<CodeExecutionResult> {
     const startedAt = new Date().toISOString();
     const value = await this.options.execute(request, context);
-    if (
-      value &&
-      typeof value === "object" &&
-      "executionId" in value &&
-      "status" in value
-    ) {
+    if (value && typeof value === "object" && "executionId" in value && "status" in value) {
       return CodeExecutionResultSchema.parse(value);
     }
     const completedAt = new Date().toISOString();
@@ -248,13 +223,11 @@ export class FunctionExecutionAdapter implements CodeExecutionAdapter {
       engine: this.engine,
       operation: request.operation,
       status: "completed",
-      output:
-        partial.output === undefined ? null : toJsonValue(partial.output),
+      output: partial.output === undefined ? null : toJsonValue(partial.output),
       logs: partial.logs ?? [],
       startedAt,
       completedAt,
-      durationMs:
-        new Date(completedAt).getTime() - new Date(startedAt).getTime(),
+      durationMs: new Date(completedAt).getTime() - new Date(startedAt).getTime(),
       metadata: request.metadata,
     });
   }

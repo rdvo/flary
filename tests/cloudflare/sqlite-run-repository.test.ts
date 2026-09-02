@@ -3,10 +3,7 @@ import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 
 import { SqliteFlaryRunRepository } from "../../src/harness/cloudflare/sqlite-run-repository.ts";
-import {
-  createFlueRunService,
-  type FlueAgentGateway,
-} from "../../src/harness/flue/service.ts";
+import { createFlueRunService, type FlueAgentGateway } from "../../src/harness/flue/service.ts";
 import { SqliteFlaryStepStore } from "../../src/harness/functions/runs.ts";
 import { UserInputRequestSchema } from "../../src/harness/contracts/index.ts";
 import type { TrustedRunContext } from "../../src/harness/host/runs.ts";
@@ -22,23 +19,14 @@ type SqlDatabase = {
 function sqlStore() {
   const database = new DatabaseSync(":memory:") as unknown as SqlDatabase;
   return {
-    exec<T = Record<string, unknown>>(
-      query: string,
-      ...bindings: unknown[]
-    ): { toArray(): T[] } {
+    exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): { toArray(): T[] } {
       const trimmed = query.trim().toLowerCase();
-      if (
-        bindings.length === 0 &&
-        !/^(select|with|pragma|explain)\b/.test(trimmed)
-      ) {
+      if (bindings.length === 0 && !/^(select|with|pragma|explain)\b/.test(trimmed)) {
         database.exec(query);
         return { toArray: () => [] };
       }
       const statement = database.prepare(query);
-      if (
-        /^(select|with|pragma|explain)\b/.test(trimmed) ||
-        /\breturning\b/.test(trimmed)
-      ) {
+      if (/^(select|with|pragma|explain)\b/.test(trimmed) || /\breturning\b/.test(trimmed)) {
         return { toArray: () => statement.all(...bindings) as T[] };
       }
       statement.run(...bindings);
@@ -96,8 +84,7 @@ test("Durable Object SQLite keeps run ownership after service restart", async ()
   await assert.rejects(
     restarted.get({ ...tenantOne, tenantId: "tenant_2" }, handle.runId),
     (error: unknown) =>
-      error instanceof Error &&
-      (error as Error & { code?: string }).code === "run_not_found",
+      error instanceof Error && (error as Error & { code?: string }).code === "run_not_found",
   );
 });
 
@@ -152,12 +139,14 @@ test("Durable Object SQLite keeps user-input requests across restart and workflo
   const request = UserInputRequestSchema.parse({
     id: "input_restart",
     threadId: "submission_user_input",
-    questions: [{
-      header: "Branch",
-      question: "Which branch should Flary use?",
-      options: [{ label: "main", description: "The default branch" }],
-      multiSelect: false,
-    }],
+    questions: [
+      {
+        header: "Branch",
+        question: "Which branch should Flary use?",
+        options: [{ label: "main", description: "The default branch" }],
+        multiSelect: false,
+      },
+    ],
     requestedBy: { id: "flary", kind: "agent", version: "1" },
     requestedAt: new Date().toISOString(),
   });
@@ -186,12 +175,14 @@ test("Durable Object SQLite stores input for standalone interactive threads", as
   const request = UserInputRequestSchema.parse({
     id: "input_thread",
     threadId: runId,
-    questions: [{
-      header: "Delivery",
-      question: "When should we deliver?",
-      options: [{ label: "Tomorrow", description: "Recommended" }],
-      multiSelect: false,
-    }],
+    questions: [
+      {
+        header: "Delivery",
+        question: "When should we deliver?",
+        options: [{ label: "Tomorrow", description: "Recommended" }],
+        multiSelect: false,
+      },
+    ],
     requestedBy: { id: "concierge", kind: "agent" },
     requestedAt: new Date().toISOString(),
   });

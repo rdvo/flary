@@ -52,17 +52,16 @@ export function normalizeCatalogCall(value: unknown, input?: unknown): unknown {
 
   const record = value as Record<string, unknown>;
   const id = record.id ?? record.toolId ?? record.tool_id ?? record.name;
-  const normalizedInput = "input" in record
-    ? record.input
-    : "arguments" in record
-      ? record.arguments
-      : "args" in record
-        ? record.args
-        : "parameters" in record
-          ? record.parameters
-          : {};
+  const normalizedInput =
+    "input" in record
+      ? record.input
+      : "arguments" in record
+        ? record.arguments
+        : "args" in record
+          ? record.args
+          : "parameters" in record
+            ? record.parameters
+            : {};
 
-  return typeof id === "string"
-    ? { id, input: normalizedInput }
-    : value;
+  return typeof id === "string" ? { id, input: normalizedInput } : value;
 }

@@ -1,21 +1,11 @@
-import {
-  CloudflareDynamicWorkerAdapter,
-  CloudflareSandboxAdapter,
-} from "flary/cloudflare";
-import {
-  CodeExecutionRouter,
-} from "flary/execution";
+import { CloudflareDynamicWorkerAdapter, CloudflareSandboxAdapter } from "flary/cloudflare";
+import { CodeExecutionRouter } from "flary/execution";
 import type { CodeExecutionEvent } from "flary/contracts";
 
 import type { Env } from "./env";
 
-export function createCloudExecutionRouter(
-  env: Env,
-  organizationId: string,
-): CodeExecutionRouter {
-  const coordinator = env.ORG_COORDINATOR.get(
-    env.ORG_COORDINATOR.idFromName(organizationId),
-  );
+export function createCloudExecutionRouter(env: Env, organizationId: string): CodeExecutionRouter {
+  const coordinator = env.ORG_COORDINATOR.get(env.ORG_COORDINATOR.idFromName(organizationId));
 
   return new CodeExecutionRouter({
     adapters: [

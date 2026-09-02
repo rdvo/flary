@@ -10,11 +10,17 @@ export const remember = app.fn({
 });
 
 const optional = {
-  ...(generated.features.mcp ? { connections: app.mcp({
-    namespace: "connections",
-    connection: "dashboard-mcp",
-  }) } : {}),
+  ...(generated.features.mcp
+    ? {
+        connections: app.mcp({
+          namespace: "connections",
+          connection: "dashboard-mcp",
+        }),
+      }
+    : {}),
   ...(generated.features.browser ? { browser: app.browser({ profile: "thread" }) } : {}),
-  ...(generated.features.sandbox ? { shell: app.sandbox({ network: "restricted", sleepAfter: "10m" }) } : {}),
+  ...(generated.features.sandbox
+    ? { shell: app.sandbox({ network: "restricted", sleepAfter: "10m" }) }
+    : {}),
 };
 export const tools = app.tools({ remember, ...optional });

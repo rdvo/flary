@@ -61,7 +61,7 @@ test("seed selection keeps the newest complete turns in source order", () => {
   const selected = selectSeededTurns([turn(0), turn(1), turn(2), turn(3)], 3);
   assert.deepEqual(
     selected.map((item) => item.id),
-    ["turn_1", "turn_2", "turn_3"]
+    ["turn_1", "turn_2", "turn_3"],
   );
   assert.deepEqual(selectSeededTurns([turn(0)], 0), []);
 });
@@ -100,11 +100,7 @@ test("a child thread records the exact parent turns used to seed it", () => {
   });
 
   assert.deepEqual(cleanChild.seededTurnIds, []);
-  assert.deepEqual(contextualChild.seededTurnIds, [
-    "turn_2",
-    "turn_3",
-    "turn_4",
-  ]);
+  assert.deepEqual(contextualChild.seededTurnIds, ["turn_2", "turn_3", "turn_4"]);
   assert.equal(contextualChild.verbosity, "high");
 });
 
@@ -152,6 +148,6 @@ test("messages are direct by default and preserve queue or interrupt mode", () =
         toThreadId: second.threadId,
         content: "Send me your notes.",
       }),
-    SubagentPolicyError
+    SubagentPolicyError,
   );
 });

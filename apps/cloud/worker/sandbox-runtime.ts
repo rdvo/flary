@@ -1,7 +1,4 @@
-import {
-  ContainerProxy,
-  Sandbox,
-} from "@cloudflare/sandbox";
+import { ContainerProxy, Sandbox } from "@cloudflare/sandbox";
 
 // Untrusted workloads cannot reach the public internet. Add narrow outbound
 // handlers for package registries or source providers when a product needs

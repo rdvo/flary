@@ -1,7 +1,4 @@
-import {
-  ProviderErrorSchema,
-  type ProviderError,
-} from "./contracts.js";
+import { ProviderErrorSchema, type ProviderError } from "./contracts.js";
 import { JsonObjectSchema } from "../contracts/common.js";
 import type { ProviderRequestOptions } from "./types.js";
 
@@ -31,9 +28,7 @@ export function asNumber(value: unknown): number | undefined {
 
 export function asNonNegativeInteger(value: unknown): number | undefined {
   const number = asNumber(value);
-  return number !== undefined && Number.isInteger(number) && number >= 0
-    ? number
-    : undefined;
+  return number !== undefined && Number.isInteger(number) && number >= 0 ? number : undefined;
 }
 
 export function parseJsonObject(value: unknown): Record<string, unknown> {
@@ -71,25 +66,23 @@ export function contentToText(content: unknown): string {
 export function createProviderError(
   provider: string,
   error: unknown,
-  status?: number
+  status?: number,
 ): ProviderAdapterError {
   const record = asRecord(error);
   const nested = asRecord(record.error);
   const code = asString(
     nested.code ?? record.code ?? record.type,
-    status && status >= 500 ? "provider_server_error" : "provider_error"
+    status && status >= 500 ? "provider_server_error" : "provider_error",
   );
-  const message = asString(
-    nested.message ?? record.message,
-    "The provider returned an error."
-  );
+  const message = asString(nested.message ?? record.message, "The provider returned an error.");
   const details = JsonObjectSchema.safeParse(nested.details ?? record.details);
 
   return new ProviderAdapterError({
     code,
     message,
     status,
-    retryable: status === 408 || status === 409 || status === 429 || status === undefined || status >= 500,
+    retryable:
+      status === 408 || status === 409 || status === 429 || status === undefined || status >= 500,
     provider,
     details: details.success ? details.data : undefined,
   });
@@ -97,7 +90,7 @@ export function createProviderError(
 
 export async function providerErrorFromResponse(
   provider: string,
-  response: Response
+  response: Response,
 ): Promise<ProviderAdapterError> {
   let payload: unknown;
   try {
@@ -141,7 +134,7 @@ export interface ServerSentEvent {
 }
 
 export async function* parseServerSentEvents(
-  body: ReadableStream<Uint8Array>
+  body: ReadableStream<Uint8Array>,
 ): AsyncGenerator<ServerSentEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -208,9 +201,7 @@ export async function* parseServerSentEvents(
   }
 }
 
-function findLineEnd(value: string):
-  | { index: number; nextIndex: number }
-  | undefined {
+function findLineEnd(value: string): { index: number; nextIndex: number } | undefined {
   for (let index = 0; index < value.length; index += 1) {
     if (value[index] === "\n") {
       return {

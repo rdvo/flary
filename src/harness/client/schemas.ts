@@ -4,7 +4,7 @@ import {
   ConnectionSecretMetadataSchema,
   ProviderCredentialLifecycleSchema,
   ProviderOAuthSessionSchema,
-} from "../contracts";
+} from "../contracts/index.js";
 
 const ApiTimestampSchema = z.union([
   z.number().int().nonnegative(),
@@ -35,14 +35,7 @@ export const PromptRevisionSourceResponseSchema = z.object({
 export const PromptVariantSummarySchema = z.object({
   id: z.string().min(1),
   rolloutId: z.string().min(1),
-  scope: z.enum([
-    "global",
-    "organization",
-    "project",
-    "user",
-    "session",
-    "request",
-  ]),
+  scope: z.enum(["global", "organization", "project", "user", "session", "request"]),
   variantId: z.string().min(1),
   revisionId: z.string().min(1),
   allocationBasisPoints: z.number().int().nonnegative(),
@@ -67,7 +60,7 @@ export const CreatePromptRolloutInputSchema = z.object({
         revisionId: z.string().trim().min(1).max(200),
         allocationBasisPoints: z.number().int().min(0).max(10_000),
         enabled: z.boolean().default(true),
-      })
+      }),
     )
     .min(1),
 });
@@ -125,20 +118,10 @@ export const ProviderCredentialHandoffResponseSchema = z.object({
 export type SavePromptInput = z.input<typeof SavePromptInputSchema>;
 export type SavePromptResponse = z.infer<typeof SavePromptResponseSchema>;
 export type Connection = z.infer<typeof ConnectionSchema>;
-export type ConnectionSecretMetadata = z.infer<
-  typeof ConnectionSecretMetadataSchema
->;
-export type ConnectionDetailResponse = z.infer<
-  typeof ConnectionDetailResponseSchema
->;
-export type ProviderOAuthResponse = z.infer<
-  typeof ProviderOAuthResponseSchema
->;
+export type ConnectionSecretMetadata = z.infer<typeof ConnectionSecretMetadataSchema>;
+export type ConnectionDetailResponse = z.infer<typeof ConnectionDetailResponseSchema>;
+export type ProviderOAuthResponse = z.infer<typeof ProviderOAuthResponseSchema>;
 export type PromptRevisionSummary = z.infer<typeof PromptRevisionSummarySchema>;
-export type PromptRevisionSourceResponse = z.infer<
-  typeof PromptRevisionSourceResponseSchema
->;
+export type PromptRevisionSourceResponse = z.infer<typeof PromptRevisionSourceResponseSchema>;
 export type PromptVariantSummary = z.infer<typeof PromptVariantSummarySchema>;
-export type CreatePromptRolloutInput = z.input<
-  typeof CreatePromptRolloutInputSchema
->;
+export type CreatePromptRolloutInput = z.input<typeof CreatePromptRolloutInputSchema>;

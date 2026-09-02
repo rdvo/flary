@@ -5,8 +5,8 @@ section: Run
 order: 3
 ---
 
-A subagent is a declared child agent with its own durable thread, transcript,
-approvals, audits, usage, and model selection.
+A subagent is a declared child agent with its own durable thread, transcript, approvals, audits,
+usage, and model selection.
 
 ```ts
 export const coder = app.agent({
@@ -15,8 +15,8 @@ export const coder = app.agent({
 });
 ```
 
-Flary applies safe child, depth, step, and cost defaults. Add a `delegation`
-or `limits` block only when the application needs different values.
+Flary applies safe child, depth, step, and cost defaults. Add a `delegation` or `limits` block only
+when the application needs different values.
 
 A child can use another provider:
 
@@ -29,14 +29,12 @@ await thread.subagents.spawn({
 });
 ```
 
-Parents, children, and siblings use durable mailboxes. A completed child sends
-a typed result with its summary, checkpoint, files, checks, usage, and errors.
-The root thread reserves and settles limits transactionally across the full
-tree.
+Parents, children, and siblings use durable mailboxes. A completed child sends a typed result with
+its summary, checkpoint, files, checks, usage, and errors. The root thread reserves and settles
+limits transactionally across the full tree.
 
-Shared workspaces are the default for child agents. Possible writes are
-serialized. User-created thread forks use isolated workspace branches.
+Shared workspaces are the default for child agents. Possible writes are serialized. User-created
+thread forks use isolated workspace branches.
 
-Durable schedules can start a function or agent command later. Schedule
-history includes attempts, retry state, pause, resume, cancellation, and the
-created run or thread reference.
+Durable schedules can start a function or agent command later. Schedule history includes attempts,
+retry state, pause, resume, cancellation, and the created run or thread reference.

@@ -14,8 +14,8 @@
       "/functions/*",
       "/connections",
       "/settings",
-      "/setup"
-    ]
+      "/setup",
+    ],
   },
-  "d1_databases": [{ "binding": "FLARY_DASHBOARD_DB" }]
+  "d1_databases": [{ "binding": "FLARY_DASHBOARD_DB" }],
 }

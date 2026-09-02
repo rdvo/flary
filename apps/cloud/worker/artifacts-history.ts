@@ -25,10 +25,7 @@ export interface ArtifactsRepositoryHandle {
   name: string;
   remote: string;
   lastPushAt?: string | null;
-  createToken(
-    scope?: "write" | "read",
-    ttl?: number
-  ): Promise<{ plaintext: string }>;
+  createToken(scope?: "write" | "read", ttl?: number): Promise<{ plaintext: string }>;
 }
 
 export interface ArtifactsBinding {
@@ -38,7 +35,7 @@ export interface ArtifactsBinding {
       readOnly?: boolean;
       description?: string;
       setDefaultBranch?: string;
-    }
+    },
   ): Promise<{
     name: string;
     remote: string;
@@ -85,11 +82,7 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
   readonly #scope: StorageScope;
   readonly #repository: string;
 
-  constructor(options: {
-    artifacts: ArtifactsBinding;
-    scope: StorageScope;
-    repository: string;
-  }) {
+  constructor(options: { artifacts: ArtifactsBinding; scope: StorageScope; repository: string }) {
     this.#artifacts = options.artifacts;
     this.#scope = options.scope;
     this.#repository = options.repository;
@@ -121,10 +114,7 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
         ...(file.metadata ? { metadata: file.metadata } : {}),
       })),
     };
-    await context.fs.writeFile(
-      `${GIT_DIR}/${INTERNAL_METADATA_PATH}`,
-      JSON.stringify(metadata)
-    );
+    await context.fs.writeFile(`${GIT_DIR}/${INTERNAL_METADATA_PATH}`, JSON.stringify(metadata));
     await context.git.add({ dir: GIT_DIR, filepath: "." });
     const result = await context.git.commit({
       dir: GIT_DIR,
@@ -144,10 +134,7 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
     return this.commit(input);
   }
 
-  async read(
-    repository: string,
-    commitId: string
-  ): Promise<ArtifactCommit | undefined> {
+  async read(repository: string, commitId: string): Promise<ArtifactCommit | undefined> {
     this.assertRepository(repository);
     const context = await this.open(this.#scope.branch, false);
     if (!(await this.hasCommits(context))) return undefined;
@@ -161,15 +148,13 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
     repository: string,
     scope: RecallScope,
     branch = "main",
-    limit = 50
+    limit = 50,
   ): Promise<ArtifactCommit[]> {
     this.assertRepository(repository);
     this.assertScope(scope);
     const parsedBranch = ArtifactBranchNameSchema.parse(branch);
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
-      throw new Error(
-        "Artifact history limit must be an integer from 1 to 100"
-      );
+      throw new Error("Artifact history limit must be an integer from 1 to 100");
     }
     const context = await this.open(parsedBranch, false);
     const entries = await context.git
@@ -198,7 +183,7 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
   async latest(
     repository: string,
     scope: RecallScope,
-    branch = "main"
+    branch = "main",
   ): Promise<ArtifactCommit | undefined> {
     this.assertRepository(repository);
     this.assertScope(scope);
@@ -209,10 +194,7 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
     return scopeContains(scope, commit.scope) ? commit : undefined;
   }
 
-  async repository(
-    repository: string,
-    scope: RecallScope
-  ): Promise<ArtifactRepository> {
+  async repository(repository: string, scope: RecallScope): Promise<ArtifactRepository> {
     this.assertRepository(repository);
     this.assertScope(scope);
     return ArtifactRepositorySchema.parse({
@@ -222,11 +204,7 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
     });
   }
 
-  async branch(
-    repository: string,
-    scope: RecallScope,
-    branch = "main"
-  ): Promise<ArtifactBranch> {
+  async branch(repository: string, scope: RecallScope, branch = "main"): Promise<ArtifactBranch> {
     const parsedBranch = ArtifactBranchNameSchema.parse(branch);
     const head = await this.latest(repository, scope, parsedBranch);
     return ArtifactBranchSchema.parse({
@@ -243,7 +221,7 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
     scope: RecallScope,
     baseCommitId: string | undefined,
     headCommitId: string,
-    branch = "main"
+    branch = "main",
   ): Promise<ArtifactDiff> {
     const head = await this.requireCommit(repository, scope, headCommitId);
     const base = baseCommitId
@@ -253,9 +231,7 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
       throw new Error("Artifact diff branch does not match the head commit");
     }
     if (base && base.branch !== head.branch) {
-      throw new Error(
-        "Artifact diff base branch does not match the head commit"
-      );
+      throw new Error("Artifact diff base branch does not match the head commit");
     }
     return buildArtifactDiff(repository, scope, head.branch, base, head);
   }
@@ -265,7 +241,7 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
     scope: RecallScope,
     sourceBranch: string,
     targetBranch: string,
-    commitId?: string
+    commitId?: string,
   ): Promise<ArtifactBranch> {
     this.assertRepository(repository);
     this.assertScope(scope);
@@ -313,16 +289,11 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
     repository: string,
     scope: RecallScope,
     sourceBranch: string,
-    targetBranch: string
+    targetBranch: string,
   ): Promise<ArtifactCommit> {
     const source = await this.branch(repository, scope, sourceBranch);
-    if (!source.headCommitId)
-      throw new Error("The source artifact branch is empty");
-    const sourceHead = await this.requireCommit(
-      repository,
-      scope,
-      source.headCommitId
-    );
+    if (!source.headCommitId) throw new Error("The source artifact branch is empty");
+    const sourceHead = await this.requireCommit(repository, scope, source.headCommitId);
     const target = await this.branch(repository, scope, targetBranch);
     const id = `merge-${sourceBranch}-${sourceHead.id}`.slice(0, 200);
     return this.commit({
@@ -341,7 +312,7 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
     repository: string,
     scope: RecallScope,
     query: string,
-    limit = 10
+    limit = 10,
   ): Promise<ArtifactSearchHit[]> {
     this.assertRepository(repository);
     this.assertScope(scope);
@@ -358,8 +329,7 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
         if (commits.has(entry.oid)) continue;
         try {
           const commit = await this.readCommittedTree(context, entry.oid);
-          if (scopeContains(scope, commit.scope))
-            commits.set(entry.oid, commit);
+          if (scopeContains(scope, commit.scope)) commits.set(entry.oid, commit);
         } catch {
           // Ignore commits created outside Flary's history format.
         }
@@ -370,9 +340,7 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
     for (const commit of commits.values()) {
       for (const file of commit.files) {
         const lines = file.content.split(/\r?\n/);
-        const index = lines.findIndex((line) =>
-          line.toLocaleLowerCase().includes(needle)
-        );
+        const index = lines.findIndex((line) => line.toLocaleLowerCase().includes(needle));
         if (index < 0) continue;
         hits.push({
           commitId: commit.id,
@@ -395,10 +363,7 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
 
   private async open(branch: string, write: boolean): Promise<GitContext> {
     const repository = await this.getRepository();
-    const tokenResult = await repository.createToken(
-      write ? "write" : "read",
-      TOKEN_TTL_SECONDS
-    );
+    const tokenResult = await repository.createToken(write ? "write" : "read", TOKEN_TTL_SECONDS);
     const token = tokenSecret(tokenResult.plaintext);
     const fs = new InMemoryFs();
     const git = createGit(fs, GIT_DIR);
@@ -463,7 +428,7 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
 
   private async resolveCommit(
     context: GitContext,
-    requestedId: string
+    requestedId: string,
   ): Promise<string | undefined> {
     try {
       await context.git.checkout({
@@ -482,7 +447,7 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
           depth: 5000,
         });
         const match = entries.find((entry) =>
-          entry.message.includes(`Flary checkpoint ${requestedId}`)
+          entry.message.includes(`Flary checkpoint ${requestedId}`),
         );
         if (match) return match.oid;
       }
@@ -492,7 +457,7 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
 
   private async findLogicalCommit(
     context: GitContext,
-    logicalId: string
+    logicalId: string,
   ): Promise<ArtifactCommit | undefined> {
     const entries = await context.git
       .log({ dir: GIT_DIR, ref: context.branch, depth: 5000 })
@@ -504,10 +469,7 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
     return undefined;
   }
 
-  private async replaceFiles(
-    context: GitContext,
-    files: ArtifactCommit["files"]
-  ): Promise<void> {
+  private async replaceFiles(context: GitContext, files: ArtifactCommit["files"]): Promise<void> {
     const current = await collectFiles(context.fs, GIT_DIR);
     const nextPaths = new Set(files.map((file) => file.path));
     for (const path of current) {
@@ -520,19 +482,12 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
     }
   }
 
-  private async readCommittedTree(
-    context: GitContext,
-    oid: string
-  ): Promise<ArtifactCommit> {
+  private async readCommittedTree(context: GitContext, oid: string): Promise<ArtifactCommit> {
     await context.git.checkout({ dir: GIT_DIR, ref: oid, force: true });
-    const metadataText = await context.fs.readFile(
-      `${GIT_DIR}/${INTERNAL_METADATA_PATH}`
-    );
+    const metadataText = await context.fs.readFile(`${GIT_DIR}/${INTERNAL_METADATA_PATH}`);
     const metadata = parseMetadata(metadataText);
     const files = await collectFileEntries(context.fs, GIT_DIR);
-    const descriptors = new Map(
-      metadata.files.map((file) => [file.path, file])
-    );
+    const descriptors = new Map(metadata.files.map((file) => [file.path, file]));
     return ArtifactCommitSchema.parse({
       id: oid,
       repository: metadata.repository,
@@ -551,7 +506,7 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
   private async requireCommit(
     repository: string,
     scope: RecallScope,
-    id: string
+    id: string,
   ): Promise<ArtifactCommit> {
     const commit = await this.read(repository, id);
     if (!commit || !scopeContains(scope, commit.scope)) {
@@ -574,11 +529,7 @@ export class CloudflareArtifactHistoryStore implements ArtifactHistoryStore {
   }
 }
 
-async function collectFiles(
-  fs: InMemoryFs,
-  root: string,
-  prefix = ""
-): Promise<string[]> {
+async function collectFiles(fs: InMemoryFs, root: string, prefix = ""): Promise<string[]> {
   const files = await collectFileEntries(fs, root, prefix);
   return files.map((file) => file.path);
 }
@@ -586,13 +537,12 @@ async function collectFiles(
 async function collectFileEntries(
   fs: InMemoryFs,
   root: string,
-  prefix = ""
+  prefix = "",
 ): Promise<Array<{ path: string; content: string }>> {
   const names = await fs.readdir(prefix ? `${root}/${prefix}` : root);
   const files: Array<{ path: string; content: string }> = [];
   for (const name of names) {
-    if (name === ".git" || (prefix === ".flary" && name === "commit.json"))
-      continue;
+    if (name === ".git" || (prefix === ".flary" && name === "commit.json")) continue;
     const relative = prefix ? `${prefix}/${name}` : name;
     const absolute = `${root}/${relative}`;
     const stat = await fs.stat(absolute);
@@ -610,8 +560,7 @@ async function collectFileEntries(
 
 function parseMetadata(value: string): CommitMetadata {
   const parsed = JSON.parse(value) as unknown;
-  if (!parsed || typeof parsed !== "object")
-    throw new Error("Invalid Artifacts metadata");
+  if (!parsed || typeof parsed !== "object") throw new Error("Invalid Artifacts metadata");
   const record = parsed as Record<string, unknown>;
   return {
     version: 1,
@@ -659,9 +608,9 @@ function branchNames(value: unknown, fallback: string[]): string[] {
 function isNotFound(error: unknown): boolean {
   return Boolean(
     error &&
-      typeof error === "object" &&
-      "code" in error &&
-      (error as { code?: unknown }).code === "NOT_FOUND"
+    typeof error === "object" &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "NOT_FOUND",
   );
 }
 

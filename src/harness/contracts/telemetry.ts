@@ -7,8 +7,8 @@ import {
   NonEmptyStringSchema,
   PositiveIntegerSchema,
   TimestampSchema,
-} from "./common";
-import { PromptCacheRetentionSchema } from "./provider";
+} from "./common.js";
+import { PromptCacheRetentionSchema } from "./provider.js";
 
 const LowerHex32Schema = z
   .string()
@@ -34,8 +34,7 @@ export const TraceFlagsSchema = z
   .regex(/^[0-9a-f]{2}$/, "Expected two lowercase hexadecimal trace flags");
 export type TraceFlags = z.infer<typeof TraceFlagsSchema>;
 
-const TraceStateKeyPattern =
-  /^[a-z][_0-9a-z-]{0,255}(?:@[a-z][_0-9a-z-]{0,255})?$/;
+const TraceStateKeyPattern = /^[a-z][_0-9a-z-]{0,255}(?:@[a-z][_0-9a-z-]{0,255})?$/;
 const TraceStateValuePattern = /^[\x21-\x2b\x2d-\x3c\x3e-\x7e]{1,256}$/;
 
 /** The W3C tracestate header value. */
@@ -51,12 +50,9 @@ export const TraceStateSchema = z
         if (separator < 1) return false;
         const key = member.slice(0, separator).trim();
         const stateValue = member.slice(separator + 1).trim();
-        return (
-          TraceStateKeyPattern.test(key) &&
-          TraceStateValuePattern.test(stateValue)
-        );
+        return TraceStateKeyPattern.test(key) && TraceStateValuePattern.test(stateValue);
       }),
-    "Expected a valid W3C tracestate list"
+    "Expected a valid W3C tracestate list",
   );
 export type TraceState = z.infer<typeof TraceStateSchema>;
 
@@ -137,13 +133,7 @@ export const W3CTraceParentSchema = TraceParentSchema;
 export type W3CTraceParent = TraceParent;
 
 /** The kind of work represented by a span. */
-export const SpanKindSchema = z.enum([
-  "internal",
-  "server",
-  "client",
-  "producer",
-  "consumer",
-]);
+export const SpanKindSchema = z.enum(["internal", "server", "client", "producer", "consumer"]);
 export type SpanKind = z.infer<typeof SpanKindSchema>;
 
 /** The W3C/OpenTelemetry-compatible span status code. */
@@ -175,10 +165,7 @@ export const TelemetrySpanSchema = z
   })
   .strict()
   .superRefine((value, context) => {
-    if (
-      value.endedAt !== undefined &&
-      Date.parse(value.endedAt) < Date.parse(value.startedAt)
-    ) {
+    if (value.endedAt !== undefined && Date.parse(value.endedAt) < Date.parse(value.startedAt)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["endedAt"],
@@ -207,9 +194,7 @@ export const EffectiveCacheRetentionSchema = z.enum([
   "1h",
   "24h",
 ]);
-export type EffectiveCacheRetention = z.infer<
-  typeof EffectiveCacheRetentionSchema
->;
+export type EffectiveCacheRetention = z.infer<typeof EffectiveCacheRetentionSchema>;
 
 export const CacheUsageSchema = z
   .object({
@@ -231,9 +216,7 @@ export type CacheUsage = z.infer<typeof CacheUsageSchema>;
 export const ReasoningUsageSchema = z
   .object({
     tokens: TelemetryIntegerSchema.optional(),
-    effort: z
-      .enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"])
-      .optional(),
+    effort: z.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
   })
   .strict();
 export type ReasoningUsage = z.infer<typeof ReasoningUsageSchema>;
@@ -287,11 +270,9 @@ export type MediaUsage = z.infer<typeof MediaUsageSchema>;
 /** Provider-specific values kept under named extension keys. */
 export const ProviderUsageExtensionsSchema = z.record(
   z.string().trim().min(1).max(128),
-  JsonValueSchema
+  JsonValueSchema,
 );
-export type ProviderUsageExtensions = z.infer<
-  typeof ProviderUsageExtensionsSchema
->;
+export type ProviderUsageExtensions = z.infer<typeof ProviderUsageExtensionsSchema>;
 
 /** A cost value measured in integer micro-units, or an explicit unknown value. */
 const CostUnitSchema = z
@@ -361,7 +342,7 @@ const SafeReferenceIdSchema = z
   .string()
   .regex(
     /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/,
-    "Reference IDs must be opaque path-safe identifiers"
+    "Reference IDs must be opaque path-safe identifiers",
   );
 
 export const ReferenceDigestSchema = z
@@ -646,9 +627,7 @@ export const ApprovalTelemetryActionSchema = z.enum([
   "expired",
   "cancelled",
 ]);
-export type ApprovalTelemetryAction = z.infer<
-  typeof ApprovalTelemetryActionSchema
->;
+export type ApprovalTelemetryAction = z.infer<typeof ApprovalTelemetryActionSchema>;
 
 export const ApprovalTelemetryPayloadSchema = z
   .object({
@@ -658,9 +637,7 @@ export const ApprovalTelemetryPayloadSchema = z
     reasonCode: IdentifierSchema.optional(),
   })
   .strict();
-export type ApprovalTelemetryPayload = z.infer<
-  typeof ApprovalTelemetryPayloadSchema
->;
+export type ApprovalTelemetryPayload = z.infer<typeof ApprovalTelemetryPayloadSchema>;
 
 export const ApprovalTelemetryEventSchema = z
   .object({
@@ -669,9 +646,7 @@ export const ApprovalTelemetryEventSchema = z
     payload: ApprovalTelemetryPayloadSchema,
   })
   .strict();
-export type ApprovalTelemetryEvent = z.infer<
-  typeof ApprovalTelemetryEventSchema
->;
+export type ApprovalTelemetryEvent = z.infer<typeof ApprovalTelemetryEventSchema>;
 
 export const CacheTelemetryActionSchema = z.enum([
   "lookup",
@@ -711,9 +686,7 @@ export const SandboxTelemetryActionSchema = z.enum([
   "failed",
   "terminated",
 ]);
-export type SandboxTelemetryAction = z.infer<
-  typeof SandboxTelemetryActionSchema
->;
+export type SandboxTelemetryAction = z.infer<typeof SandboxTelemetryActionSchema>;
 
 export const SandboxTelemetryPayloadSchema = z
   .object({
@@ -726,9 +699,7 @@ export const SandboxTelemetryPayloadSchema = z
     errorCode: IdentifierSchema.optional(),
   })
   .strict();
-export type SandboxTelemetryPayload = z.infer<
-  typeof SandboxTelemetryPayloadSchema
->;
+export type SandboxTelemetryPayload = z.infer<typeof SandboxTelemetryPayloadSchema>;
 
 export const SandboxTelemetryEventSchema = z
   .object({
@@ -746,9 +717,7 @@ export const ArtifactTelemetryActionSchema = z.enum([
   "deleted",
   "committed",
 ]);
-export type ArtifactTelemetryAction = z.infer<
-  typeof ArtifactTelemetryActionSchema
->;
+export type ArtifactTelemetryAction = z.infer<typeof ArtifactTelemetryActionSchema>;
 
 export const ArtifactTelemetryPayloadSchema = z
   .object({
@@ -759,9 +728,7 @@ export const ArtifactTelemetryPayloadSchema = z
     digest: ReferenceDigestSchema.optional(),
   })
   .strict();
-export type ArtifactTelemetryPayload = z.infer<
-  typeof ArtifactTelemetryPayloadSchema
->;
+export type ArtifactTelemetryPayload = z.infer<typeof ArtifactTelemetryPayloadSchema>;
 
 export const ArtifactTelemetryEventSchema = z
   .object({
@@ -770,9 +737,7 @@ export const ArtifactTelemetryEventSchema = z
     payload: ArtifactTelemetryPayloadSchema,
   })
   .strict();
-export type ArtifactTelemetryEvent = z.infer<
-  typeof ArtifactTelemetryEventSchema
->;
+export type ArtifactTelemetryEvent = z.infer<typeof ArtifactTelemetryEventSchema>;
 
 export const PromptSelectionTelemetryActionSchema = z.enum([
   "requested",
@@ -780,9 +745,7 @@ export const PromptSelectionTelemetryActionSchema = z.enum([
   "fallback",
   "rejected",
 ]);
-export type PromptSelectionTelemetryAction = z.infer<
-  typeof PromptSelectionTelemetryActionSchema
->;
+export type PromptSelectionTelemetryAction = z.infer<typeof PromptSelectionTelemetryActionSchema>;
 
 export const PromptSelectionTelemetryPayloadSchema = z
   .object({
@@ -795,9 +758,7 @@ export const PromptSelectionTelemetryPayloadSchema = z
     reasonCode: IdentifierSchema.optional(),
   })
   .strict();
-export type PromptSelectionTelemetryPayload = z.infer<
-  typeof PromptSelectionTelemetryPayloadSchema
->;
+export type PromptSelectionTelemetryPayload = z.infer<typeof PromptSelectionTelemetryPayloadSchema>;
 
 export const PromptSelectionTelemetryEventSchema = z
   .object({
@@ -806,9 +767,7 @@ export const PromptSelectionTelemetryEventSchema = z
     payload: PromptSelectionTelemetryPayloadSchema,
   })
   .strict();
-export type PromptSelectionTelemetryEvent = z.infer<
-  typeof PromptSelectionTelemetryEventSchema
->;
+export type PromptSelectionTelemetryEvent = z.infer<typeof PromptSelectionTelemetryEventSchema>;
 
 /** Validate any supported telemetry event while keeping its payload type. */
 export const TelemetryEventSchema = z.discriminatedUnion("type", [

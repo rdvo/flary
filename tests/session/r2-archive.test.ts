@@ -2,10 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 
-import {
-  R2SessionArchive,
-  SqliteSessionLedger,
-} from "../../src/harness/session/index.ts";
+import { R2SessionArchive, SqliteSessionLedger } from "../../src/harness/session/index.ts";
 
 test("seals cold records as encrypted R2 segments and keeps a hot SQLite window", async () => {
   const storage = sqlite();
@@ -36,32 +33,30 @@ test("seals cold records as encrypted R2 segments and keeps a hot SQLite window"
             ? new Uint8Array(await new Response(value).arrayBuffer())
             : ArrayBuffer.isView(value)
               ? new Uint8Array(
-                  value.buffer.slice(
-                    value.byteOffset,
-                    value.byteOffset + value.byteLength,
-                  ),
+                  value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength),
                 )
               : new Uint8Array(value);
         objects.set(key, bytes);
       },
       async get(key) {
         const bytes = objects.get(key);
-        return bytes
-          ? { arrayBuffer: async () => bytes.slice().buffer as ArrayBuffer }
-          : null;
+        return bytes ? { arrayBuffer: async () => bytes.slice().buffer as ArrayBuffer } : null;
       },
     },
   });
 
   assert.equal(await archive.sealColdRecords("session"), 3);
   assert.equal(
-    storage.sql.exec<{ count: number }>(
-      "SELECT COUNT(*) AS count FROM flary_session_ledger_records",
-    ).toArray()[0]!.count,
+    storage.sql
+      .exec<{ count: number }>("SELECT COUNT(*) AS count FROM flary_session_ledger_records")
+      .toArray()[0]!.count,
     2,
   );
   const records = await archive.read("session");
-  assert.deepEqual(records.map((record) => record.sequence), [1, 2, 3]);
+  assert.deepEqual(
+    records.map((record) => record.sequence),
+    [1, 2, 3],
+  );
   assert.equal((await ledger.metadata("session"))?.sealedThroughSequence, 3);
 
   await ledger.append({
@@ -84,10 +79,7 @@ function sqlite() {
   return {
     sql: {
       exec<T>(query: string, ...bindings: unknown[]) {
-        if (
-          bindings.length === 0 &&
-          !query.trimStart().toLowerCase().startsWith("select")
-        ) {
+        if (bindings.length === 0 && !query.trimStart().toLowerCase().startsWith("select")) {
           database.exec(query);
           return { toArray: () => [] as T[] };
         }

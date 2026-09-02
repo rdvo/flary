@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 
-import {
-  CloudflareEncryptedSecretStore,
-} from "../../src/harness/cloudflare/secrets.js";
+import { CloudflareEncryptedSecretStore } from "../../src/harness/cloudflare/secrets.js";
 import { encodeBase64Url } from "../../src/harness/vault/crypto.js";
 
 function d1() {
@@ -55,9 +53,10 @@ test("the Cloudflare secret store encrypts values and returns only metadata", as
 
   assert.equal(metadata.version, 1);
   assert.equal("value" in metadata, false);
-  const row = database.prepare(
-    "SELECT ciphertext, iv FROM flary_connection_secret",
-  ).get() as { ciphertext: string; iv: string };
+  const row = database.prepare("SELECT ciphertext, iv FROM flary_connection_secret").get() as {
+    ciphertext: string;
+    iv: string;
+  };
   assert.equal(JSON.stringify(row).includes("plaintext-must-not-be-stored"), false);
   assert.equal(
     await store.resolve(scope, "github", "api-token", "organization"),
@@ -70,8 +69,5 @@ test("the Cloudflare secret store encrypts values and returns only metadata", as
     scope: "organization",
   });
   assert.equal(rotated.version, 2);
-  assert.equal(
-    await store.resolve(scope, "github", "api-token", "organization"),
-    "rotated-value",
-  );
+  assert.equal(await store.resolve(scope, "github", "api-token", "organization"), "rotated-value");
 });

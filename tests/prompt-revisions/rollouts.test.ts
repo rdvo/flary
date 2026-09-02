@@ -50,10 +50,7 @@ test("prompt revisions are strict and parsed revisions are immutable", () => {
 
   assert.equal(Object.isFrozen(parsed), true);
   assert.equal(parsed.sourceHash, "a".repeat(64));
-  assert.equal(
-    PromptRevisionSchema.safeParse({ ...revision, mutable: true }).success,
-    false
-  );
+  assert.equal(PromptRevisionSchema.safeParse({ ...revision, mutable: true }).success, false);
   assert.throws(() => {
     (parsed as { sourceHash: string }).sourceHash = "changed";
   }, TypeError);
@@ -63,7 +60,7 @@ test("variant allocations require unique IDs and exactly 10,000 basis points", (
   const parsed = PromptVariantListSchema.parse(variants);
   assert.equal(
     parsed.reduce((total, variant) => total + variant.allocationBasisPoints, 0),
-    10_000
+    10_000,
   );
 
   assert.equal(
@@ -80,7 +77,7 @@ test("variant allocations require unique IDs and exactly 10,000 basis points", (
         allocationBasisPoints: 5_000,
       },
     ]).success,
-    false
+    false,
   );
   assert.equal(
     PromptVariantListSchema.safeParse([
@@ -92,7 +89,7 @@ test("variant allocations require unique IDs and exactly 10,000 basis points", (
         allocationBasisPoints: 5_000,
       },
     ]).success,
-    false
+    false,
   );
   assert.equal(
     PromptVariantListSchema.safeParse([
@@ -102,7 +99,7 @@ test("variant allocations require unique IDs and exactly 10,000 basis points", (
         allocationBasisPoints: 10_001,
       },
     ]).success,
-    false
+    false,
   );
 });
 
@@ -115,12 +112,9 @@ test("assignment scopes and authorized overrides reject unauthorized shapes", ()
     {
       scope: "user",
       subject: "user-42",
-    }
+    },
   );
-  assert.equal(
-    PromptAssignmentSchema.safeParse({ scope: "user" }).success,
-    false
-  );
+  assert.equal(PromptAssignmentSchema.safeParse({ scope: "user" }).success, false);
 
   const testOverride = AuthorizedTestOverrideSchema.parse({
     kind: "test",
@@ -137,7 +131,7 @@ test("assignment scopes and authorized overrides reject unauthorized shapes", ()
       testId: "checkout-smoke",
       variantId: "candidate",
     }).success,
-    false
+    false,
   );
 
   const operatorOverride = AuthorizedOperatorOverrideSchema.parse({
@@ -157,7 +151,7 @@ test("assignment scopes and authorized overrides reject unauthorized shapes", ()
       reason: "Compare the fallback prompt",
       unexpected: true,
     }).success,
-    false
+    false,
   );
 });
 
@@ -215,7 +209,7 @@ test("prompt variant selection is deterministic and supports authorized override
       variantId: "candidate",
       scope: "user",
     }).id,
-    "candidate"
+    "candidate",
   );
   assert.equal(
     selectPromptVariant(parsedRollout, assignment, {
@@ -225,7 +219,7 @@ test("prompt variant selection is deterministic and supports authorized override
       variantId: "control",
       reason: "Inspect control output",
     }).id,
-    "control"
+    "control",
   );
 
   assert.throws(() =>
@@ -235,7 +229,7 @@ test("prompt variant selection is deterministic and supports authorized override
       testId: "checkout-smoke",
       variantId: "candidate",
       scope: "project",
-    })
+    }),
   );
   assert.throws(() =>
     selectPromptVariant(parsedRollout, assignment, {
@@ -244,7 +238,7 @@ test("prompt variant selection is deterministic and supports authorized override
       operatorId: "operator-7",
       variantId: "missing",
       reason: "Unknown variant",
-    })
+    }),
   );
 });
 
@@ -260,7 +254,7 @@ test("prompt selection telemetry stores only a hashed assignment key", async () 
       },
       runId: "run-1",
       now: "2026-01-01T00:00:00+00:00",
-    }
+    },
   );
 
   assert.equal(result.event.type, "prompt.selection");

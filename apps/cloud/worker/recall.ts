@@ -8,10 +8,7 @@ import {
   type RecallReference,
   type RecallScope,
 } from "flary/contracts";
-import {
-  R2ArtifactHistoryStore,
-  type ArtifactR2Bucket,
-} from "flary/storage";
+import { R2ArtifactHistoryStore, type ArtifactR2Bucket } from "flary/storage";
 import { TurbopufferRecallIndex } from "flary/recall";
 import type { ThreadBinding } from "flary/contracts";
 import type { Env } from "./env";
@@ -25,9 +22,7 @@ export const ThreadRecallSearchInputSchema = z
     limit: z.number().int().positive().max(100).default(10),
   })
   .strict();
-export type ThreadRecallSearchInput = z.input<
-  typeof ThreadRecallSearchInputSchema
->;
+export type ThreadRecallSearchInput = z.input<typeof ThreadRecallSearchInputSchema>;
 
 export const ThreadRecallOpenInputSchema = z
   .object({
@@ -134,12 +129,7 @@ export async function searchThreadRecall(
 
   const store = artifactStore(env, binding);
   if (!store) throw new Error("recall_unavailable");
-  const hits = await store.searchExact(
-    repository(binding),
-    scope,
-    request.query,
-    request.limit,
-  );
+  const hits = await store.searchExact(repository(binding), scope, request.query, request.limit);
   return RecallSearchResponseSchema.parse({
     results: hits
       .filter((hit) => !request.kinds || request.kinds.includes(kindForPath(hit.path)))
@@ -207,7 +197,10 @@ export async function openThreadRecall(
   const lines = file.content.split(/\r?\n/);
   const start = Math.max(1, reference.lineStart ?? 1);
   const end = Math.min(lines.length, reference.lineEnd ?? lines.length);
-  const content = lines.slice(start - 1, end).join("\n").trim();
+  const content = lines
+    .slice(start - 1, end)
+    .join("\n")
+    .trim();
   if (!content) return undefined;
   return {
     id: reference.id,

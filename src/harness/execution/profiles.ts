@@ -43,76 +43,72 @@ function toProfile(input: ExecutionProfileInput | ExecutionProfile): ExecutionPr
 }
 
 export function defineExecutionProfile(
-  input: ExecutionProfileInput | ExecutionProfile
+  input: ExecutionProfileInput | ExecutionProfile,
 ): ExecutionProfile {
   return toProfile(input);
 }
 
 export const createExecutionProfile = defineExecutionProfile;
 
-export const DEFAULT_EXECUTION_PROFILES: Readonly<
-  Record<string, ExecutionProfile>
-> = Object.freeze({
-  default: toProfile({
-    name: "default",
-    limits: {
-      maxToolCalls: 64,
-      maxConcurrency: 4,
-      readParallelism: 4,
-      batchSize: 8,
-    },
-  }),
-  safe: toProfile({
-    name: "safe",
-    limits: {
-      maxToolCalls: 32,
-      maxConcurrency: 1,
-      readParallelism: 1,
-      batchSize: 1,
-    },
-    approval: { requireForWrites: true },
-  }),
-  balanced: toProfile({
-    name: "balanced",
-    limits: {
-      maxToolCalls: 64,
-      maxConcurrency: 4,
-      readParallelism: 4,
-      batchSize: 8,
-    },
-  }),
-  fast: toProfile({
-    name: "fast",
-    limits: {
-      maxToolCalls: 128,
-      maxConcurrency: 8,
-      readParallelism: 8,
-      batchSize: 16,
-    },
-  }),
-  strict: toProfile({
-    name: "strict",
-    limits: {
-      maxToolCalls: 32,
-      maxConcurrency: 2,
-      readParallelism: 1,
-      batchSize: 4,
-    },
-    approval: { requireForWrites: true },
-  }),
-});
+export const DEFAULT_EXECUTION_PROFILES: Readonly<Record<string, ExecutionProfile>> = Object.freeze(
+  {
+    default: toProfile({
+      name: "default",
+      limits: {
+        maxToolCalls: 64,
+        maxConcurrency: 4,
+        readParallelism: 4,
+        batchSize: 8,
+      },
+    }),
+    safe: toProfile({
+      name: "safe",
+      limits: {
+        maxToolCalls: 32,
+        maxConcurrency: 1,
+        readParallelism: 1,
+        batchSize: 1,
+      },
+      approval: { requireForWrites: true },
+    }),
+    balanced: toProfile({
+      name: "balanced",
+      limits: {
+        maxToolCalls: 64,
+        maxConcurrency: 4,
+        readParallelism: 4,
+        batchSize: 8,
+      },
+    }),
+    fast: toProfile({
+      name: "fast",
+      limits: {
+        maxToolCalls: 128,
+        maxConcurrency: 8,
+        readParallelism: 8,
+        batchSize: 16,
+      },
+    }),
+    strict: toProfile({
+      name: "strict",
+      limits: {
+        maxToolCalls: 32,
+        maxConcurrency: 2,
+        readParallelism: 1,
+        batchSize: 4,
+      },
+      approval: { requireForWrites: true },
+    }),
+  },
+);
 
 export const NAMED_EXECUTION_PROFILES = DEFAULT_EXECUTION_PROFILES;
 
 export function resolveExecutionProfile(
-  profile:
-    | string
-    | ExecutionProfileInput
-    | ExecutionProfile
-    | undefined = "default",
+  profile: string | ExecutionProfileInput | ExecutionProfile | undefined = "default",
   profiles: Readonly<
     Record<string, ExecutionProfileInput | ExecutionProfile>
-  > = DEFAULT_EXECUTION_PROFILES
+  > = DEFAULT_EXECUTION_PROFILES,
 ): ExecutionProfile {
   if (typeof profile !== "string") {
     return toProfile(profile ?? { name: "default" });
@@ -138,7 +134,7 @@ export class ExecutionProfileRegistry {
   constructor(
     profiles: Readonly<
       Record<string, ExecutionProfileInput | ExecutionProfile>
-    > = DEFAULT_EXECUTION_PROFILES
+    > = DEFAULT_EXECUTION_PROFILES,
   ) {
     for (const [name, profile] of Object.entries(profiles)) {
       const resolved = toProfile(profile);
@@ -159,9 +155,7 @@ export class ExecutionProfileRegistry {
     return this.#profiles.get(name);
   }
 
-  resolve(
-    profile: string | ExecutionProfileInput | ExecutionProfile
-  ): ExecutionProfile {
+  resolve(profile: string | ExecutionProfileInput | ExecutionProfile): ExecutionProfile {
     if (typeof profile !== "string") {
       return this.define(profile);
     }
@@ -176,4 +170,3 @@ export class ExecutionProfileRegistry {
     return [...this.#profiles.keys()].sort();
   }
 }
-

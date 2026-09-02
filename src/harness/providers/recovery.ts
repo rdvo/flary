@@ -1,10 +1,6 @@
 import { z } from "zod";
 
-import {
-  IdentifierSchema,
-  JsonObjectSchema,
-  TimestampSchema,
-} from "../contracts/common.js";
+import { IdentifierSchema, JsonObjectSchema, TimestampSchema } from "../contracts/common.js";
 import { ProviderKindSchema } from "../contracts/provider.js";
 import {
   ModelRequestSchema,
@@ -27,9 +23,7 @@ export const ProviderOperationStatusSchema = z.enum([
   "cancelled",
   "interrupted",
 ]);
-export type ProviderOperationStatus = z.infer<
-  typeof ProviderOperationStatusSchema
->;
+export type ProviderOperationStatus = z.infer<typeof ProviderOperationStatusSchema>;
 
 export const ProviderFailureClassSchema = z.enum([
   "rate_limit",
@@ -66,37 +60,24 @@ export const ProviderRecoveryCheckpointSchema = z
     updatedAt: TimestampSchema,
   })
   .strict();
-export type ProviderRecoveryCheckpoint = z.infer<
-  typeof ProviderRecoveryCheckpointSchema
->;
+export type ProviderRecoveryCheckpoint = z.infer<typeof ProviderRecoveryCheckpointSchema>;
 
 export interface ProviderCheckpointStore {
-  get(
-    runId: string,
-    operationId: string
-  ): Promise<ProviderRecoveryCheckpoint | undefined>;
+  get(runId: string, operationId: string): Promise<ProviderRecoveryCheckpoint | undefined>;
   put(checkpoint: ProviderRecoveryCheckpoint): Promise<void>;
 }
 
-export class InMemoryProviderCheckpointStore
-  implements ProviderCheckpointStore
-{
+export class InMemoryProviderCheckpointStore implements ProviderCheckpointStore {
   readonly #values = new Map<string, ProviderRecoveryCheckpoint>();
 
-  async get(
-    runId: string,
-    operationId: string
-  ): Promise<ProviderRecoveryCheckpoint | undefined> {
+  async get(runId: string, operationId: string): Promise<ProviderRecoveryCheckpoint | undefined> {
     const value = this.#values.get(`${runId}:${operationId}`);
     return value ? ProviderRecoveryCheckpointSchema.parse(value) : undefined;
   }
 
   async put(checkpointValue: ProviderRecoveryCheckpoint): Promise<void> {
     const checkpoint = ProviderRecoveryCheckpointSchema.parse(checkpointValue);
-    this.#values.set(
-      `${checkpoint.runId}:${checkpoint.operationId}`,
-      checkpoint
-    );
+    this.#values.set(`${checkpoint.runId}:${checkpoint.operationId}`, checkpoint);
   }
 }
 
@@ -113,21 +94,15 @@ export interface DurableProviderAdapter {
   readonly id: string;
   readonly provider: z.infer<typeof ProviderKindSchema>;
 
-  start(
-    request: ModelRequest,
-    context: ProviderRecoveryContext
-  ): AsyncIterable<ModelStreamEvent>;
+  start(request: ModelRequest, context: ProviderRecoveryContext): AsyncIterable<ModelStreamEvent>;
 
   recover(
     request: ModelRequest,
     checkpoint: ProviderRecoveryCheckpoint,
-    context: ProviderRecoveryContext
+    context: ProviderRecoveryContext,
   ): AsyncIterable<ModelStreamEvent>;
 
-  cancel(
-    checkpoint: ProviderRecoveryCheckpoint,
-    context: ProviderRecoveryContext
-  ): Promise<void>;
+  cancel(checkpoint: ProviderRecoveryCheckpoint, context: ProviderRecoveryContext): Promise<void>;
 
   classifyError(error: unknown): ProviderFailureClass;
 }
@@ -135,7 +110,7 @@ export interface DurableProviderAdapter {
 export function initialProviderCheckpoint(
   adapter: Pick<DurableProviderAdapter, "id" | "provider">,
   context: ProviderRecoveryContext,
-  attempt = 1
+  attempt = 1,
 ): ProviderRecoveryCheckpoint {
   return ProviderRecoveryCheckpointSchema.parse({
     runId: IdentifierSchema.parse(context.runId),
@@ -156,23 +131,19 @@ export async function* checkpointProviderStream(
   adapter: Pick<DurableProviderAdapter, "id" | "provider" | "classifyError">,
   stream: AsyncIterable<ModelStreamEvent>,
   context: ProviderRecoveryContext,
-  initial?: ProviderRecoveryCheckpoint
+  initial?: ProviderRecoveryCheckpoint,
 ): AsyncIterable<ModelStreamEvent> {
   let checkpoint = initial ?? initialProviderCheckpoint(adapter, context);
   await context.checkpoints.put(checkpoint);
   try {
     for await (const eventValue of stream) {
       const event = ProviderStreamEventSchema.parse(eventValue);
-      const persisted = await context.checkpoints.get(
-        checkpoint.runId,
-        checkpoint.operationId
-      );
+      const persisted = await context.checkpoints.get(checkpoint.runId, checkpoint.operationId);
       if (persisted) {
         checkpoint = ProviderRecoveryCheckpointSchema.parse({
           ...checkpoint,
           streamSequence: persisted.streamSequence ?? checkpoint.streamSequence,
-          continuationToken:
-            persisted.continuationToken ?? checkpoint.continuationToken,
+          continuationToken: persisted.continuationToken ?? checkpoint.continuationToken,
         });
       }
       checkpoint = checkpointForEvent(checkpoint, event, adapter);
@@ -183,10 +154,7 @@ export async function* checkpointProviderStream(
     const error = providerError(cause, adapter.id);
     checkpoint = ProviderRecoveryCheckpointSchema.parse({
       ...checkpoint,
-      status:
-        adapter.classifyError(cause) === "cancelled"
-          ? "cancelled"
-          : "interrupted",
+      status: adapter.classifyError(cause) === "cancelled" ? "cancelled" : "interrupted",
       failureClass: adapter.classifyError(cause),
       error,
       updatedAt: new Date().toISOString(),
@@ -198,7 +166,7 @@ export async function* checkpointProviderStream(
 
 export function continuationRequest(
   requestValue: ModelRequest,
-  checkpoint: ProviderRecoveryCheckpoint
+  checkpoint: ProviderRecoveryCheckpoint,
 ): ModelRequest {
   const request = ModelRequestSchema.parse(requestValue);
   if (!checkpoint.partialText) return request;
@@ -210,8 +178,7 @@ export function continuationRequest(
   messages.splice(insertAt, 0, {
     role: "assistant",
     content: checkpoint.partialText,
-    toolCalls:
-      checkpoint.toolCalls.length > 0 ? checkpoint.toolCalls : undefined,
+    toolCalls: checkpoint.toolCalls.length > 0 ? checkpoint.toolCalls : undefined,
   });
   return ModelRequestSchema.parse({
     ...request,
@@ -230,21 +197,17 @@ export function classifyHttpFailure(error: unknown): ProviderFailureClass {
     typeof error.status === "number"
       ? error.status
       : typeof error === "object" &&
-        error !== null &&
-        "error" in error &&
-        typeof error.error === "object" &&
-        error.error !== null &&
-        "status" in error.error &&
-        typeof error.error.status === "number"
-      ? error.error.status
-      : undefined;
+          error !== null &&
+          "error" in error &&
+          typeof error.error === "object" &&
+          error.error !== null &&
+          "status" in error.error &&
+          typeof error.error.status === "number"
+        ? error.error.status
+        : undefined;
   if (status === 401 || status === 403) return "authentication";
   if (status === 429) return "rate_limit";
-  if (
-    status === 408 ||
-    status === 409 ||
-    (status !== undefined && status >= 500)
-  ) {
+  if (status === 408 || status === 409 || (status !== undefined && status >= 500)) {
     return "transient";
   }
   if (status !== undefined && status >= 400) return "invalid_request";
@@ -254,7 +217,7 @@ export function classifyHttpFailure(error: unknown): ProviderFailureClass {
 function checkpointForEvent(
   checkpoint: ProviderRecoveryCheckpoint,
   event: ModelStreamEvent,
-  adapter: Pick<DurableProviderAdapter, "id" | "provider" | "classifyError">
+  adapter: Pick<DurableProviderAdapter, "id" | "provider" | "classifyError">,
 ): ProviderRecoveryCheckpoint {
   const base = {
     ...checkpoint,
@@ -319,7 +282,7 @@ function checkpointForEvent(
 
 function mergeToolCallDelta(
   calls: ProviderToolCall[],
-  event: Extract<ModelStreamEvent, { type: "tool_call_delta" }>
+  event: Extract<ModelStreamEvent, { type: "tool_call_delta" }>,
 ): ProviderToolCall[] {
   const next = [...calls];
   const current = next[event.index] ?? {
@@ -329,8 +292,7 @@ function mergeToolCallDelta(
     rawArguments: "",
   };
   const rawArguments =
-    (current.rawArguments ?? JSON.stringify(current.arguments)) +
-    (event.argumentsDelta ?? "");
+    (current.rawArguments ?? JSON.stringify(current.arguments)) + (event.argumentsDelta ?? "");
   let argumentsValue = current.arguments;
   try {
     argumentsValue = JsonObjectSchema.parse(JSON.parse(rawArguments));

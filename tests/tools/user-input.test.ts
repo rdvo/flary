@@ -152,16 +152,15 @@ test("the built-in can ask a free-form question and then a follow-up", async () 
 
   const second = await run({
     input: {
-      questions: [{
-        header: "Channel",
-        question: "Which channel should we use?",
-        options: [{ label: "Email" }, { label: "SMS" }],
-      }],
+      questions: [
+        {
+          header: "Channel",
+          question: "Which channel should we use?",
+          options: [{ label: "Email" }, { label: "SMS" }],
+        },
+      ],
     },
   });
   assert.equal(second.answers.Channel, "Email only");
-  assert.deepEqual(asked, [
-    "When should this launch?",
-    "Which channel should we use?",
-  ]);
+  assert.deepEqual(asked, ["When should this launch?", "Which channel should we use?"]);
 });

@@ -1,11 +1,5 @@
 import { sql } from "drizzle-orm";
-import {
-  index,
-  integer,
-  sqliteTable,
-  text,
-  uniqueIndex,
-} from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 const timestamp = (name: string) =>
   integer(name, { mode: "timestamp_ms" })
@@ -18,14 +12,12 @@ export const user = sqliteTable(
     id: text("id").primaryKey(),
     name: text("name").notNull(),
     email: text("email").notNull(),
-    emailVerified: integer("email_verified", { mode: "boolean" })
-      .notNull()
-      .default(false),
+    emailVerified: integer("email_verified", { mode: "boolean" }).notNull().default(false),
     image: text("image"),
     createdAt: timestamp("created_at"),
     updatedAt: timestamp("updated_at"),
   },
-  (table) => [uniqueIndex("user_email_unique").on(table.email)]
+  (table) => [uniqueIndex("user_email_unique").on(table.email)],
 );
 
 export const session = sqliteTable(
@@ -46,7 +38,7 @@ export const session = sqliteTable(
   (table) => [
     uniqueIndex("session_token_unique").on(table.token),
     index("session_user_idx").on(table.userId),
-  ]
+  ],
 );
 
 export const account = sqliteTable(
@@ -74,11 +66,8 @@ export const account = sqliteTable(
   },
   (table) => [
     index("account_user_idx").on(table.userId),
-    uniqueIndex("account_provider_unique").on(
-      table.providerId,
-      table.accountId
-    ),
-  ]
+    uniqueIndex("account_provider_unique").on(table.providerId, table.accountId),
+  ],
 );
 
 export const verification = sqliteTable(
@@ -91,7 +80,7 @@ export const verification = sqliteTable(
     createdAt: timestamp("created_at"),
     updatedAt: timestamp("updated_at"),
   },
-  (table) => [index("verification_identifier_idx").on(table.identifier)]
+  (table) => [index("verification_identifier_idx").on(table.identifier)],
 );
 
 export const organization = sqliteTable(
@@ -104,7 +93,7 @@ export const organization = sqliteTable(
     metadata: text("metadata"),
     createdAt: timestamp("created_at"),
   },
-  (table) => [uniqueIndex("organization_slug_unique").on(table.slug)]
+  (table) => [uniqueIndex("organization_slug_unique").on(table.slug)],
 );
 
 export const member = sqliteTable(
@@ -121,12 +110,9 @@ export const member = sqliteTable(
     createdAt: timestamp("created_at"),
   },
   (table) => [
-    uniqueIndex("member_user_org_unique").on(
-      table.userId,
-      table.organizationId
-    ),
+    uniqueIndex("member_user_org_unique").on(table.userId, table.organizationId),
     index("member_org_idx").on(table.organizationId),
-  ]
+  ],
 );
 
 export const invitation = sqliteTable(
@@ -148,7 +134,7 @@ export const invitation = sqliteTable(
   (table) => [
     index("invitation_org_idx").on(table.organizationId),
     index("invitation_email_idx").on(table.email),
-  ]
+  ],
 );
 
 export const flaryApp = sqliteTable(
@@ -167,12 +153,9 @@ export const flaryApp = sqliteTable(
     updatedAt: timestamp("updated_at"),
   },
   (table) => [
-    uniqueIndex("flary_app_org_slug_unique").on(
-      table.organizationId,
-      table.slug
-    ),
+    uniqueIndex("flary_app_org_slug_unique").on(table.organizationId, table.slug),
     index("flary_app_org_idx").on(table.organizationId),
-  ]
+  ],
 );
 
 // D1 is the searchable thread registry. The exact binding is copied into the
@@ -195,9 +178,7 @@ export const flaryThread = sqliteTable(
     persona: text("persona"),
     defaultMode: text("default_mode").notNull().default("ask"),
     defaultModelJson: text("default_model_json"),
-    defaultThinkingLevel: text("default_thinking_level")
-      .notNull()
-      .default("medium"),
+    defaultThinkingLevel: text("default_thinking_level").notNull().default("medium"),
     connectionIdsJson: text("connection_ids_json").notNull().default("[]"),
     status: text("status").notNull().default("active"),
     createdBy: text("created_by")
@@ -297,7 +278,7 @@ export const prompt = sqliteTable(
   (table) => [
     uniqueIndex("prompt_app_slug_unique").on(table.appId, table.slug),
     index("prompt_app_idx").on(table.appId),
-  ]
+  ],
 );
 
 /** Immutable source snapshot for one logical prompt. */
@@ -320,16 +301,10 @@ export const promptRevision = sqliteTable(
     createdAt: timestamp("created_at"),
   },
   (table) => [
-    uniqueIndex("prompt_revision_prompt_number_unique").on(
-      table.promptId,
-      table.revision
-    ),
-    uniqueIndex("prompt_revision_prompt_hash_unique").on(
-      table.promptId,
-      table.sourceHash
-    ),
+    uniqueIndex("prompt_revision_prompt_number_unique").on(table.promptId, table.revision),
+    uniqueIndex("prompt_revision_prompt_hash_unique").on(table.promptId, table.sourceHash),
     index("prompt_revision_prompt_idx").on(table.promptId, table.createdAt),
-  ]
+  ],
 );
 
 /** A deterministic rollout variant points at one immutable prompt revision. */
@@ -357,10 +332,10 @@ export const promptVariant = sqliteTable(
     uniqueIndex("prompt_variant_rollout_variant_unique").on(
       table.promptId,
       table.rolloutId,
-      table.variantId
+      table.variantId,
     ),
     index("prompt_variant_rollout_idx").on(table.promptId, table.rolloutId),
-  ]
+  ],
 );
 
 export const cloudflareOAuthState = sqliteTable(
@@ -378,7 +353,7 @@ export const cloudflareOAuthState = sqliteTable(
     expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
     createdAt: timestamp("created_at"),
   },
-  (table) => [index("cloudflare_oauth_state_expiry_idx").on(table.expiresAt)]
+  (table) => [index("cloudflare_oauth_state_expiry_idx").on(table.expiresAt)],
 );
 
 export const cloudflareConnection = sqliteTable(
@@ -407,12 +382,9 @@ export const cloudflareConnection = sqliteTable(
     updatedAt: timestamp("updated_at"),
   },
   (table) => [
-    uniqueIndex("cloudflare_connection_org_user_unique").on(
-      table.organizationId,
-      table.userId
-    ),
+    uniqueIndex("cloudflare_connection_org_user_unique").on(table.organizationId, table.userId),
     index("cloudflare_connection_org_idx").on(table.organizationId),
-  ]
+  ],
 );
 
 // Application-owned API and MCP connection metadata. Secret values live in
@@ -461,14 +433,11 @@ export const flaryConnection = sqliteTable(
     updatedAt: timestamp("updated_at"),
   },
   (table) => [
-    uniqueIndex("flary_connection_app_slug_unique").on(
-      table.appId,
-      table.slug
-    ),
+    uniqueIndex("flary_connection_app_slug_unique").on(table.appId, table.slug),
     index("flary_connection_app_idx").on(table.appId),
     index("flary_connection_org_idx").on(table.organizationId),
     index("flary_connection_owner_idx").on(table.ownerUserId),
-  ]
+  ],
 );
 
 /**
@@ -511,11 +480,7 @@ export const providerOAuthSession = sqliteTable(
     updatedAt: timestamp("updated_at"),
   },
   (table) => [
-    index("provider_oauth_session_owner_idx").on(
-      table.organizationId,
-      table.userId,
-      table.status,
-    ),
+    index("provider_oauth_session_owner_idx").on(table.organizationId, table.userId, table.status),
     index("provider_oauth_session_expiry_idx").on(table.expiresAt),
   ],
 );
@@ -544,13 +509,10 @@ export const secretEnvelope = sqliteTable(
     updatedAt: timestamp("updated_at"),
   },
   (table) => [
-    uniqueIndex("secret_envelope_connection_name_unique").on(
-      table.connectionId,
-      table.name
-    ),
+    uniqueIndex("secret_envelope_connection_name_unique").on(table.connectionId, table.name),
     index("secret_envelope_org_idx").on(table.organizationId),
     index("secret_envelope_connection_idx").on(table.connectionId),
-  ]
+  ],
 );
 
 export const schema = {

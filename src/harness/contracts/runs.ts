@@ -7,13 +7,13 @@ import {
   MetadataSchema,
   NonNegativeIntegerSchema,
   TimestampSchema,
-} from "./common";
+} from "./common.js";
 import {
   CacheUsageSchema,
   MicroUnitCostSchema,
   NormalizedUsageSchema,
   TraceContextSchema,
-} from "./telemetry";
+} from "./telemetry.js";
 
 // Select an agent or a flow as the run target.
 export const RunTargetSchema = z.discriminatedUnion("kind", [

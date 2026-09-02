@@ -8,11 +8,7 @@ import {
   type RunEvent,
   type TraceContext,
 } from "../contracts/index.js";
-import {
-  redactErrorMessage,
-  redactSecrets,
-  redactText,
-} from "../execution/redaction.js";
+import { redactErrorMessage, redactSecrets, redactText } from "../execution/redaction.js";
 
 export interface NormalizeFlueEventOptions {
   readonly runId: string;
@@ -29,7 +25,7 @@ export interface NormalizeFlueEventOptions {
  */
 export function normalizeFlueEvent(
   event: FlueEvent,
-  options: NormalizeFlueEventOptions
+  options: NormalizeFlueEventOptions,
 ): RunEvent | undefined {
   const base = {
     id: `event_${options.runId}_${event.eventIndex}`,
@@ -120,10 +116,7 @@ export function normalizeFlueEvent(
               ? {
                   error: {
                     code: "tool_failed",
-                    message: errorMessage(
-                      event.result,
-                      "Tool execution failed"
-                    ),
+                    message: errorMessage(event.result, "Tool execution failed"),
                   },
                 }
               : { output: jsonObject(event.result) }),
@@ -143,8 +136,7 @@ export function normalizeFlueEvent(
         payload: {
           ...(stringValue(model.provider) || stringValue(response.provider)
             ? {
-                provider:
-                  stringValue(model.provider) ?? stringValue(response.provider),
+                provider: stringValue(model.provider) ?? stringValue(response.provider),
               }
             : {}),
           ...(stringValue(model.id) || stringValue(response.model)
@@ -154,10 +146,7 @@ export function normalizeFlueEvent(
             : {}),
           ...(usage ? { usage } : {}),
           durationMs: Math.max(0, Math.floor(event.durationMs)),
-          retryCount: Math.max(
-            0,
-            Math.floor(numberValue(response.retryCount) ?? 0)
-          ),
+          retryCount: Math.max(0, Math.floor(numberValue(response.retryCount) ?? 0)),
         },
       });
     }
@@ -253,18 +242,12 @@ function messageText(value: unknown): string {
   const message = asRecord(value);
   if (typeof message.content === "string") return redactText(message.content);
   if (!Array.isArray(message.content)) return "";
-  return redactText(
-    message.content
-      .map((part) => stringValue(asRecord(part).text) ?? "")
-      .join("")
-  );
+  return redactText(message.content.map((part) => stringValue(asRecord(part).text) ?? "").join(""));
 }
 
 function messageRole(value: unknown): "user" | "assistant" | "system" | "tool" {
   const role = stringValue(asRecord(value).role);
-  return role === "user" || role === "system" || role === "tool"
-    ? role
-    : "assistant";
+  return role === "user" || role === "system" || role === "tool" ? role : "assistant";
 }
 
 function jsonObject(value: unknown): Record<string, unknown> {
@@ -295,9 +278,7 @@ function stringValue(value: unknown): string | undefined {
 }
 
 function numberValue(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0
-    ? value
-    : undefined;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 function errorMessage(value: unknown, fallback: string): string {

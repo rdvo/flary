@@ -43,7 +43,7 @@ test("a subagent prompt contains only the selected complete turns", () => {
         messages: [{ role: "assistant", content: "Inspect the iframe first." }],
         createdAt: "2026-07-28T11:30:00.000Z",
       },
-    ]
+    ],
   );
 
   assert.match(prompt, /Inspect the iframe first/);

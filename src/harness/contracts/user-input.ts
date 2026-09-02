@@ -5,8 +5,8 @@ import {
   MetadataSchema,
   NonEmptyStringSchema,
   TimestampSchema,
-} from "./common";
-import { IdentityReferenceSchema } from "./identity";
+} from "./common.js";
+import { IdentityReferenceSchema } from "./identity.js";
 
 export const UserInputOptionSchema = z
   .object({
@@ -89,6 +89,4 @@ export const UserInputAnswerRequestSchema = z
     metadata: MetadataSchema.optional(),
   })
   .strict();
-export type UserInputAnswerRequest = z.input<
-  typeof UserInputAnswerRequestSchema
->;
+export type UserInputAnswerRequest = z.input<typeof UserInputAnswerRequestSchema>;

@@ -1,9 +1,5 @@
 import type { ProviderKind } from "../contracts/provider.js";
-import type {
-  ModelRequest,
-  ModelResponse,
-  ModelStreamEvent,
-} from "./contracts.js";
+import type { ModelRequest, ModelResponse, ModelStreamEvent } from "./contracts.js";
 
 export interface ProviderRequestOptions {
   readonly signal?: AbortSignal;
@@ -16,15 +12,9 @@ export interface ModelAdapter {
   readonly provider: ProviderKind;
   readonly supportsStreaming: boolean;
 
-  complete(
-    request: ModelRequest,
-    options?: ProviderRequestOptions
-  ): Promise<ModelResponse>;
+  complete(request: ModelRequest, options?: ProviderRequestOptions): Promise<ModelResponse>;
 
-  stream(
-    request: ModelRequest,
-    options?: ProviderRequestOptions
-  ): AsyncIterable<ModelStreamEvent>;
+  stream(request: ModelRequest, options?: ProviderRequestOptions): AsyncIterable<ModelStreamEvent>;
 }
 
 export interface ProviderAdapterRegistryOptions {

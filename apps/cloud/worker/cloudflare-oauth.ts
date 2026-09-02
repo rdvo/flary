@@ -34,12 +34,7 @@ export interface CloudflareOAuthTokens {
 export class CloudflareOAuthError extends Error {
   constructor(
     public readonly reason:
-      | "configuration"
-      | "denied"
-      | "token"
-      | "accounts"
-      | "gateway"
-      | "request",
+      "configuration" | "denied" | "token" | "accounts" | "gateway" | "request",
     message: string,
   ) {
     super(message);
@@ -49,8 +44,7 @@ export class CloudflareOAuthError extends Error {
 
 export function isCloudflareOAuthConfigured(env: Env): boolean {
   return Boolean(
-    env.CLOUDFLARE_OAUTH_CLIENT_ID?.trim() &&
-      env.CLOUDFLARE_OAUTH_CLIENT_SECRET?.trim(),
+    env.CLOUDFLARE_OAUTH_CLIENT_ID?.trim() && env.CLOUDFLARE_OAUTH_CLIENT_SECRET?.trim(),
   );
 }
 
@@ -61,10 +55,7 @@ export function cloudflareOAuthScopes(env: Env): string[] {
   return configured?.length ? configured : [...DEFAULT_SCOPES];
 }
 
-export function cloudflareOAuthRedirectUri(
-  env: Env,
-  requestUrl: string,
-): string {
+export function cloudflareOAuthRedirectUri(env: Env, requestUrl: string): string {
   const origin = env.APP_URL?.trim() || new URL(requestUrl).origin;
   return new URL("/api/cloudflare/oauth/callback", origin).toString();
 }
@@ -75,18 +66,12 @@ export function buildCloudflareAuthorizationUrl(
   state: string,
 ): string {
   if (!isCloudflareOAuthConfigured(env)) {
-    throw new CloudflareOAuthError(
-      "configuration",
-      "Cloudflare OAuth is not configured",
-    );
+    throw new CloudflareOAuthError("configuration", "Cloudflare OAuth is not configured");
   }
 
   const url = new URL(CLOUDFLARE_AUTHORIZE_URL);
   url.searchParams.set("client_id", env.CLOUDFLARE_OAUTH_CLIENT_ID!.trim());
-  url.searchParams.set(
-    "redirect_uri",
-    cloudflareOAuthRedirectUri(env, requestUrl),
-  );
+  url.searchParams.set("redirect_uri", cloudflareOAuthRedirectUri(env, requestUrl));
   url.searchParams.set("response_type", "code");
   url.searchParams.set("scope", cloudflareOAuthScopes(env).join(" "));
   url.searchParams.set("state", state);
@@ -167,8 +152,7 @@ export async function fetchCloudflareAccounts(
   return result
     .filter(
       (account) =>
-        typeof account?.id === "string" &&
-        CLOUDFLARE_ACCOUNT_ID_PATTERN.test(account.id),
+        typeof account?.id === "string" && CLOUDFLARE_ACCOUNT_ID_PATTERN.test(account.id),
     )
     .map((account) => ({
       id: account.id,
@@ -183,10 +167,7 @@ export async function ensureCloudflareGateway(
   existingGatewayId?: string | null,
 ): Promise<string> {
   if (!CLOUDFLARE_ACCOUNT_ID_PATTERN.test(accountId)) {
-    throw new CloudflareOAuthError(
-      "gateway",
-      "Cloudflare returned an invalid account ID",
-    );
+    throw new CloudflareOAuthError("gateway", "Cloudflare returned an invalid account ID");
   }
 
   const gatewayId = existingGatewayId?.trim() || buildGatewayId(userId);
@@ -227,10 +208,7 @@ export async function ensureCloudflareGateway(
   return gatewayId;
 }
 
-export async function revokeCloudflareToken(
-  env: Env,
-  token: string,
-): Promise<void> {
+export async function revokeCloudflareToken(env: Env, token: string): Promise<void> {
   if (!isCloudflareOAuthConfigured(env)) return;
   const clientId = env.CLOUDFLARE_OAUTH_CLIENT_ID!.trim();
   const clientSecret = env.CLOUDFLARE_OAUTH_CLIENT_SECRET!.trim();
@@ -247,10 +225,7 @@ export async function revokeCloudflareToken(
     }),
   });
   if (!response.ok) {
-    throw new CloudflareOAuthError(
-      "request",
-      "Cloudflare token revocation failed",
-    );
+    throw new CloudflareOAuthError("request", "Cloudflare token revocation failed");
   }
 }
 
@@ -312,13 +287,7 @@ export async function getCloudflareAccessToken(
     "access",
   );
   const encryptedRefreshToken = refreshed.refreshToken
-    ? await encryptCloudflareToken(
-        env,
-        refreshed.refreshToken,
-        organizationId,
-        userId,
-        "refresh",
-      )
+    ? await encryptCloudflareToken(env, refreshed.refreshToken, organizationId, userId, "refresh")
     : null;
   await database
     .update(cloudflareConnection)
@@ -327,8 +296,7 @@ export async function getCloudflareAccessToken(
       accessTokenIv: encryptedAccessToken.iv,
       refreshTokenCiphertext:
         encryptedRefreshToken?.ciphertext ?? connection.refreshTokenCiphertext,
-      refreshTokenIv:
-        encryptedRefreshToken?.iv ?? connection.refreshTokenIv,
+      refreshTokenIv: encryptedRefreshToken?.iv ?? connection.refreshTokenIv,
       accessTokenExpiresAt: refreshed.accessTokenExpiresAt,
       scope: refreshed.scope ?? connection.scope,
       updatedAt: new Date(),
@@ -350,10 +318,7 @@ async function requestCloudflareToken(
   values: Record<string, string>,
 ): Promise<CloudflareOAuthTokens> {
   if (!isCloudflareOAuthConfigured(env)) {
-    throw new CloudflareOAuthError(
-      "configuration",
-      "Cloudflare OAuth is not configured",
-    );
+    throw new CloudflareOAuthError("configuration", "Cloudflare OAuth is not configured");
   }
   const clientId = env.CLOUDFLARE_OAUTH_CLIENT_ID!.trim();
   const clientSecret = env.CLOUDFLARE_OAUTH_CLIENT_SECRET!.trim();
@@ -366,14 +331,9 @@ async function requestCloudflareToken(
     },
     body: new URLSearchParams({ ...values, client_id: clientId }),
   });
-  const payload = (await response.json().catch(() => null)) as
-    | CloudflareTokenResponse
-    | null;
+  const payload = (await response.json().catch(() => null)) as CloudflareTokenResponse | null;
   if (!response.ok || !payload?.access_token) {
-    throw new CloudflareOAuthError(
-      "token",
-      "Cloudflare did not return an access token",
-    );
+    throw new CloudflareOAuthError("token", "Cloudflare did not return an access token");
   }
   return {
     accessToken: payload.access_token,
@@ -399,9 +359,7 @@ async function cloudflareApiRequest<T>(
     ...init,
     headers,
   });
-  const payload = (await response.json().catch(() => null)) as
-    | CloudflareApiResponse<T>
-    | null;
+  const payload = (await response.json().catch(() => null)) as CloudflareApiResponse<T> | null;
   if (!response.ok || !payload?.success) {
     throw new CloudflareOAuthError(
       reason,

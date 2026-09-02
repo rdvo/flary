@@ -7,7 +7,7 @@ import {
   NonNegativeIntegerSchema,
   NonEmptyStringSchema,
   PositiveIntegerSchema,
-} from "./common";
+} from "./common.js";
 
 // Control how much prose a model returns when the provider supports it.
 // Providers that do not expose a native verbosity option can use this value
@@ -18,9 +18,7 @@ export type TextVerbosity = z.infer<typeof TextVerbositySchema>;
 // Control provider-native prompt cache retention. Adapters map these values to
 // the provider's supported TTL and ignore unsupported values.
 export const PromptCacheRetentionSchema = z.enum(["none", "short", "long"]);
-export type PromptCacheRetention = z.infer<
-  typeof PromptCacheRetentionSchema
->;
+export type PromptCacheRetention = z.infer<typeof PromptCacheRetentionSchema>;
 
 // Keep reasoning levels provider-neutral. Adapters must reject or reduce a
 // level when a selected model does not support it.
@@ -103,9 +101,14 @@ export type ModelSelection = z.infer<typeof ModelSelectionSchema>;
 /** A model selected by a caller. Strings use the `provider/model` form. */
 export const ModelInputSchema = z.union([
   ModelSelectionSchema,
-  z.string().trim().min(3).max(400).regex(/^[^/\s]+\/.+$/, {
-    message: "A model string must use the provider/model form",
-  }),
+  z
+    .string()
+    .trim()
+    .min(3)
+    .max(400)
+    .regex(/^[^/\s]+\/.+$/, {
+      message: "A model string must use the provider/model form",
+    }),
 ]);
 export type ModelInput = z.infer<typeof ModelInputSchema>;
 
@@ -151,14 +154,9 @@ export const ProviderSegmentSchema = z
     nativeSessionReference: IdentifierSchema.optional(),
     startedAt: z.string().datetime({ offset: true }),
     completedAt: z.string().datetime({ offset: true }).optional(),
-    completionReason: z.enum([
-      "active",
-      "completed",
-      "switched",
-      "aborted",
-      "failed",
-      "compacted",
-    ]).default("active"),
+    completionReason: z
+      .enum(["active", "completed", "switched", "aborted", "failed", "compacted"])
+      .default("active"),
   })
   .strict();
 export type ProviderSegment = z.infer<typeof ProviderSegmentSchema>;

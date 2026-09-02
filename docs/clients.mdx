@@ -5,13 +5,13 @@ section: Connect
 order: 3
 ---
 
-Flary is the durable agent backend. Your application owns the screen, bot, or
-channel that people use.
+Flary is the durable agent backend. Your application owns the screen, bot, or channel that people
+use.
 
 ## Headless use
 
-Choose **Agent backend** in `flary create`. The deployed Worker provides typed
-HTTP, WebSocket, and SSE APIs. You do not write a route for each agent action.
+Choose **Agent backend** in `flary create`. The deployed Worker provides typed HTTP, WebSocket, and
+SSE APIs. You do not write a route for each agent action.
 
 Use the typed client from a trusted server:
 
@@ -25,15 +25,14 @@ const api = flary<typeof functions>({
 });
 ```
 
-Do not place a personal backend token in public browser code. Use your
-application session, a trusted server route, or the dashboard's secure cookie.
+Do not place a personal backend token in public browser code. Use your application session, a
+trusted server route, or the dashboard's secure cookie.
 
 ## Use the ready React console
 
-Flary ships the same WebSocket console that the dashboard starter uses. It
-includes thread creation and deletion, replay, reconnect, optimistic messages,
-one ordered activity rail, tool details, approvals, interruption, and the
-composer.
+Flary ships the same WebSocket console that the dashboard starter uses. It includes thread creation
+and deletion, replay, reconnect, optimistic messages, one ordered activity rail, tool details,
+approvals, interruption, and the composer.
 
 ```tsx
 import { flary } from "flary/client";
@@ -50,8 +49,8 @@ export function AgentPanel() {
 }
 ```
 
-The component does not copy the session into application storage. Flary stays
-the session authority. The browser stores only the newest replay cursor.
+The component does not copy the session into application storage. Flary stays the session authority.
+The browser stores only the newest replay cursor.
 
 Style the outer shell or build your own view from the same hook:
 
@@ -85,9 +84,9 @@ for await (const event of thread.stream({ after: savedCursor })) {
 }
 ```
 
-Use `thread.connect()` when the UI needs bidirectional WebSocket control. The
-connection uses one short-lived ticket, resumes from a durable cursor, and can
-sleep with its Thread Control Durable Object. SSE is the read-only fallback.
+Use `thread.connect()` when the UI needs bidirectional WebSocket control. The connection uses one
+short-lived ticket, resumes from a durable cursor, and can sleep with its Thread Control Durable
+Object. SSE is the read-only fallback.
 
 ## Telegram, Discord, CMS, or webhook
 
@@ -99,8 +98,8 @@ The adapter is small:
 4. Save the newest durable cursor.
 5. Deliver public events back to the channel.
 
-Do not store model or tool credentials in the channel. The Flary Worker
-resolves them after it validates the tenant identity.
+Do not store model or tool credentials in the channel. The Flary Worker resolves them after it
+validates the tenant identity.
 
 Read [Threads and realtime clients](/docs/threads/) for all thread controls and
 [HTTP API and events](/docs/http-api-and-events/) for route-level integration.

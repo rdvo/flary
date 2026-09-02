@@ -99,23 +99,27 @@ test("Cloudflare Workers AI adapter preserves tool calls and their round trip", 
 
   const response = await adapter.complete({
     ...request,
-    tools: [{
-      name: "execute",
-      description: "Use the lazy Flary tool catalog.",
-      inputSchema: {
-        type: "object",
-        properties: { code: { type: "string" } },
-        required: ["code"],
+    tools: [
+      {
+        name: "execute",
+        description: "Use the lazy Flary tool catalog.",
+        inputSchema: {
+          type: "object",
+          properties: { code: { type: "string" } },
+          required: ["code"],
+        },
       },
-    }],
+    ],
   });
   assert.equal(response.finishReason, "tool_call");
-  assert.deepEqual(response.toolCalls, [{
-    id: "call_1",
-    name: "execute",
-    arguments: { code: 'return tools.search("threads")' },
-    rawArguments: '{"code":"return tools.search(\\"threads\\")"}',
-  }]);
+  assert.deepEqual(response.toolCalls, [
+    {
+      id: "call_1",
+      name: "execute",
+      arguments: { code: 'return tools.search("threads")' },
+      rawArguments: '{"code":"return tools.search(\\"threads\\")"}',
+    },
+  ]);
 
   await adapter.complete({
     ...request,
@@ -130,14 +134,16 @@ test("Cloudflare Workers AI adapter preserves tool calls and their round trip", 
     {
       role: "assistant",
       content: "",
-      tool_calls: [{
-        id: "call_1",
-        type: "function",
-        function: {
-          name: "execute",
-          arguments: '{"code":"return tools.search(\\"threads\\")"}',
+      tool_calls: [
+        {
+          id: "call_1",
+          type: "function",
+          function: {
+            name: "execute",
+            arguments: '{"code":"return tools.search(\\"threads\\")"}',
+          },
         },
-      }],
+      ],
     },
     { role: "tool", content: '{"items":[]}', tool_call_id: "call_1" },
   ]);

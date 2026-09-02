@@ -3,9 +3,7 @@ import {
   type McpDescriptorCache,
   type ScopedMcpEndpoint,
 } from "../mcp/index.js";
-import type {
-  McpToolDescriptor,
-} from "../mcp/client.js";
+import type { McpToolDescriptor } from "../mcp/client.js";
 import type { TenantContext } from "../contracts/tenancy.js";
 
 interface SqlRows<T> {
@@ -13,10 +11,7 @@ interface SqlRows<T> {
 }
 
 interface SqlStorage {
-  exec<T = Record<string, unknown>>(
-    query: string,
-    ...bindings: unknown[]
-  ): SqlRows<T>;
+  exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): SqlRows<T>;
 }
 
 interface DescriptorCacheRow {
@@ -84,9 +79,9 @@ export class SqliteMcpDescriptorCache implements McpDescriptorCache {
       );
       return undefined;
     }
-    const parsed = McpToolDescriptorSchema.array().max(256).safeParse(
-      JSON.parse(row.descriptors_json),
-    );
+    const parsed = McpToolDescriptorSchema.array()
+      .max(256)
+      .safeParse(JSON.parse(row.descriptors_json));
     return parsed.success ? parsed.data : undefined;
   }
 

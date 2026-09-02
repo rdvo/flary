@@ -33,11 +33,17 @@ test("Gemini uses the key header and normalizes text and usage", async () => {
 
 test("Gemini maps function calls to the provider-neutral contract", async () => {
   const adapter = new GeminiAdapter({
-    fetch: async () => Response.json({
-      candidates: [{ content: { parts: [{ functionCall: { name: "search", args: { query: "Flary" } } }] } }],
-    }),
+    fetch: async () =>
+      Response.json({
+        candidates: [
+          { content: { parts: [{ functionCall: { name: "search", args: { query: "Flary" } } }] } },
+        ],
+      }),
   });
-  const result = await adapter.complete({ model: "gemini-test", messages: [{ role: "user", content: "Search" }] });
+  const result = await adapter.complete({
+    model: "gemini-test",
+    messages: [{ role: "user", content: "Search" }],
+  });
   assert.equal(result.finishReason, "tool_call");
   assert.deepEqual(result.toolCalls[0]?.arguments, { query: "Flary" });
 });

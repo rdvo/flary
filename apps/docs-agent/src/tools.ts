@@ -23,7 +23,9 @@ export const searchFlary = app.fn({
     return docsCorpus
       .map((entry) => ({ entry, score: score(entry, terms) }))
       .filter((candidate) => candidate.score > 0)
-      .sort((left, right) => right.score - left.score || left.entry.id.localeCompare(right.entry.id))
+      .sort(
+        (left, right) => right.score - left.score || left.entry.id.localeCompare(right.entry.id),
+      )
       .slice(0, 6)
       .map(({ entry }) => ({
         id: entry.id,
@@ -73,7 +75,10 @@ function score(entry: (typeof docsCorpus)[number], terms: readonly string[]): nu
 }
 
 function excerpt(text: string, terms: readonly string[]): string {
-  const normalized = text.replace(/^---[\s\S]*?---\s*/m, "").replace(/\s+/g, " ").trim();
+  const normalized = text
+    .replace(/^---[\s\S]*?---\s*/m, "")
+    .replace(/\s+/g, " ")
+    .trim();
   const lower = normalized.toLowerCase();
   const positions = terms.map((term) => lower.indexOf(term)).filter((value) => value >= 0);
   const center = positions.length > 0 ? Math.min(...positions) : 0;

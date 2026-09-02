@@ -14,8 +14,7 @@ const ProjectPathTextSchema = z
     message: "Paths must use forward slashes",
   })
   .refine(
-    (value) =>
-      value.split("/").every((part) => part.length > 0 && part !== "." && part !== ".."),
+    (value) => value.split("/").every((part) => part.length > 0 && part !== "." && part !== ".."),
     { message: "Paths must be canonical and stay inside the project root" },
   );
 
@@ -24,10 +23,7 @@ export const ProjectFilePathSchema = ProjectPathTextSchema;
 export type ProjectFilePath = z.infer<typeof ProjectFilePathSchema>;
 
 /** A canonical directory prefix. An empty value selects the project root. */
-export const ProjectDirectoryPathSchema = z.union([
-  z.literal(""),
-  ProjectPathTextSchema,
-]);
+export const ProjectDirectoryPathSchema = z.union([z.literal(""), ProjectPathTextSchema]);
 export type ProjectDirectoryPath = z.infer<typeof ProjectDirectoryPathSchema>;
 
 export const ProjectFileEncodingSchema = z.enum(["utf8", "base64"]);
@@ -62,21 +58,12 @@ export const ProjectFileWriteRequestSchema = z
     path: ProjectFilePathSchema,
     content: z.string().max(32 * 1024 * 1024),
     encoding: ProjectFileEncodingSchema.default("utf8"),
-    mediaType: z
-      .string()
-      .trim()
-      .min(1)
-      .max(255)
-      .default("application/octet-stream"),
+    mediaType: z.string().trim().min(1).max(255).default("application/octet-stream"),
     expectedSha256: Sha256HexSchema.optional(),
   })
   .strict();
-export type ProjectFileWriteRequestInput = z.input<
-  typeof ProjectFileWriteRequestSchema
->;
-export type ProjectFileWriteRequest = z.output<
-  typeof ProjectFileWriteRequestSchema
->;
+export type ProjectFileWriteRequestInput = z.input<typeof ProjectFileWriteRequestSchema>;
+export type ProjectFileWriteRequest = z.output<typeof ProjectFileWriteRequestSchema>;
 
 export const ProjectFileReadRequestSchema = z
   .object({
@@ -84,9 +71,7 @@ export const ProjectFileReadRequestSchema = z
     encoding: ProjectFileEncodingSchema.optional(),
   })
   .strict();
-export type ProjectFileReadRequest = z.infer<
-  typeof ProjectFileReadRequestSchema
->;
+export type ProjectFileReadRequest = z.infer<typeof ProjectFileReadRequestSchema>;
 
 export const ProjectFileReadResponseSchema = z
   .object({
@@ -95,9 +80,7 @@ export const ProjectFileReadResponseSchema = z
     encoding: ProjectFileEncodingSchema,
   })
   .strict();
-export type ProjectFileReadResponse = z.infer<
-  typeof ProjectFileReadResponseSchema
->;
+export type ProjectFileReadResponse = z.infer<typeof ProjectFileReadResponseSchema>;
 
 export const ProjectFileListRequestSchema = z
   .object({
@@ -106,21 +89,15 @@ export const ProjectFileListRequestSchema = z
     limit: z.number().int().min(1).max(10_000).default(1_000),
   })
   .strict();
-export type ProjectFileListRequestInput = z.input<
-  typeof ProjectFileListRequestSchema
->;
-export type ProjectFileListRequest = z.output<
-  typeof ProjectFileListRequestSchema
->;
+export type ProjectFileListRequestInput = z.input<typeof ProjectFileListRequestSchema>;
+export type ProjectFileListRequest = z.output<typeof ProjectFileListRequestSchema>;
 
 export const ProjectFileListResponseSchema = z
   .object({
     files: z.array(ProjectFileEntrySchema),
   })
   .strict();
-export type ProjectFileListResponse = z.infer<
-  typeof ProjectFileListResponseSchema
->;
+export type ProjectFileListResponse = z.infer<typeof ProjectFileListResponseSchema>;
 
 export const ProjectFileDeleteRequestSchema = z
   .object({
@@ -137,21 +114,15 @@ export const ProjectFileDeleteRequestSchema = z
       });
     }
   });
-export type ProjectFileDeleteRequestInput = z.input<
-  typeof ProjectFileDeleteRequestSchema
->;
-export type ProjectFileDeleteRequest = z.output<
-  typeof ProjectFileDeleteRequestSchema
->;
+export type ProjectFileDeleteRequestInput = z.input<typeof ProjectFileDeleteRequestSchema>;
+export type ProjectFileDeleteRequest = z.output<typeof ProjectFileDeleteRequestSchema>;
 
 export const ProjectFileDeleteResponseSchema = z
   .object({
     deleted: z.array(ProjectFilePathSchema),
   })
   .strict();
-export type ProjectFileDeleteResponse = z.infer<
-  typeof ProjectFileDeleteResponseSchema
->;
+export type ProjectFileDeleteResponse = z.infer<typeof ProjectFileDeleteResponseSchema>;
 
 export const ProjectFileMoveRequestSchema = z
   .object({
@@ -163,24 +134,19 @@ export const ProjectFileMoveRequestSchema = z
   .refine((value) => value.from !== value.to, {
     message: "Source and destination paths must be different",
   });
-export type ProjectFileMoveRequestInput = z.input<
-  typeof ProjectFileMoveRequestSchema
->;
-export type ProjectFileMoveRequest = z.output<
-  typeof ProjectFileMoveRequestSchema
->;
+export type ProjectFileMoveRequestInput = z.input<typeof ProjectFileMoveRequestSchema>;
+export type ProjectFileMoveRequest = z.output<typeof ProjectFileMoveRequestSchema>;
 
 export const ProjectFileCopyRequestSchema = ProjectFileMoveRequestSchema;
-export type ProjectFileCopyRequestInput = z.input<
-  typeof ProjectFileCopyRequestSchema
->;
-export type ProjectFileCopyRequest = z.output<
-  typeof ProjectFileCopyRequestSchema
->;
+export type ProjectFileCopyRequestInput = z.input<typeof ProjectFileCopyRequestSchema>;
+export type ProjectFileCopyRequest = z.output<typeof ProjectFileCopyRequestSchema>;
 
 export const ProjectTextEditSchema = z
   .object({
-    oldText: z.string().min(1).max(2 * 1024 * 1024),
+    oldText: z
+      .string()
+      .min(1)
+      .max(2 * 1024 * 1024),
     newText: z.string().max(2 * 1024 * 1024),
     replaceAll: z.boolean().default(false),
   })
@@ -194,51 +160,38 @@ export const ProjectFileEditRequestSchema = z
     expectedSha256: Sha256HexSchema.optional(),
   })
   .strict();
-export type ProjectFileEditRequestInput = z.input<
-  typeof ProjectFileEditRequestSchema
->;
-export type ProjectFileEditRequest = z.output<
-  typeof ProjectFileEditRequestSchema
->;
+export type ProjectFileEditRequestInput = z.input<typeof ProjectFileEditRequestSchema>;
+export type ProjectFileEditRequest = z.output<typeof ProjectFileEditRequestSchema>;
 
 export const ProjectFilePatchRequestSchema = z
   .object({
     path: ProjectFilePathSchema,
-    patch: z.string().min(1).max(8 * 1024 * 1024),
+    patch: z
+      .string()
+      .min(1)
+      .max(8 * 1024 * 1024),
     expectedSha256: Sha256HexSchema.optional(),
   })
   .strict();
-export type ProjectFilePatchRequestInput = z.input<
-  typeof ProjectFilePatchRequestSchema
->;
-export type ProjectFilePatchRequest = z.output<
-  typeof ProjectFilePatchRequestSchema
->;
+export type ProjectFilePatchRequestInput = z.input<typeof ProjectFilePatchRequestSchema>;
+export type ProjectFilePatchRequest = z.output<typeof ProjectFilePatchRequestSchema>;
 
 export const ProjectFileMutationResponseSchema = z
   .object({
     file: ProjectFileEntrySchema,
   })
   .strict();
-export type ProjectFileMutationResponse = z.infer<
-  typeof ProjectFileMutationResponseSchema
->;
+export type ProjectFileMutationResponse = z.infer<typeof ProjectFileMutationResponseSchema>;
 
-export const ProjectFileEditResponseSchema =
-  ProjectFileMutationResponseSchema.extend({
-    replacementCount: z.number().int().nonnegative(),
-  }).strict();
-export type ProjectFileEditResponse = z.infer<
-  typeof ProjectFileEditResponseSchema
->;
+export const ProjectFileEditResponseSchema = ProjectFileMutationResponseSchema.extend({
+  replacementCount: z.number().int().nonnegative(),
+}).strict();
+export type ProjectFileEditResponse = z.infer<typeof ProjectFileEditResponseSchema>;
 
-export const ProjectFilePatchResponseSchema =
-  ProjectFileMutationResponseSchema.extend({
-    hunkCount: z.number().int().positive(),
-  }).strict();
-export type ProjectFilePatchResponse = z.infer<
-  typeof ProjectFilePatchResponseSchema
->;
+export const ProjectFilePatchResponseSchema = ProjectFileMutationResponseSchema.extend({
+  hunkCount: z.number().int().positive(),
+}).strict();
+export type ProjectFilePatchResponse = z.infer<typeof ProjectFilePatchResponseSchema>;
 
 export const WorkspaceMutationSchema = z.discriminatedUnion("operation", [
   z

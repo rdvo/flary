@@ -37,9 +37,7 @@ export function redactSecrets(value: unknown, key?: string): JsonValue {
 
 export function redactText(value: string): string {
   if (SENSITIVE_PREFIX.test(value.trim())) return "<redacted>";
-  return value
-    .replace(SENSITIVE_ASSIGNMENT, "$1<redacted>")
-    .replace(SENSITIVE_TOKEN, "<redacted>");
+  return value.replace(SENSITIVE_ASSIGNMENT, "$1<redacted>").replace(SENSITIVE_TOKEN, "<redacted>");
 }
 
 export function redactErrorMessage(value: unknown, fallback: string): string {

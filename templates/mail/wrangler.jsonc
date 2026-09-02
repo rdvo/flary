@@ -6,31 +6,27 @@
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/health"]
+    "run_worker_first": ["/api/*", "/health"],
   },
   "d1_databases": [{ "binding": "MAIL_DB" }],
   "r2_buckets": [{ "binding": "MAIL_STORAGE" }],
   "queues": {
     "producers": [{ "binding": "MAIL_QUEUE", "queue": "flary-mail-jobs" }],
-    "consumers": [
-      { "queue": "flary-mail-jobs", "max_batch_size": 10, "max_retries": 5 }
-    ]
+    "consumers": [{ "queue": "flary-mail-jobs", "max_batch_size": 10, "max_retries": 5 }],
   },
   "durable_objects": {
-    "bindings": [{ "name": "MAIL_ROOM", "class_name": "MailRoom" }]
+    "bindings": [{ "name": "MAIL_ROOM", "class_name": "MailRoom" }],
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MailRoom"] }],
-  "send_email": [
-    { "name": "EMAIL", "allowed_sender_addresses": ["admin@example.com"] }
-  ],
+  "send_email": [{ "name": "EMAIL", "allowed_sender_addresses": ["admin@example.com"] }],
   "addresses": ["admin@example.com"],
   "vars": {
     "MAIL_DOMAIN": "example.com",
-    "MAILBOX_ADDRESSES": "admin@example.com"
+    "MAILBOX_ADDRESSES": "admin@example.com",
   },
   "observability": {
     "enabled": true,
     "logs": { "enabled": true, "head_sampling_rate": 1 },
-    "traces": { "enabled": true, "head_sampling_rate": 0.05 }
-  }
+    "traces": { "enabled": true, "head_sampling_rate": 0.05 },
+  },
 }

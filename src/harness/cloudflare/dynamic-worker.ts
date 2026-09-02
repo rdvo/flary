@@ -8,13 +8,13 @@ import {
   CodeModeInputSchema,
   type CodeExecutionRequest,
   type CodeExecutionResult,
-} from "../contracts/code-execution";
+} from "../contracts/code-execution.js";
 import {
   clipText,
   toJsonValue,
   type CodeExecutionAdapter,
   type CodeExecutionContext,
-} from "../execution/adapters";
+} from "../execution/adapters.js";
 import type { FlaryExecutionToolOptions } from "../flue/toolset.js";
 
 export interface DynamicWorkerAdapterOptions {
@@ -44,9 +44,7 @@ export function createCloudflareCodeMode(
 }
 
 // Run short model-written JavaScript with network access blocked by default.
-export class CloudflareDynamicWorkerAdapter
-  implements CodeExecutionAdapter
-{
+export class CloudflareDynamicWorkerAdapter implements CodeExecutionAdapter {
   readonly engine = "dynamic-worker" as const;
   private readonly executor: Promise<DynamicWorkerExecutor>;
   private readonly operation: string;
@@ -65,10 +63,7 @@ export class CloudflareDynamicWorkerAdapter
   }
 
   supports(request: CodeExecutionRequest): boolean {
-    return (
-      request.runtime !== "linux" &&
-      request.operation === this.operation
-    );
+    return request.runtime !== "linux" && request.operation === this.operation;
   }
 
   async execute(
@@ -77,12 +72,10 @@ export class CloudflareDynamicWorkerAdapter
   ): Promise<CodeExecutionResult> {
     const input = CodeModeInputSchema.parse(request.input);
     const startedAt = new Date().toISOString();
-    const providers: ResolvedProvider[] = context.toolNamespaces?.map(
-      (provider) => ({
-        name: provider.name,
-        fns: wrapTools(provider.tools),
-      }),
-    ) ?? [
+    const providers: ResolvedProvider[] = context.toolNamespaces?.map((provider) => ({
+      name: provider.name,
+      fns: wrapTools(provider.tools),
+    })) ?? [
       {
         name: "codemode",
         fns: wrapTools(context.tools ?? {}),
@@ -91,9 +84,7 @@ export class CloudflareDynamicWorkerAdapter
 
     const outcome = await (await this.executor).execute(input.code, providers);
     const completedAt = new Date().toISOString();
-    const logs = (outcome.logs ?? []).map((line) =>
-      clipText(line, request.limits.maxOutputBytes),
-    );
+    const logs = (outcome.logs ?? []).map((line) => clipText(line, request.limits.maxOutputBytes));
     if (outcome.error) {
       return {
         executionId: request.executionId,
@@ -109,8 +100,7 @@ export class CloudflareDynamicWorkerAdapter
         logs,
         startedAt,
         completedAt,
-        durationMs:
-          new Date(completedAt).getTime() - new Date(startedAt).getTime(),
+        durationMs: new Date(completedAt).getTime() - new Date(startedAt).getTime(),
         metadata: request.metadata,
       };
     }
@@ -125,18 +115,14 @@ export class CloudflareDynamicWorkerAdapter
       logs,
       startedAt,
       completedAt,
-      durationMs:
-        new Date(completedAt).getTime() - new Date(startedAt).getTime(),
+      durationMs: new Date(completedAt).getTime() - new Date(startedAt).getTime(),
       metadata: request.metadata,
     };
   }
 }
 
 function wrapTools(
-  tools: Record<
-    string,
-    (...args: unknown[]) => unknown | Promise<unknown>
-  >,
+  tools: Record<string, (...args: unknown[]) => unknown | Promise<unknown>>,
 ): Record<string, (...args: unknown[]) => Promise<unknown>> {
   return Object.fromEntries(
     Object.entries(tools).map(([name, tool]) => [

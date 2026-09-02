@@ -1,14 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  InMemoryConversationStreamStore,
-  type ConversationRecord,
-} from "@flue/runtime-v2/adapter";
-import {
-  agentStreamPath,
-  handleAgentConversationRead,
-} from "@flue/runtime-v2/internal";
+import { InMemoryConversationStreamStore, type ConversationRecord } from "@flue/runtime-v2/adapter";
+import { agentStreamPath, handleAgentConversationRead } from "@flue/runtime-v2/internal";
 
 import { createFlue2CanonicalControl } from "../../src/harness/session/flue2-control.ts";
 // Flue 2 pins this file name. This test exercises its real context builder.
@@ -52,43 +46,46 @@ test("canonical rollback creates an active branch that survives store reattachme
     request: new Request("https://flue.internal/?view=history"),
   });
   assert.equal(response.status, 200);
-  const snapshot = await response.json() as {
+  const snapshot = (await response.json()) as {
     messages: Array<{ id: string; signal?: { tagName?: string } }>;
   };
-  assert.deepEqual(snapshot.messages.map((message) => message.id), [
-    "entry_user_1",
-    "entry_user_2",
-    "entry_flary_rollback_marker",
-  ]);
+  assert.deepEqual(
+    snapshot.messages.map((message) => message.id),
+    ["entry_user_1", "entry_user_2", "entry_flary_rollback_marker"],
+  );
   assert.equal(snapshot.messages[2]?.signal?.tagName, "rollback");
 
   const entries = new Map<string, unknown>([
     ["entry_user_1", reducedUser("entry_user_1", null, "first")],
     ["entry_user_2", reducedUser("entry_user_2", "entry_user_1", "second")],
-    ["entry_flary_rollback_marker", {
-      id: "entry_flary_rollback_marker",
-      parentId: "entry_user_2",
-      timestamp: "2026-08-27T12:00:00.000Z",
-      type: "message",
-      message: {
-        role: "signal",
-        type: "flary_rollback",
-        tagName: "rollback",
-        content: "Rolled back",
-        attributes: {
-          targetEntryId: "entry_user_1",
-          turnId: "turn_1",
-          excludeTarget: "false",
+    [
+      "entry_flary_rollback_marker",
+      {
+        id: "entry_flary_rollback_marker",
+        parentId: "entry_user_2",
+        timestamp: "2026-08-27T12:00:00.000Z",
+        type: "message",
+        message: {
+          role: "signal",
+          type: "flary_rollback",
+          tagName: "rollback",
+          content: "Rolled back",
+          attributes: {
+            targetEntryId: "entry_user_1",
+            turnId: "turn_1",
+            excludeTarget: "false",
+          },
+          timestamp: Date.parse("2026-08-27T12:00:00.000Z"),
         },
-        timestamp: Date.parse("2026-08-27T12:00:00.000Z"),
       },
-    }],
+    ],
   ]);
   const context = buildConversationContext({
     entries,
     activeLeafId: "entry_flary_rollback_marker",
   }) as Array<{ content: Array<{ type: string; text?: string }> }>;
-  const text = context.flatMap((message) => message.content)
+  const text = context
+    .flatMap((message) => message.content)
     .map((part) => part.text ?? "")
     .join("\n");
   assert.match(text, /first/);
@@ -142,21 +139,18 @@ test("canonical archive restores the exact record batches after eviction", async
 test("through-turn export preserves atomic batches and rejects a mixed boundary", async () => {
   const store = new InMemoryConversationStreamStore();
   const path = agentStreamPath("coder", "source_boundary");
-  await seed(store, path, [
-    rootRecord(),
-    userRecord("r1", "turn_1", "u1", null, "one"),
-  ]);
+  await seed(store, path, [rootRecord(), userRecord("r1", "turn_1", "u1", null, "one")]);
   const control = createFlue2CanonicalControl({
     store,
     compact: async () => {},
     active: async () => false,
     resumeApprovals: async () => {},
   });
-  const archive = await control.exportCanonical({
+  const archive = (await control.exportCanonical({
     agentId: "coder",
     threadId: "source_boundary",
     throughTurnId: "turn_1",
-  }) as { batches: readonly (readonly ConversationRecord[])[] };
+  })) as { batches: readonly (readonly ConversationRecord[])[] };
   assert.equal(archive.batches.length, 1);
   assert.equal(archive.batches[0]?.length, 2);
 

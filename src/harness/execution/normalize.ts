@@ -9,7 +9,7 @@ import {
 
 const functionValueSchema = z.custom<(...args: never[]) => unknown>(
   (value) => typeof value === "function",
-  { message: "Expected a function" }
+  { message: "Expected a function" },
 );
 
 export function parseToolHandler(value: unknown): ToolHandler {
@@ -19,14 +19,8 @@ export function parseToolHandler(value: unknown): ToolHandler {
 export function normalizeToolTask(input: ToolTaskInput | ToolTask): ToolTask {
   const parsed = toolTaskInputSchema.parse(input);
   const operation = parsed.operation ?? parsed.kind ?? parsed.type ?? "read";
-  const execute =
-    parsed.execute === undefined
-      ? undefined
-      : parseToolHandler(parsed.execute);
-  const handler =
-    parsed.handler === undefined
-      ? undefined
-      : parseToolHandler(parsed.handler);
+  const execute = parsed.execute === undefined ? undefined : parseToolHandler(parsed.execute);
+  const handler = parsed.handler === undefined ? undefined : parseToolHandler(parsed.handler);
 
   return {
     ...parsed,
@@ -38,9 +32,7 @@ export function normalizeToolTask(input: ToolTaskInput | ToolTask): ToolTask {
   };
 }
 
-export function parseToolTasks(
-  inputs: readonly (ToolTaskInput | ToolTask)[]
-): ToolTask[] {
+export function parseToolTasks(inputs: readonly (ToolTaskInput | ToolTask)[]): ToolTask[] {
   const parsed = z.array(toolTaskInputSchema).parse(inputs);
   const ids = new Set<string>();
   const issues: z.ZodIssue[] = [];
@@ -84,7 +76,7 @@ export interface NormalizedToolDefinition {
 }
 
 export function normalizeToolDefinition(
-  entry: ToolRegistryEntry | unknown
+  entry: ToolRegistryEntry | unknown,
 ): NormalizedToolDefinition {
   if (typeof entry === "function") {
     return { execute: parseToolHandler(entry) };
@@ -140,10 +132,7 @@ export function normalizeToolDefinition(
   }
 
   const requiresApproval = candidate.requiresApproval;
-  if (
-    requiresApproval !== undefined &&
-    typeof requiresApproval !== "boolean"
-  ) {
+  if (requiresApproval !== undefined && typeof requiresApproval !== "boolean") {
     throw new z.ZodError([
       {
         code: z.ZodIssueCode.custom,
@@ -156,12 +145,8 @@ export function normalizeToolDefinition(
   return {
     execute,
     operation: operation as "read" | "write" | undefined,
-    resourceKey: resourceKey as
-      | string
-      | ((task: ToolTask) => string | undefined)
-      | undefined,
+    resourceKey: resourceKey as string | ((task: ToolTask) => string | undefined) | undefined,
     requiresApproval: requiresApproval as boolean | undefined,
     concurrencyKey: concurrencyKey as string | undefined,
   };
 }
-

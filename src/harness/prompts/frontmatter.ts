@@ -1,23 +1,13 @@
 import { parseDocument } from "yaml";
-import {
-  diagnosticFromZod,
-  makeDiagnostic,
-  throwCompileError,
-} from "./diagnostics.js";
-import {
-  PromptFrontmatterSchema,
-  type PromptFrontmatter,
-} from "./types.js";
+import { diagnosticFromZod, makeDiagnostic, throwCompileError } from "./diagnostics.js";
+import { PromptFrontmatterSchema, type PromptFrontmatter } from "./types.js";
 
 export interface ParsedPromptDocument {
   frontmatter: PromptFrontmatter;
   body: string;
 }
 
-export function parsePromptDocument(
-  source: string,
-  file?: string,
-): ParsedPromptDocument {
+export function parsePromptDocument(source: string, file?: string): ParsedPromptDocument {
   if (!source.startsWith("---")) {
     return {
       frontmatter: PromptFrontmatterSchema.parse({}),

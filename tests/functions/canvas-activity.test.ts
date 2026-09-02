@@ -21,11 +21,14 @@ test("draw_canvas projects a bounded redacted UI artifact", () => {
 });
 
 test("draw_canvas bounds public HTML and iframe height", () => {
-  const projected = projectPublicToolActivityInput({
-    title: "Large canvas",
-    html: `  <main>${"x".repeat(70_000)}</main>  `,
-    height: 4_000,
-  }, "flary__draw_canvas");
+  const projected = projectPublicToolActivityInput(
+    {
+      title: "Large canvas",
+      html: `  <main>${"x".repeat(70_000)}</main>  `,
+      height: 4_000,
+    },
+    "flary__draw_canvas",
+  );
   const canvas = projected.canvas as Record<string, unknown>;
   assert.equal((canvas.html as string).length, 60_000);
   assert.equal(canvas.height, 720);

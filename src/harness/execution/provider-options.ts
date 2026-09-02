@@ -35,15 +35,13 @@ export interface ResolveProviderRequestTuningInput {
 }
 
 const OPENAI_REASONING_LEVELS: ReadonlySet<string> = new Set(
-  ReasoningEffortSchema.options.filter(
-    (level) => level !== "max" && level !== "ultra"
-  )
+  ReasoningEffortSchema.options.filter((level) => level !== "max" && level !== "ultra"),
 );
 
 // Pi-style native verbosity is available through the OpenAI Responses API.
 // Other adapters receive the same value as clear prompt guidance.
 export function resolveProviderRequestTuning(
-  input: ResolveProviderRequestTuningInput
+  input: ResolveProviderRequestTuningInput,
 ): ProviderRequestTuning {
   const providerKind = ProviderKindSchema.parse(input.providerKind);
   const api = ProviderApiStyleSchema.parse(input.api);
@@ -64,17 +62,11 @@ export function resolveProviderRequestTuning(
 
   if (selection.reasoningEffort) {
     const effort = ReasoningEffortSchema.parse(selection.reasoningEffort);
-    if (
-      providerKind === "openai" &&
-      api === "responses" &&
-      OPENAI_REASONING_LEVELS.has(effort)
-    ) {
+    if (providerKind === "openai" && api === "responses" && OPENAI_REASONING_LEVELS.has(effort)) {
       const currentReasoning = asJsonObject(parameters.reasoning);
       parameters.reasoning = { ...currentReasoning, effort };
     } else {
-      warnings.push(
-        `The ${providerKind} ${api} adapter must map reasoning effort '${effort}'.`
-      );
+      warnings.push(`The ${providerKind} ${api} adapter must map reasoning effort '${effort}'.`);
     }
   }
 
@@ -90,9 +82,7 @@ function asJsonObject(value: unknown): JsonObject {
   return parsed.success ? parsed.data : {};
 }
 
-function verbosityInstruction(
-  verbosity: z.infer<typeof TextVerbositySchema>
-): string {
+function verbosityInstruction(verbosity: z.infer<typeof TextVerbositySchema>): string {
   if (verbosity === "low") {
     return "Use concise answers. Include only details that are needed.";
   }

@@ -39,9 +39,7 @@ body {
   margin: 0;
   min-width: 320px;
   overflow-x: hidden;
-  background:
-    linear-gradient(90deg, rgba(76, 54, 37, 0.035) 1px, transparent 1px),
-    var(--paper);
+  background: linear-gradient(90deg, rgba(76, 54, 37, 0.035) 1px, transparent 1px), var(--paper);
   background-size: min(10vw, 144px) 100%;
 }
 
@@ -517,9 +515,7 @@ h2 {
   overflow: auto;
   padding: 24px 28px 32px;
   color: #e6e7eb;
-  background:
-    radial-gradient(circle at 92% 5%, rgba(201, 103, 45, 0.13), transparent 33%),
-    #1e1e1e;
+  background: radial-gradient(circle at 92% 5%, rgba(201, 103, 45, 0.13), transparent 33%), #1e1e1e;
   font-size: 13px;
   line-height: 1.7;
   tab-size: 2;
@@ -673,8 +669,7 @@ h3 {
   border: 1px solid var(--ink);
   color: #f0f3fa;
   background:
-    radial-gradient(circle at 88% 12%, rgba(201, 103, 45, 0.15), transparent 38%),
-    var(--ink);
+    radial-gradient(circle at 88% 12%, rgba(201, 103, 45, 0.15), transparent 38%), var(--ink);
   font-size: clamp(13px, 1.5vw, 17px);
   line-height: 1.9;
 }

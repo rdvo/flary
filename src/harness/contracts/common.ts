@@ -37,10 +37,7 @@ export const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 );
 
 // Use a JSON object for extension data.
-export const JsonObjectSchema: z.ZodType<JsonObject> = z.record(
-  z.string(),
-  JsonValueSchema,
-);
+export const JsonObjectSchema: z.ZodType<JsonObject> = z.record(z.string(), JsonValueSchema);
 
 // Use metadata for non-sensitive extension data.
 export const MetadataSchema = JsonObjectSchema;

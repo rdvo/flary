@@ -11,10 +11,10 @@ import {
   type ArtifactCommitInput,
   type ArtifactRepository,
   type ArtifactSearchHit,
-} from "./artifacts";
-import { RecallScopeSchema, type RecallScope } from "../contracts/recall";
-import type { StorageScope } from "../contracts/tenancy";
-import { tenantStoragePrefix } from "./scopes";
+} from "./artifacts.js";
+import { RecallScopeSchema, type RecallScope } from "../contracts/recall.js";
+import type { StorageScope } from "../contracts/tenancy.js";
+import { tenantStoragePrefix } from "./scopes.js";
 
 export interface ArtifactR2ObjectBody {
   text(): Promise<string>;
@@ -27,11 +27,7 @@ export interface ArtifactR2Bucket {
     options?: { httpMetadata?: { contentType?: string } },
   ): Promise<unknown>;
   get(key: string): Promise<ArtifactR2ObjectBody | null>;
-  list?(options?: {
-    prefix?: string;
-    cursor?: string;
-    limit?: number;
-  }): Promise<{
+  list?(options?: { prefix?: string; cursor?: string; limit?: number }): Promise<{
     objects: Array<{ key: string }>;
     truncated?: boolean;
     cursor?: string;
@@ -85,10 +81,7 @@ export class R2ArtifactHistoryStore implements ArtifactHistoryStore {
     return commit;
   }
 
-  async read(
-    repository: string,
-    commitId: string,
-  ): Promise<ArtifactCommit | undefined> {
+  async read(repository: string, commitId: string): Promise<ArtifactCommit | undefined> {
     this.assertRepository(repository);
     const object = await this.readObject(this.commitKey(repository, commitId));
     return object;
@@ -111,9 +104,7 @@ export class R2ArtifactHistoryStore implements ArtifactHistoryStore {
       throw new Error("Artifact history limit must be an integer from 1 to 100");
     }
     const objects = await this.listAll(this.commitPrefix(repository));
-    const commits = await Promise.all(
-      objects.map((object) => this.readObject(object.key)),
-    );
+    const commits = await Promise.all(objects.map((object) => this.readObject(object.key)));
     return commits
       .filter(
         (commit): commit is ArtifactCommit =>
@@ -134,9 +125,7 @@ export class R2ArtifactHistoryStore implements ArtifactHistoryStore {
     const parsedScope = RecallScopeSchema.parse(scope);
     this.assertScope(parsedScope);
     this.assertRepository(repository);
-    const pointerObject = await this.#bucket.get(
-      this.latestKey(repository, parsedScope, branch),
-    );
+    const pointerObject = await this.#bucket.get(this.latestKey(repository, parsedScope, branch));
     if (!pointerObject) return undefined;
     const pointer = JSON.parse(await pointerObject.text()) as {
       commitId?: string;
@@ -145,10 +134,7 @@ export class R2ArtifactHistoryStore implements ArtifactHistoryStore {
     return this.read(repository, pointer.commitId);
   }
 
-  async repository(
-    repository: string,
-    scope: RecallScope,
-  ): Promise<ArtifactRepository> {
+  async repository(repository: string, scope: RecallScope): Promise<ArtifactRepository> {
     this.assertScope(scope);
     this.assertRepository(repository);
     return ArtifactRepositorySchema.parse({
@@ -158,11 +144,7 @@ export class R2ArtifactHistoryStore implements ArtifactHistoryStore {
     });
   }
 
-  async branch(
-    repository: string,
-    scope: RecallScope,
-    branch = "main",
-  ): Promise<ArtifactBranch> {
+  async branch(repository: string, scope: RecallScope, branch = "main"): Promise<ArtifactBranch> {
     const parsedScope = RecallScopeSchema.parse(scope);
     const parsedBranch = ArtifactBranchNameSchema.parse(branch);
     this.assertScope(parsedScope);
@@ -270,9 +252,7 @@ export class R2ArtifactHistoryStore implements ArtifactHistoryStore {
       throw new Error("R2 list is required for exact artifact search");
     }
     const objects = await this.listAll(this.commitPrefix(repository));
-    const commits = await Promise.all(
-      objects.map((object) => this.readObject(object.key)),
-    );
+    const commits = await Promise.all(objects.map((object) => this.readObject(object.key)));
     const hits: ArtifactSearchHit[] = [];
     for (const commit of commits) {
       if (!commit || commit.repository !== repository) continue;

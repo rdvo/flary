@@ -1,8 +1,4 @@
-import {
-  Workspace,
-  createWorkspaceStateBackend,
-  type StateBackend,
-} from "@cloudflare/shell";
+import { Workspace, createWorkspaceStateBackend, type StateBackend } from "@cloudflare/shell";
 import { stateTools } from "@cloudflare/shell/workers";
 import { gitTools, type GitToolsOptions } from "@cloudflare/shell/git";
 import type { ToolProvider } from "@cloudflare/codemode";
@@ -77,9 +73,7 @@ export interface ShellWorkspaceByteWrite {
   expectedSha256?: string;
 }
 
-type ShellR2Bucket = NonNullable<
-  ConstructorParameters<typeof Workspace>[0]["r2"]
->;
+type ShellR2Bucket = NonNullable<ConstructorParameters<typeof Workspace>[0]["r2"]>;
 
 type WorkspaceFileRow = {
   path: string;
@@ -112,8 +106,7 @@ export class ShellWorkspace {
     this.#sql = options.sql;
     this.#scope = options.scope;
     this.#r2 = options.r2 as BlobBucket | undefined;
-    this.#inlineThreshold =
-      options.inlineThreshold ?? FLARY_WORKSPACE_INLINE_THRESHOLD;
+    this.#inlineThreshold = options.inlineThreshold ?? FLARY_WORKSPACE_INLINE_THRESHOLD;
     this.#requireR2ForLargeFiles = options.requireR2ForLargeFiles ?? true;
     this.#hasR2 = Boolean(options.r2);
     this.#sql.exec(`
@@ -143,9 +136,7 @@ export class ShellWorkspace {
     });
   }
 
-  async write(
-    input: ProjectFileWriteRequestInput,
-  ): Promise<ProjectFileMutationResponse> {
+  async write(input: ProjectFileWriteRequestInput): Promise<ProjectFileMutationResponse> {
     const request = ProjectFileWriteRequestSchema.parse(input);
     const bytes = decodeWorkspaceFileContent(request.content, request.encoding);
     return this.writeBytes({
@@ -156,9 +147,7 @@ export class ShellWorkspace {
     });
   }
 
-  async writeBytes(
-    input: ShellWorkspaceByteWrite,
-  ): Promise<ProjectFileMutationResponse> {
+  async writeBytes(input: ShellWorkspaceByteWrite): Promise<ProjectFileMutationResponse> {
     if (!(input.bytes instanceof Uint8Array)) {
       throw new Error("Workspace bytes must be a Uint8Array");
     }
@@ -173,19 +162,13 @@ export class ShellWorkspace {
     if (request.expectedSha256 && request.expectedSha256 !== sha256) {
       throw new Error("File content does not match expectedSha256");
     }
-    if (
-      bytes.byteLength > this.#inlineThreshold &&
-      this.#requireR2ForLargeFiles &&
-      !this.#hasR2
-    ) {
+    if (bytes.byteLength > this.#inlineThreshold && this.#requireR2ForLargeFiles && !this.#hasR2) {
       throw new Error("R2 is required for files larger than 1.5 MB");
     }
 
     const previous = this.#getMeta(request.path);
     const storageKey =
-      bytes.byteLength > this.#inlineThreshold
-        ? tenantBlobKey(this.#scope, sha256)
-        : null;
+      bytes.byteLength > this.#inlineThreshold ? tenantBlobKey(this.#scope, sha256) : null;
     if (storageKey) {
       await this.#r2!.put(storageKey, bytes, {
         httpMetadata: { contentType: request.mediaType },
@@ -201,17 +184,9 @@ export class ShellWorkspace {
         await this.workspace.deleteFile(shellPath(request.path));
       }
     } else {
-      await this.workspace.writeFileBytes(
-        shellPath(request.path),
-        bytes,
-        request.mediaType,
-      );
+      await this.workspace.writeFileBytes(shellPath(request.path), bytes, request.mediaType);
     }
-    if (
-      previous?.storage_key &&
-      previous.storage_key !== storageKey &&
-      this.#r2
-    ) {
+    if (previous?.storage_key && previous.storage_key !== storageKey && this.#r2) {
       await this.#r2.delete(previous.storage_key);
     }
     const now = new Date().toISOString();
@@ -255,8 +230,7 @@ export class ShellWorkspace {
     if (digest !== meta.sha256) {
       throw new Error(`Stored bytes failed integrity check for ${request.path}`);
     }
-    const encoding =
-      request.encoding ?? (isTextMediaType(meta.media_type) ? "utf8" : "base64");
+    const encoding = request.encoding ?? (isTextMediaType(meta.media_type) ? "utf8" : "base64");
     return ProjectFileReadResponseSchema.parse({
       file: this.#entry(meta),
       content:
@@ -275,9 +249,7 @@ export class ShellWorkspace {
     const request = ProjectFileListRequestSchema.parse(input);
     const files = this.#listMeta()
       .map((row) => this.#entry(row))
-      .filter((entry) =>
-        workspacePathMatches(entry.path, request.prefix, request.recursive),
-      )
+      .filter((entry) => workspacePathMatches(entry.path, request.prefix, request.recursive))
       .sort((left, right) => left.path.localeCompare(right.path))
       .slice(0, request.limit);
     return ProjectFileListResponseSchema.parse({ files });
@@ -288,9 +260,7 @@ export class ShellWorkspace {
     const rows = this.#listMeta().filter((row) => {
       if (!request.recursive) return row.path === request.path;
       return (
-        request.path === "" ||
-        row.path === request.path ||
-        row.path.startsWith(`${request.path}/`)
+        request.path === "" || row.path === request.path || row.path.startsWith(`${request.path}/`)
       );
     });
     if (rows.length > 0) {
@@ -312,10 +282,7 @@ export class ShellWorkspace {
           `${request.path}/%`,
         );
       } else {
-        this.#sql.exec(
-          "DELETE FROM flary_workspace_file_meta WHERE path = ?",
-          request.path,
-        );
+        this.#sql.exec("DELETE FROM flary_workspace_file_meta WHERE path = ?", request.path);
       }
     }
     return ProjectFileDeleteResponseSchema.parse({
@@ -335,10 +302,7 @@ export class ShellWorkspace {
       await this.workspace.mv(shellPath(request.from), shellPath(request.to));
     }
     const now = new Date().toISOString();
-    this.#sql.exec(
-      "DELETE FROM flary_workspace_file_meta WHERE path = ?",
-      request.from,
-    );
+    this.#sql.exec("DELETE FROM flary_workspace_file_meta WHERE path = ?", request.from);
     this.#sql.exec(
       `INSERT INTO flary_workspace_file_meta
         (path, size, sha256, media_type, storage_key, created_at, updated_at)
@@ -373,10 +337,7 @@ export class ShellWorkspace {
   async edit(input: ProjectFileEditRequestInput) {
     const request = ProjectFileEditRequestSchema.parse(input);
     const current = await this.read({ path: request.path, encoding: "utf8" });
-    if (
-      request.expectedSha256 &&
-      current.file.sha256 !== request.expectedSha256
-    ) {
+    if (request.expectedSha256 && current.file.sha256 !== request.expectedSha256) {
       throw new Error("File changed before the edit was applied");
     }
     let content = current.content;
@@ -411,10 +372,7 @@ export class ShellWorkspace {
   async applyPatch(input: ProjectFilePatchRequestInput) {
     const request = ProjectFilePatchRequestSchema.parse(input);
     const current = await this.read({ path: request.path, encoding: "utf8" });
-    if (
-      request.expectedSha256 &&
-      current.file.sha256 !== request.expectedSha256
-    ) {
+    if (request.expectedSha256 && current.file.sha256 !== request.expectedSha256) {
       throw new Error("File changed before the patch was applied");
     }
     const applied = applyWorkspaceUnifiedPatch(current.content, request.patch, request.path);
@@ -445,19 +403,15 @@ export class ShellWorkspace {
   /** Search text without exposing the Shell backend or absolute paths. */
   async grep(input: WorkspaceGrepRequestInput) {
     const request = WorkspaceGrepRequestSchema.parse(input);
-    const results = await this.stateBackend().searchFiles(
-      `/${request.pattern}`,
-      request.query,
-      {
-        caseSensitive: request.caseSensitive,
-        regex: request.regex,
-        wholeWord: request.wholeWord,
-        contextBefore: request.contextBefore,
-        contextAfter: request.contextAfter,
-        maxMatches: request.maxMatches,
-      },
-    );
-    const files = [] as Array<{ path: string; matches: typeof results[number]["matches"] }>;
+    const results = await this.stateBackend().searchFiles(`/${request.pattern}`, request.query, {
+      caseSensitive: request.caseSensitive,
+      regex: request.regex,
+      wholeWord: request.wholeWord,
+      contextBefore: request.contextBefore,
+      contextAfter: request.contextAfter,
+      maxMatches: request.maxMatches,
+    });
+    const files = [] as Array<{ path: string; matches: (typeof results)[number]["matches"] }>;
     for (const result of results) {
       const path = relativeShellPath(result.path);
       if (path) files.push({ path, matches: result.matches });
@@ -472,10 +426,7 @@ export class ShellWorkspace {
     const diff =
       request.newContent !== undefined
         ? await backend.diffContent(shellPath(request.path), request.newContent)
-        : await backend.diff(
-            shellPath(request.path),
-            shellPath(request.compareToPath!),
-          );
+        : await backend.diff(shellPath(request.path), shellPath(request.compareToPath!));
     return WorkspaceDiffResponseSchema.parse({
       path: request.path,
       compareToPath: request.compareToPath,
@@ -489,10 +440,7 @@ export class ShellWorkspace {
     const originals = new Map<string, ProjectFileReadResponse>();
     for (const edit of request.edits) {
       if (!originals.has(edit.path)) {
-        originals.set(
-          edit.path,
-          await this.read({ path: edit.path, encoding: "utf8" }),
-        );
+        originals.set(edit.path, await this.read({ path: edit.path, encoding: "utf8" }));
       }
     }
 
@@ -526,10 +474,7 @@ export class ShellWorkspace {
 
     return WorkspaceBatchEditResponseSchema.parse({
       results,
-      totalReplacementCount: results.reduce(
-        (total, result) => total + result.replacementCount,
-        0,
-      ),
+      totalReplacementCount: results.reduce((total, result) => total + result.replacementCount, 0),
     });
   }
 
@@ -586,9 +531,7 @@ export class ShellWorkspace {
       .exec<{ name: string }>("PRAGMA table_info(flary_workspace_file_meta)")
       .toArray();
     if (!columns.some((column) => column.name === "storage_key")) {
-      this.#sql.exec(
-        "ALTER TABLE flary_workspace_file_meta ADD COLUMN storage_key TEXT",
-      );
+      this.#sql.exec("ALTER TABLE flary_workspace_file_meta ADD COLUMN storage_key TEXT");
     }
   }
 
@@ -598,10 +541,7 @@ export class ShellWorkspace {
       size: Number(row.size),
       sha256: row.sha256,
       mediaType: row.media_type,
-      storage:
-        row.storage_key || Number(row.size) > this.#inlineThreshold
-          ? "r2"
-          : "inline",
+      storage: row.storage_key || Number(row.size) > this.#inlineThreshold ? "r2" : "inline",
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     });

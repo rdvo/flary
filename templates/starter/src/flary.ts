@@ -6,7 +6,9 @@ export const BindingsSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
   GITHUB_MCP_PAT: z.string().optional(),
-  AI: z.custom<{ run(model: string, input: Record<string, unknown>): Promise<unknown> }>().optional(),
+  AI: z
+    .custom<{ run(model: string, input: Record<string, unknown>): Promise<unknown> }>()
+    .optional(),
   FLARY_ACCESS_TOKEN: z.string().optional(),
   FLARY_SESSION_ARCHIVE_KEY: z.string().optional(),
   // Cloudflare injects this Worker Loader binding in deployed environments.
@@ -25,10 +27,16 @@ export const app = flary({
     if (!request) return undefined;
     const local = LOCAL_HOSTS.has(new URL(request.url).hostname);
     const visitor = request.headers.get("x-flary-widget-session");
-    const publicWidget = generated.widget && new URL(request.url).pathname.startsWith("/apps/assistant/") &&
-      Boolean(visitor && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(visitor));
+    const publicWidget =
+      generated.widget &&
+      new URL(request.url).pathname.startsWith("/apps/assistant/") &&
+      Boolean(
+        visitor &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(visitor),
+      );
     const bearer = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-    const personal = generated.authMode === "personal" &&
+    const personal =
+      generated.authMode === "personal" &&
       Boolean(bindings.FLARY_ACCESS_TOKEN) &&
       bearer === bindings.FLARY_ACCESS_TOKEN;
     // Existing-application mode accepts local requests only. Production stays

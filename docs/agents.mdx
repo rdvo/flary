@@ -8,8 +8,7 @@ order: 2
 import { Code } from "astro:components";
 import coderExample from "../templates/starter/src/coder.ts?raw";
 
-An **agent** defines persistent behavior. A **thread** is one durable
-conversation with that agent.
+An **agent** defines persistent behavior. A **thread** is one durable conversation with that agent.
 
 ```ts
 export const coder = app.agent({
@@ -19,19 +18,17 @@ export const coder = app.agent({
 });
 ```
 
-The agent uses the application's default model and Flary's safe runtime
-defaults. Its thread keeps messages, tool calls, approvals, model selection,
-usage, and recovery state.
+The agent uses the application's default model and Flary's safe runtime defaults. Its thread keeps
+messages, tool calls, approvals, model selection, usage, and recovery state.
 
-For repository work, use the [complete Codex-style coding agent](/docs/examples/coding-agent/).
-It shows the actual built-in grep, read, edit, write, delete, Git, Sandbox,
-subagent, checkpoint, and realtime APIs.
+For repository work, use the [complete Codex-style coding agent](/docs/examples/coding-agent/). It
+shows the actual built-in grep, read, edit, write, delete, Git, Sandbox, subagent, checkpoint, and
+realtime APIs.
 
 ## Add controls only when needed
 
-You can later add an allowed-model list, custom limits, subagents, a mode, or a
-compaction policy. These controls are optional. Keep them out of the first
-agent until the product needs them.
+You can later add an allowed-model list, custom limits, subagents, a mode, or a compaction policy.
+These controls are optional. Keep them out of the first agent until the product needs them.
 
 ## Models
 
@@ -45,9 +42,8 @@ models: {
 }
 ```
 
-Read [Providers and connections](/docs/connections/) before you enable model
-switching. Flary preserves provider-neutral history and does not move private
-provider state across providers.
+Read [Providers and connections](/docs/connections/) before you enable model switching. Flary
+preserves provider-neutral history and does not move private provider state across providers.
 
 ## Tested starter source
 

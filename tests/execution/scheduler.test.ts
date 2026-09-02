@@ -64,23 +64,17 @@ test("runs independent reads in parallel and serializes writes by resource", asy
 
 test("write tools need an idempotency key", async () => {
   let calls = 0;
-  const report = await executeToolTasks(
-    [{ id: "write-1", name: "write", operation: "write" }],
-    {
-      handlers: {
-        write: async () => {
-          calls += 1;
-        },
+  const report = await executeToolTasks([{ id: "write-1", name: "write", operation: "write" }], {
+    handlers: {
+      write: async () => {
+        calls += 1;
       },
     },
-  );
+  });
 
   assert.equal(calls, 0);
   assert.equal(report.results[0]?.status, "rejected");
-  assert.equal(
-    report.results[0]?.error?.code,
-    "idempotency_key_required",
-  );
+  assert.equal(report.results[0]?.error?.code, "idempotency_key_required");
 });
 
 test("an unknown write outcome is persisted and is not repeated", async () => {
@@ -111,10 +105,7 @@ test("an unknown write outcome is persisted and is not repeated", async () => {
   assert.equal(first.results[0]?.status, "outcome_unknown");
   assert.equal(second.results[0]?.status, "outcome_unknown");
   assert.equal(calls, 1);
-  assert.equal(
-    (await journal.get("run-1", "charge-1"))?.state,
-    "outcome_unknown",
-  );
+  assert.equal((await journal.get("run-1", "charge-1"))?.state, "outcome_unknown");
 });
 
 test("a recovered started write becomes unknown and never runs again", async () => {
@@ -153,10 +144,7 @@ test("a recovered started write becomes unknown and never runs again", async () 
 
   assert.equal(calls, 0);
   assert.equal(report.results[0]?.status, "outcome_unknown");
-  assert.equal(
-    (await journal.get("run-recovered", "write-recovered"))?.state,
-    "outcome_unknown",
-  );
+  assert.equal((await journal.get("run-recovered", "write-recovered"))?.state, "outcome_unknown");
 });
 
 test("a recovered call with changed input fails closed", async () => {
@@ -175,13 +163,15 @@ test("a recovered call with changed input fails closed", async () => {
   });
   let calls = 0;
   const report = await executeToolTasks(
-    [{
-      id: "ordinal-1",
-      name: "write",
-      input: { value: "changed" },
-      operation: "write",
-      idempotencyKey: "stable-key",
-    }],
+    [
+      {
+        id: "ordinal-1",
+        name: "write",
+        input: { value: "changed" },
+        operation: "write",
+        idempotencyKey: "stable-key",
+      },
+    ],
     {
       runId: "run-mismatch",
       toolJournal: journal,
@@ -195,21 +185,20 @@ test("a recovered call with changed input fails closed", async () => {
 
   assert.equal(calls, 0);
   assert.equal(report.results[0]?.status, "rejected");
-  assert.equal(
-    report.results[0]?.error?.code,
-    "tool_replay_mismatch",
-  );
+  assert.equal(report.results[0]?.error?.code, "tool_replay_mismatch");
 });
 
 test("tool results are redacted before result and journal storage", async () => {
   const journal = new InMemoryToolExecutionJournal();
   const report = await executeToolTasks(
-    [{
-      id: "read-secret",
-      name: "read-secret",
-      input: {},
-      operation: "read",
-    }],
+    [
+      {
+        id: "read-secret",
+        name: "read-secret",
+        input: {},
+        operation: "read",
+      },
+    ],
     {
       runId: "run-redaction",
       toolJournal: journal,
@@ -226,11 +215,8 @@ test("tool results are redacted before result and journal storage", async () => 
     accessToken: "<redacted>",
     status: "ok",
   });
-  assert.deepEqual(
-    (await journal.get("run-redaction", "read-secret"))?.output,
-    {
-      accessToken: "<redacted>",
-      status: "ok",
-    },
-  );
+  assert.deepEqual((await journal.get("run-redaction", "read-secret"))?.output, {
+    accessToken: "<redacted>",
+    status: "ok",
+  });
 });

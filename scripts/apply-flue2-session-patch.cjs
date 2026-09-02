@@ -22,7 +22,8 @@ function applyFlue2SessionPatch(searchPaths) {
     .find((root) => fs.existsSync(path.join(root, "package.json")));
   if (!packageRoot) return false;
   const directory = path.join(packageRoot, "dist");
-  const dispatchFile = fs.readdirSync(directory)
+  const dispatchFile = fs
+    .readdirSync(directory)
     .find((name) => /^dispatch-[A-Za-z0-9_-]+\.mjs$/.test(name));
   if (!dispatchFile) throw new Error("[flary] Could not find the pinned Flue 2 dispatch module.");
   const file = path.join(directory, dispatchFile);

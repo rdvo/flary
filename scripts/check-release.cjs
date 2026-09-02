@@ -5,9 +5,7 @@ const repository = path.resolve(__dirname, "..");
 const manifest = require(path.join(repository, "package.json"));
 const version = process.env.FLARY_RELEASE_VERSION || manifest.version;
 if (version !== manifest.version) {
-  throw new Error(
-    `Release version ${version} does not match package version ${manifest.version}`,
-  );
+  throw new Error(`Release version ${version} does not match package version ${manifest.version}`);
 }
 
 (async () => {

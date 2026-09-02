@@ -67,6 +67,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Check package exports
+        run: npm run package:check
+
       - name: Verify stable session engine
         run: node scripts/check-release.cjs
         env:
@@ -183,4 +186,5 @@ jobs:
           name: Release ${{ inputs.release_tag || github.ref_name }}
           generate_release_notes: true
           prerelease: ${{ contains(inputs.release_tag || github.ref_name, '-') }}
-          make_latest: ${{ contains(inputs.release_tag || github.ref_name, '-') && 'false' || 'true' }}
+          make_latest:
+            ${{ contains(inputs.release_tag || github.ref_name, '-') && 'false' || 'true' }}

@@ -142,12 +142,15 @@ export class CloudflareMcpOAuthConnections {
     }
   }
 
-  async start(scope: CloudflareMcpOAuthScope, input: {
-    readonly name: string;
-    readonly namespace?: string;
-    readonly url: string;
-    readonly scopes?: readonly string[];
-  }): Promise<McpConnectionStartResult> {
+  async start(
+    scope: CloudflareMcpOAuthScope,
+    input: {
+      readonly name: string;
+      readonly namespace?: string;
+      readonly url: string;
+      readonly scopes?: readonly string[];
+    },
+  ): Promise<McpConnectionStartResult> {
     const endpoint = assertSafeMcpUrl(input.url).toString().replace(/\/$/, "");
     const name = input.name.trim().slice(0, 120);
     if (!name) throw new Error("MCP connection name is required");
@@ -159,14 +162,25 @@ export class CloudflareMcpOAuthConnections {
     const challenge = await probeAuthorization(this.#fetch, endpoint);
     if (!challenge.protected) {
       const runtime = createMcpConnection(
-        sourceFor({ id: connectionId, namespace, endpoint_url: endpoint, transport: "streamable-http" }),
+        sourceFor({
+          id: connectionId,
+          namespace,
+          endpoint_url: endpoint,
+          transport: "streamable-http",
+        }),
         { fetch: this.#fetch },
       );
-      const tools = await runtime.fetchTools?.() ?? [];
+      const tools = (await runtime.fetchTools?.()) ?? [];
       await this.expirePendingFlows(scope, connectionId);
       await this.upsertConnection(scope, {
-        id: connectionId, name, namespace, endpoint, authType: "none",
-        status: "ready", toolCount: tools.length, now,
+        id: connectionId,
+        name,
+        namespace,
+        endpoint,
+        authType: "none",
+        status: "ready",
+        toolCount: tools.length,
+        now,
       });
       return (await this.get(scope, connectionId))!;
     }
@@ -184,8 +198,14 @@ export class CloudflareMcpOAuthConnections {
       endpoint,
       challenge.resourceMetadataUrl,
     );
-    const metadata = await discoverAuthorizationServer(this.#fetch, resource.authorization_servers[0]!);
-    if (metadata.code_challenge_methods_supported && !metadata.code_challenge_methods_supported.includes("S256")) {
+    const metadata = await discoverAuthorizationServer(
+      this.#fetch,
+      resource.authorization_servers[0]!,
+    );
+    if (
+      metadata.code_challenge_methods_supported &&
+      !metadata.code_challenge_methods_supported.includes("S256")
+    ) {
       throw new Error("The MCP authorization server does not support PKCE S256");
     }
     const client = await resolveClient(this.#fetch, metadata, {
@@ -202,7 +222,14 @@ export class CloudflareMcpOAuthConnections {
       : challenge.scopes?.length
         ? challenge.scopes
         : supportedScopes;
-    const scopes = [...new Set(requestedScopes.map((value) => value.trim()).filter(Boolean).slice(0, 64))];
+    const scopes = [
+      ...new Set(
+        requestedScopes
+          .map((value) => value.trim())
+          .filter(Boolean)
+          .slice(0, 64),
+      ),
+    ];
     const authorizationUrl = new URL(metadata.authorization_endpoint);
     authorizationUrl.searchParams.set("response_type", "code");
     authorizationUrl.searchParams.set("client_id", client.id);
@@ -215,8 +242,13 @@ export class CloudflareMcpOAuthConnections {
 
     await this.expirePendingFlows(scope, connectionId);
     await this.upsertConnection(scope, {
-      id: connectionId, name, namespace, endpoint, authType: "oauth2",
-      status: "needs_auth", now,
+      id: connectionId,
+      name,
+      namespace,
+      endpoint,
+      authType: "oauth2",
+      status: "needs_auth",
+      now,
     });
     const privateState: PrivateFlow = {
       tenantId: scope.tenantId,
@@ -233,15 +265,23 @@ export class CloudflareMcpOAuthConnections {
       codeVerifier: verifier,
       scopes,
     };
-    await this.options.database.prepare(
-      `INSERT INTO flary_mcp_oauth_session
+    await this.options.database
+      .prepare(
+        `INSERT INTO flary_mcp_oauth_session
        (id, tenant_id, user_id, connection_id, status, private_state, expires_at, created_at, updated_at)
        VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
-    ).bind(
-      flowId, scope.tenantId, scope.userId, connectionId,
-      await this.encrypt(privateState, associatedFlow(scope, flowId)),
-      now + FLOW_LIFETIME_MS, now, now,
-    ).run();
+      )
+      .bind(
+        flowId,
+        scope.tenantId,
+        scope.userId,
+        connectionId,
+        await this.encrypt(privateState, associatedFlow(scope, flowId)),
+        now + FLOW_LIFETIME_MS,
+        now,
+        now,
+      )
+      .run();
 
     return {
       ...(await this.get(scope, connectionId))!,
@@ -255,9 +295,10 @@ export class CloudflareMcpOAuthConnections {
     readonly error?: string;
     readonly issuer?: string;
   }): Promise<McpConnectionSummary> {
-    const row = await this.options.database.prepare(
-      "SELECT * FROM flary_mcp_oauth_session WHERE id = ?",
-    ).bind(input.state).first<FlowRow>();
+    const row = await this.options.database
+      .prepare("SELECT * FROM flary_mcp_oauth_session WHERE id = ?")
+      .bind(input.state)
+      .first<FlowRow>();
     if (!row || row.status !== "pending") throw new Error("The MCP authorization is not pending");
     const scope = { tenantId: row.tenant_id, userId: row.user_id };
     if (row.expires_at <= this.#now().getTime()) {
@@ -265,7 +306,10 @@ export class CloudflareMcpOAuthConnections {
       throw new Error("The MCP authorization expired. Start it again.");
     }
     try {
-      const flow = await this.decrypt<PrivateFlow>(row.private_state, associatedFlow(scope, row.id));
+      const flow = await this.decrypt<PrivateFlow>(
+        row.private_state,
+        associatedFlow(scope, row.id),
+      );
       if (input.issuer && input.issuer !== flow.issuer) {
         throw new Error("The MCP authorization response came from an unexpected issuer");
       }
@@ -274,7 +318,12 @@ export class CloudflareMcpOAuthConnections {
       }
       if (input.error) throw new Error("The MCP authorization was denied");
       if (!input.code) throw new Error("The MCP callback did not contain an authorization code");
-      const token = await exchangeAuthorizationCode(this.#fetch, flow, input.code, this.#now().getTime());
+      const token = await exchangeAuthorizationCode(
+        this.#fetch,
+        flow,
+        input.code,
+        this.#now().getTime(),
+      );
       const connection = await this.load(scope, row.connection_id);
       if (!connection) throw new Error("The MCP connection was not found");
       const credential: StoredCredential = {
@@ -292,18 +341,25 @@ export class CloudflareMcpOAuthConnections {
         fetch: this.#fetch,
         credentials: { get: async () => ({ kind: "bearer", value: credential.accessToken }) },
       });
-      const tools = await runtime.fetchTools?.() ?? [];
+      const tools = (await runtime.fetchTools?.()) ?? [];
       const now = this.#now().getTime();
-      await this.options.database.prepare(
-        `UPDATE flary_connection SET status = 'ready', encrypted_credential = ?,
+      await this.options.database
+        .prepare(
+          `UPDATE flary_connection SET status = 'ready', encrypted_credential = ?,
          credential_generation = ?, credential_expires_at = ?, metadata_json = ?, updated_at = ?
          WHERE id = ? AND tenant_id = ? AND owner_user_id = ? AND kind = 'mcp'`,
-      ).bind(
-        await this.encrypt(credential, associatedCredential(scope, connection.id)),
-        crypto.randomUUID(), credential.expiresAt ?? null,
-        JSON.stringify({ toolCount: tools.length, scopes: credential.scopes }),
-        now, connection.id, scope.tenantId, scope.userId,
-      ).run();
+        )
+        .bind(
+          await this.encrypt(credential, associatedCredential(scope, connection.id)),
+          crypto.randomUUID(),
+          credential.expiresAt ?? null,
+          JSON.stringify({ toolCount: tools.length, scopes: credential.scopes }),
+          now,
+          connection.id,
+          scope.tenantId,
+          scope.userId,
+        )
+        .run();
       await this.setFlowStatus(row.id, "ready");
       return (await this.get(scope, connection.id))!;
     } catch (error) {
@@ -314,9 +370,12 @@ export class CloudflareMcpOAuthConnections {
   }
 
   async list(scope: CloudflareMcpOAuthScope): Promise<readonly McpConnectionSummary[]> {
-    const rows = await this.options.database.prepare(
-      "SELECT * FROM flary_connection WHERE tenant_id = ? AND owner_user_id = ? AND kind = 'mcp' ORDER BY created_at ASC",
-    ).bind(scope.tenantId, scope.userId).all<ConnectionRow>();
+    const rows = await this.options.database
+      .prepare(
+        "SELECT * FROM flary_connection WHERE tenant_id = ? AND owner_user_id = ? AND kind = 'mcp' ORDER BY created_at ASC",
+      )
+      .bind(scope.tenantId, scope.userId)
+      .all<ConnectionRow>();
     return rows.results.map(publicConnection);
   }
 
@@ -326,24 +385,36 @@ export class CloudflareMcpOAuthConnections {
   }
 
   async disable(scope: CloudflareMcpOAuthScope, id: string): Promise<void> {
-    await this.options.database.prepare(
-      "UPDATE flary_connection SET status = 'disabled', updated_at = ? WHERE id = ? AND tenant_id = ? AND owner_user_id = ? AND kind = 'mcp'",
-    ).bind(this.#now().getTime(), id, scope.tenantId, scope.userId).run();
+    await this.options.database
+      .prepare(
+        "UPDATE flary_connection SET status = 'disabled', updated_at = ? WHERE id = ? AND tenant_id = ? AND owner_user_id = ? AND kind = 'mcp'",
+      )
+      .bind(this.#now().getTime(), id, scope.tenantId, scope.userId)
+      .run();
   }
 
   async remove(scope: CloudflareMcpOAuthScope, id: string): Promise<void> {
-    await this.options.database.prepare(
-      "DELETE FROM flary_mcp_oauth_session WHERE connection_id = ? AND tenant_id = ? AND user_id = ?",
-    ).bind(id, scope.tenantId, scope.userId).run();
-    await this.options.database.prepare(
-      "DELETE FROM flary_connection WHERE id = ? AND tenant_id = ? AND owner_user_id = ? AND kind = 'mcp'",
-    ).bind(id, scope.tenantId, scope.userId).run();
+    await this.options.database
+      .prepare(
+        "DELETE FROM flary_mcp_oauth_session WHERE connection_id = ? AND tenant_id = ? AND user_id = ?",
+      )
+      .bind(id, scope.tenantId, scope.userId)
+      .run();
+    await this.options.database
+      .prepare(
+        "DELETE FROM flary_connection WHERE id = ? AND tenant_id = ? AND owner_user_id = ? AND kind = 'mcp'",
+      )
+      .bind(id, scope.tenantId, scope.userId)
+      .run();
   }
 
   async connection(scope: CloudflareMcpOAuthScope): Promise<FlaryMcpConnection> {
-    const rows = await this.options.database.prepare(
-      "SELECT * FROM flary_connection WHERE tenant_id = ? AND owner_user_id = ? AND kind = 'mcp' AND status = 'ready' ORDER BY namespace ASC",
-    ).bind(scope.tenantId, scope.userId).all<ConnectionRow>();
+    const rows = await this.options.database
+      .prepare(
+        "SELECT * FROM flary_connection WHERE tenant_id = ? AND owner_user_id = ? AND kind = 'mcp' AND status = 'ready' ORDER BY namespace ASC",
+      )
+      .bind(scope.tenantId, scope.userId)
+      .all<ConnectionRow>();
     const clients = new Map<string, ReturnType<typeof createMcpConnection>>();
     const clientFor = async (row: ConnectionRow) => {
       const current = clients.get(row.namespace);
@@ -351,7 +422,13 @@ export class CloudflareMcpOAuthConnections {
       const credential = row.auth_type === "oauth2" ? await this.credential(scope, row) : undefined;
       const runtime = createMcpConnection(sourceFor(row), {
         fetch: this.#fetch,
-        ...(credential ? { credentials: { get: async () => ({ kind: "bearer" as const, value: credential.accessToken }) } } : {}),
+        ...(credential
+          ? {
+              credentials: {
+                get: async () => ({ kind: "bearer" as const, value: credential.accessToken }),
+              },
+            }
+          : {}),
       });
       clients.set(row.namespace, runtime);
       return runtime;
@@ -359,20 +436,22 @@ export class CloudflareMcpOAuthConnections {
     const tools: NonNullable<FlaryMcpConnection["tools"]>[number][] = [];
     for (const row of rows.results) {
       const runtime = await clientFor(row);
-      for (const tool of await runtime.fetchTools?.() ?? []) {
+      for (const tool of (await runtime.fetchTools?.()) ?? []) {
         tools.push({ ...tool, name: `${row.namespace}__${tool.name}` });
       }
     }
-    const revision = await sha256Hex(JSON.stringify({
-      sources: rows.results.map((row) => ({
-        id: row.id,
-        namespace: row.namespace,
-        endpoint: row.endpoint_url,
-        generation: row.credential_generation,
-        updatedAt: row.updated_at,
-      })),
-      tools,
-    }));
+    const revision = await sha256Hex(
+      JSON.stringify({
+        sources: rows.results.map((row) => ({
+          id: row.id,
+          namespace: row.namespace,
+          endpoint: row.endpoint_url,
+          generation: row.credential_generation,
+          updatedAt: row.updated_at,
+        })),
+        tools,
+      }),
+    );
     return {
       name: "connections",
       revision,
@@ -380,7 +459,8 @@ export class CloudflareMcpOAuthConnections {
       client: {
         callTool: async (input) => {
           const separator = input.name.indexOf("__");
-          if (separator < 1) throw new Error("The MCP tool name does not contain a connection namespace");
+          if (separator < 1)
+            throw new Error("The MCP tool name does not contain a connection namespace");
           const namespace = input.name.slice(0, separator);
           const tool = input.name.slice(separator + 2);
           const row = rows.results.find((item) => item.namespace === namespace);
@@ -391,47 +471,89 @@ export class CloudflareMcpOAuthConnections {
     };
   }
 
-  private async credential(scope: CloudflareMcpOAuthScope, row: ConnectionRow): Promise<StoredCredential> {
+  private async credential(
+    scope: CloudflareMcpOAuthScope,
+    row: ConnectionRow,
+  ): Promise<StoredCredential> {
     if (!row.encrypted_credential) throw new Error("The MCP connection needs authorization");
-    let credential = await this.decrypt<StoredCredential>(row.encrypted_credential, associatedCredential(scope, row.id));
-    if (!credential.expiresAt || credential.expiresAt > this.#now().getTime() + 60_000) return credential;
+    let credential = await this.decrypt<StoredCredential>(
+      row.encrypted_credential,
+      associatedCredential(scope, row.id),
+    );
+    if (!credential.expiresAt || credential.expiresAt > this.#now().getTime() + 60_000)
+      return credential;
     if (!credential.refreshToken) {
-      await this.options.database.prepare(
-        "UPDATE flary_connection SET status = 'needs_auth', updated_at = ? WHERE id = ? AND tenant_id = ? AND owner_user_id = ? AND kind = 'mcp'",
-      ).bind(this.#now().getTime(), row.id, scope.tenantId, scope.userId).run();
+      await this.options.database
+        .prepare(
+          "UPDATE flary_connection SET status = 'needs_auth', updated_at = ? WHERE id = ? AND tenant_id = ? AND owner_user_id = ? AND kind = 'mcp'",
+        )
+        .bind(this.#now().getTime(), row.id, scope.tenantId, scope.userId)
+        .run();
       throw new Error("The MCP connection expired and needs authorization");
     }
     const refreshed = await refreshCredential(this.#fetch, credential, this.#now().getTime());
     credential = { ...credential, ...refreshed };
-    await this.options.database.prepare(
-      "UPDATE flary_connection SET encrypted_credential = ?, credential_generation = ?, credential_expires_at = ?, updated_at = ? WHERE id = ? AND tenant_id = ? AND owner_user_id = ? AND kind = 'mcp'",
-    ).bind(
-      await this.encrypt(credential, associatedCredential(scope, row.id)),
-      crypto.randomUUID(), credential.expiresAt ?? null, this.#now().getTime(), row.id,
-      scope.tenantId, scope.userId,
-    ).run();
+    await this.options.database
+      .prepare(
+        "UPDATE flary_connection SET encrypted_credential = ?, credential_generation = ?, credential_expires_at = ?, updated_at = ? WHERE id = ? AND tenant_id = ? AND owner_user_id = ? AND kind = 'mcp'",
+      )
+      .bind(
+        await this.encrypt(credential, associatedCredential(scope, row.id)),
+        crypto.randomUUID(),
+        credential.expiresAt ?? null,
+        this.#now().getTime(),
+        row.id,
+        scope.tenantId,
+        scope.userId,
+      )
+      .run();
     return credential;
   }
 
-  private async load(scope: CloudflareMcpOAuthScope, id: string): Promise<ConnectionRow | undefined> {
-    return await this.options.database.prepare(
-      "SELECT * FROM flary_connection WHERE id = ? AND tenant_id = ? AND owner_user_id = ? AND kind = 'mcp'",
-    ).bind(id, scope.tenantId, scope.userId).first<ConnectionRow>() ?? undefined;
+  private async load(
+    scope: CloudflareMcpOAuthScope,
+    id: string,
+  ): Promise<ConnectionRow | undefined> {
+    return (
+      (await this.options.database
+        .prepare(
+          "SELECT * FROM flary_connection WHERE id = ? AND tenant_id = ? AND owner_user_id = ? AND kind = 'mcp'",
+        )
+        .bind(id, scope.tenantId, scope.userId)
+        .first<ConnectionRow>()) ?? undefined
+    );
   }
 
-  private async loadByNamespace(scope: CloudflareMcpOAuthScope, namespace: string): Promise<ConnectionRow | undefined> {
-    return await this.options.database.prepare(
-      "SELECT * FROM flary_connection WHERE tenant_id = ? AND owner_user_id = ? AND kind = 'mcp' AND namespace = ?",
-    ).bind(scope.tenantId, scope.userId, namespace).first<ConnectionRow>() ?? undefined;
+  private async loadByNamespace(
+    scope: CloudflareMcpOAuthScope,
+    namespace: string,
+  ): Promise<ConnectionRow | undefined> {
+    return (
+      (await this.options.database
+        .prepare(
+          "SELECT * FROM flary_connection WHERE tenant_id = ? AND owner_user_id = ? AND kind = 'mcp' AND namespace = ?",
+        )
+        .bind(scope.tenantId, scope.userId, namespace)
+        .first<ConnectionRow>()) ?? undefined
+    );
   }
 
-  private async upsertConnection(scope: CloudflareMcpOAuthScope, input: {
-    id: string; name: string; namespace: string; endpoint: string;
-    authType: "none" | "oauth2"; status: ConnectionRow["status"];
-    toolCount?: number; now: number;
-  }): Promise<void> {
-    await this.options.database.prepare(
-      `INSERT INTO flary_connection
+  private async upsertConnection(
+    scope: CloudflareMcpOAuthScope,
+    input: {
+      id: string;
+      name: string;
+      namespace: string;
+      endpoint: string;
+      authType: "none" | "oauth2";
+      status: ConnectionRow["status"];
+      toolCount?: number;
+      now: number;
+    },
+  ): Promise<void> {
+    await this.options.database
+      .prepare(
+        `INSERT INTO flary_connection
        (id, owner_user_id, tenant_id, kind, label, status, namespace,
         endpoint_url, transport, auth_type, metadata_json, created_at, updated_at)
        VALUES (?, ?, ?, 'mcp', ?, ?, ?, ?, 'streamable-http', ?, ?, ?, ?)
@@ -440,25 +562,43 @@ export class CloudflareMcpOAuthConnections {
          metadata_json = excluded.metadata_json, encrypted_credential = NULL,
          credential_generation = NULL, credential_expires_at = NULL,
          updated_at = excluded.updated_at`,
-    ).bind(
-      input.id, scope.userId, scope.tenantId, input.name, input.status,
-      input.namespace, input.endpoint, input.authType,
-      JSON.stringify({ toolCount: input.toolCount ?? 0, scopes: [] }),
-      input.now, input.now,
-    ).run();
+      )
+      .bind(
+        input.id,
+        scope.userId,
+        scope.tenantId,
+        input.name,
+        input.status,
+        input.namespace,
+        input.endpoint,
+        input.authType,
+        JSON.stringify({ toolCount: input.toolCount ?? 0, scopes: [] }),
+        input.now,
+        input.now,
+      )
+      .run();
   }
 
   private async setFlowStatus(id: string, status: FlowRow["status"]): Promise<void> {
-    await this.options.database.prepare(
-      "UPDATE flary_mcp_oauth_session SET status = ?, private_state = CASE WHEN ? = 'pending' THEN private_state ELSE '' END, updated_at = ? WHERE id = ?",
-    ).bind(status, status, this.#now().getTime(), id).run();
+    await this.options.database
+      .prepare(
+        "UPDATE flary_mcp_oauth_session SET status = ?, private_state = CASE WHEN ? = 'pending' THEN private_state ELSE '' END, updated_at = ? WHERE id = ?",
+      )
+      .bind(status, status, this.#now().getTime(), id)
+      .run();
   }
 
-  private async expirePendingFlows(scope: CloudflareMcpOAuthScope, connectionId: string): Promise<void> {
-    await this.options.database.prepare(
-      `UPDATE flary_mcp_oauth_session SET status = 'expired', private_state = '', updated_at = ?
+  private async expirePendingFlows(
+    scope: CloudflareMcpOAuthScope,
+    connectionId: string,
+  ): Promise<void> {
+    await this.options.database
+      .prepare(
+        `UPDATE flary_mcp_oauth_session SET status = 'expired', private_state = '', updated_at = ?
        WHERE connection_id = ? AND tenant_id = ? AND user_id = ? AND status = 'pending'`,
-    ).bind(this.#now().getTime(), connectionId, scope.tenantId, scope.userId).run();
+      )
+      .bind(this.#now().getTime(), connectionId, scope.tenantId, scope.userId)
+      .run();
   }
 
   private async setConnectionStatus(
@@ -466,40 +606,82 @@ export class CloudflareMcpOAuthConnections {
     id: string,
     status: ConnectionRow["status"],
   ): Promise<void> {
-    await this.options.database.prepare(
-      "UPDATE flary_connection SET status = ?, updated_at = ? WHERE id = ? AND tenant_id = ? AND owner_user_id = ? AND kind = 'mcp'",
-    ).bind(status, this.#now().getTime(), id, scope.tenantId, scope.userId).run();
+    await this.options.database
+      .prepare(
+        "UPDATE flary_connection SET status = ?, updated_at = ? WHERE id = ? AND tenant_id = ? AND owner_user_id = ? AND kind = 'mcp'",
+      )
+      .bind(status, this.#now().getTime(), id, scope.tenantId, scope.userId)
+      .run();
   }
 
   private async encrypt(value: unknown, associated: string): Promise<string> {
     const iv = crypto.getRandomValues(new Uint8Array(12));
-    const key = await crypto.subtle.importKey("raw", decodeBase64(this.options.encryptionKey) as unknown as BufferSource, "AES-GCM", false, ["encrypt"]);
-    const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: new TextEncoder().encode(associated) }, key, new TextEncoder().encode(JSON.stringify(value)));
+    const key = await crypto.subtle.importKey(
+      "raw",
+      decodeBase64(this.options.encryptionKey) as unknown as BufferSource,
+      "AES-GCM",
+      false,
+      ["encrypt"],
+    );
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(associated) },
+      key,
+      new TextEncoder().encode(JSON.stringify(value)),
+    );
     return `${encodeBase64(iv)}.${encodeBase64(new Uint8Array(ciphertext))}`;
   }
 
   private async decrypt<T>(value: string, associated: string): Promise<T> {
     const [iv, ciphertext] = value.split(".");
     if (!iv || !ciphertext) throw new Error("The encrypted MCP credential is invalid");
-    const key = await crypto.subtle.importKey("raw", decodeBase64(this.options.encryptionKey) as unknown as BufferSource, "AES-GCM", false, ["decrypt"]);
-    const plaintext = await crypto.subtle.decrypt({ name: "AES-GCM", iv: decodeBase64(iv) as unknown as BufferSource, additionalData: new TextEncoder().encode(associated) }, key, decodeBase64(ciphertext) as unknown as BufferSource);
+    const key = await crypto.subtle.importKey(
+      "raw",
+      decodeBase64(this.options.encryptionKey) as unknown as BufferSource,
+      "AES-GCM",
+      false,
+      ["decrypt"],
+    );
+    const plaintext = await crypto.subtle.decrypt(
+      {
+        name: "AES-GCM",
+        iv: decodeBase64(iv) as unknown as BufferSource,
+        additionalData: new TextEncoder().encode(associated),
+      },
+      key,
+      decodeBase64(ciphertext) as unknown as BufferSource,
+    );
     return JSON.parse(new TextDecoder().decode(plaintext)) as T;
   }
 }
 
-function sourceFor(row: Pick<ConnectionRow, "id" | "namespace" | "endpoint_url" | "transport">): FlaryMcpSource {
-  return { kind: "mcp", namespace: row.namespace, connection: row.id, url: row.endpoint_url, transport: row.transport };
+function sourceFor(
+  row: Pick<ConnectionRow, "id" | "namespace" | "endpoint_url" | "transport">,
+): FlaryMcpSource {
+  return {
+    kind: "mcp",
+    namespace: row.namespace,
+    connection: row.id,
+    url: row.endpoint_url,
+    transport: row.transport,
+  };
 }
 
 function normalizeNamespace(value: string): string {
-  const result = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 80);
+  const result = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
   if (!result) throw new Error("MCP namespace must contain a letter or number");
   return result;
 }
 
 function publicConnection(row: ConnectionRow): McpConnectionSummary {
   const metadata = parseRecord(row.metadata_json);
-  const scopes = Array.isArray(metadata.scopes) ? metadata.scopes.filter((value): value is string => typeof value === "string") : [];
+  const scopes = Array.isArray(metadata.scopes)
+    ? metadata.scopes.filter((value): value is string => typeof value === "string")
+    : [];
   return {
     id: row.id,
     namespace: row.namespace,
@@ -509,13 +691,18 @@ function publicConnection(row: ConnectionRow): McpConnectionSummary {
     status: row.status,
     ...(typeof metadata.toolCount === "number" ? { toolCount: metadata.toolCount } : {}),
     scopes,
-    ...(row.credential_expires_at ? { expiresAt: new Date(row.credential_expires_at).toISOString() } : {}),
+    ...(row.credential_expires_at
+      ? { expiresAt: new Date(row.credential_expires_at).toISOString() }
+      : {}),
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
   };
 }
 
-async function probeAuthorization(fetcher: typeof fetch, endpoint: string): Promise<{
+async function probeAuthorization(
+  fetcher: typeof fetch,
+  endpoint: string,
+): Promise<{
   protected: boolean;
   resourceMetadataUrl?: string;
   scopes?: string[];
@@ -523,7 +710,16 @@ async function probeAuthorization(fetcher: typeof fetch, endpoint: string): Prom
   const response = await safeFetch(fetcher, endpoint, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "flary", version: "1" } } }),
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-03-26",
+        capabilities: {},
+        clientInfo: { name: "flary", version: "1" },
+      },
+    }),
   });
   if (response.status === 401) {
     const header = response.headers.get("www-authenticate");
@@ -539,13 +735,22 @@ async function probeAuthorization(fetcher: typeof fetch, endpoint: string): Prom
   return { protected: false };
 }
 
-async function discoverProtectedResource(fetcher: typeof fetch, endpoint: string, advertised?: string): Promise<ProtectedResourceMetadata> {
+async function discoverProtectedResource(
+  fetcher: typeof fetch,
+  endpoint: string,
+  advertised?: string,
+): Promise<ProtectedResourceMetadata> {
   const url = new URL(endpoint);
   const candidates = [
     advertised,
-    new URL(`/.well-known/oauth-protected-resource${url.pathname === "/" ? "" : url.pathname}`, url.origin).toString(),
+    new URL(
+      `/.well-known/oauth-protected-resource${url.pathname === "/" ? "" : url.pathname}`,
+      url.origin,
+    ).toString(),
     new URL("/.well-known/oauth-protected-resource", url.origin).toString(),
-  ].filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index);
+  ].filter(
+    (value, index, values): value is string => Boolean(value) && values.indexOf(value) === index,
+  );
   for (const candidate of candidates) {
     try {
       const value = await fetchJson(fetcher, candidate);
@@ -559,17 +764,26 @@ async function discoverProtectedResource(fetcher: typeof fetch, endpoint: string
         resource: value.resource,
         authorization_servers: auth,
         ...(Array.isArray(value.scopes_supported)
-          ? { scopes_supported: value.scopes_supported.filter((item): item is string => typeof item === "string") }
+          ? {
+              scopes_supported: value.scopes_supported.filter(
+                (item): item is string => typeof item === "string",
+              ),
+            }
           : {}),
       };
     } catch {
       // Try the next standards-defined metadata location.
     }
   }
-  throw new Error("The MCP server requires authorization but did not publish valid protected-resource metadata");
+  throw new Error(
+    "The MCP server requires authorization but did not publish valid protected-resource metadata",
+  );
 }
 
-async function discoverAuthorizationServer(fetcher: typeof fetch, issuerInput: string): Promise<OAuthMetadata> {
+async function discoverAuthorizationServer(
+  fetcher: typeof fetch,
+  issuerInput: string,
+): Promise<OAuthMetadata> {
   const issuer = assertSafePublicUrl(issuerInput);
   const path = issuer.pathname === "/" ? "" : issuer.pathname.replace(/\/$/, "");
   const candidates = [
@@ -580,19 +794,34 @@ async function discoverAuthorizationServer(fetcher: typeof fetch, issuerInput: s
     try {
       const value = await fetchJson(fetcher, candidate);
       if (typeof value.issuer !== "string" || value.issuer !== issuerInput) continue;
-      if (typeof value.authorization_endpoint !== "string" || typeof value.token_endpoint !== "string") continue;
+      if (
+        typeof value.authorization_endpoint !== "string" ||
+        typeof value.token_endpoint !== "string"
+      )
+        continue;
       assertSafePublicUrl(value.issuer);
       assertSafePublicUrl(value.authorization_endpoint);
       assertSafePublicUrl(value.token_endpoint);
-      if (typeof value.registration_endpoint === "string") assertSafePublicUrl(value.registration_endpoint);
+      if (typeof value.registration_endpoint === "string")
+        assertSafePublicUrl(value.registration_endpoint);
       return {
         issuer: value.issuer,
         authorization_endpoint: value.authorization_endpoint,
         token_endpoint: value.token_endpoint,
-        ...(typeof value.registration_endpoint === "string" ? { registration_endpoint: value.registration_endpoint } : {}),
-        ...(Array.isArray(value.scopes_supported) ? { scopes_supported: stringArray(value.scopes_supported) } : {}),
-        ...(Array.isArray(value.code_challenge_methods_supported) ? { code_challenge_methods_supported: stringArray(value.code_challenge_methods_supported) } : {}),
-        ...(value.client_id_metadata_document_supported === true ? { client_id_metadata_document_supported: true } : {}),
+        ...(typeof value.registration_endpoint === "string"
+          ? { registration_endpoint: value.registration_endpoint }
+          : {}),
+        ...(Array.isArray(value.scopes_supported)
+          ? { scopes_supported: stringArray(value.scopes_supported) }
+          : {}),
+        ...(Array.isArray(value.code_challenge_methods_supported)
+          ? {
+              code_challenge_methods_supported: stringArray(value.code_challenge_methods_supported),
+            }
+          : {}),
+        ...(value.client_id_metadata_document_supported === true
+          ? { client_id_metadata_document_supported: true }
+          : {}),
         ...(value.authorization_response_iss_parameter_supported === true
           ? { authorization_response_iss_parameter_supported: true }
           : {}),
@@ -604,12 +833,20 @@ async function discoverAuthorizationServer(fetcher: typeof fetch, issuerInput: s
   throw new Error("The MCP authorization server did not publish usable OAuth metadata");
 }
 
-async function resolveClient(fetcher: typeof fetch, metadata: OAuthMetadata, input: {
-  callbackUrl: string; clientMetadataUrl: string; clientName: string;
-}): Promise<{ id: string; secret?: string }> {
+async function resolveClient(
+  fetcher: typeof fetch,
+  metadata: OAuthMetadata,
+  input: {
+    callbackUrl: string;
+    clientMetadataUrl: string;
+    clientName: string;
+  },
+): Promise<{ id: string; secret?: string }> {
   if (metadata.client_id_metadata_document_supported) return { id: input.clientMetadataUrl };
   if (!metadata.registration_endpoint) {
-    throw new Error("The MCP authorization server supports neither Client ID Metadata Documents nor Dynamic Client Registration");
+    throw new Error(
+      "The MCP authorization server supports neither Client ID Metadata Documents nor Dynamic Client Registration",
+    );
   }
   const response = await safeFetch(fetcher, metadata.registration_endpoint, {
     method: "POST",
@@ -633,8 +870,16 @@ async function resolveClient(fetcher: typeof fetch, metadata: OAuthMetadata, inp
   };
 }
 
-async function exchangeAuthorizationCode(fetcher: typeof fetch, flow: PrivateFlow, code: string, now: number): Promise<{
-  accessToken: string; refreshToken?: string; expiresAt?: number; scopes: string[];
+async function exchangeAuthorizationCode(
+  fetcher: typeof fetch,
+  flow: PrivateFlow,
+  code: string,
+  now: number,
+): Promise<{
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt?: number;
+  scopes: string[];
 }> {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
@@ -651,7 +896,11 @@ async function exchangeAuthorizationCode(fetcher: typeof fetch, flow: PrivateFlo
     body,
   });
   const value = await responseJson(response);
-  if (!response.ok || typeof value.access_token !== "string" || (value.token_type && String(value.token_type).toLowerCase() !== "bearer")) {
+  if (
+    !response.ok ||
+    typeof value.access_token !== "string" ||
+    (value.token_type && String(value.token_type).toLowerCase() !== "bearer")
+  ) {
     throw new Error("The MCP authorization server did not return a valid bearer token");
   }
   return {
@@ -662,7 +911,11 @@ async function exchangeAuthorizationCode(fetcher: typeof fetch, flow: PrivateFlo
   };
 }
 
-async function refreshCredential(fetcher: typeof fetch, credential: StoredCredential, now: number): Promise<Partial<StoredCredential>> {
+async function refreshCredential(
+  fetcher: typeof fetch,
+  credential: StoredCredential,
+  now: number,
+): Promise<Partial<StoredCredential>> {
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: credential.refreshToken!,
@@ -676,12 +929,15 @@ async function refreshCredential(fetcher: typeof fetch, credential: StoredCreden
     body,
   });
   const value = await responseJson(response);
-  if (!response.ok || typeof value.access_token !== "string") throw new Error("The MCP credential could not be refreshed");
+  if (!response.ok || typeof value.access_token !== "string")
+    throw new Error("The MCP credential could not be refreshed");
   return {
     accessToken: value.access_token,
     ...(typeof value.refresh_token === "string" ? { refreshToken: value.refresh_token } : {}),
     ...(typeof value.expires_in === "number" ? { expiresAt: now + value.expires_in * 1_000 } : {}),
-    ...(typeof value.scope === "string" ? { scopes: value.scope.split(/\s+/).filter(Boolean) } : {}),
+    ...(typeof value.scope === "string"
+      ? { scopes: value.scope.split(/\s+/).filter(Boolean) }
+      : {}),
   };
 }
 
@@ -705,7 +961,11 @@ async function responseJson(response: Response): Promise<Record<string, any>> {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
-async function safeFetch(fetcher: typeof fetch, urlInput: string, init: RequestInit): Promise<Response> {
+async function safeFetch(
+  fetcher: typeof fetch,
+  urlInput: string,
+  init: RequestInit,
+): Promise<Response> {
   const url = assertSafePublicUrl(urlInput);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10_000);
@@ -722,14 +982,17 @@ function assertSafePublicUrl(value: string): URL {
 
 function resourceMetadataFromHeader(header: string | null): string | undefined {
   if (!header) return undefined;
-  return /resource_metadata\s*=\s*["']([^"']+)["']/i.exec(header)?.[1]
-    ?? /resource_metadata\s*=\s*([^,\s]+)/i.exec(header)?.[1];
+  return (
+    /resource_metadata\s*=\s*["']([^"']+)["']/i.exec(header)?.[1] ??
+    /resource_metadata\s*=\s*([^,\s]+)/i.exec(header)?.[1]
+  );
 }
 
 function scopeFromHeader(header: string | null): string[] {
   if (!header) return [];
-  const value = /(?:^|,)\s*Bearer\s+[^,]*?scope\s*=\s*["']([^"']*)["']/i.exec(header)?.[1]
-    ?? /\bscope\s*=\s*["']([^"']*)["']/i.exec(header)?.[1];
+  const value =
+    /(?:^|,)\s*Bearer\s+[^,]*?scope\s*=\s*["']([^"']*)["']/i.exec(header)?.[1] ??
+    /\bscope\s*=\s*["']([^"']*)["']/i.exec(header)?.[1];
   return value ? value.split(/\s+/).filter(Boolean).slice(0, 64) : [];
 }
 
@@ -756,16 +1019,23 @@ function associatedCredential(scope: CloudflareMcpOAuthScope, id: string): strin
 }
 
 function randomBase64Url(bytes: number): string {
-  return encodeBase64(crypto.getRandomValues(new Uint8Array(bytes))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return encodeBase64(crypto.getRandomValues(new Uint8Array(bytes)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
 }
 
 async function sha256Base64Url(value: string): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)),
+  );
   return encodeBase64(digest).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 async function sha256Hex(value: string): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)),
+  );
   return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 

@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 
-import {
-  SqliteSessionLedger,
-} from "../../src/harness/session/sqlite.ts";
+import { SqliteSessionLedger } from "../../src/harness/session/sqlite.ts";
 
 type SqlDatabase = {
   exec(query: string): void;
@@ -20,23 +18,14 @@ function sqlStore() {
   return {
     database,
     sql: {
-      exec<T = Record<string, unknown>>(
-        query: string,
-        ...bindings: unknown[]
-      ): { toArray(): T[] } {
+      exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): { toArray(): T[] } {
         const trimmed = query.trim().toLowerCase();
-        if (
-          bindings.length === 0 &&
-          !/^(select|with|pragma|explain)\b/.test(trimmed)
-        ) {
+        if (bindings.length === 0 && !/^(select|with|pragma|explain)\b/.test(trimmed)) {
           database.exec(query);
           return { toArray: () => [] };
         }
         const statement = database.prepare(query);
-        if (
-          /^(select|with|pragma|explain)\b/.test(trimmed) ||
-          /\breturning\b/.test(trimmed)
-        ) {
+        if (/^(select|with|pragma|explain)\b/.test(trimmed) || /\breturning\b/.test(trimmed)) {
           return { toArray: () => statement.all(...bindings) as T[] };
         }
         statement.run(...bindings);
@@ -88,13 +77,19 @@ test("appends records and reads pages after a stable cursor", async () => {
   assert.equal(three.previousHash, two.recordHash);
 
   const pageOne = await first.list("session_sqlite", { limit: 2 });
-  assert.deepEqual(pageOne.items.map(({ sequence }) => sequence), [1, 2]);
+  assert.deepEqual(
+    pageOne.items.map(({ sequence }) => sequence),
+    [1, 2],
+  );
   assert.equal(pageOne.nextCursor, "v1:2");
   const pageTwo = await first.list("session_sqlite", {
     after: pageOne.nextCursor,
     limit: 2,
   });
-  assert.deepEqual(pageTwo.items.map(({ sequence }) => sequence), [3]);
+  assert.deepEqual(
+    pageTwo.items.map(({ sequence }) => sequence),
+    [3],
+  );
   assert.equal(pageTwo.nextCursor, undefined);
 });
 
@@ -114,8 +109,7 @@ test("keeps ownership, chain data, and hot-record metadata after restart", async
     threadId: "thread_sqlite",
     recordCount: 3,
     latestSequence: 3,
-    latestHash: (await restarted.list("session_sqlite", { limit: 3 }))
-      .items[2]?.recordHash,
+    latestHash: (await restarted.list("session_sqlite", { limit: 3 })).items[2]?.recordHash,
     hotRecordLimit: 2,
     hotStartSequence: 2,
     hotRecordCount: 2,
@@ -140,18 +134,22 @@ test("detects a changed SQLite record", async () => {
   const { database, sql } = sqlStore();
   const ledger = new SqliteSessionLedger(sql);
   await ledger.append(appendInput(1));
-  const row = database.prepare(
-    `SELECT record_json FROM flary_session_ledger_records
+  const row = database
+    .prepare(
+      `SELECT record_json FROM flary_session_ledger_records
      WHERE session_id = ? AND sequence = ?`,
-  ).all("session_sqlite", 1)[0] as { record_json: string };
+    )
+    .all("session_sqlite", 1)[0] as { record_json: string };
   const record = JSON.parse(row.record_json) as {
     publicPayload: Record<string, unknown>;
   };
   record.publicPayload = { changed: true };
-  database.prepare(
-    `UPDATE flary_session_ledger_records
+  database
+    .prepare(
+      `UPDATE flary_session_ledger_records
      SET record_json = ? WHERE session_id = ? AND sequence = ?`,
-  ).run(JSON.stringify(record), "session_sqlite", 1);
+    )
+    .run(JSON.stringify(record), "session_sqlite", 1);
 
   await assert.rejects(ledger.verify("session_sqlite"), /record hash/i);
 });
@@ -165,14 +163,13 @@ test("serializes concurrent appends into one valid chain", async () => {
         ...appendInput((index % 9) + 1),
         sourceCursor: `concurrent:${index}`,
         recordedAt: "2026-07-30T12:00:00.000Z",
-      })),
+      }),
+    ),
   );
 
   await ledger.verify("session_sqlite");
   assert.deepEqual(
-    (await ledger.list("session_sqlite", { limit: 10 })).items.map(
-      ({ sequence }) => sequence,
-    ),
+    (await ledger.list("session_sqlite", { limit: 10 })).items.map(({ sequence }) => sequence),
     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
   );
 });

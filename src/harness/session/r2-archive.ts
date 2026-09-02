@@ -1,7 +1,4 @@
-import {
-  SessionRecordSchema,
-  type SessionRecord,
-} from "./contracts.js";
+import { SessionRecordSchema, type SessionRecord } from "./contracts.js";
 import { SqliteSessionLedger } from "./sqlite.js";
 
 interface SqlRows<T> {
@@ -9,10 +6,7 @@ interface SqlRows<T> {
 }
 
 interface SqlStorage {
-  exec<T = Record<string, unknown>>(
-    query: string,
-    ...bindings: unknown[]
-  ): SqlRows<T>;
+  exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): SqlRows<T>;
   transactionSync<T>(closure: () => T): T;
 }
 
@@ -50,10 +44,7 @@ export class R2SessionArchive {
     readonly secret: string;
   }) {
     const sql = input.sql as Partial<SqlStorage>;
-    if (
-      typeof sql.exec !== "function" ||
-      typeof sql.transactionSync !== "function"
-    ) {
+    if (typeof sql.exec !== "function" || typeof sql.transactionSync !== "function") {
       throw new Error("The R2 session archive needs Durable Object SQLite");
     }
     if (input.secret.length < 32) {
@@ -83,18 +74,19 @@ export class R2SessionArchive {
     const metadata = await ledger.metadata(sessionId);
     if (!metadata?.archiveRequired) return 0;
     const lastSequence = metadata.latestSequence - metadata.hotRecordLimit;
-    const rows = this.#sql.exec<{ record_json: string }>(
-      `SELECT record_json
+    const rows = this.#sql
+      .exec<{ record_json: string }>(
+        `SELECT record_json
        FROM flary_session_ledger_records
        WHERE session_id = ? AND sequence > ? AND sequence <= ?
        ORDER BY sequence ASC`,
-      sessionId,
-      metadata.sealedThroughSequence,
-      lastSequence,
-    ).toArray();
+        sessionId,
+        metadata.sealedThroughSequence,
+        lastSequence,
+      )
+      .toArray();
     if (rows.length === 0) return 0;
-    const records = rows.map((row) =>
-      SessionRecordSchema.parse(JSON.parse(row.record_json)));
+    const records = rows.map((row) => SessionRecordSchema.parse(JSON.parse(row.record_json)));
     const firstSequence = records[0]!.sequence;
     const plaintext = new TextEncoder().encode(
       `${records.map((record) => JSON.stringify(record)).join("\n")}\n`,
@@ -107,9 +99,7 @@ export class R2SessionArchive {
         {
           name: "AES-GCM",
           iv: arrayBuffer(nonce),
-          additionalData: new TextEncoder().encode(
-            `${sessionId}:${firstSequence}:${lastSequence}`,
-          ),
+          additionalData: new TextEncoder().encode(`${sessionId}:${firstSequence}:${lastSequence}`),
         },
         key,
         arrayBuffer(compressed),
@@ -161,21 +151,23 @@ export class R2SessionArchive {
   ): Promise<SessionRecord[]> {
     const after = options.after ?? 0;
     const limit = options.limit ?? 1_000;
-    const segments = this.#sql.exec<ArchiveSegmentRow>(
-      `SELECT storage_key, first_sequence, last_sequence, nonce_base64, sha256
+    const segments = this.#sql
+      .exec<ArchiveSegmentRow>(
+        `SELECT storage_key, first_sequence, last_sequence, nonce_base64, sha256
        FROM flary_session_archive_segments
        WHERE session_id = ? AND last_sequence > ?
        ORDER BY first_sequence ASC`,
-      sessionId,
-      after,
-    ).toArray();
+        sessionId,
+        after,
+      )
+      .toArray();
     const records: SessionRecord[] = [];
     const key = await archiveKey(this.#secret);
     for (const segment of segments) {
       const object = await this.#bucket.get(segment.storage_key);
       if (!object) throw new Error(`Session archive '${segment.storage_key}' is missing`);
       const ciphertext = new Uint8Array(await object.arrayBuffer());
-      if (await sha256(ciphertext) !== segment.sha256) {
+      if ((await sha256(ciphertext)) !== segment.sha256) {
         throw new Error(`Session archive '${segment.storage_key}' failed its hash check`);
       }
       const plaintext = await crypto.subtle.decrypt(
@@ -189,9 +181,7 @@ export class R2SessionArchive {
         key,
         arrayBuffer(ciphertext),
       );
-      const text = new TextDecoder().decode(
-        await gunzip(new Uint8Array(plaintext)),
-      );
+      const text = new TextDecoder().decode(await gunzip(new Uint8Array(plaintext)));
       for (const line of text.split("\n")) {
         if (!line) continue;
         const record = SessionRecordSchema.parse(JSON.parse(line));
@@ -204,28 +194,21 @@ export class R2SessionArchive {
 
   /** Delete all sealed public ledger segments for one session. */
   async deleteSession(sessionId: string): Promise<number> {
-    const segments = this.#sql.exec<{ storage_key: string }>(
-      "SELECT storage_key FROM flary_session_archive_segments WHERE session_id = ?",
-      sessionId,
-    ).toArray();
+    const segments = this.#sql
+      .exec<{ storage_key: string }>(
+        "SELECT storage_key FROM flary_session_archive_segments WHERE session_id = ?",
+        sessionId,
+      )
+      .toArray();
     for (const segment of segments) await this.#bucket.delete?.(segment.storage_key);
-    this.#sql.exec(
-      "DELETE FROM flary_session_archive_segments WHERE session_id = ?",
-      sessionId,
-    );
+    this.#sql.exec("DELETE FROM flary_session_archive_segments WHERE session_id = ?", sessionId);
     return segments.length;
   }
 }
 
 async function archiveKey(secret: string): Promise<CryptoKey> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(secret),
-  );
-  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, [
-    "encrypt",
-    "decrypt",
-  ]);
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
 }
 
 async function gzip(bytes: Uint8Array): Promise<Uint8Array> {
@@ -249,9 +232,7 @@ async function transform(
 }
 
 async function sha256(bytes: Uint8Array): Promise<string> {
-  const digest = new Uint8Array(
-    await crypto.subtle.digest("SHA-256", arrayBuffer(bytes)),
-  );
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", arrayBuffer(bytes)));
   return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 

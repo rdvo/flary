@@ -15,17 +15,13 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as prompts from "@clack/prompts";
+import { parse as parseJsonc, type ParseError } from "jsonc-parser";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const templatesRoot = join(packageRoot, "templates");
 
 type Template = "dashboard" | "backend" | "mail";
-export type Provider =
-  | "google"
-  | "openai"
-  | "anthropic"
-  | "workers-ai"
-  | "none";
+export type Provider = "google" | "openai" | "anthropic" | "workers-ai" | "none";
 export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
 type Feature = "browser" | "sandbox" | "mcp";
 
@@ -68,7 +64,7 @@ export interface CommandRunner {
       readonly cwd: string;
       readonly env?: NodeJS.ProcessEnv;
       readonly quiet?: boolean;
-    }
+    },
   ): Promise<CommandResult>;
 }
 
@@ -162,9 +158,7 @@ const defaultRunner: CommandRunner = {
       const child = spawn(command, [...args], {
         cwd: options.cwd,
         env: options.env,
-        stdio: options.quiet
-          ? ["ignore", "pipe", "pipe"]
-          : ["inherit", "pipe", "pipe"],
+        stdio: options.quiet ? ["ignore", "pipe", "pipe"] : ["inherit", "pipe", "pipe"],
       });
       let stdout = "";
       let stderr = "";
@@ -182,7 +176,7 @@ const defaultRunner: CommandRunner = {
           code: code ?? 1,
           stdout,
           stderr,
-        })
+        }),
       );
     });
   },
@@ -256,21 +250,16 @@ function parseArgs(args: readonly string[]): ParsedArgs {
     hasNewFlags = true;
     const take = () => {
       const next = rest[++index];
-      if (!next || next.startsWith("-"))
-        throw new Error(`Missing value for ${value}`);
+      if (!next || next.startsWith("-")) throw new Error(`Missing value for ${value}`);
       return next;
     };
     if (value === "--template")
-      template = parseChoice<Template>(
-        take(),
-        ["dashboard", "backend", "mail"],
-        value
-      );
+      template = parseChoice<Template>(take(), ["dashboard", "backend", "mail"], value);
     else if (value === "--provider")
       provider = parseChoice<Provider>(
         take(),
         ["google", "openai", "anthropic", "workers-ai", "none"],
-        value
+        value,
       );
     else if (value === "--model") model = take();
     else if (value === "--features") {
@@ -280,26 +269,15 @@ function parseArgs(args: readonly string[]): ParsedArgs {
           ? []
           : raw
               .split(",")
-              .map((entry) =>
-                parseChoice<Feature>(
-                  entry,
-                  ["browser", "sandbox", "mcp"],
-                  value
-                )
-              );
+              .map((entry) => parseChoice<Feature>(entry, ["browser", "sandbox", "mcp"], value));
     } else if (value === "--profile") profile = take();
     else if (value === "--account") account = take();
     else if (value === "--package-manager")
-      packageManager = parseChoice<PackageManager>(
-        take(),
-        ["npm", "pnpm", "yarn", "bun"],
-        value
-      );
+      packageManager = parseChoice<PackageManager>(take(), ["npm", "pnpm", "yarn", "bun"], value);
     else if (value === "--deploy") deploy = true;
     else if (value === "--no-deploy") deploy = false;
     else if (value === "--domain") domain = normalizeDomain(take());
-    else if (value === "--mailboxes")
-      mailboxes = parseMailboxLocalParts(take());
+    else if (value === "--mailboxes") mailboxes = parseMailboxLocalParts(take());
     else if (value === "--yes" || value === "-y") yes = true;
     else throw new Error(`Unknown option: ${value}`);
   }
@@ -327,11 +305,7 @@ function normalizeDomain(value: string): string {
     .toLowerCase()
     .replace(/^https?:\/\//, "")
     .replace(/\/$/, "");
-  if (
-    !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(
-      domain
-    )
-  ) {
+  if (!/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(domain)) {
     throw new Error(`Invalid mail domain: ${value}`);
   }
   return domain;
@@ -343,29 +317,18 @@ function parseMailboxLocalParts(value: string): string[] {
       value
         .split(",")
         .map((entry) => entry.trim().toLowerCase())
-        .filter(Boolean)
+        .filter(Boolean),
     ),
   ];
-  if (
-    values.length === 0 ||
-    values.some((entry) => !/^[a-z0-9][a-z0-9._+-]{0,63}$/.test(entry))
-  ) {
-    throw new Error(
-      "Mailboxes must be comma-separated local parts such as admin,support."
-    );
+  if (values.length === 0 || values.some((entry) => !/^[a-z0-9][a-z0-9._+-]{0,63}$/.test(entry))) {
+    throw new Error("Mailboxes must be comma-separated local parts such as admin,support.");
   }
   return values;
 }
 
-function parseChoice<T extends string>(
-  value: string,
-  choices: readonly T[],
-  flag: string
-): T {
+function parseChoice<T extends string>(value: string, choices: readonly T[], flag: string): T {
   if (!choices.includes(value as T)) {
-    throw new Error(
-      `Invalid value for ${flag}: ${value}. Use ${choices.join(", ")}.`
-    );
+    throw new Error(`Invalid value for ${flag}: ${value}. Use ${choices.join(", ")}.`);
   }
   return value as T;
 }
@@ -392,11 +355,9 @@ function packageCommands(manager: PackageManager): {
   install: [string, string[]];
   dev: string;
 } {
-  if (manager === "pnpm")
-    return { install: ["pnpm", ["install"]], dev: "pnpm dev" };
+  if (manager === "pnpm") return { install: ["pnpm", ["install"]], dev: "pnpm dev" };
   if (manager === "yarn") return { install: ["yarn", []], dev: "yarn dev" };
-  if (manager === "bun")
-    return { install: ["bun", ["install"]], dev: "bun run dev" };
+  if (manager === "bun") return { install: ["bun", ["install"]], dev: "bun run dev" };
   return { install: ["npm", ["install"]], dev: "npm run dev" };
 }
 
@@ -414,31 +375,23 @@ function requiredSecrets(
   template: Template,
   provider: Provider,
   authMode: "personal" | "existing",
-  features: readonly Feature[] = []
+  features: readonly Feature[] = [],
 ): string[] {
   if (template === "mail") return ["BETTER_AUTH_SECRET", "FLARY_SETUP_TOKEN"];
   const values = ["FLARY_INTERNAL_TOKEN", "FLARY_SESSION_ARCHIVE_KEY"];
   if (template === "dashboard") {
-    values.push(
-      "BETTER_AUTH_SECRET",
-      "FLARY_TOKEN_ENCRYPTION_KEY_B64",
-      "FLARY_SETUP_TOKEN"
-    );
+    values.push("BETTER_AUTH_SECRET", "FLARY_TOKEN_ENCRYPTION_KEY_B64", "FLARY_SETUP_TOKEN");
   } else if (authMode === "personal") {
     values.push("FLARY_ACCESS_TOKEN");
   }
   if (provider === "openai") values.push("OPENAI_API_KEY");
   if (provider === "anthropic") values.push("ANTHROPIC_API_KEY");
   if (provider === "google") values.push("GEMINI_API_KEY");
-  if (template === "backend" && features.includes("mcp"))
-    values.push("GITHUB_MCP_PAT");
+  if (template === "backend" && features.includes("mcp")) values.push("GITHUB_MCP_PAT");
   return values;
 }
 
-function normalizeFeatures(
-  template: Template,
-  features: readonly Feature[]
-): Feature[] {
+function normalizeFeatures(template: Template, features: readonly Feature[]): Feature[] {
   return template === "dashboard"
     ? [...new Set<Feature>(["mcp", ...features])]
     : [...new Set(features)];
@@ -453,7 +406,7 @@ function randomSecret(bytes = 32): string {
 async function promptSetup(
   parsed: ParsedArgs,
   env: NodeJS.ProcessEnv,
-  prompt: CliPrompt
+  prompt: CliPrompt,
 ): Promise<SetupAnswers> {
   prompt.intro("Create your Flary deployment");
   const template =
@@ -526,9 +479,7 @@ async function promptSetup(
     });
     cancelIfNeeded(mailRoutingApproved, prompt);
     if (!mailRoutingApproved)
-      throw new Error(
-        "Flary Mail needs approval to enable Email Routing on the selected domain."
-      );
+      throw new Error("Flary Mail needs approval to enable Email Routing on the selected domain.");
     const deploy =
       parsed.deploy ??
       (await prompt.confirm({
@@ -600,9 +551,7 @@ async function promptSetup(
     (await prompt.multiselect({
       message: "Optional features",
       options: [
-        ...(template === "backend"
-          ? [{ value: "mcp", label: "GitHub MCP example" }]
-          : []),
+        ...(template === "backend" ? [{ value: "mcp", label: "GitHub MCP example" }] : []),
         { value: "browser", label: "Browser Run" },
         {
           value: "sandbox",
@@ -613,10 +562,7 @@ async function promptSetup(
       required: false,
     }));
   cancelIfNeeded(selectedFeatures, prompt);
-  const features = normalizeFeatures(
-    template as Template,
-    selectedFeatures as Feature[]
-  );
+  const features = normalizeFeatures(template as Template, selectedFeatures as Feature[]);
   const authMode =
     template === "backend"
       ? await prompt.select({
@@ -706,23 +652,17 @@ function cancelIfNeeded(value: unknown, prompt: CliPrompt): void {
 async function scaffoldProject(
   target: string,
   answers: SetupAnswers,
-  parsed: ParsedArgs
+  parsed: ParsedArgs,
 ): Promise<FlaryProjectState> {
   if (await exists(target)) {
     const entries = await readdir(target);
-    if (entries.length > 0)
-      throw new Error(`Target directory is not empty: ${target}`);
+    if (entries.length > 0) throw new Error(`Target directory is not empty: ${target}`);
   } else {
     await mkdir(target, { recursive: true });
   }
-  const source = join(
-    templatesRoot,
-    answers.template === "backend" ? "starter" : answers.template
-  );
+  const source = join(templatesRoot, answers.template === "backend" ? "starter" : answers.template);
   if (!(await exists(source)))
-    throw new Error(
-      `The ${answers.template} template is not included in this Flary package.`
-    );
+    throw new Error(`The ${answers.template} template is not included in this Flary package.`);
   await cp(source, target, { recursive: true });
   if (await exists(join(target, "gitignore")))
     await rename(join(target, "gitignore"), join(target, ".gitignore"));
@@ -735,10 +675,7 @@ async function scaffoldProject(
     flary: await packageVersion(),
   };
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  const generatedSecrets = generatedSecretValues(
-    answers.template,
-    answers.authMode
-  );
+  const generatedSecrets = generatedSecretValues(answers.template, answers.authMode);
   const allSecrets = { ...generatedSecrets, ...answers.secrets };
   await writeDevVars(target, allSecrets);
   const state: FlaryProjectState = {
@@ -755,7 +692,7 @@ async function scaffoldProject(
       answers.template,
       answers.provider,
       answers.authMode,
-      answers.features
+      answers.features,
     ),
     ...(answers.mailDomain ? { mailDomain: answers.mailDomain } : {}),
     ...(answers.mailboxes ? { mailboxes: answers.mailboxes } : {}),
@@ -770,14 +707,13 @@ async function scaffoldProject(
     mailboxes: state.mailboxes,
   });
   await writeProjectState(target, state);
-  if (state.template !== "mail")
-    await writeGeneratedOptions(target, state, answers.authMode);
+  if (state.template !== "mail") await writeGeneratedOptions(target, state, answers.authMode);
   return state;
 }
 
 function generatedSecretValues(
   template: Template,
-  authMode: "personal" | "existing"
+  authMode: "personal" | "existing",
 ): Record<string, string> {
   if (template === "mail") {
     return {
@@ -792,7 +728,7 @@ function generatedSecretValues(
   if (template === "dashboard") {
     values.BETTER_AUTH_SECRET = randomSecret();
     values.FLARY_TOKEN_ENCRYPTION_KEY_B64 = Buffer.from(
-      crypto.getRandomValues(new Uint8Array(32))
+      crypto.getRandomValues(new Uint8Array(32)),
     ).toString("base64");
     values.FLARY_SETUP_TOKEN = randomSecret(24);
   } else if (authMode === "personal") {
@@ -804,19 +740,18 @@ function generatedSecretValues(
 async function writeGeneratedOptions(
   target: string,
   state: FlaryProjectState,
-  authMode: "personal" | "existing"
+  authMode: "personal" | "existing",
 ): Promise<void> {
   const model =
     state.model ??
     (state.provider === "google"
       ? "gemini-2.5-flash"
       : state.provider === "anthropic"
-      ? "claude-sonnet-4-5"
-      : state.provider === "workers-ai"
-      ? "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
-      : "gpt-5");
-  const modelPrefix =
-    state.provider === "workers-ai" ? "cloudflare" : state.provider;
+        ? "claude-sonnet-4-5"
+        : state.provider === "workers-ai"
+          ? "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+          : "gpt-5");
+  const modelPrefix = state.provider === "workers-ai" ? "cloudflare" : state.provider;
   const qualifiedModel =
     state.provider !== "none" && !model.startsWith(`${modelPrefix}/`)
       ? `${modelPrefix}/${model}`
@@ -844,17 +779,14 @@ async function writeGeneratedOptions(
         widget: Boolean(state.widget),
       },
       null,
-      2
+      2,
     )};`,
     "",
   ].join("\n");
   await writeFile(join(target, "src", "flary.generated.ts"), source);
 }
 
-async function writeDevVars(
-  target: string,
-  values: Record<string, string>
-): Promise<void> {
+async function writeDevVars(target: string, values: Record<string, string>): Promise<void> {
   const file = join(target, ".dev.vars");
   const current = await readKeyValueFile(file);
   const merged = { ...current, ...values };
@@ -863,7 +795,7 @@ async function writeDevVars(
     Object.entries(merged)
       .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
       .join("\n") + "\n",
-    { mode: 0o600 }
+    { mode: 0o600 },
   );
   await chmod(file, 0o600);
 }
@@ -883,29 +815,19 @@ async function readKeyValueFile(file: string): Promise<Record<string, string>> {
   return values;
 }
 
-async function writeProjectState(
-  target: string,
-  state: FlaryProjectState
-): Promise<void> {
+async function writeProjectState(target: string, state: FlaryProjectState): Promise<void> {
   await mkdir(join(target, ".flary"), { recursive: true });
-  await writeFile(
-    join(target, ".flary", "project.json"),
-    `${JSON.stringify(state, null, 2)}\n`
-  );
+  await writeFile(join(target, ".flary", "project.json"), `${JSON.stringify(state, null, 2)}\n`);
 }
 
 async function readProjectState(target: string): Promise<FlaryProjectState> {
   const file = join(target, ".flary", "project.json");
   if (!(await exists(file)))
-    throw new Error(
-      `No Flary setup state was found in ${target}. Run \`flary create\` first.`
-    );
+    throw new Error(`No Flary setup state was found in ${target}. Run \`flary create\` first.`);
   return JSON.parse(await readFile(file, "utf8")) as FlaryProjectState;
 }
 
-async function readOrRecoverProjectState(
-  target: string
-): Promise<FlaryProjectState> {
+async function readOrRecoverProjectState(target: string): Promise<FlaryProjectState> {
   try {
     return await readProjectState(target);
   } catch {
@@ -913,18 +835,12 @@ async function readOrRecoverProjectState(
     const manifestFile = join(target, "package.json");
     const mailMigration = join(target, "migrations", "0001_mail.sql");
     const isMail = await exists(mailMigration);
-    if (
-      (!isMail && !(await exists(generatedFile))) ||
-      !(await exists(manifestFile))
-    ) {
-      throw new Error(
-        `Setup cannot resume because ${target} is not a generated Flary project.`
-      );
+    if ((!isMail && !(await exists(generatedFile))) || !(await exists(manifestFile))) {
+      throw new Error(`Setup cannot resume because ${target} is not a generated Flary project.`);
     }
     const source = isMail ? "" : await readFile(generatedFile, "utf8");
-    const provider = /["']?provider["']?\s*:\s*["']([^"']+)/.exec(
-      source
-    )?.[1] as Provider | undefined;
+    const provider = /["']?provider["']?\s*:\s*["']([^"']+)/.exec(source)?.[1] as
+      Provider | undefined;
     const model = /["']?model["']?\s*:\s*["']([^"']+)/.exec(source)?.[1];
     const widget = /["']?widget["']?\s*:\s*true/.test(source);
     const authMode =
@@ -933,49 +849,36 @@ async function readOrRecoverProjectState(
         : "existing";
     if (
       !isMail &&
-      (!provider ||
-        !["google", "openai", "anthropic", "workers-ai", "none"].includes(
-          provider
-        ))
+      (!provider || !["google", "openai", "anthropic", "workers-ai", "none"].includes(provider))
     ) {
-      throw new Error(
-        "Setup cannot resume because the generated provider setting is invalid."
-      );
+      throw new Error("Setup cannot resume because the generated provider setting is invalid.");
     }
-    const legacyFeatures = /["']?features["']?\s*:\s*(\[[^\]]*\])/.exec(
-      source
-    )?.[1];
-    const featureObject = /["']?features["']?\s*:\s*(\{[^}]*\})/.exec(
-      source
-    )?.[1];
+    const legacyFeatures = /["']?features["']?\s*:\s*(\[[^\]]*\])/.exec(source)?.[1];
+    const featureObject = /["']?features["']?\s*:\s*(\{[^}]*\})/.exec(source)?.[1];
     const features = legacyFeatures
       ? [...legacyFeatures.matchAll(/["'](browser|sandbox|mcp)["']/g)].map(
-          (match) => match[1] as Feature
+          (match) => match[1] as Feature,
         )
       : (["mcp", "browser", "sandbox"] as const).filter((feature) =>
-          new RegExp(`["']?${feature}["']?\\s*:\\s*true`).test(
-            featureObject ?? ""
-          )
+          new RegExp(`["']?${feature}["']?\\s*:\\s*true`).test(featureObject ?? ""),
         );
     const template: Template = isMail
       ? "mail"
       : (await exists(join(target, "migrations", "0001_dashboard.sql")))
-      ? "dashboard"
-      : "backend";
+        ? "dashboard"
+        : "backend";
     const manifest = await readManifest(manifestFile);
-    const packageManager: PackageManager = (await exists(
-      join(target, "pnpm-lock.yaml")
-    ))
+    const packageManager: PackageManager = (await exists(join(target, "pnpm-lock.yaml")))
       ? "pnpm"
       : (await exists(join(target, "yarn.lock")))
-      ? "yarn"
-      : (await exists(join(target, "bun.lock"))) ||
-        (await exists(join(target, "bun.lockb")))
-      ? "bun"
-      : "npm";
-    const wrangler = JSON.parse(
-      await readFile(join(target, "wrangler.jsonc"), "utf8")
-    ) as Record<string, unknown>;
+        ? "yarn"
+        : (await exists(join(target, "bun.lock"))) || (await exists(join(target, "bun.lockb")))
+          ? "bun"
+          : "npm";
+    const wrangler = JSON.parse(await readFile(join(target, "wrangler.jsonc"), "utf8")) as Record<
+      string,
+      unknown
+    >;
     const state: FlaryProjectState = {
       version: 1,
       template,
@@ -988,15 +891,8 @@ async function readOrRecoverProjectState(
         typeof wrangler.name === "string"
           ? wrangler.name
           : workerName(manifest.name ?? basename(target)),
-      ...(typeof wrangler.account_id === "string"
-        ? { accountId: wrangler.account_id }
-        : {}),
-      requiredSecrets: requiredSecrets(
-        template,
-        isMail ? "none" : provider!,
-        authMode,
-        features
-      ),
+      ...(typeof wrangler.account_id === "string" ? { accountId: wrangler.account_id } : {}),
+      requiredSecrets: requiredSecrets(template, isMail ? "none" : provider!, authMode, features),
       ...(isMail &&
       typeof wrangler.vars === "object" &&
       wrangler.vars &&
@@ -1026,14 +922,19 @@ async function updateWrangler(
     workersAI?: boolean;
     mailDomain?: string;
     mailboxes?: readonly string[];
-  }
+  },
 ): Promise<void> {
   const file = join(target, "wrangler.jsonc");
   if (!(await exists(file))) return;
-  const value = JSON.parse(await readFile(file, "utf8")) as Record<
-    string,
-    unknown
-  >;
+  const parseErrors: ParseError[] = [];
+  const parsed = parseJsonc(await readFile(file, "utf8"), parseErrors, {
+    allowTrailingComma: true,
+    disallowComments: false,
+  });
+  if (parseErrors.length > 0 || !parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${file} is not valid JSONC.`);
+  }
+  const value = parsed as Record<string, unknown>;
   if (input.name) value.name = input.name;
   if (input.accountId) value.account_id = input.accountId;
   if (input.requiredSecrets && !input.mailDomain) {
@@ -1049,9 +950,7 @@ async function updateWrangler(
   if (input.workersAI) value.ai = { binding: "AI" };
   else if (input.workersAI === false) delete value.ai;
   if (input.mailDomain && input.mailboxes?.length) {
-    const addresses = input.mailboxes.map(
-      (mailbox) => `${mailbox}@${input.mailDomain}`
-    );
+    const addresses = input.mailboxes.map((mailbox) => `${mailbox}@${input.mailDomain}`);
     value.addresses = addresses;
     value.send_email = [{ name: "EMAIL", allowed_sender_addresses: addresses }];
     value.vars = {
@@ -1071,9 +970,7 @@ async function updateWrangler(
     const queueName = `${input.name ?? "flary-mail"}-jobs`;
     value.queues = {
       producers: (queues.producers ?? []).map((producer) =>
-        producer.binding === "MAIL_QUEUE"
-          ? { ...producer, queue: queueName }
-          : producer
+        producer.binding === "MAIL_QUEUE" ? { ...producer, queue: queueName } : producer,
       ),
       consumers: (queues.consumers ?? []).map((consumer) => ({
         ...consumer,
@@ -1088,7 +985,7 @@ async function installProject(
   target: string,
   state: FlaryProjectState,
   runner: CommandRunner,
-  env: NodeJS.ProcessEnv
+  env: NodeJS.ProcessEnv,
 ): Promise<void> {
   const [command, args] = packageCommands(state.packageManager).install;
   const result = await runner.run(command, args, { cwd: target, env });
@@ -1097,17 +994,12 @@ async function installProject(
 
 async function localWrangler(
   target: string,
-  state: FlaryProjectState
+  state: FlaryProjectState,
 ): Promise<[string, string[]]> {
   const suffix = process.platform === "win32" ? ".cmd" : "";
   let directory = resolve(target);
   while (true) {
-    const executable = join(
-      directory,
-      "node_modules",
-      ".bin",
-      `wrangler${suffix}`
-    );
+    const executable = join(directory, "node_modules", ".bin", `wrangler${suffix}`);
     if (await exists(executable)) {
       return [executable, state.profile ? ["--profile", state.profile] : []];
     }
@@ -1124,7 +1016,7 @@ async function authenticateWrangler(
   runner: CommandRunner,
   env: NodeJS.ProcessEnv,
   prompt: CliPrompt,
-  requestedAccount?: string
+  requestedAccount?: string,
 ): Promise<FlaryProjectState> {
   const [wrangler, prefix] = await localWrangler(target, state);
   let result = await runner.run(wrangler, [...prefix, "whoami", "--json"], {
@@ -1133,16 +1025,14 @@ async function authenticateWrangler(
     quiet: true,
   });
   if (result.code !== 0) {
-    let login = await runner.run(
-      wrangler,
-      [...prefix, "login", "--use-keyring"],
-      { cwd: target, env, quiet: true }
-    );
+    let login = await runner.run(wrangler, [...prefix, "login", "--use-keyring"], {
+      cwd: target,
+      env,
+      quiet: true,
+    });
     if (
       login.code !== 0 &&
-      /use-keyring|unknown (argument|option)/i.test(
-        `${login.stdout}\n${login.stderr}`
-      )
+      /use-keyring|unknown (argument|option)/i.test(`${login.stdout}\n${login.stderr}`)
     ) {
       // Some Wrangler releases use the operating-system credential store by
       // default and do not expose this flag.
@@ -1158,8 +1048,7 @@ async function authenticateWrangler(
       quiet: true,
     });
   }
-  if (result.code !== 0)
-    throw new Error("Wrangler authentication could not be verified.");
+  if (result.code !== 0) throw new Error("Wrangler authentication could not be verified.");
   const accounts = parseWranglerAccounts(result.stdout);
   let accountId = requestedAccount ?? state.accountId;
   if (!accountId && accounts.length === 1) accountId = accounts[0]!.id;
@@ -1175,13 +1064,8 @@ async function authenticateWrangler(
     accountId = String(selected);
   }
   if (!accountId)
-    throw new Error(
-      "No Cloudflare account is available. Use --account with an account ID."
-    );
-  if (
-    accounts.length > 0 &&
-    !accounts.some((account) => account.id === accountId)
-  )
+    throw new Error("No Cloudflare account is available. Use --account with an account ID.");
+  if (accounts.length > 0 && !accounts.some((account) => account.id === accountId))
     throw new Error(`Wrangler cannot access Cloudflare account ${accountId}.`);
   const next = { ...state, accountId };
   await updateWrangler(target, { accountId });
@@ -1189,26 +1073,21 @@ async function authenticateWrangler(
   return next;
 }
 
-export function parseWranglerAccounts(
-  output: string
-): Array<{ id: string; name: string }> {
+export function parseWranglerAccounts(output: string): Array<{ id: string; name: string }> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(output);
   } catch {
     throw new Error("Wrangler returned invalid account data.");
   }
-  const root =
-    parsed && typeof parsed === "object"
-      ? (parsed as Record<string, unknown>)
-      : {};
+  const root = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
   const source = Array.isArray(root.accounts)
     ? root.accounts
     : Array.isArray(root.account)
-    ? root.account
-    : root.account && typeof root.account === "object"
-    ? [root.account]
-    : [];
+      ? root.account
+      : root.account && typeof root.account === "object"
+        ? [root.account]
+        : [];
   return source.flatMap((value) => {
     if (!value || typeof value !== "object") return [];
     const account = value as Record<string, unknown>;
@@ -1216,8 +1095,8 @@ export function parseWranglerAccounts(
       typeof account.id === "string"
         ? account.id
         : typeof account.account_id === "string"
-        ? account.account_id
-        : undefined;
+          ? account.account_id
+          : undefined;
     if (!id) return [];
     return [{ id, name: typeof account.name === "string" ? account.name : id }];
   });
@@ -1246,20 +1125,19 @@ async function deployProject(
     prompt: CliPrompt;
     account?: string;
     log: (message: string) => void;
-  }
+  },
 ): Promise<FlaryProjectState> {
   let state = await readProjectState(target);
   if (!(await exists(join(target, "node_modules"))))
     await installProject(target, state, input.runner, input.env);
-  if (state.features.includes("sandbox"))
-    await checkDocker(target, input.runner, input.env);
+  if (state.features.includes("sandbox")) await checkDocker(target, input.runner, input.env);
   state = await authenticateWrangler(
     target,
     state,
     input.runner,
     input.env,
     input.prompt,
-    input.account
+    input.account,
   );
   const build = await input.runner.run(state.packageManager, ["run", "build"], {
     cwd: target,
@@ -1267,72 +1145,59 @@ async function deployProject(
   });
   if (build.code !== 0) throw new Error("The project build failed.");
   const [wrangler, prefix] = await localWrangler(target, state);
-  const validation = await input.runner.run(
-    wrangler,
-    [...prefix, "deploy", "--dry-run"],
-    { cwd: target, env: input.env }
-  );
-  if (validation.code !== 0)
-    throw new Error("Wrangler could not validate the deployment.");
+  const validation = await input.runner.run(wrangler, [...prefix, "deploy", "--dry-run"], {
+    cwd: target,
+    env: input.env,
+  });
+  if (validation.code !== 0) throw new Error("Wrangler could not validate the deployment.");
   if (state.template === "mail") {
-    if (
-      !state.mailDomain ||
-      !state.mailboxes?.length ||
-      !state.mailRoutingApproved
-    ) {
+    if (!state.mailDomain || !state.mailboxes?.length || !state.mailRoutingApproved) {
       throw new Error(
-        "Flary Mail needs a domain, at least one mailbox, and approval to enable Email Routing."
+        "Flary Mail needs a domain, at least one mailbox, and approval to enable Email Routing.",
       );
     }
     const routing = await input.runner.run(
       wrangler,
       [...prefix, "email", "routing", "enable", state.mailDomain],
-      { cwd: target, env: input.env }
+      { cwd: target, env: input.env },
     );
     if (routing.code !== 0)
       throw new Error(
-        `Email Routing could not be enabled for ${state.mailDomain}. Check its existing MX records.`
+        `Email Routing could not be enabled for ${state.mailDomain}. Check its existing MX records.`,
       );
     const sending = await input.runner.run(
       wrangler,
       [...prefix, "email", "sending", "enable", state.mailDomain],
-      { cwd: target, env: input.env }
+      { cwd: target, env: input.env },
     );
     const sendingOutput = `${sending.stdout}\n${sending.stderr}`;
     const sendingAlreadyEnabled =
-      /subdomain already exists/i.test(sendingOutput) ||
-      /\bcode:\s*2040\b/i.test(sendingOutput);
+      /subdomain already exists/i.test(sendingOutput) || /\bcode:\s*2040\b/i.test(sendingOutput);
     if (sending.code !== 0 && !sendingAlreadyEnabled)
       throw new Error(
-        `Email Sending could not be enabled for ${state.mailDomain}. A Workers Paid plan is required.`
+        `Email Sending could not be enabled for ${state.mailDomain}. A Workers Paid plan is required.`,
       );
   }
   const localSecrets = await readKeyValueFile(join(target, ".dev.vars"));
   const missingLocally = state.requiredSecrets.filter(
-    (name) => !localSecrets[name] && !input.env[name]
+    (name) => !localSecrets[name] && !input.env[name],
   );
   let remoteSecrets = new Set<string>();
   if (missingLocally.length > 0) {
-    const listed = await input.runner.run(
-      wrangler,
-      [...prefix, "secret", "list"],
-      { cwd: target, env: input.env }
-    );
-    if (listed.code === 0)
-      remoteSecrets = new Set(parseWranglerSecretNames(listed.stdout));
+    const listed = await input.runner.run(wrangler, [...prefix, "secret", "list"], {
+      cwd: target,
+      env: input.env,
+    });
+    if (listed.code === 0) remoteSecrets = new Set(parseWranglerSecretNames(listed.stdout));
   }
   const missing = missingLocally.filter((name) => !remoteSecrets.has(name));
   if (missing.length > 0)
-    throw new Error(
-      `Required secrets are missing: ${missing.join(
-        ", "
-      )}. Run \`flary setup\`.`
-    );
+    throw new Error(`Required secrets are missing: ${missing.join(", ")}. Run \`flary setup\`.`);
   const selectedSecrets = Object.fromEntries(
     state.requiredSecrets.flatMap((name) => {
       const value = localSecrets[name] ?? input.env[name];
       return value ? [[name, value]] : [];
-    })
+    }),
   ) as Record<string, string>;
   const secretDir = await mkdtemp(join(tmpdir(), "flary-secrets-"));
   const secretFile = join(secretDir, "secrets.json");
@@ -1343,36 +1208,25 @@ async function deployProject(
     });
     await chmod(secretFile, 0o600);
     const deployArgs = [...prefix, "deploy"];
-    if (Object.keys(selectedSecrets).length > 0)
-      deployArgs.push("--secrets-file", secretFile);
-    const deployed = await input.runner.run(
-      wrangler,
-      deployArgs,
-      {
-        cwd: target,
-        env: { ...input.env, WRANGLER_OUTPUT_FILE_PATH: deploymentOutputFile },
-      }
-    );
+    if (Object.keys(selectedSecrets).length > 0) deployArgs.push("--secrets-file", secretFile);
+    const deployed = await input.runner.run(wrangler, deployArgs, {
+      cwd: target,
+      env: { ...input.env, WRANGLER_OUTPUT_FILE_PATH: deploymentOutputFile },
+    });
     if (deployed.code !== 0) throw new Error("Wrangler deployment failed.");
     if (state.template === "dashboard" || state.template === "mail") {
-      const binding =
-        state.template === "mail" ? "MAIL_DB" : "FLARY_DASHBOARD_DB";
+      const binding = state.template === "mail" ? "MAIL_DB" : "FLARY_DASHBOARD_DB";
       const migration = await input.runner.run(
         wrangler,
         [...prefix, "d1", "migrations", "apply", binding, "--remote"],
-        { cwd: target, env: input.env }
+        { cwd: target, env: input.env },
       );
       if (migration.code !== 0)
         throw new Error(
-          `${
-            state.template === "mail" ? "Mail" : "Dashboard"
-          } database migration failed.`
+          `${state.template === "mail" ? "Mail" : "Dashboard"} database migration failed.`,
         );
     }
-    const url = await deploymentUrl(
-      deployed.stdout + "\n" + deployed.stderr,
-      deploymentOutputFile
-    );
+    const url = await deploymentUrl(deployed.stdout + "\n" + deployed.stderr, deploymentOutputFile);
     const next = { ...state, deployedUrl: url };
     await writeProjectState(target, next);
     await verifyDeployment(next, selectedSecrets, input.log);
@@ -1382,21 +1236,15 @@ async function deployProject(
   }
 }
 
-export async function deploymentUrl(
-  output: string,
-  outputFile: string
-): Promise<string> {
+export async function deploymentUrl(output: string, outputFile: string): Promise<string> {
   if (await exists(outputFile)) {
-    const records = (await readFile(outputFile, "utf8"))
-      .split(/\r?\n/)
-      .filter(Boolean);
+    const records = (await readFile(outputFile, "utf8")).split(/\r?\n/).filter(Boolean);
     for (const line of records.reverse()) {
       try {
         const record = JSON.parse(line) as { targets?: unknown };
         const target = Array.isArray(record.targets)
           ? record.targets.find(
-              (value): value is string =>
-                typeof value === "string" && value.startsWith("https://")
+              (value): value is string => typeof value === "string" && value.startsWith("https://"),
             )
           : undefined;
         if (target) return target.replace(/\/$/, "");
@@ -1405,53 +1253,43 @@ export async function deploymentUrl(
       }
     }
   }
-  const textTarget = /https:\/\/[^\s]+\.workers\.dev/
-    .exec(output)?.[0]
-    ?.replace(/[),.;]+$/, "");
+  const textTarget = /https:\/\/[^\s]+\.workers\.dev/.exec(output)?.[0]?.replace(/[),.;]+$/, "");
   if (textTarget) return textTarget;
-  const customDomain =
-    /^\s*(?:https:\/\/)?([^\s]+)\s+\(custom domain\)\s*$/im.exec(output)?.[1];
+  const customDomain = /^\s*(?:https:\/\/)?([^\s]+)\s+\(custom domain\)\s*$/im.exec(output)?.[1];
   if (customDomain) return `https://${customDomain.replace(/\/$/, "")}`;
   throw new Error(
-    "Wrangler deployed the Worker but did not report its URL. Run `flary doctor` after you add the URL to .flary/project.json."
+    "Wrangler deployed the Worker but did not report its URL. Run `flary doctor` after you add the URL to .flary/project.json.",
   );
 }
 
 async function verifyDeployment(
   state: FlaryProjectState,
   secrets: Record<string, string>,
-  log: (message: string) => void
+  log: (message: string) => void,
 ): Promise<void> {
   if (!state.deployedUrl) return;
   const health = await fetch(new URL("/health", state.deployedUrl), {
     signal: AbortSignal.timeout(15_000),
   }).catch(() => undefined);
   if (!health?.ok)
-    throw new Error(
-      `Deployment completed, but ${state.deployedUrl}/health did not pass.`
-    );
+    throw new Error(`Deployment completed, but ${state.deployedUrl}/health did not pass.`);
   if (state.template === "dashboard" || state.template === "mail") {
     const setup = await fetch(new URL("/api/setup/status", state.deployedUrl), {
       signal: AbortSignal.timeout(15_000),
     }).catch(() => undefined);
     if (!setup?.ok)
-      throw new Error(
-        `The Worker is healthy, but the ${state.template} setup route did not pass.`
-      );
+      throw new Error(`The Worker is healthy, but the ${state.template} setup route did not pass.`);
   }
   if (state.template === "backend" && secrets.FLARY_ACCESS_TOKEN) {
-    const result = await fetch(
-      new URL("/functions/support", state.deployedUrl),
-      {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${secrets.FLARY_ACCESS_TOKEN}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ question: "Reply with OK." }),
-        signal: AbortSignal.timeout(30_000),
-      }
-    ).catch(() => undefined);
+    const result = await fetch(new URL("/functions/support", state.deployedUrl), {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${secrets.FLARY_ACCESS_TOKEN}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ question: "Reply with OK." }),
+      signal: AbortSignal.timeout(30_000),
+    }).catch(() => undefined);
     if (!result?.ok && state.provider !== "none")
       throw new Error("The authenticated example operation did not pass.");
   }
@@ -1461,25 +1299,22 @@ async function verifyDeployment(
 async function checkDocker(
   target: string,
   runner: CommandRunner,
-  env: NodeJS.ProcessEnv
+  env: NodeJS.ProcessEnv,
 ): Promise<void> {
   const result = await runner
     .run("docker", ["info"], { cwd: target, env, quiet: true })
     .catch(() => ({ code: 1, stdout: "", stderr: "" }));
   if (result.code !== 0)
     throw new Error(
-      "Sandbox needs a running Docker-compatible builder and a paid Cloudflare Workers plan. Disable Sandbox or start Docker."
+      "Sandbox needs a running Docker-compatible builder and a paid Cloudflare Workers plan. Disable Sandbox or start Docker.",
     );
 }
 
 async function createProject(
   parsed: ParsedArgs,
   options: Required<
-    Pick<
-      RunFlaryCliOptions,
-      "cwd" | "env" | "isTTY" | "runner" | "log" | "prompt"
-    >
-  >
+    Pick<RunFlaryCliOptions, "cwd" | "env" | "isTTY" | "runner" | "log" | "prompt">
+  >,
 ): Promise<void> {
   const target = resolve(options.cwd, parsed.target ?? "flary-agent");
   const legacy = !options.isTTY && !parsed.hasNewFlags;
@@ -1497,13 +1332,9 @@ async function createProject(
   } else if (options.isTTY && !parsed.yes) {
     answers = await promptSetup(parsed, options.env, options.prompt);
   } else {
-    if (
-      !parsed.template ||
-      !parsed.packageManager ||
-      parsed.deploy === undefined
-    ) {
+    if (!parsed.template || !parsed.packageManager || parsed.deploy === undefined) {
       throw new Error(
-        "Non-interactive create requires --template, --package-manager, and --deploy or --no-deploy."
+        "Non-interactive create requires --template, --package-manager, and --deploy or --no-deploy.",
       );
     }
     if (parsed.template === "mail") {
@@ -1524,43 +1355,36 @@ async function createProject(
       };
     } else {
       if (!parsed.provider)
-        throw new Error(
-          "The dashboard and backend templates require --provider."
-        );
+        throw new Error("The dashboard and backend templates require --provider.");
       const authMode = "personal" as const;
       const secrets: Record<string, string> = {};
       if (parsed.provider === "openai") {
         if (!options.env.OPENAI_API_KEY)
           throw new Error(
-            "OPENAI_API_KEY is required for --provider openai in non-interactive mode."
+            "OPENAI_API_KEY is required for --provider openai in non-interactive mode.",
           );
         secrets.OPENAI_API_KEY = options.env.OPENAI_API_KEY;
       }
       if (parsed.provider === "anthropic") {
         if (!options.env.ANTHROPIC_API_KEY)
           throw new Error(
-            "ANTHROPIC_API_KEY is required for --provider anthropic in non-interactive mode."
+            "ANTHROPIC_API_KEY is required for --provider anthropic in non-interactive mode.",
           );
         secrets.ANTHROPIC_API_KEY = options.env.ANTHROPIC_API_KEY;
       }
       if (parsed.provider === "google") {
-        const value =
-          options.env.GEMINI_API_KEY ??
-          options.env.GOOGLE_GENERATIVE_AI_API_KEY;
+        const value = options.env.GEMINI_API_KEY ?? options.env.GOOGLE_GENERATIVE_AI_API_KEY;
         if (!value)
           throw new Error(
-            "GEMINI_API_KEY is required for --provider google in non-interactive mode."
+            "GEMINI_API_KEY is required for --provider google in non-interactive mode.",
           );
         secrets.GEMINI_API_KEY = value;
       }
-      const features = normalizeFeatures(
-        parsed.template,
-        parsed.features ?? []
-      );
+      const features = normalizeFeatures(parsed.template, parsed.features ?? []);
       if (parsed.template === "backend" && features.includes("mcp")) {
         if (!options.env.GITHUB_MCP_PAT)
           throw new Error(
-            "GITHUB_MCP_PAT is required when the MCP example is enabled in non-interactive mode."
+            "GITHUB_MCP_PAT is required when the MCP example is enabled in non-interactive mode.",
           );
         secrets.GITHUB_MCP_PAT = options.env.GITHUB_MCP_PAT;
       }
@@ -1592,16 +1416,12 @@ async function createProject(
       log: options.log,
     });
   const commands = packageCommands(state.packageManager);
-  options.log(
-    `\n${answers.deploy ? "Deployment ready" : "Project ready"}: ${target}`
-  );
+  options.log(`\n${answers.deploy ? "Deployment ready" : "Project ready"}: ${target}`);
   if (state.deployedUrl)
     options.log(
       `Open: ${state.deployedUrl}${
-        state.template === "dashboard" || state.template === "mail"
-          ? "/setup"
-          : ""
-      }`
+        state.template === "dashboard" || state.template === "mail" ? "/setup" : ""
+      }`,
     );
   if (state.template === "dashboard" || state.template === "mail")
     options.log("First-owner token: .dev.vars → FLARY_SETUP_TOKEN");
@@ -1610,9 +1430,7 @@ async function createProject(
   options.log(`Local development: cd ${target} && ${commands.dev}`);
   if (state.template === "dashboard")
     options.log(
-      `Connections: ${
-        state.deployedUrl ? `${state.deployedUrl}/connections` : "/connections"
-      }`
+      `Connections: ${state.deployedUrl ? `${state.deployedUrl}/connections` : "/connections"}`,
     );
   options.log("Recovery: npx flary setup");
 }
@@ -1620,9 +1438,7 @@ async function createProject(
 async function setupProject(
   target: string,
   parsed: ParsedArgs,
-  options: Required<
-    Pick<RunFlaryCliOptions, "env" | "isTTY" | "log" | "prompt">
-  >
+  options: Required<Pick<RunFlaryCliOptions, "env" | "isTTY" | "log" | "prompt">>,
 ): Promise<void> {
   const current = await readOrRecoverProjectState(target);
   if (current.template === "mail") {
@@ -1643,9 +1459,7 @@ async function setupProject(
       name: next.workerName,
     });
     await writeProjectState(target, next);
-    options.log(
-      "Flary Mail setup is ready. Run `npx flary deploy` to apply it."
-    );
+    options.log("Flary Mail setup is ready. Run `npx flary deploy` to apply it.");
     return;
   }
   const localSecrets = await readKeyValueFile(join(target, ".dev.vars"));
@@ -1654,9 +1468,10 @@ async function setupProject(
   if (options.isTTY && !parsed.provider) {
     const selected = await options.prompt.select({
       message: "AI provider",
-      options: ["google", "openai", "anthropic", "workers-ai", "none"].map(
-        (value) => ({ value, label: value })
-      ),
+      options: ["google", "openai", "anthropic", "workers-ai", "none"].map((value) => ({
+        value,
+        label: value,
+      })),
       initialValue: current.provider,
     });
     cancelIfNeeded(selected, options.prompt);
@@ -1690,7 +1505,7 @@ async function setupProject(
     cancelIfNeeded(value, options.prompt);
     if (!value)
       throw new Error(
-        "OPENAI_API_KEY is required. Set it in the environment or run setup in a terminal."
+        "OPENAI_API_KEY is required. Set it in the environment or run setup in a terminal.",
       );
     secrets.OPENAI_API_KEY = String(value);
   }
@@ -1707,7 +1522,7 @@ async function setupProject(
     cancelIfNeeded(value, options.prompt);
     if (!value)
       throw new Error(
-        "ANTHROPIC_API_KEY is required. Set it in the environment or run setup in a terminal."
+        "ANTHROPIC_API_KEY is required. Set it in the environment or run setup in a terminal.",
       );
     secrets.ANTHROPIC_API_KEY = String(value);
   }
@@ -1725,7 +1540,7 @@ async function setupProject(
     cancelIfNeeded(value, options.prompt);
     if (!value)
       throw new Error(
-        "GEMINI_API_KEY is required. Set it in the environment or run setup in a terminal."
+        "GEMINI_API_KEY is required. Set it in the environment or run setup in a terminal.",
       );
     secrets.GEMINI_API_KEY = String(value);
   }
@@ -1742,27 +1557,18 @@ async function setupProject(
     cancelIfNeeded(value, options.prompt);
     if (!value)
       throw new Error(
-        "GITHUB_MCP_PAT is required while the MCP example is enabled. Set it in the environment or run setup in a terminal."
+        "GITHUB_MCP_PAT is required while the MCP example is enabled. Set it in the environment or run setup in a terminal.",
       );
     secrets.GITHUB_MCP_PAT = String(value);
   }
   if (Object.keys(secrets).length > 0) await writeDevVars(target, secrets);
-  const authMode = current.requiredSecrets.includes("FLARY_ACCESS_TOKEN")
-    ? "personal"
-    : "existing";
+  const authMode = current.requiredSecrets.includes("FLARY_ACCESS_TOKEN") ? "personal" : "existing";
   const next: FlaryProjectState = {
     ...current,
     provider,
-    model:
-      parsed.model ??
-      (provider === current.provider ? current.model : undefined),
+    model: parsed.model ?? (provider === current.provider ? current.model : undefined),
     features,
-    requiredSecrets: requiredSecrets(
-      current.template,
-      provider,
-      authMode,
-      features
-    ),
+    requiredSecrets: requiredSecrets(current.template, provider, authMode, features),
   };
   await writeGeneratedOptions(target, next, authMode);
   await updateWrangler(target, {
@@ -1775,7 +1581,7 @@ async function setupProject(
 
 async function doctorProject(
   target: string,
-  options: Required<Pick<RunFlaryCliOptions, "env" | "runner" | "log">>
+  options: Required<Pick<RunFlaryCliOptions, "env" | "runner" | "log">>,
 ): Promise<void> {
   const checks: Array<[string, boolean, string]> = [];
   const major = Number(process.versions.node.split(".")[0]);
@@ -1800,34 +1606,26 @@ async function doctorProject(
         quiet: true,
       })
       .catch(() => ({ code: 1, stdout: "", stderr: "" }));
-    checks.push([
-      "Package manager",
-      packageManager.code === 0,
-      state.packageManager,
-    ]);
+    checks.push(["Package manager", packageManager.code === 0, state.packageManager]);
     checks.push([
       "Cloudflare account",
       Boolean(state.accountId),
       state.accountId ?? "run `flary deploy` to select an account",
     ]);
     const values = await readKeyValueFile(join(target, ".dev.vars"));
-    const missing = state.requiredSecrets.filter(
-      (name) => !values[name] && !options.env[name]
-    );
+    const missing = state.requiredSecrets.filter((name) => !values[name] && !options.env[name]);
     checks.push([
       "Required local secrets",
       missing.length === 0,
-      missing.length
-        ? missing.join(", ")
-        : `${state.requiredSecrets.length} present`,
+      missing.length ? missing.join(", ") : `${state.requiredSecrets.length} present`,
     ]);
     if (await exists(join(target, "node_modules"))) {
       const [wrangler, prefix] = await localWrangler(target, state);
-      const identity = await options.runner.run(
-        wrangler,
-        [...prefix, "whoami", "--json"],
-        { cwd: target, env: options.env, quiet: true }
-      );
+      const identity = await options.runner.run(wrangler, [...prefix, "whoami", "--json"], {
+        cwd: target,
+        env: options.env,
+        quiet: true,
+      });
       checks.push([
         "Wrangler authentication",
         identity.code === 0,
@@ -1841,9 +1639,7 @@ async function doctorProject(
               join(target, ".flue-vite.wrangler.jsonc"),
             ];
       const generatedFile = (
-        await Promise.all(
-          generated.map(async (file) => ({ file, present: await exists(file) }))
-        )
+        await Promise.all(generated.map(async (file) => ({ file, present: await exists(file) })))
       ).find(({ present }) => present)?.file;
       checks.push([
         "Generated runtime configuration",
@@ -1852,11 +1648,8 @@ async function doctorProject(
       ]);
       if (generatedFile) {
         const problems = doctorBindingProblems(
-          JSON.parse(await readFile(generatedFile, "utf8")) as Record<
-            string,
-            unknown
-          >,
-          state
+          JSON.parse(await readFile(generatedFile, "utf8")) as Record<string, unknown>,
+          state,
         );
         checks.push([
           "Generated Cloudflare bindings",
@@ -1875,17 +1668,10 @@ async function doctorProject(
         checks.push([
           "Sandbox builder",
           docker.code === 0,
-          docker.code === 0
-            ? "Docker is ready"
-            : "start a Docker-compatible builder",
+          docker.code === 0 ? "Docker is ready" : "start a Docker-compatible builder",
         ]);
       }
-    } else
-      checks.push([
-        "Dependencies",
-        false,
-        "run your package manager install command",
-      ]);
+    } else checks.push(["Dependencies", false, "run your package manager install command"]);
     if (state.template === "dashboard") {
       checks.push([
         "Dashboard migration",
@@ -1909,13 +1695,12 @@ async function doctorProject(
   }
   for (const [name, ok, detail] of checks)
     options.log(`${ok ? "PASS" : "FAIL"}  ${name}: ${detail}`);
-  if (checks.some(([, ok]) => !ok))
-    throw new Error("Flary doctor found a problem.");
+  if (checks.some(([, ok]) => !ok)) throw new Error("Flary doctor found a problem.");
 }
 
 function doctorBindingProblems(
   config: Record<string, unknown>,
-  state: FlaryProjectState
+  state: FlaryProjectState,
 ): string[] {
   const objects =
     config.durable_objects && typeof config.durable_objects === "object"
@@ -1923,28 +1708,26 @@ function doctorBindingProblems(
       : {};
   const names = new Set(
     (objects.bindings ?? []).flatMap((binding) =>
-      typeof binding.name === "string" ? [binding.name] : []
-    )
+      typeof binding.name === "string" ? [binding.name] : [],
+    ),
   );
   const d1 = new Set(
-    (Array.isArray(config.d1_databases) ? config.d1_databases : []).flatMap(
-      (binding) =>
-        binding &&
-        typeof binding === "object" &&
-        typeof (binding as { binding?: unknown }).binding === "string"
-          ? [(binding as { binding: string }).binding]
-          : []
-    )
+    (Array.isArray(config.d1_databases) ? config.d1_databases : []).flatMap((binding) =>
+      binding &&
+      typeof binding === "object" &&
+      typeof (binding as { binding?: unknown }).binding === "string"
+        ? [(binding as { binding: string }).binding]
+        : [],
+    ),
   );
   const r2 = new Set(
-    (Array.isArray(config.r2_buckets) ? config.r2_buckets : []).flatMap(
-      (binding) =>
-        binding &&
-        typeof binding === "object" &&
-        typeof (binding as { binding?: unknown }).binding === "string"
-          ? [(binding as { binding: string }).binding]
-          : []
-    )
+    (Array.isArray(config.r2_buckets) ? config.r2_buckets : []).flatMap((binding) =>
+      binding &&
+      typeof binding === "object" &&
+      typeof (binding as { binding?: unknown }).binding === "string"
+        ? [(binding as { binding: string }).binding]
+        : [],
+    ),
   );
   const queues =
     config.queues && typeof config.queues === "object"
@@ -1952,8 +1735,8 @@ function doctorBindingProblems(
       : {};
   const queueNames = new Set(
     (queues.producers ?? []).flatMap((producer) =>
-      typeof producer.binding === "string" ? [producer.binding] : []
-    )
+      typeof producer.binding === "string" ? [producer.binding] : [],
+    ),
   );
   const missing: string[] = [];
   if (state.template === "mail") {
@@ -1967,7 +1750,7 @@ function doctorBindingProblems(
         (binding) =>
           binding &&
           typeof binding === "object" &&
-          (binding as { name?: unknown }).name === "EMAIL"
+          (binding as { name?: unknown }).name === "EMAIL",
       )
     )
       missing.push("EMAIL");
@@ -1975,11 +1758,7 @@ function doctorBindingProblems(
       missing.push("addresses");
     return missing;
   }
-  for (const binding of [
-    "FLARY_RUN_SERVICE",
-    "FLARY_THREAD_CONTROL",
-    "FLARY_WORKSPACE",
-  ])
+  for (const binding of ["FLARY_RUN_SERVICE", "FLARY_THREAD_CONTROL", "FLARY_WORKSPACE"])
     if (!names.has(binding)) missing.push(binding);
   for (const binding of [
     "FLARY_THREAD_CATALOG",
@@ -1990,20 +1769,13 @@ function doctorBindingProblems(
     if (!r2.has(binding)) missing.push(binding);
   if (!queueNames.has("FLARY_SESSION_PROJECTION_QUEUE"))
     missing.push("FLARY_SESSION_PROJECTION_QUEUE");
-  if (
-    state.features.includes("browser") &&
-    !(config.browser && typeof config.browser === "object")
-  )
+  if (state.features.includes("browser") && !(config.browser && typeof config.browser === "object"))
     missing.push("BROWSER");
-  if (state.features.includes("sandbox") && !names.has("SANDBOX"))
-    missing.push("SANDBOX");
+  if (state.features.includes("sandbox") && !names.has("SANDBOX")) missing.push("SANDBOX");
   return missing;
 }
 
-async function writeIfMissing(
-  path: string,
-  content: string
-): Promise<"created" | "skipped"> {
+async function writeIfMissing(path: string, content: string): Promise<"created" | "skipped"> {
   if (await exists(path)) return "skipped";
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, content, { flag: "wx" });
@@ -2013,13 +1785,13 @@ async function writeIfMissing(
 async function initProject(
   targetArg: string | undefined,
   cwd: string,
-  log: (message: string) => void
+  log: (message: string) => void,
 ): Promise<void> {
   const target = resolve(cwd, targetArg ?? ".");
   const manifestPath = join(target, "package.json");
   if (!(await exists(manifestPath)))
     throw new Error(
-      `No package.json was found in ${target}. Use "flary create" for a new project.`
+      `No package.json was found in ${target}. Use "flary create" for a new project.`,
     );
   const manifest = await readManifest(manifestPath);
   if (!manifest.dependencies?.flary && !manifest.devDependencies?.flary) {
@@ -2038,7 +1810,7 @@ async function initProject(
     files.map(async (file) => ({
       path: file.path,
       status: await writeIfMissing(file.path, file.content),
-    }))
+    })),
   );
   log(`Initialized Flary in ${target}`);
   for (const result of results)
@@ -2060,7 +1832,7 @@ export interface QuickstartProjectInput {
 /** Create or update the generated widget project without exposing secret values. */
 export async function prepareQuickstartProject(
   input: QuickstartProjectInput,
-  options: Pick<RunFlaryCliOptions, "env" | "runner" | "log"> = {}
+  options: Pick<RunFlaryCliOptions, "env" | "runner" | "log"> = {},
 ): Promise<FlaryProjectState> {
   const target = resolve(input.target);
   const env = options.env ?? process.env;
@@ -2069,14 +1841,13 @@ export async function prepareQuickstartProject(
     input.provider === "google"
       ? "GEMINI_API_KEY"
       : input.provider === "openai"
-      ? "OPENAI_API_KEY"
-      : input.provider === "anthropic"
-      ? "ANTHROPIC_API_KEY"
-      : undefined;
+        ? "OPENAI_API_KEY"
+        : input.provider === "anthropic"
+          ? "ANTHROPIC_API_KEY"
+          : undefined;
   let state: FlaryProjectState;
   if (!(await exists(join(target, ".flary", "project.json")))) {
-    const secrets =
-      keyName && input.providerKey ? { [keyName]: input.providerKey } : {};
+    const secrets = keyName && input.providerKey ? { [keyName]: input.providerKey } : {};
     state = await scaffoldProject(
       target,
       {
@@ -2101,15 +1872,14 @@ export async function prepareQuickstartProject(
         yes: true,
         hasNewFlags: true,
         ...(input.accountId ? { account: input.accountId } : {}),
-      }
+      },
     );
     await installProject(target, state, runner, env);
   } else {
     state = await readProjectState(target);
     if (state.template !== "backend")
       throw new Error("The quick start needs a backend project directory.");
-    if (keyName && input.providerKey)
-      await writeDevVars(target, { [keyName]: input.providerKey });
+    if (keyName && input.providerKey) await writeDevVars(target, { [keyName]: input.providerKey });
   }
   const next: FlaryProjectState = {
     ...state,
@@ -2130,7 +1900,7 @@ export async function prepareQuickstartProject(
       `  systemPrompt: ${JSON.stringify(input.systemPrompt)},`,
       "} as const;",
       "",
-    ].join("\n")
+    ].join("\n"),
   );
   await updateWrangler(target, {
     name: next.workerName,
@@ -2149,13 +1919,11 @@ export async function deployQuickstartProject(
     readonly accountId: string;
     readonly cloudflareAccessToken?: string;
   },
-  options: Pick<RunFlaryCliOptions, "env" | "runner" | "log"> = {}
+  options: Pick<RunFlaryCliOptions, "env" | "runner" | "log"> = {},
 ): Promise<FlaryProjectState> {
   const env = {
     ...(options.env ?? process.env),
-    ...(input.cloudflareAccessToken
-      ? { CLOUDFLARE_API_TOKEN: input.cloudflareAccessToken }
-      : {}),
+    ...(input.cloudflareAccessToken ? { CLOUDFLARE_API_TOKEN: input.cloudflareAccessToken } : {}),
   };
   return deployProject(resolve(target), {
     runner: options.runner ?? defaultRunner,
@@ -2168,13 +1936,12 @@ export async function deployQuickstartProject(
 
 export async function runFlaryCli(
   args: readonly string[],
-  options: RunFlaryCliOptions = {}
+  options: RunFlaryCliOptions = {},
 ): Promise<void> {
   const parsed = parseArgs(args);
   const cwd = options.cwd ?? process.cwd();
   const env = options.env ?? process.env;
-  const isTTY =
-    options.isTTY ?? Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  const isTTY = options.isTTY ?? Boolean(process.stdin.isTTY && process.stdout.isTTY);
   const runner = options.runner ?? defaultRunner;
   const log = options.log ?? console.log;
   const prompt = options.prompt ?? defaultPrompt;
@@ -2193,8 +1960,7 @@ export async function runFlaryCli(
     return createProject(parsed, { cwd, env, isTTY, runner, log, prompt });
   if (parsed.command === "init") return initProject(parsed.target, cwd, log);
   const target = resolve(cwd, parsed.target ?? ".");
-  if (parsed.command === "setup")
-    return setupProject(target, parsed, { env, isTTY, log, prompt });
+  if (parsed.command === "setup") return setupProject(target, parsed, { env, isTTY, log, prompt });
   if (parsed.command === "deploy") {
     const state = await deployProject(target, {
       runner,
@@ -2206,9 +1972,6 @@ export async function runFlaryCli(
     log(`Deployment ready: ${state.deployedUrl ?? state.workerName}`);
     return;
   }
-  if (parsed.command === "doctor")
-    return doctorProject(target, { env, runner, log });
-  throw new Error(
-    `Unknown Flary command: ${parsed.command}\nRun "flary help" for usage.`
-  );
+  if (parsed.command === "doctor") return doctorProject(target, { env, runner, log });
+  throw new Error(`Unknown Flary command: ${parsed.command}\nRun "flary help" for usage.`);
 }

@@ -5,8 +5,8 @@ import {
   MetadataSchema,
   NonEmptyStringSchema,
   TimestampSchema,
-} from "../contracts/common";
-import { RecallScopeSchema, type RecallScope } from "../contracts/recall";
+} from "../contracts/common.js";
+import { RecallScopeSchema, type RecallScope } from "../contracts/recall.js";
 
 const ArtifactPathSchema = z
   .string()
@@ -27,8 +27,7 @@ export const ArtifactBranchNameSchema = z
   .max(200)
   .refine(
     (branch) =>
-      !branch.startsWith("/") &&
-      !branch.split("/").some((part) => part === ".." || part === ""),
+      !branch.startsWith("/") && !branch.split("/").some((part) => part === ".." || part === ""),
     "Artifact branch names must be relative and canonical",
   );
 
@@ -57,7 +56,10 @@ export const ArtifactFileSchema = z
     path: ArtifactPathSchema,
     content: z.string().max(64 * 1024 * 1024),
     mediaType: z.string().trim().min(1).max(255).default("text/plain"),
-    sha256: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
+    sha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/i)
+      .optional(),
     metadata: MetadataSchema.optional(),
   })
   .strict();
@@ -94,7 +96,10 @@ export const ArtifactFileSummarySchema = z
   .object({
     path: ArtifactPathSchema,
     mediaType: z.string().trim().min(1).max(255),
-    sha256: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
+    sha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/i)
+      .optional(),
     metadata: MetadataSchema.optional(),
   })
   .strict();
@@ -114,9 +119,7 @@ export const ArtifactCommitSummarySchema = z
   .strict();
 export type ArtifactCommitSummary = z.infer<typeof ArtifactCommitSummarySchema>;
 
-export function summarizeArtifactCommit(
-  commit: ArtifactCommit,
-): ArtifactCommitSummary {
+export function summarizeArtifactCommit(commit: ArtifactCommit): ArtifactCommitSummary {
   return ArtifactCommitSummarySchema.parse({
     id: commit.id,
     repository: commit.repository,
@@ -138,10 +141,22 @@ export const ArtifactDiffFileSchema = z
   .object({
     path: ArtifactPathSchema,
     status: z.enum(["added", "modified", "deleted", "unchanged"]),
-    beforeSha256: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
-    afterSha256: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
-    beforeContent: z.string().max(64 * 1024 * 1024).optional(),
-    afterContent: z.string().max(64 * 1024 * 1024).optional(),
+    beforeSha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/i)
+      .optional(),
+    afterSha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/i)
+      .optional(),
+    beforeContent: z
+      .string()
+      .max(64 * 1024 * 1024)
+      .optional(),
+    afterContent: z
+      .string()
+      .max(64 * 1024 * 1024)
+      .optional(),
   })
   .strict();
 export type ArtifactDiffFile = z.infer<typeof ArtifactDiffFileSchema>;
@@ -187,11 +202,7 @@ export interface ArtifactHistoryStore {
     branch?: string,
   ): Promise<ArtifactCommit | undefined>;
   repository(repository: string, scope: RecallScope): Promise<ArtifactRepository>;
-  branch(
-    repository: string,
-    scope: RecallScope,
-    branch?: string,
-  ): Promise<ArtifactBranch>;
+  branch(repository: string, scope: RecallScope, branch?: string): Promise<ArtifactBranch>;
   checkpoint(input: ArtifactCommitInput): Promise<ArtifactCommit>;
   diff(
     repository: string,
@@ -225,16 +236,19 @@ function scopeKey(scope: RecallScope): string {
   return JSON.stringify(scope);
 }
 
-function snippet(content: string, query: string): {
-  value: string;
-  lineStart: number;
-  lineEnd: number;
-} | undefined {
+function snippet(
+  content: string,
+  query: string,
+):
+  | {
+      value: string;
+      lineStart: number;
+      lineEnd: number;
+    }
+  | undefined {
   const lines = content.split(/\r?\n/);
   const needle = query.toLocaleLowerCase();
-  const index = lines.findIndex((line) =>
-    line.toLocaleLowerCase().includes(needle),
-  );
+  const index = lines.findIndex((line) => line.toLocaleLowerCase().includes(needle));
   if (index < 0) return undefined;
   const start = Math.max(0, index - 1);
   const end = Math.min(lines.length, index + 2);
@@ -272,10 +286,7 @@ export class InMemoryArtifactHistoryStore implements ArtifactHistoryStore {
     return commit;
   }
 
-  async read(
-    repository: string,
-    commitId: string,
-  ): Promise<ArtifactCommit | undefined> {
+  async read(repository: string, commitId: string): Promise<ArtifactCommit | undefined> {
     const commit = this.#commits.get(commitId);
     return commit?.repository === repository ? commit : undefined;
   }
@@ -309,10 +320,7 @@ export class InMemoryArtifactHistoryStore implements ArtifactHistoryStore {
     return id ? this.read(repository, id) : undefined;
   }
 
-  async repository(
-    repository: string,
-    scope: RecallScope,
-  ): Promise<ArtifactRepository> {
+  async repository(repository: string, scope: RecallScope): Promise<ArtifactRepository> {
     return ArtifactRepositorySchema.parse({
       repository: NonEmptyStringSchema.parse(repository),
       scope: RecallScopeSchema.parse(scope),
@@ -320,11 +328,7 @@ export class InMemoryArtifactHistoryStore implements ArtifactHistoryStore {
     });
   }
 
-  async branch(
-    repository: string,
-    scope: RecallScope,
-    branch = "main",
-  ): Promise<ArtifactBranch> {
+  async branch(repository: string, scope: RecallScope, branch = "main"): Promise<ArtifactBranch> {
     const parsedBranch = ArtifactBranchNameSchema.parse(branch);
     const key = branchKey(repository, scope, parsedBranch);
     const existing = this.#branches.get(key);
@@ -484,12 +488,8 @@ export function buildArtifactDiff(
     return ArtifactDiffFileSchema.parse({
       path,
       status,
-      ...(oldFile
-        ? { beforeContent: oldFile.content, beforeSha256: oldFile.sha256 }
-        : {}),
-      ...(newFile
-        ? { afterContent: newFile.content, afterSha256: newFile.sha256 }
-        : {}),
+      ...(oldFile ? { beforeContent: oldFile.content, beforeSha256: oldFile.sha256 } : {}),
+      ...(newFile ? { afterContent: newFile.content, afterSha256: newFile.sha256 } : {}),
     });
   });
   return ArtifactDiffSchema.parse({

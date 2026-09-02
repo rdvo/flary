@@ -1,7 +1,4 @@
-import {
-  Validator,
-  type Schema as JsonSchema,
-} from "@cfworker/json-schema";
+import { Validator, type Schema as JsonSchema } from "@cfworker/json-schema";
 import type { ToolDefinition } from "@flue/runtime";
 import { z } from "zod";
 
@@ -25,10 +22,7 @@ import {
   type ToolCatalog,
   type ToolCatalogRegistration,
 } from "../tools/catalog.js";
-import {
-  LazyToolRuntime,
-  type LazyToolRuntimeOptions,
-} from "../tools/runtime.js";
+import { LazyToolRuntime, type LazyToolRuntimeOptions } from "../tools/runtime.js";
 import type { FlaryToolset } from "../tools/sdk.js";
 import {
   McpCredentialSchema,
@@ -73,10 +67,7 @@ export interface McpToolPermissionRequest extends McpCredentialRequest {
 export type ScopedMcpCredentialResolver =
   | ((
       request: McpCredentialRequest,
-    ) =>
-      | McpCredential
-      | undefined
-      | Promise<McpCredential | undefined>)
+    ) => McpCredential | undefined | Promise<McpCredential | undefined>)
   | {
       get(
         request: McpCredentialRequest,
@@ -86,19 +77,11 @@ export type ScopedMcpCredentialResolver =
 export type McpToolPermissionResolver =
   | ((
       request: McpToolPermissionRequest,
-    ) =>
-      | McpToolGrantInput
-      | false
-      | undefined
-      | Promise<McpToolGrantInput | false | undefined>)
+    ) => McpToolGrantInput | false | undefined | Promise<McpToolGrantInput | false | undefined>)
   | {
       resolve(
         request: McpToolPermissionRequest,
-      ):
-        | McpToolGrantInput
-        | false
-        | undefined
-        | Promise<McpToolGrantInput | false | undefined>;
+      ): McpToolGrantInput | false | undefined | Promise<McpToolGrantInput | false | undefined>;
     };
 
 export interface McpDescriptorCache {
@@ -140,9 +123,7 @@ export interface CreateMcpToolsOptions extends CreateMcpToolsetOptions {
   readonly readParallelism?: number;
   readonly maxConcurrencyPerConnection?: number;
   readonly approve?: LazyToolRuntimeOptions["approve"];
-  readonly onEvent?: (
-    event: ToolLifecycleEvent,
-  ) => void | Promise<void>;
+  readonly onEvent?: (event: ToolLifecycleEvent) => void | Promise<void>;
 }
 
 export class McpTenantIsolationError extends Error {
@@ -193,30 +174,20 @@ const sharedMcpCache = new McpToolCache();
  * Discover approved MCP descriptors and register them in a private Flary
  * catalog. Credentials stay inside trusted resolver closures.
  */
-export async function createMcpToolset(
-  options: CreateMcpToolsetOptions,
-): Promise<FlaryToolset> {
+export async function createMcpToolset(options: CreateMcpToolsetOptions): Promise<FlaryToolset> {
   const scope = TenantContextSchema.parse(options.scope);
-  const endpoints = options.endpoints.map((endpoint) =>
-    ScopedMcpEndpointSchema.parse(endpoint),
-  );
+  const endpoints = options.endpoints.map((endpoint) => ScopedMcpEndpointSchema.parse(endpoint));
   assertUniqueConnections(endpoints);
 
   const cache =
     options.cache ??
-    (options.clientOptions
-      ? new McpToolCache(options.clientOptions)
-      : sharedMcpCache);
+    (options.clientOptions ? new McpToolCache(options.clientOptions) : sharedMcpCache);
   const tools: RegisteredMcpTool[] = [];
 
   for (const endpoint of endpoints) {
     assertEndpointScope(scope, endpoint);
     const namespace = mcpNamespace(scope, endpoint);
-    const credentialProvider = scopedCredentialProvider(
-      scope,
-      endpoint,
-      options.credentials,
-    );
+    const credentialProvider = scopedCredentialProvider(scope, endpoint, options.credentials);
     let descriptors: readonly McpToolDescriptor[];
     try {
       descriptors = await loadDescriptors({
@@ -247,10 +218,7 @@ export async function createMcpToolset(
       });
       if (!grant) continue;
       const toolId = await mcpToolId(scope, endpoint, descriptor);
-      const connectionRef = await mcpConnectionReference(
-        scope,
-        endpoint,
-      );
+      const connectionRef = await mcpConnectionReference(scope, endpoint);
       tools.push({
         id: toolId,
         registration: createRegistration({
@@ -298,9 +266,7 @@ export async function createMcpToolset(
  * The durable journal is required. It prevents a state-changing MCP call from
  * running twice when its prior outcome is not known after recovery.
  */
-export async function createMcpTools(
-  options: CreateMcpToolsOptions,
-): Promise<ToolDefinition[]> {
+export async function createMcpTools(options: CreateMcpToolsOptions): Promise<ToolDefinition[]> {
   const catalog = new InMemoryToolCatalog();
   const toolset = await createMcpToolset(options);
   toolset.register(catalog);
@@ -309,10 +275,7 @@ export async function createMcpTools(
   const concurrencyCaps = Object.fromEntries(
     options.endpoints.map((endpointInput) => {
       const endpoint = ScopedMcpEndpointSchema.parse(endpointInput);
-      return [
-        connectionConcurrencyKey(endpoint),
-        options.maxConcurrencyPerConnection ?? 4,
-      ];
+      return [connectionConcurrencyKey(endpoint), options.maxConcurrencyPerConnection ?? 4];
     }),
   );
   const runtime = new LazyToolRuntime({
@@ -344,25 +307,12 @@ function createRegistration(input: {
   cache: McpToolCache;
   credentials: McpCredentialProvider;
 }): ToolCatalogRegistration {
-  const {
-    id,
-    endpoint,
-    descriptor,
-    grant,
-    namespace,
-    connectionRef,
-    cache,
-    credentials,
-  } = input;
+  const { id, endpoint, descriptor, grant, namespace, connectionRef, cache, credentials } = input;
   const validator = new Validator(descriptor.inputSchema as JsonSchema);
   const capabilities =
     grant.capabilities.length > 0
       ? grant.capabilities
-      : [
-          grant.operation === "read"
-            ? "connection.mcp.read"
-            : "connection.mcp.call",
-        ];
+      : [grant.operation === "read" ? "connection.mcp.read" : "connection.mcp.call"];
   const operation: ToolOperation = grant.operation;
   const resourceKey = `mcp:${endpoint.connectionId}`;
 
@@ -370,23 +320,18 @@ function createRegistration(input: {
     definition: {
       id,
       name: descriptor.name,
-      ...(descriptor.description
-        ? { description: descriptor.description }
-        : {}),
+      ...(descriptor.description ? { description: descriptor.description } : {}),
       kind: "mcp",
       inputSchema: JsonObjectSchema.parse(descriptor.inputSchema),
       operation,
       capabilities,
       tags: ["mcp", "connection", safeTag(endpoint.name)],
-      requiresApproval:
-        grant.requiresApproval ?? operation === "write",
+      requiresApproval: grant.requiresApproval ?? operation === "write",
       concurrencyKey: connectionConcurrencyKey(endpoint),
       metadata: {
         connectionRef,
         server: endpoint.name,
-        ...(endpoint.credentialVersion
-          ? { sourceRevision: endpoint.credentialVersion }
-          : {}),
+        ...(endpoint.credentialVersion ? { sourceRevision: endpoint.credentialVersion } : {}),
       },
     },
     resourceKey,
@@ -396,11 +341,9 @@ function createRegistration(input: {
       if (!validation.valid) throw new McpToolInputError();
       let result;
       try {
-        result = await cache.client(mcpEndpoint(endpoint), namespace).call(
-          descriptor.name,
-          argumentsInput,
-          credentials,
-        );
+        result = await cache
+          .client(mcpEndpoint(endpoint), namespace)
+          .call(descriptor.name, argumentsInput, credentials);
       } catch {
         throw new McpToolTransportError();
       }
@@ -444,9 +387,7 @@ function validateCachedDescriptors(
 ): McpToolDescriptor[] {
   if (!values || values.length === 0) return [];
   const parsed = validateDiscoveredDescriptors(endpoint, values);
-  return parsed.every((tool) => Date.parse(tool.expiresAt) > Date.now())
-    ? parsed
-    : [];
+  return parsed.every((tool) => Date.parse(tool.expiresAt) > Date.now()) ? parsed : [];
 }
 
 function validateDiscoveredDescriptors(
@@ -458,13 +399,8 @@ function validateDiscoveredDescriptors(
   }
   return values.map((value) => {
     const tool = McpToolDescriptorSchema.parse(value);
-    if (
-      tool.connectionId !== endpoint.connectionId ||
-      tool.server !== endpoint.name
-    ) {
-      throw new McpTenantIsolationError(
-        "An MCP descriptor does not match its trusted connection",
-      );
+    if (tool.connectionId !== endpoint.connectionId || tool.server !== endpoint.name) {
+      throw new McpTenantIsolationError("An MCP descriptor does not match its trusted connection");
     }
     return tool;
   });
@@ -500,35 +436,21 @@ async function resolveGrant(
   request: McpToolPermissionRequest,
 ): Promise<McpToolGrant | undefined> {
   const value =
-    typeof resolver === "function"
-      ? await resolver(request)
-      : await resolver.resolve(request);
-  return value === false || value === undefined
-    ? undefined
-    : McpToolGrantSchema.parse(value);
+    typeof resolver === "function" ? await resolver(request) : await resolver.resolve(request);
+  return value === false || value === undefined ? undefined : McpToolGrantSchema.parse(value);
 }
 
-function assertEndpointScope(
-  scope: TenantContext,
-  endpoint: ScopedMcpEndpoint,
-): void {
-  if (
-    endpoint.organizationId !== scope.organizationId ||
-    endpoint.appId !== scope.appId
-  ) {
+function assertEndpointScope(scope: TenantContext, endpoint: ScopedMcpEndpoint): void {
+  if (endpoint.organizationId !== scope.organizationId || endpoint.appId !== scope.appId) {
     throw new McpTenantIsolationError();
   }
 }
 
-function assertUniqueConnections(
-  endpoints: readonly ScopedMcpEndpoint[],
-): void {
+function assertUniqueConnections(endpoints: readonly ScopedMcpEndpoint[]): void {
   const ids = new Set<string>();
   for (const endpoint of endpoints) {
     if (ids.has(endpoint.connectionId)) {
-      throw new McpSecurityError(
-        `Duplicate MCP connection: ${endpoint.connectionId}`,
-      );
+      throw new McpSecurityError(`Duplicate MCP connection: ${endpoint.connectionId}`);
     }
     ids.add(endpoint.connectionId);
   }
@@ -543,15 +465,10 @@ async function mcpToolId(
     scope.organizationId,
     scope.appId,
     endpoint.connectionId,
-    "credentialVersion" in endpoint
-      ? endpoint.credentialVersion ?? "current"
-      : "current",
+    "credentialVersion" in endpoint ? (endpoint.credentialVersion ?? "current") : "current",
     descriptor.name,
   ].join("\u0000");
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
-  );
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   const hash = [...new Uint8Array(digest)]
     .slice(0, 8)
     .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -570,10 +487,7 @@ async function mcpConnectionReference(
     endpoint.connectionId,
     endpoint.credentialVersion ?? "current",
   ].join("\u0000");
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
-  );
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)]
     .slice(0, 12)
     .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -593,10 +507,7 @@ function mcpEndpoint(endpoint: ScopedMcpEndpoint): McpEndpoint {
   });
 }
 
-function mcpNamespace(
-  scope: TenantContext,
-  endpoint: ScopedMcpEndpoint,
-): string {
+function mcpNamespace(scope: TenantContext, endpoint: ScopedMcpEndpoint): string {
   return [
     scope.organizationId,
     scope.appId,

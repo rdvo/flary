@@ -34,7 +34,7 @@ export interface UseFlaryThreadResult {
   respondToInput(
     requestId: string,
     answers: Readonly<Record<string, string>>,
-    options?: { response?: string; canceled?: boolean }
+    options?: { response?: string; canceled?: boolean },
   ): Promise<void>;
   reconnect(): void;
 }
@@ -48,23 +48,19 @@ const sleep = (duration: number, signal: AbortSignal) =>
         clearTimeout(timer);
         resolve();
       },
-      { once: true }
+      { once: true },
     );
   });
 
-async function withTimeout<T>(
-  promise: Promise<T>,
-  durationMs: number
-): Promise<T> {
+async function withTimeout<T>(promise: Promise<T>, durationMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       promise,
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(
-          () =>
-            reject(new Error("The live command acknowledgement timed out.")),
-          durationMs
+          () => reject(new Error("The live command acknowledgement timed out.")),
+          durationMs,
         );
       }),
     ]);
@@ -86,9 +82,7 @@ function cursorKey(thread: FlaryAgentThreadHandle): string {
   return `flary:thread:${thread.ref.organizationId}:${thread.ref.appId}:${thread.ref.threadId}:cursor`;
 }
 
-async function readAllAudit(
-  thread: FlaryAgentThreadHandle
-): Promise<FlaryUiRecord[]> {
+async function readAllAudit(thread: FlaryAgentThreadHandle): Promise<FlaryUiRecord[]> {
   const all: unknown[] = [];
   let after = 0;
   for (let page = 0; page < 100; page += 1) {
@@ -104,16 +98,12 @@ async function readAllAudit(
 }
 
 /** Durable WebSocket-first thread state with cursor replay and HTTP repair. */
-export function useFlaryThread(
-  options: UseFlaryThreadOptions
-): UseFlaryThreadResult {
+export function useFlaryThread(options: UseFlaryThreadOptions): UseFlaryThreadResult {
   const { thread } = options;
   const [records, setRecords] = useState<FlaryUiRecord[]>([]);
-  const [pendingMessages, setPendingMessages] = useState<FlaryPendingMessage[]>(
-    []
-  );
+  const [pendingMessages, setPendingMessages] = useState<FlaryPendingMessage[]>([]);
   const [connectionState, setConnectionState] = useState<FlaryConnectionState>(
-    thread ? "connecting" : "idle"
+    thread ? "connecting" : "idle",
   );
   const [reconnectToken, setReconnectToken] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -130,13 +120,14 @@ export function useFlaryThread(
       currentRecords.current = merged;
       setRecords(merged);
       if (incoming.some((record) => record.type.startsWith("input."))) {
-        void thread.userInput().then((requests) => {
-          setInputRequests([...requests]);
-        }).catch(() => undefined);
+        void thread
+          .userInput()
+          .then((requests) => {
+            setInputRequests([...requests]);
+          })
+          .catch(() => undefined);
       }
-      const confirmed = incoming.filter(
-        (record) => record.type === "message.user"
-      ).length;
+      const confirmed = incoming.filter((record) => record.type === "message.user").length;
       if (confirmed) setPendingMessages((current) => current.slice(confirmed));
       const nextCursor = incoming.at(-1)?.sequence ?? cursor.current;
       if (nextCursor > cursor.current) {
@@ -145,7 +136,7 @@ export function useFlaryThread(
         connection.current?.acknowledge(nextCursor);
       }
     },
-    [options.storage, thread]
+    [options.storage, thread],
   );
 
   useEffect(() => {
@@ -171,15 +162,8 @@ export function useFlaryThread(
     cursor.current = 0;
 
     const resync = async () => {
-      const [history, requests] = await Promise.all([
-        readAllAudit(thread),
-        thread.userInput(),
-      ]);
-      if (
-        controller.signal.aborted ||
-        generation !== reconnectGeneration.current
-      )
-        return;
+      const [history, requests] = await Promise.all([readAllAudit(thread), thread.userInput()]);
+      if (controller.signal.aborted || generation !== reconnectGeneration.current) return;
       const merged = mergeFlaryUiRecords(history, currentRecords.current);
       currentRecords.current = merged;
       setRecords(merged);
@@ -191,10 +175,7 @@ export function useFlaryThread(
 
     const run = async () => {
       let attempt = 0;
-      while (
-        !controller.signal.aborted &&
-        generation === reconnectGeneration.current
-      ) {
+      while (!controller.signal.aborted && generation === reconnectGeneration.current) {
         setConnectionState(attempt ? "reconnecting" : "connecting");
         try {
           const active = await thread.connect({
@@ -210,24 +191,14 @@ export function useFlaryThread(
           setConnectionState("live");
           setError(null);
           for await (const frame of active.events()) {
-            if (
-              controller.signal.aborted ||
-              generation !== reconnectGeneration.current
-            )
-              break;
-            if (frame.type === "events")
-              commit(normalizeFlaryUiRecords(frame.records));
+            if (controller.signal.aborted || generation !== reconnectGeneration.current) break;
+            if (frame.type === "events") commit(normalizeFlaryUiRecords(frame.records));
             else if (frame.type === "resync_required") await resync();
-            else if (frame.type === "error" && !frame.requestId)
-              setError(frame.message);
+            else if (frame.type === "error" && !frame.requestId) setError(frame.message);
           }
         } catch (cause) {
           if (!controller.signal.aborted) {
-            setError(
-              cause instanceof Error
-                ? cause.message
-                : "The live connection closed."
-            );
+            setError(cause instanceof Error ? cause.message : "The live connection closed.");
             await resync().catch(() => undefined);
           }
         } finally {
@@ -235,10 +206,7 @@ export function useFlaryThread(
         }
         if (controller.signal.aborted) return;
         attempt += 1;
-        const delay = Math.min(
-          500 * 2 ** Math.min(attempt, 5),
-          options.reconnectMaxMs ?? 12_000
-        );
+        const delay = Math.min(500 * 2 ** Math.min(attempt, 5), options.reconnectMaxMs ?? 12_000);
         await sleep(delay, controller.signal);
       }
     };
@@ -278,9 +246,9 @@ export function useFlaryThread(
                 {
                   requestId,
                   idempotencyKey: requestId,
-                }
+                },
               ),
-              8_000
+              8_000,
             );
             return;
           } catch {
@@ -290,18 +258,13 @@ export function useFlaryThread(
         }
         await thread.send({ message: value, mode, idempotencyKey: requestId });
       } catch (cause) {
-        setPendingMessages((current) =>
-          current.filter((item) => item.id !== requestId)
-        );
-        const message =
-          cause instanceof Error
-            ? cause.message
-            : "The message was not accepted.";
+        setPendingMessages((current) => current.filter((item) => item.id !== requestId));
+        const message = cause instanceof Error ? cause.message : "The message was not accepted.";
         setError(message);
         throw cause;
       }
     },
-    [thread]
+    [thread],
   );
 
   const interrupt = useCallback(async () => {
@@ -315,7 +278,7 @@ export function useFlaryThread(
     async (
       requestId: string,
       answers: Readonly<Record<string, string>>,
-      inputOptions: { response?: string; canceled?: boolean } = {}
+      inputOptions: { response?: string; canceled?: boolean } = {},
     ) => {
       if (!thread) return;
       await thread.sendInput(requestId, answers, inputOptions);
@@ -327,19 +290,17 @@ export function useFlaryThread(
                 response: {
                   requestId,
                   answers: { ...answers },
-                  ...(inputOptions.response
-                    ? { response: inputOptions.response }
-                    : {}),
+                  ...(inputOptions.response ? { response: inputOptions.response } : {}),
                   canceled: inputOptions.canceled ?? false,
                   answeredBy: thread.binding.createdBy,
                   answeredAt: new Date().toISOString(),
                 },
               }
-            : record
-        )
+            : record,
+        ),
       );
     },
-    [thread]
+    [thread],
   );
 
   const decide = useCallback(
@@ -350,7 +311,7 @@ export function useFlaryThread(
       else if (decision === "approve") await thread.approve(approvalId);
       else await thread.reject(approvalId);
     },
-    [thread]
+    [thread],
   );
 
   const turns = useMemo(() => projectFlaryUiTurns(records), [records]);

@@ -33,9 +33,7 @@ test("tenant storage keys are opaque and tenant scoped", () => {
     "tenants/org_123/applications/app_123/projects/project_123/workspaces/workspace_main/blobs/" +
       "a".repeat(64),
   );
-  assert.throws(
-    () => tenantBlobKey({ ...scope, organizationId: "org/other" }, "a".repeat(64)),
-  );
+  assert.throws(() => tenantBlobKey({ ...scope, organizationId: "org/other" }, "a".repeat(64)));
 });
 
 test("workspace names round-trip without user-controlled path segments", () => {

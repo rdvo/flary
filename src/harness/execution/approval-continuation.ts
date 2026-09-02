@@ -23,9 +23,7 @@ export const DurableToolCallSnapshotSchema = z
     idempotencyKey: IdentifierSchema.optional(),
   })
   .strict();
-export type DurableToolCallSnapshot = z.infer<
-  typeof DurableToolCallSnapshotSchema
->;
+export type DurableToolCallSnapshot = z.infer<typeof DurableToolCallSnapshotSchema>;
 
 export const DurableApprovalRecordSchema = z
   .object({
@@ -34,9 +32,7 @@ export const DurableApprovalRecordSchema = z
     decision: ApprovalDecisionSchema.nullable(),
   })
   .strict();
-export type DurableApprovalRecord = z.infer<
-  typeof DurableApprovalRecordSchema
->;
+export type DurableApprovalRecord = z.infer<typeof DurableApprovalRecordSchema>;
 
 export const ApprovalLifecycleEventSchema = z.discriminatedUnion("type", [
   z
@@ -58,26 +54,18 @@ export const ApprovalLifecycleEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 ]);
-export type ApprovalLifecycleEvent = z.infer<
-  typeof ApprovalLifecycleEventSchema
->;
+export type ApprovalLifecycleEvent = z.infer<typeof ApprovalLifecycleEventSchema>;
 
 export interface ToolApprovalStore {
   create(input: {
     request: ApprovalRequest;
     toolCall: DurableToolCallSnapshot;
   }): Promise<DurableApprovalRecord> | DurableApprovalRecord;
-  get(requestId: string):
-    | Promise<DurableApprovalRecord | undefined>
-    | DurableApprovalRecord
-    | undefined;
-  decide(
-    decision: ApprovalDecision,
-  ): Promise<DurableApprovalRecord> | DurableApprovalRecord;
-  wait(
+  get(
     requestId: string,
-    options?: { signal?: AbortSignal },
-  ): Promise<ApprovalDecision>;
+  ): Promise<DurableApprovalRecord | undefined> | DurableApprovalRecord | undefined;
+  decide(decision: ApprovalDecision): Promise<DurableApprovalRecord> | DurableApprovalRecord;
+  wait(requestId: string, options?: { signal?: AbortSignal }): Promise<ApprovalDecision>;
 }
 
 export type ApprovalRecoveryState = "none" | "waiting" | "ready";
@@ -96,12 +84,8 @@ export interface ApprovalRecoveryResult {
 }
 
 export interface ApprovalContinuation {
-  inspect(input: ApprovalRecoveryCall):
-    | ApprovalRecoveryState
-    | Promise<ApprovalRecoveryState>;
-  resume(
-    input: ApprovalRecoveryCall,
-  ): Promise<ApprovalRecoveryResult>;
+  inspect(input: ApprovalRecoveryCall): ApprovalRecoveryState | Promise<ApprovalRecoveryState>;
+  resume(input: ApprovalRecoveryCall): Promise<ApprovalRecoveryResult>;
 }
 
 export interface ApprovalRequestInput {
@@ -141,10 +125,7 @@ export class ApprovalExpiredError extends Error {
  */
 export class InMemoryToolApprovalStore implements ToolApprovalStore {
   readonly #records = new Map<string, DurableApprovalRecord>();
-  readonly #waiters = new Map<
-    string,
-    Set<(decision: ApprovalDecision) => void>
-  >();
+  readonly #waiters = new Map<string, Set<(decision: ApprovalDecision) => void>>();
 
   constructor(records: readonly DurableApprovalRecord[] = []) {
     for (const record of records) {
@@ -201,10 +182,7 @@ export class InMemoryToolApprovalStore implements ToolApprovalStore {
     const record = this.#records.get(requestId);
     if (!record) throw new Error("Approval request not found");
     if (record.decision) return record.decision;
-    if (
-      record.request.expiresAt &&
-      Date.parse(record.request.expiresAt) <= Date.now()
-    ) {
+    if (record.request.expiresAt && Date.parse(record.request.expiresAt) <= Date.now()) {
       const expired = ApprovalDecisionSchema.parse({
         requestId,
         status: "expired",
@@ -227,8 +205,6 @@ export class InMemoryToolApprovalStore implements ToolApprovalStore {
   }
 
   snapshot(): DurableApprovalRecord[] {
-    return [...this.#records.values()].map((record) =>
-      DurableApprovalRecordSchema.parse(record),
-    );
+    return [...this.#records.values()].map((record) => DurableApprovalRecordSchema.parse(record));
   }
 }

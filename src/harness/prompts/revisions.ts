@@ -1,12 +1,6 @@
-import {
-  PromptRevisionSchema,
-  type PromptRevision,
-} from "../contracts/prompt-revisions.js";
+import { PromptRevisionSchema, type PromptRevision } from "../contracts/prompt-revisions.js";
 
-export type CreatePromptRevisionInput = Omit<
-  PromptRevision,
-  "id" | "revision" | "createdAt"
-> & {
+export type CreatePromptRevisionInput = Omit<PromptRevision, "id" | "revision" | "createdAt"> & {
   id?: string;
   revision?: number;
   createdAt?: string;
@@ -33,8 +27,7 @@ export class InMemoryPromptRevisionStore implements PromptRevisionStore {
   async create(input: CreatePromptRevisionInput): Promise<PromptRevision> {
     const duplicate = this.revisions.find(
       (revision) =>
-        revision.promptId === input.promptId &&
-        revision.sourceHash === input.sourceHash
+        revision.promptId === input.promptId && revision.sourceHash === input.sourceHash,
     );
     if (duplicate) return clone(duplicate);
 
@@ -50,13 +43,10 @@ export class InMemoryPromptRevisionStore implements PromptRevisionStore {
     if (
       this.revisions.some(
         (existing) =>
-          existing.promptId === revision.promptId &&
-          existing.revision === revision.revision
+          existing.promptId === revision.promptId && existing.revision === revision.revision,
       )
     ) {
-      throw new Error(
-        `Prompt revision ${revision.promptId}#${revision.revision} already exists`
-      );
+      throw new Error(`Prompt revision ${revision.promptId}#${revision.revision} already exists`);
     }
     this.revisions.push(clone(revision));
     return clone(revision);

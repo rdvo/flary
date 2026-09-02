@@ -14,19 +14,10 @@ import {
 } from "flary/contracts";
 
 import { createDb } from "./db";
-import {
-  flaryConnection,
-  providerOAuthSession,
-} from "./db/schema";
+import { flaryConnection, providerOAuthSession } from "./db/schema";
 import type { Env } from "./env";
-import {
-  saveSubscriptionCredential,
-} from "./provider-subscriptions";
-import {
-  decryptToken,
-  encryptToken,
-  providerOAuthStateAssociatedData,
-} from "./security/tokens";
+import { saveSubscriptionCredential } from "./provider-subscriptions";
+import { decryptToken, encryptToken, providerOAuthStateAssociatedData } from "./security/tokens";
 
 const PROVIDER_NAMES: Record<SubscriptionProvider, string> = {
   anthropic: "Claude Pro / Max",
@@ -92,25 +83,27 @@ export async function startCloudProviderOAuth(
     userId: input.userId,
     state: flow.privateState,
   });
-  await createDb(env.DB).insert(providerOAuthSession).values({
-    id,
-    appId: input.appId,
-    organizationId: input.organizationId,
-    userId: input.userId,
-    connectionId,
-    provider,
-    method: flow.method,
-    status: "pending",
-    authorizationUrl: flow.authorizationUrl ?? null,
-    verificationUri: flow.verificationUri ?? null,
-    userCode: flow.userCode ?? null,
-    intervalSeconds: flow.intervalSeconds ?? null,
-    privateStateCiphertext: privateState.ciphertext,
-    privateStateIv: privateState.iv,
-    expiresAt,
-    createdAt: now,
-    updatedAt: now,
-  });
+  await createDb(env.DB)
+    .insert(providerOAuthSession)
+    .values({
+      id,
+      appId: input.appId,
+      organizationId: input.organizationId,
+      userId: input.userId,
+      connectionId,
+      provider,
+      method: flow.method,
+      status: "pending",
+      authorizationUrl: flow.authorizationUrl ?? null,
+      verificationUri: flow.verificationUri ?? null,
+      userCode: flow.userCode ?? null,
+      intervalSeconds: flow.intervalSeconds ?? null,
+      privateStateCiphertext: privateState.ciphertext,
+      privateStateIv: privateState.iv,
+      expiresAt,
+      createdAt: now,
+      updatedAt: now,
+    });
   await createDb(env.DB)
     .update(flaryConnection)
     .set({
@@ -150,11 +143,7 @@ export async function getCloudProviderOAuth(
       .where(eq(providerOAuthSession.id, row.id));
     row = { ...row, status: "expired", updatedAt: now };
   }
-  if (
-    input.poll &&
-    row.status === "pending" &&
-    row.provider === "openai-codex"
-  ) {
+  if (input.poll && row.status === "pending" && row.provider === "openai-codex") {
     row = await pollOpenAIProviderOAuth(env, row);
   }
   return publicSession(row);
@@ -172,10 +161,7 @@ export async function completeCloudProviderOAuth(
 ): Promise<ProviderOAuthSession> {
   const row = await loadOwnedSession(env, input);
   assertPending(row);
-  if (
-    row.provider !== "anthropic" &&
-    row.method !== "browser_callback"
-  ) {
+  if (row.provider !== "anthropic" && row.method !== "browser_callback") {
     throw new CloudProviderOAuthError(
       "oauth_session_not_pending",
       "This provider login completes through status polling",
@@ -221,15 +207,9 @@ export async function cancelCloudProviderOAuth(
 
 type OAuthRow = typeof providerOAuthSession.$inferSelect;
 
-async function pollOpenAIProviderOAuth(
-  env: Env,
-  row: OAuthRow,
-): Promise<OAuthRow> {
+async function pollOpenAIProviderOAuth(env: Env, row: OAuthRow): Promise<OAuthRow> {
   const intervalMs = Math.max(1, row.intervalSeconds ?? 5) * 1_000;
-  if (
-    row.lastPolledAt &&
-    row.lastPolledAt.getTime() + intervalMs > Date.now()
-  ) {
+  if (row.lastPolledAt && row.lastPolledAt.getTime() + intervalMs > Date.now()) {
     return row;
   }
   try {
@@ -423,10 +403,7 @@ async function loadOwnedSession(
 
 function assertPending(row: OAuthRow): void {
   if (row.expiresAt.getTime() <= Date.now()) {
-    throw new CloudProviderOAuthError(
-      "oauth_session_expired",
-      "The provider login expired",
-    );
+    throw new CloudProviderOAuthError("oauth_session_expired", "The provider login expired");
   }
   if (row.status !== "pending") {
     throw new CloudProviderOAuthError(
@@ -446,17 +423,11 @@ function publicSession(row: OAuthRow): ProviderOAuthSession {
     provider: row.provider,
     method: row.method,
     status: row.status,
-    ...(row.authorizationUrl
-      ? { authorizationUrl: row.authorizationUrl }
-      : {}),
+    ...(row.authorizationUrl ? { authorizationUrl: row.authorizationUrl } : {}),
     ...(row.verificationUri ? { verificationUri: row.verificationUri } : {}),
     ...(row.userCode ? { userCode: row.userCode } : {}),
-    ...(row.intervalSeconds
-      ? { intervalSeconds: row.intervalSeconds }
-      : {}),
-    ...(row.accountSubject
-      ? { accountSubject: row.accountSubject }
-      : {}),
+    ...(row.intervalSeconds ? { intervalSeconds: row.intervalSeconds } : {}),
+    ...(row.accountSubject ? { accountSubject: row.accountSubject } : {}),
     ...(row.errorCode ? { errorCode: row.errorCode } : {}),
     expiresAt: row.expiresAt.toISOString(),
     createdAt: (row.createdAt ?? new Date()).toISOString(),
@@ -477,19 +448,11 @@ async function encryptPrivateState(
   return encryptToken(
     JSON.stringify(input.state),
     requireEncryption(env),
-    providerOAuthStateAssociatedData(
-      input.organizationId,
-      input.userId,
-      input.appId,
-      input.id,
-    ),
+    providerOAuthStateAssociatedData(input.organizationId, input.userId, input.appId, input.id),
   );
 }
 
-async function decryptPrivateState(
-  env: Env,
-  row: OAuthRow,
-): Promise<ProviderOAuthPrivateState> {
+async function decryptPrivateState(env: Env, row: OAuthRow): Promise<ProviderOAuthPrivateState> {
   if (!row.privateStateCiphertext || !row.privateStateIv) {
     throw new CloudProviderOAuthError(
       "oauth_session_not_pending",
@@ -502,12 +465,7 @@ async function decryptPrivateState(
       iv: row.privateStateIv,
     },
     requireEncryption(env),
-    providerOAuthStateAssociatedData(
-      row.organizationId,
-      row.userId,
-      row.appId,
-      row.id,
-    ),
+    providerOAuthStateAssociatedData(row.organizationId, row.userId, row.appId, row.id),
   );
   return JSON.parse(value) as ProviderOAuthPrivateState;
 }
@@ -531,10 +489,7 @@ function safeProviderError(error: unknown): CloudProviderOAuthError {
 }
 
 async function shortHash(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
-  );
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)]
     .slice(0, 8)
     .map((byte) => byte.toString(16).padStart(2, "0"))

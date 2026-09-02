@@ -1,11 +1,5 @@
 import { sql } from "drizzle-orm";
-import {
-  index,
-  integer,
-  sqliteTable,
-  text,
-  uniqueIndex,
-} from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 const timestamp = (name: string) =>
   integer(name, { mode: "timestamp_ms" })
@@ -18,14 +12,12 @@ export const user = sqliteTable(
     id: text("id").primaryKey(),
     name: text("name").notNull(),
     email: text("email").notNull(),
-    emailVerified: integer("email_verified", { mode: "boolean" })
-      .notNull()
-      .default(false),
+    emailVerified: integer("email_verified", { mode: "boolean" }).notNull().default(false),
     image: text("image"),
     createdAt: timestamp("created_at"),
     updatedAt: timestamp("updated_at"),
   },
-  (table) => [uniqueIndex("user_email_unique").on(table.email)]
+  (table) => [uniqueIndex("user_email_unique").on(table.email)],
 );
 
 export const session = sqliteTable(
@@ -45,7 +37,7 @@ export const session = sqliteTable(
   (table) => [
     uniqueIndex("session_token_unique").on(table.token),
     index("session_user_idx").on(table.userId),
-  ]
+  ],
 );
 
 export const account = sqliteTable(
@@ -75,7 +67,7 @@ export const account = sqliteTable(
   (table) => [
     index("account_user_idx").on(table.userId),
     uniqueIndex("account_issuer_unique").on(table.issuer, table.accountId),
-  ]
+  ],
 );
 
 export const verification = sqliteTable(
@@ -88,7 +80,7 @@ export const verification = sqliteTable(
     createdAt: timestamp("created_at"),
     updatedAt: timestamp("updated_at"),
   },
-  (table) => [index("verification_identifier_idx").on(table.identifier)]
+  (table) => [index("verification_identifier_idx").on(table.identifier)],
 );
 
 export const schema = { user, session, account, verification };

@@ -6,16 +6,11 @@ export const DEFAULT_SESSION_HOT_RECORD_LIMIT = 10_000;
 
 export type SessionJsonPrimitive = string | number | boolean | null;
 export type SessionJsonValue =
-  | SessionJsonPrimitive
-  | SessionJsonValue[]
-  | { [key: string]: SessionJsonValue };
+  SessionJsonPrimitive | SessionJsonValue[] | { [key: string]: SessionJsonValue };
 
 export const SessionJsonValueSchema: z.ZodType<SessionJsonValue> =
   z.json() as z.ZodType<SessionJsonValue>;
-export const SessionJsonObjectSchema = z.record(
-  z.string(),
-  SessionJsonValueSchema,
-);
+export const SessionJsonObjectSchema = z.record(z.string(), SessionJsonValueSchema);
 export type SessionJsonObject = z.infer<typeof SessionJsonObjectSchema>;
 
 export const SessionIdentifierSchema = z.string().trim().min(1).max(512);
@@ -92,9 +87,7 @@ export const EncryptedSessionContentRefSchema = z
     keyVersion: z.string().trim().min(1).max(128).optional(),
   })
   .strict();
-export type EncryptedSessionContentRef = z.infer<
-  typeof EncryptedSessionContentRefSchema
->;
+export type EncryptedSessionContentRef = z.infer<typeof EncryptedSessionContentRefSchema>;
 
 const SessionRecordIdentityShape = {
   tenantId: SessionIdentifierSchema,
@@ -140,9 +133,7 @@ export const SessionRecordSchema = SessionRecordDraftSchema.extend({
 }).strict();
 export type SessionRecord = z.infer<typeof SessionRecordSchema>;
 
-export const SessionLedgerCursorSchema = z
-  .string()
-  .regex(/^v1:[1-9][0-9]*$/);
+export const SessionLedgerCursorSchema = z.string().regex(/^v1:[1-9][0-9]*$/);
 export type SessionLedgerCursor = z.infer<typeof SessionLedgerCursorSchema>;
 
 export const SessionLedgerMetadataSchema = z
@@ -163,9 +154,7 @@ export const SessionLedgerMetadataSchema = z
     updatedAt: SessionTimestampSchema,
   })
   .strict();
-export type SessionLedgerMetadata = z.infer<
-  typeof SessionLedgerMetadataSchema
->;
+export type SessionLedgerMetadata = z.infer<typeof SessionLedgerMetadataSchema>;
 
 export const SessionRecordPageSchema = z
   .object({
@@ -175,8 +164,10 @@ export const SessionRecordPageSchema = z
   .strict();
 export type SessionRecordPage = z.infer<typeof SessionRecordPageSchema>;
 
-export interface SessionRecordAppendInput
-  extends Omit<SessionRecordDraft, "schemaVersion" | "format"> {
+export interface SessionRecordAppendInput extends Omit<
+  SessionRecordDraft,
+  "schemaVersion" | "format"
+> {
   schemaVersion?: typeof SESSION_LEDGER_SCHEMA_VERSION;
   format?: typeof SESSION_LEDGER_FORMAT;
 }

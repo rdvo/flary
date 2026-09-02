@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  flary,
-  defineFlaryInteractiveAgent,
-} from "../../src/harness/functions/index.ts";
+import { flary, defineFlaryInteractiveAgent } from "../../src/harness/functions/index.ts";
 import type {
   FlaryThreadHostService,
   FlaryThreadScope,
@@ -111,24 +108,18 @@ test("app.agent compiles to Flue and serves durable thread controls", async () =
   assert.equal(list.status, 200);
   assert.deepEqual((await list.json()).agents[0].name, "coder");
 
-  const send = await worker.request(
-    "http://local/api/flary/apps/coder/threads/thread_1/messages",
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        message: "Change course.",
-        mode: "steer",
-        model: "anthropic/claude-sonnet",
-      }),
-    }
-  );
+  const send = await worker.request("http://local/api/flary/apps/coder/threads/thread_1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      message: "Change course.",
+      mode: "steer",
+      model: "anthropic/claude-sonnet",
+    }),
+  });
   assert.equal(send.status, 202);
   assert.equal(messages[0]?.mode, "steer");
-  assert.equal(
-    (messages[0] as { model?: string }).model,
-    "anthropic/claude-sonnet"
-  );
+  assert.equal((messages[0] as { model?: string }).model, "anthropic/claude-sonnet");
 });
 
 test("app.agent attaches a durable thread workspace with one option", () => {
@@ -264,10 +255,7 @@ test("durable subagents use their own provider and the root runtime binding", as
     provider: "openai",
     model: "gpt-5.6-sol",
   });
-  assert.equal(
-    (actions[0].input.metadata as Record<string, unknown>).flaryRuntimeAgentId,
-    "coder"
-  );
+  assert.equal((actions[0].input.metadata as Record<string, unknown>).flaryRuntimeAgentId, "coder");
 
   const child = await runtime.initialize({
     env: {},
@@ -285,7 +273,7 @@ test("durable subagents use their own provider and the root runtime binding", as
         agent: "reviewer",
         task: "Review through the API.",
       }),
-    }
+    },
   );
   assert.equal(response.status, 200, await response.clone().text());
   assert.equal(actions[1]?.input.agentId, "reviewer");
@@ -329,10 +317,7 @@ test("interactive agents resolve trusted instructions inside the agent isolate",
       }\nRun: ${runId}\nAgent: ${agentId}`,
   });
   const runtime = defineFlaryInteractiveAgent(agent) as unknown as {
-    initialize(input: {
-      env: object;
-      id: string;
-    }): Promise<{ instructions: string }>;
+    initialize(input: { env: object; id: string }): Promise<{ instructions: string }>;
   };
 
   const result = await runtime.initialize({
@@ -408,20 +393,17 @@ test("durable agent tools restore admitted roles and scopes", async () => {
   assert.notEqual(coder.revision, lazyCoder.revision);
   assert.throws(
     () => app.agent({ name: "invalid", tools, eagerTools: ["missing"] }),
-    /unknown catalog id/i
+    /unknown catalog id/i,
   );
   const worker = app.serve({ coder }, { prefix: "/api/flary" });
-  const created = await worker.request(
-    "http://local/api/flary/apps/coder/threads",
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        threadId: "thread_1",
-        workspace: binding().workspace,
-      }),
-    }
-  );
+  const created = await worker.request("http://local/api/flary/apps/coder/threads", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      threadId: "thread_1",
+      workspace: binding().workspace,
+    }),
+  });
   assert.equal(created.status, 201, await created.clone().text());
   assert.deepEqual(stored.metadata?.flaryAdmittedRoles, ["admin"]);
   assert.deepEqual(stored.metadata?.flaryAdmittedScopes, ["analytics.read"]);

@@ -1,21 +1,7 @@
-export type MailFolder =
-  | "inbox"
-  | "sent"
-  | "outbox"
-  | "drafts"
-  | "archive"
-  | "spam"
-  | "trash";
+export type MailFolder = "inbox" | "sent" | "outbox" | "drafts" | "archive" | "spam" | "trash";
 
 export type MailDeliveryStatus =
-  | "draft"
-  | "queued"
-  | "sending"
-  | "sent"
-  | "delivered"
-  | "deferred"
-  | "bounced"
-  | "failed";
+  "draft" | "queued" | "sending" | "sent" | "delivered" | "deferred" | "bounced" | "failed";
 
 export interface MailAddress {
   readonly email: string;
@@ -26,13 +12,7 @@ export interface MailRealtimeEvent {
   readonly type: "mail.changed";
   readonly mailboxId: string;
   readonly messageId: string;
-  readonly change:
-    | "received"
-    | "queued"
-    | "sent"
-    | "delivery"
-    | "read"
-    | "moved";
+  readonly change: "received" | "queued" | "sent" | "delivery" | "read" | "moved";
   readonly at: string;
 }
 
@@ -64,7 +44,7 @@ export function replySubject(value: string): string {
 
 export function createReplyThreadHeaders(
   messageId: string,
-  references?: string | null
+  references?: string | null,
 ): ReplyThreadHeaders {
   const parent = messageId.trim();
   if (!/^<[^<>\s]+>$/.test(parent)) {
@@ -91,19 +71,8 @@ export async function mailThreadKey(input: {
     parseReferenceChain(input.inReplyTo)[0] ??
     input.messageId?.trim() ??
     "";
-  const participants = [
-    ...new Set(input.participants.map(normalizeMailAddress)),
-  ]
-    .sort()
-    .join(",");
-  const source =
-    root ||
-    `${normalizeMailSubject(input.subject).toLowerCase()}\n${participants}`;
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(source)
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  const participants = [...new Set(input.participants.map(normalizeMailAddress))].sort().join(",");
+  const source = root || `${normalizeMailSubject(input.subject).toLowerCase()}\n${participants}`;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }

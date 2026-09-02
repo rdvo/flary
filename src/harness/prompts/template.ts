@@ -1,19 +1,9 @@
-import {
-  makeDiagnostic,
-  throwCompileError,
-} from "./diagnostics.js";
+import { makeDiagnostic, throwCompileError } from "./diagnostics.js";
 import type { PromptInputDefinition } from "./types.js";
 
 const TEMPLATE_VALUE = /{{\s*([A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*)\s*}}/g;
 const UNSAFE_TEMPLATE = /{{[{#/!>^&]|}}}/;
-const SECRET_SEGMENTS = new Set([
-  "secret",
-  "secrets",
-  "token",
-  "apikey",
-  "api_key",
-  "password",
-]);
+const SECRET_SEGMENTS = new Set(["secret", "secrets", "token", "apikey", "api_key", "password"]);
 
 export function findTemplatePaths(template: string, file?: string): string[] {
   if (UNSAFE_TEMPLATE.test(template)) {
@@ -99,9 +89,7 @@ function rejectUnknownValues(
   definitions: Record<string, PromptInputDefinition>,
   file?: string,
 ): void {
-  const allowedRoots = new Set(
-    Object.keys(definitions).map((path) => path.split(".")[0]),
-  );
+  const allowedRoots = new Set(Object.keys(definitions).map((path) => path.split(".")[0]));
   const unknown = Object.keys(values).filter((key) => !allowedRoots.has(key));
   if (unknown.length > 0) {
     throwCompileError(
@@ -114,11 +102,7 @@ function rejectUnknownValues(
   }
 }
 
-function assertValueType(
-  definition: PromptInputDefinition,
-  value: unknown,
-  file?: string,
-): void {
+function assertValueType(definition: PromptInputDefinition, value: unknown, file?: string): void {
   const matches =
     definition.type === "any" ||
     definition.type === "json" ||

@@ -116,8 +116,7 @@ textarea:focus-visible {
   display: grid;
   place-items: center;
   padding: 24px;
-  background: radial-gradient(circle at 20% 10%, #fff 0, transparent 35%),
-    #e8ebe7;
+  background: radial-gradient(circle at 20% 10%, #fff 0, transparent 35%), #e8ebe7;
 }
 .access-card {
   width: min(440px, 100%);

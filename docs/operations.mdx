@@ -11,13 +11,10 @@ Before production:
 - Keep provider and connection credentials outside model context and logs.
 - Require approval for state-changing tools and sensitive browser actions.
 - Set step, tool-call, token, cost, Sandbox, Browser, child, and depth limits.
-- Check tenant identity on every thread, event, approval, attachment, and audit
-  request.
+- Check tenant identity on every thread, event, approval, attachment, and audit request.
 - Keep write idempotency keys and block automatic replay of unknown outcomes.
-- Test Worker and Durable Object restart during streams, tools, approvals, and
-  archive sealing.
+- Test Worker and Durable Object restart during streams, tools, approvals, and archive sealing.
 - Run `npx flary doctor` after each deployment change.
 
-Use Cloudflare logs and Flary's tenant-scoped usage and audit APIs for
-operations. Public audit views contain hashes, sizes, state, and safe metadata,
-not secret values.
+Use Cloudflare logs and Flary's tenant-scoped usage and audit APIs for operations. Public audit
+views contain hashes, sizes, state, and safe metadata, not secret values.

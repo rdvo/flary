@@ -2,10 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 
-import {
-  FlarySessionProjector,
-  SqliteSessionLedger,
-} from "../../src/harness/session/index.ts";
+import { FlarySessionProjector, SqliteSessionLedger } from "../../src/harness/session/index.ts";
 
 test("the session projector records redacted Flue tool events in order", async () => {
   const database = new DatabaseSync(":memory:");
@@ -67,10 +64,7 @@ test("the session projector records redacted Flue tool events in order", async (
   assert.equal(call.recordType, "tool.call");
   assert.equal(result.recordType, "tool.result");
   assert.equal(result.previousHash, call.recordHash);
-  assert.notEqual(
-    JSON.stringify(call.publicPayload).includes("secret-value"),
-    true,
-  );
+  assert.notEqual(JSON.stringify(call.publicPayload).includes("secret-value"), true);
 });
 
 test("the session projector keeps provider-private state out of public records", async () => {
@@ -176,17 +170,11 @@ test("the session projector retains safe model-turn failures", async () => {
     },
   });
   assert.equal(record.recordType, "provider.turn");
-  assert.equal(
-    (record.publicPayload.response as Record<string, unknown>).responseId,
-    "[REDACTED]",
-  );
-  assert.deepEqual(
-    (record.publicPayload.response as Record<string, unknown>).error,
-    {
-      type: "authentication_error",
-      message: "The API key cannot use this model",
-    },
-  );
+  assert.equal((record.publicPayload.response as Record<string, unknown>).responseId, "[REDACTED]");
+  assert.deepEqual((record.publicPayload.response as Record<string, unknown>).error, {
+    type: "authentication_error",
+    message: "The API key cannot use this model",
+  });
 });
 
 test("the session projector closes a turn only when the submission settles", async () => {

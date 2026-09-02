@@ -1,13 +1,10 @@
-import {
-  ArtifactCommitSchema,
-  type ArtifactCommit,
-} from "../storage/artifacts";
+import { ArtifactCommitSchema, type ArtifactCommit } from "../storage/artifacts.js";
 import {
   RecallDocumentSchema,
   type RecallDocumentInput,
   type RecallKind,
-} from "../contracts/recall";
-import type { RecallIndex } from "./index";
+} from "../contracts/recall.js";
+import type { RecallIndex } from "./index.js";
 
 function kindForPath(path: string): RecallKind {
   if (path.startsWith("plans/")) return "plan";
@@ -16,7 +13,10 @@ function kindForPath(path: string): RecallKind {
   return "file";
 }
 
-function blocks(content: string, maxLines = 40): Array<{
+function blocks(
+  content: string,
+  maxLines = 40,
+): Array<{
   text: string;
   lineStart: number;
   lineEnd: number;

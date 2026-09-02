@@ -21,9 +21,7 @@ export async function recordResolvedAgentPrompt(input: {
   readonly instructions: string;
   readonly agentRevision?: string;
 }): Promise<void> {
-  const namespace = input.env.FLARY_THREAD_CONTROL as
-    | PromptTraceDurableObjectNamespace
-    | undefined;
+  const namespace = input.env.FLARY_THREAD_CONTROL as PromptTraceDurableObjectNamespace | undefined;
   if (!namespace) return;
   const ref = parseThreadName(input.runId);
   const promptBytes = new TextEncoder().encode(input.instructions).byteLength;
@@ -44,30 +42,19 @@ export async function recordResolvedAgentPrompt(input: {
         promptHash,
         promptBytes,
         instructions: input.instructions,
-        ...(input.agentRevision
-          ? { agentRevision: input.agentRevision }
-          : {}),
+        ...(input.agentRevision ? { agentRevision: input.agentRevision } : {}),
       }),
     }),
   );
   if (!response.ok) {
-    const value = await response.json().catch(() => undefined) as
-      | { error?: unknown }
-      | undefined;
+    const value = (await response.json().catch(() => undefined)) as { error?: unknown } | undefined;
     throw new Error(
-      typeof value?.error === "string"
-        ? value.error
-        : `Prompt trace failed (${response.status})`,
+      typeof value?.error === "string" ? value.error : `Prompt trace failed (${response.status})`,
     );
   }
 }
 
 async function sha256Text(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }

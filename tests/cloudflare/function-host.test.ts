@@ -26,23 +26,14 @@ type SqlDatabase = {
 function sqlStore() {
   const database = new DatabaseSync(":memory:") as unknown as SqlDatabase;
   return {
-    exec<T = Record<string, unknown>>(
-      query: string,
-      ...bindings: unknown[]
-    ): { toArray(): T[] } {
+    exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): { toArray(): T[] } {
       const trimmed = query.trim().toLowerCase();
-      if (
-        bindings.length === 0 &&
-        !/^(select|with|pragma|explain)\b/.test(trimmed)
-      ) {
+      if (bindings.length === 0 && !/^(select|with|pragma|explain)\b/.test(trimmed)) {
         database.exec(query);
         return { toArray: () => [] };
       }
       const statement = database.prepare(query);
-      if (
-        /^(select|with|pragma|explain)\b/.test(trimmed) ||
-        /\breturning\b/.test(trimmed)
-      ) {
+      if (/^(select|with|pragma|explain)\b/.test(trimmed) || /\breturning\b/.test(trimmed)) {
         return { toArray: () => statement.all(...bindings) as T[] };
       }
       statement.run(...bindings);
@@ -122,14 +113,17 @@ test("Runtime Durable Object RPC persists ownership across handler recreation", 
   // Recreate the service boundary. The SQLite record remains the authority.
   const restarted = await call("get", { context: tenantOne, runId: handle.runId });
   assert.equal(restarted.status, 200);
-  assert.equal((await restarted.json() as { runId: string }).runId, handle.runId);
+  assert.equal(((await restarted.json()) as { runId: string }).runId, handle.runId);
 
   const otherTenant = await call("get", {
     context: { ...tenantOne, tenantId: "tenant_2" },
     runId: handle.runId,
   });
   assert.equal(otherTenant.status, 404);
-  assert.equal((await otherTenant.json() as { error: { code: string } }).error.code, "run_not_found");
+  assert.equal(
+    ((await otherTenant.json()) as { error: { code: string } }).error.code,
+    "run_not_found",
+  );
 });
 
 test("Worker-side durable run service calls the Runtime Durable Object", async () => {
@@ -173,14 +167,21 @@ test("Runtime Durable Object approval hooks use the owning agent route", async (
         assert.equal(request.headers.get("authorization"), `Bearer ${token}`);
         const url = new URL(request.url);
         if (url.searchParams.get("flary") === "approvals") {
-          return new Response(JSON.stringify({ approvals: [{
-            id: "codemode_exec_1_0",
-            runId: "agent-instance",
-            action: "tool-call",
-            reason: "Approval is required",
-            requestedBy: { id: "flary", kind: "agent", version: "1" },
-            requestedAt: new Date().toISOString(),
-          }] }), { headers: { "content-type": "application/json" } });
+          return new Response(
+            JSON.stringify({
+              approvals: [
+                {
+                  id: "codemode_exec_1_0",
+                  runId: "agent-instance",
+                  action: "tool-call",
+                  reason: "Approval is required",
+                  requestedBy: { id: "flary", kind: "agent", version: "1" },
+                  requestedAt: new Date().toISOString(),
+                },
+              ],
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
         }
         if (url.searchParams.get("flary") === "wake") {
           assert.equal(request.method, "GET");
@@ -188,7 +189,7 @@ test("Runtime Durable Object approval hooks use the owning agent route", async (
             headers: { "content-type": "application/json" },
           });
         }
-        receivedDecision = await request.json() as ApprovalDecision;
+        receivedDecision = (await request.json()) as ApprovalDecision;
         return new Response(JSON.stringify({ ok: true }), {
           headers: { "content-type": "application/json" },
         });
@@ -224,7 +225,7 @@ test("Cloudflare Flue gateway preserves the pinned direct model payload", async 
     idFromName: (name) => ({ toString: () => name }),
     get: () => ({
       async fetch(request) {
-        received = await request.json() as Record<string, unknown>;
+        received = (await request.json()) as Record<string, unknown>;
         return Response.json({
           streamUrl: "https://example.com/stream",
           offset: "0",
@@ -233,9 +234,12 @@ test("Cloudflare Flue gateway preserves the pinned direct model payload", async 
       },
     }),
   };
-  const gateway = createCloudflareFlueGateway({
-    FLUE_SUPPORT_AGENT: namespace,
-  }, { token });
+  const gateway = createCloudflareFlueGateway(
+    {
+      FLUE_SUPPORT_AGENT: namespace,
+    },
+    { token },
+  );
   const admission = await gateway.send("support", "thread_1", "continue", {
     idempotencyKey: "admission_1",
     model: "anthropic/claude-sonnet",
@@ -266,9 +270,12 @@ test("Cloudflare Flue gateway sends authenticated canonical deletion", async () 
       },
     }),
   };
-  const gateway = createCloudflareFlueGateway({
-    FLUE_SUPPORT_AGENT: namespace,
-  }, { token });
+  const gateway = createCloudflareFlueGateway(
+    {
+      FLUE_SUPPORT_AGENT: namespace,
+    },
+    { token },
+  );
 
   await gateway.delete!("support", "thread_1");
 

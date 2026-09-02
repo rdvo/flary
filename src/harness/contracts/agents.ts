@@ -7,18 +7,18 @@ import {
   NonEmptyStringSchema,
   ReferenceSchema,
   VersionSchema,
-} from "./common";
-import { ExecutionProfileReferenceSchema } from "./execution";
-import { IdentityReferenceSchema } from "./identity";
-import { ModelSelectionSchema, TextVerbositySchema } from "./provider";
-import { PromptReferenceSchema } from "./prompts";
-import { ToolReferenceSchema } from "./tools";
-import { AgentModeIdSchema, AgentModeSchema } from "./modes";
+} from "./common.js";
+import { ExecutionProfileReferenceSchema } from "./execution.js";
+import { IdentityReferenceSchema } from "./identity.js";
+import { ModelSelectionSchema, TextVerbositySchema } from "./provider.js";
+import { PromptReferenceSchema } from "./prompts.js";
+import { ToolReferenceSchema } from "./tools.js";
+import { AgentModeIdSchema, AgentModeSchema } from "./modes.js";
 import {
   DelegationPolicySchema,
   SubagentContextSeedSchema,
   SubagentRoleSchema,
-} from "./subagents";
+} from "./subagents.js";
 
 // Reference an agent manifest by ID.
 export const AgentReferenceSchema = ReferenceSchema;

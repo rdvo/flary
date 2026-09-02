@@ -1,10 +1,6 @@
 import { z } from "zod";
 
-import {
-  IdentifierSchema,
-  NonEmptyStringSchema,
-  PositiveIntegerSchema,
-} from "./common";
+import { IdentifierSchema, NonEmptyStringSchema, PositiveIntegerSchema } from "./common.js";
 import {
   ProjectDirectoryPathSchema,
   ProjectFileEditRequestSchema,
@@ -13,7 +9,7 @@ import {
   ProjectFileReadRequestSchema,
   ProjectFileWriteRequestSchema,
   ProjectFileMutationResponseSchema,
-} from "./filesystem";
+} from "./filesystem.js";
 
 /** A safe relative glob. It is never allowed to select outside a workspace. */
 export const WorkspaceGlobPatternSchema = z
@@ -31,8 +27,7 @@ export const WorkspaceGlobPatternSchema = z
     message: "Workspace patterns cannot contain control characters",
   })
   .refine(
-    (value) =>
-      value.split("/").every((part) => part.length > 0 && part !== "." && part !== ".."),
+    (value) => value.split("/").every((part) => part.length > 0 && part !== "." && part !== ".."),
     { message: "Workspace patterns cannot contain empty, . or .. segments" },
   );
 export type WorkspaceGlobPattern = z.infer<typeof WorkspaceGlobPatternSchema>;
@@ -43,9 +38,7 @@ export const WorkspaceGlobRequestSchema = z
     limit: PositiveIntegerSchema.max(10_000).default(1_000),
   })
   .strict();
-export type WorkspaceGlobRequestInput = z.input<
-  typeof WorkspaceGlobRequestSchema
->;
+export type WorkspaceGlobRequestInput = z.input<typeof WorkspaceGlobRequestSchema>;
 export type WorkspaceGlobRequest = z.output<typeof WorkspaceGlobRequestSchema>;
 
 export const WorkspaceGlobResponseSchema = z
@@ -67,9 +60,7 @@ export const WorkspaceGrepRequestSchema = z
     maxMatches: PositiveIntegerSchema.max(10_000).default(200),
   })
   .strict();
-export type WorkspaceGrepRequestInput = z.input<
-  typeof WorkspaceGrepRequestSchema
->;
+export type WorkspaceGrepRequestInput = z.input<typeof WorkspaceGrepRequestSchema>;
 export type WorkspaceGrepRequest = z.output<typeof WorkspaceGrepRequestSchema>;
 
 export const WorkspaceTextMatchSchema = z
@@ -103,7 +94,10 @@ export const WorkspaceDiffRequestSchema = z
   .object({
     path: ProjectFilePathSchema,
     compareToPath: ProjectFilePathSchema.optional(),
-    newContent: z.string().max(32 * 1024 * 1024).optional(),
+    newContent: z
+      .string()
+      .max(32 * 1024 * 1024)
+      .optional(),
   })
   .strict()
   .superRefine((value, context) => {
@@ -129,9 +123,7 @@ export const WorkspaceDiffRequestSchema = z
       });
     }
   });
-export type WorkspaceDiffRequestInput = z.input<
-  typeof WorkspaceDiffRequestSchema
->;
+export type WorkspaceDiffRequestInput = z.input<typeof WorkspaceDiffRequestSchema>;
 export type WorkspaceDiffRequest = z.output<typeof WorkspaceDiffRequestSchema>;
 
 export const WorkspaceDiffResponseSchema = z
@@ -149,12 +141,8 @@ export const WorkspaceBatchEditRequestSchema = z
     rollbackOnError: z.boolean().default(true),
   })
   .strict();
-export type WorkspaceBatchEditRequestInput = z.input<
-  typeof WorkspaceBatchEditRequestSchema
->;
-export type WorkspaceBatchEditRequest = z.output<
-  typeof WorkspaceBatchEditRequestSchema
->;
+export type WorkspaceBatchEditRequestInput = z.input<typeof WorkspaceBatchEditRequestSchema>;
+export type WorkspaceBatchEditRequest = z.output<typeof WorkspaceBatchEditRequestSchema>;
 
 export const WorkspaceBatchEditResultSchema = z
   .object({
@@ -163,9 +151,7 @@ export const WorkspaceBatchEditResultSchema = z
     replacementCount: z.number().int().nonnegative(),
   })
   .strict();
-export type WorkspaceBatchEditResult = z.infer<
-  typeof WorkspaceBatchEditResultSchema
->;
+export type WorkspaceBatchEditResult = z.infer<typeof WorkspaceBatchEditResultSchema>;
 
 export const WorkspaceBatchEditResponseSchema = z
   .object({
@@ -173,9 +159,7 @@ export const WorkspaceBatchEditResponseSchema = z
     totalReplacementCount: z.number().int().nonnegative(),
   })
   .strict();
-export type WorkspaceBatchEditResponse = z.infer<
-  typeof WorkspaceBatchEditResponseSchema
->;
+export type WorkspaceBatchEditResponse = z.infer<typeof WorkspaceBatchEditResponseSchema>;
 
 export const WorkspaceGitDirectorySchema = ProjectDirectoryPathSchema;
 
@@ -219,9 +203,7 @@ export const GitDiffEntrySchema = z
   .strict();
 export type GitDiffEntry = z.infer<typeof GitDiffEntrySchema>;
 
-export const GitDiffResponseSchema = z
-  .object({ entries: z.array(GitDiffEntrySchema) })
-  .strict();
+export const GitDiffResponseSchema = z.object({ entries: z.array(GitDiffEntrySchema) }).strict();
 export type GitDiffResponse = z.infer<typeof GitDiffResponseSchema>;
 
 export const GitBranchRequestSchema = z

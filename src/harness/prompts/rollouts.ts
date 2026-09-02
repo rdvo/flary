@@ -82,9 +82,7 @@ function stableSerialize(value: unknown, seen: Set<object>): string {
     const record = value as Record<string, unknown>;
     return `{${Object.keys(record)
       .sort()
-      .map(
-        (key) => `${JSON.stringify(key)}:${stableSerialize(record[key], seen)}`
-      )
+      .map((key) => `${JSON.stringify(key)}:${stableSerialize(record[key], seen)}`)
       .join(",")}}`;
   } finally {
     seen.delete(value);
@@ -129,10 +127,10 @@ export const stableHashToBasisPoints = hashToBasisPoints;
 /** Validate and select the variant at one exact rollout boundary. */
 export function selectVariantAtBucket(
   variantsInput: z.input<typeof PromptVariantListSchema>,
-  bucketInput: number
+  bucketInput: number,
 ): PromptVariant {
   const variants = PromptVariantListSchema.parse(variantsInput).filter(
-    (variant) => variant.enabled
+    (variant) => variant.enabled,
   );
   const bucket = RolloutBucketSchema.parse(bucketInput);
   let upperBound = 0;
@@ -153,7 +151,7 @@ export const selectVariantByBucket = selectVariantAtBucket;
 
 function parseAssignment(
   rollout: PromptRollout,
-  assignmentInput: string | z.input<typeof PromptAssignmentSchema>
+  assignmentInput: string | z.input<typeof PromptAssignmentSchema>,
 ): PromptAssignment {
   if (typeof assignmentInput === "string") {
     return PromptAssignmentSchema.parse({
@@ -167,11 +165,11 @@ function parseAssignment(
 
 function assignmentKey(
   rollout: PromptRollout,
-  assignment: PromptAssignment
+  assignment: PromptAssignment,
 ): Record<string, unknown> {
   if (assignment.scope !== rollout.scope) {
     throw new Error(
-      `Assignment scope '${assignment.scope}' does not match rollout scope '${rollout.scope}'`
+      `Assignment scope '${assignment.scope}' does not match rollout scope '${rollout.scope}'`,
     );
   }
 
@@ -186,20 +184,20 @@ function assignmentKey(
 function variantForOverride(
   rollout: PromptRollout,
   assignment: PromptAssignment,
-  overrideInput: z.input<typeof PromptOverrideSchema>
+  overrideInput: z.input<typeof PromptOverrideSchema>,
 ): PromptVariant {
   const override = PromptOverrideSchema.parse(overrideInput);
 
   if (override.scope !== undefined && override.scope !== assignment.scope) {
     throw new Error(
-      `Override scope '${override.scope}' does not match assignment scope '${assignment.scope}'`
+      `Override scope '${override.scope}' does not match assignment scope '${assignment.scope}'`,
     );
   }
 
   const variant = rollout.variants.find(({ id }) => id === override.variantId);
   if (variant === undefined) {
     throw new Error(
-      `Override variant '${override.variantId}' is not part of rollout '${rollout.rolloutId}'`
+      `Override variant '${override.variantId}' is not part of rollout '${rollout.rolloutId}'`,
     );
   }
   return variant;
@@ -209,7 +207,7 @@ function variantForOverride(
 export function selectPromptVariant(
   rolloutInput: z.input<typeof PromptRolloutSchema>,
   assignmentInput: string | z.input<typeof PromptAssignmentSchema>,
-  overrideInput?: z.input<typeof PromptOverrideSchema>
+  overrideInput?: z.input<typeof PromptOverrideSchema>,
 ): PromptVariant {
   const rollout = PromptRolloutSchema.parse(rolloutInput);
   const assignment = parseAssignment(rollout, assignmentInput);
@@ -220,7 +218,7 @@ export function selectPromptVariant(
 
   return selectVariantAtBucket(
     rollout.variants,
-    hashToBasisPoints(assignmentKey(rollout, assignment))
+    hashToBasisPoints(assignmentKey(rollout, assignment)),
   );
 }
 
@@ -238,16 +236,14 @@ export async function selectPromptVariantWithTelemetry(
     runId?: string;
     now?: string;
   },
-  overrideInput?: z.input<typeof PromptOverrideSchema>
+  overrideInput?: z.input<typeof PromptOverrideSchema>,
 ): Promise<{ variant: PromptVariant; event: PromptSelectionTelemetryEvent }> {
   const rollout = PromptRolloutSchema.parse(rolloutInput);
   const assignment = parseAssignment(rollout, assignmentInput);
   const variant = selectPromptVariant(rollout, assignment, overrideInput);
   const digest = await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(
-      stableStringify(assignmentKey(rollout, assignment))
-    )
+    new TextEncoder().encode(stableStringify(assignmentKey(rollout, assignment))),
   );
   const assignmentKeyHash = [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -284,7 +280,7 @@ export async function selectPromptVariantWithTelemetry(
 
 /** Return the assignment scope that a rollout uses. */
 export function rolloutAssignmentScope(
-  rolloutInput: z.input<typeof PromptRolloutSchema>
+  rolloutInput: z.input<typeof PromptRolloutSchema>,
 ): AssignmentScope {
   return PromptRolloutSchema.parse(rolloutInput).scope;
 }

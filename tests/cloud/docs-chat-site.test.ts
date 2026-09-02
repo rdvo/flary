@@ -10,10 +10,7 @@ type SessionPayload = {
 };
 
 function testEnvironment() {
-  const threads = new Map<
-    string,
-    { id: string; title?: string; updatedAt: string }
-  >();
+  const threads = new Map<string, { id: string; title?: string; updatedAt: string }>();
   const calls: Array<{ method: string; path: string; tenant?: string }> = [];
   const agent = {
     async fetch(request: Request): Promise<Response> {
@@ -32,16 +29,10 @@ function testEnvironment() {
             })),
         });
       }
-      if (
-        request.method === "GET" &&
-        url.pathname.startsWith("/apps/docs/threads/chat_")
-      ) {
+      if (request.method === "GET" && url.pathname.startsWith("/apps/docs/threads/chat_")) {
         return threads.has(key)
           ? Response.json({ threadId: url.pathname.split("/").at(-1) })
-          : Response.json(
-              { error: { message: "Thread was not found" } },
-              { status: 404 }
-            );
+          : Response.json({ error: { message: "Thread was not found" } }, { status: 404 });
       }
       if (request.method === "POST" && url.pathname === "/apps/docs/threads") {
         const input = (await request.json()) as {
@@ -60,10 +51,7 @@ function testEnvironment() {
         const current = threads.get(storedKey);
         const input = (await request.json()) as { title: string };
         if (!current)
-          return Response.json(
-            { error: { message: "Thread was not found" } },
-            { status: 404 }
-          );
+          return Response.json({ error: { message: "Thread was not found" } }, { status: 404 });
         threads.set(storedKey, {
           ...current,
           title: input.title,
@@ -76,17 +64,11 @@ function testEnvironment() {
           conversation: { messages: [], settlements: [], offset: "0_0" },
         });
       }
-      if (
-        request.method === "DELETE" &&
-        url.pathname.startsWith("/apps/docs/threads/chat_")
-      ) {
+      if (request.method === "DELETE" && url.pathname.startsWith("/apps/docs/threads/chat_")) {
         threads.delete(key);
         return Response.json({ ok: true });
       }
-      return Response.json(
-        { error: { message: "Unexpected test route" } },
-        { status: 500 }
-      );
+      return Response.json({ error: { message: "Unexpected test route" } }, { status: 500 });
     },
   };
   const env = {
@@ -110,7 +92,7 @@ test("docs chat creates, restores, and deletes browser-owned sessions", async ()
     {
       method: "POST",
     },
-    env
+    env,
   );
   assert.equal(created.status, 200);
   const cookie = browserCookie(created);
@@ -127,13 +109,10 @@ test("docs chat creates, restores, and deletes browser-owned sessions", async ()
         "x-flary-docs-session-ref": first.session.reference,
       },
     },
-    env
+    env,
   );
   assert.equal(restored.status, 200);
-  assert.deepEqual(
-    ((await restored.json()) as SessionPayload).session,
-    first.session
-  );
+  assert.deepEqual(((await restored.json()) as SessionPayload).session, first.session);
 
   const next = await site.request(
     "https://docs.flary.dev/api/docs-chat/session",
@@ -144,7 +123,7 @@ test("docs chat creates, restores, and deletes browser-owned sessions", async ()
         "x-flary-docs-new-session": "1",
       },
     },
-    env
+    env,
   );
   assert.equal(next.status, 200);
   const second = (await next.json()) as SessionPayload;
@@ -159,7 +138,7 @@ test("docs chat creates, restores, and deletes browser-owned sessions", async ()
         "x-flary-docs-session-ref": second.session.reference,
       },
     },
-    env
+    env,
   );
   assert.equal(deleted.status, 200);
   assert.equal(calls.at(-1)?.method, "DELETE");
@@ -172,7 +151,7 @@ test("docs chat lists and renames every durable session owned by the browser", a
     {
       method: "POST",
     },
-    env
+    env,
   );
   const cookie = browserCookie(firstResponse);
   const first = (await firstResponse.json()) as SessionPayload;
@@ -182,7 +161,7 @@ test("docs chat lists and renames every durable session owned by the browser", a
       method: "POST",
       headers: { cookie, "x-flary-docs-new-session": "1" },
     },
-    env
+    env,
   );
   const second = (await secondResponse.json()) as SessionPayload;
 
@@ -197,7 +176,7 @@ test("docs chat lists and renames every durable session owned by the browser", a
       },
       body: JSON.stringify({ title: "Workspace tools" }),
     },
-    env
+    env,
   );
   assert.equal(renamed.status, 200);
 
@@ -206,7 +185,7 @@ test("docs chat lists and renames every durable session owned by the browser", a
     {
       headers: { cookie },
     },
-    env
+    env,
   );
   assert.equal(listed.status, 200);
   const payload = (await listed.json()) as {
@@ -214,15 +193,13 @@ test("docs chat lists and renames every durable session owned by the browser", a
   };
   assert.deepEqual(
     new Set(payload.sessions.map((session) => session.id)),
-    new Set([first.session.id, second.session.id])
+    new Set([first.session.id, second.session.id]),
   );
   assert.equal(
     payload.sessions.find((session) => session.id === second.session.id)?.title,
-    "Workspace tools"
+    "Workspace tools",
   );
-  assert.ok(
-    payload.sessions.every((session) => session.reference.startsWith("v1."))
-  );
+  assert.ok(payload.sessions.every((session) => session.reference.startsWith("v1.")));
 
   const deleted = await site.request(
     "https://docs.flary.dev/api/docs-chat/session",
@@ -230,7 +207,7 @@ test("docs chat lists and renames every durable session owned by the browser", a
       method: "DELETE",
       headers: { cookie, "x-flary-docs-session-ref": second.session.reference },
     },
-    env
+    env,
   );
   assert.equal(deleted.status, 200);
   const afterDelete = await site.request(
@@ -238,14 +215,14 @@ test("docs chat lists and renames every durable session owned by the browser", a
     {
       headers: { cookie },
     },
-    env
+    env,
   );
   const remaining = (await afterDelete.json()) as {
     sessions: Array<{ id: string }>;
   };
   assert.deepEqual(
     remaining.sessions.map((session) => session.id),
-    [first.session.id]
+    [first.session.id],
   );
 });
 
@@ -256,7 +233,7 @@ test("docs chat rejects a session reference from another browser", async () => {
     {
       method: "POST",
     },
-    env
+    env,
   );
   const ownerSession = (await owner.json()) as SessionPayload;
 
@@ -265,7 +242,7 @@ test("docs chat rejects a session reference from another browser", async () => {
     {
       method: "POST",
     },
-    env
+    env,
   );
   const response = await site.request(
     "https://docs.flary.dev/api/docs-chat/history",
@@ -275,12 +252,12 @@ test("docs chat rejects a session reference from another browser", async () => {
         "x-flary-docs-session-ref": ownerSession.session.reference,
       },
     },
-    env
+    env,
   );
 
   assert.equal(response.status, 401);
   assert.equal(
     ((await response.json()) as { error: { type: string } }).error.type,
-    "chat_session_invalid"
+    "chat_session_invalid",
   );
 });

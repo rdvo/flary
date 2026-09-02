@@ -1,9 +1,5 @@
 import { z } from "zod";
-import {
-  executionLimitsSchema,
-  type ExecutionLimits,
-  type ExecutionLimitsInput,
-} from "./types.js";
+import { executionLimitsSchema, type ExecutionLimits, type ExecutionLimitsInput } from "./types.js";
 
 const LIMIT_NAMES: readonly (keyof ExecutionLimits)[] = [
   "maxToolCalls",
@@ -17,7 +13,7 @@ const LIMIT_NAMES: readonly (keyof ExecutionLimits)[] = [
 type LimitSource = ExecutionLimitsInput | undefined;
 
 function flattenLimitSources(
-  sources: readonly (LimitSource | readonly LimitSource[])[]
+  sources: readonly (LimitSource | readonly LimitSource[])[],
 ): readonly LimitSource[] {
   if (sources.length === 1 && Array.isArray(sources[0])) {
     return sources[0];
@@ -36,7 +32,7 @@ export function reduceLimits(
   ...sources: (LimitSource | readonly LimitSource[])[]
 ): ExecutionLimits {
   const parsedSources = flattenLimitSources(sources).map((source) =>
-    executionLimitsSchema.parse(source ?? {})
+    executionLimitsSchema.parse(source ?? {}),
   );
   const reduced: Partial<ExecutionLimits> = {};
 
@@ -61,14 +57,16 @@ export function reduceLimit(
   name: keyof ExecutionLimits,
   ...values: (number | undefined)[]
 ): number | undefined {
-  const parsedName = z.enum([
-    "maxToolCalls",
-    "maxDurationMs",
-    "maxResultBytes",
-    "maxConcurrency",
-    "readParallelism",
-    "batchSize",
-  ]).parse(name);
+  const parsedName = z
+    .enum([
+      "maxToolCalls",
+      "maxDurationMs",
+      "maxResultBytes",
+      "maxConcurrency",
+      "readParallelism",
+      "batchSize",
+    ])
+    .parse(name);
   const defined = values.filter((value): value is number => value !== undefined);
 
   if (defined.length === 0) {
@@ -80,4 +78,3 @@ export function reduceLimit(
   fieldSchema.parse(minimum);
   return minimum;
 }
-

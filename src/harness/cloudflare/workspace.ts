@@ -16,26 +16,17 @@ import {
   WorkspaceGrepRequestSchema,
 } from "../contracts/workspace-tools.js";
 import { redactErrorMessage, redactSecrets } from "../execution/redaction.js";
-import type {
-  FlaryToolScope,
-  FlaryWorkspaceTargetResolver,
-} from "../flue/toolset.js";
+import type { FlaryToolScope, FlaryWorkspaceTargetResolver } from "../flue/toolset.js";
 import type { ShellWorkspace } from "../storage/shell-workspace.js";
 import type { WorkspaceToolTarget } from "../tools/workspace.js";
 import { tenantStoragePrefix } from "../storage/scopes.js";
 import { FlaryHistoryProjector } from "../history/index.js";
-import {
-  R2ArtifactHistoryStore,
-  type ArtifactR2Bucket,
-} from "../storage/r2-artifacts.js";
+import { R2ArtifactHistoryStore, type ArtifactR2Bucket } from "../storage/r2-artifacts.js";
 import { summarizeArtifactCommit } from "../storage/artifacts.js";
 import { z } from "zod";
 
 type ResolvedWorkspaceScope = Required<
-  Pick<
-    FlaryToolScope,
-    "tenantId" | "appId" | "projectId" | "workspaceId" | "branch"
-  >
+  Pick<FlaryToolScope, "tenantId" | "appId" | "projectId" | "workspaceId" | "branch">
 >;
 
 export interface CloudflareWorkspaceObjectId {
@@ -74,13 +65,8 @@ export interface FlaryWorkspaceAttachmentImportInput {
 
 /** Trusted host controls. These methods are not included in agent tool descriptors. */
 export interface FlaryWorkspaceHostControl {
-  read(input: {
-    readonly path: string;
-    readonly encoding?: "utf8" | "base64";
-  }): Promise<unknown>;
-  seed(
-    input: FlaryWorkspaceSeedInput
-  ): Promise<{ seeded: true; files: unknown[] }>;
+  read(input: { readonly path: string; readonly encoding?: "utf8" | "base64" }): Promise<unknown>;
+  seed(input: FlaryWorkspaceSeedInput): Promise<{ seeded: true; files: unknown[] }>;
   checkpoint(input: {
     readonly requestId: string;
     readonly id: string;
@@ -93,7 +79,7 @@ export interface FlaryWorkspaceHostControl {
     diffReference: Readonly<Record<string, unknown>>;
   }>;
   importAttachment(
-    input: FlaryWorkspaceAttachmentImportInput
+    input: FlaryWorkspaceAttachmentImportInput,
   ): Promise<{ imported: true; attachmentId: string; file: unknown }>;
   destroy(input: { readonly requestId: string }): Promise<{ destroyed: true }>;
 }
@@ -101,28 +87,24 @@ export interface FlaryWorkspaceHostControl {
 /** Create the retry-safe, host-only lifecycle API for one workspace. */
 export async function createCloudflareWorkspaceHostControl(
   namespace: CloudflareWorkspaceObjectNamespace,
-  scopeInput: WorkspaceRef
+  scopeInput: WorkspaceRef,
 ): Promise<FlaryWorkspaceHostControl> {
   const scope = WorkspaceRefSchema.parse(scopeInput);
-  const stub = namespace.get(
-    namespace.idFromName(await cloudflareWorkspaceObjectName(scope))
-  );
+  const stub = namespace.get(namespace.idFromName(await cloudflareWorkspaceObjectName(scope)));
   const call = async <T>(method: string, input: unknown): Promise<T> => {
     const response = await stub.fetch(
       new Request(`https://flary.internal/workspace/${method}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ scope, input }),
-      })
+      }),
     );
     const body = await response.json().catch(() => undefined);
     if (!response.ok || !isRecord(body) || !("output" in body)) {
       throw new Error(
-        isRecord(body) &&
-        isRecord(body.error) &&
-        typeof body.error.message === "string"
+        isRecord(body) && isRecord(body.error) && typeof body.error.message === "string"
           ? body.error.message
-          : "The workspace host operation failed"
+          : "The workspace host operation failed",
       );
     }
     return body.output as T;
@@ -145,10 +127,7 @@ export async function createCloudflareWorkspaceHostControl(
 }
 
 export interface CloudflareWorkspaceBindingResolver {
-  resolve(
-    scope: WorkspaceRef,
-    blobs?: unknown
-  ): WorkspaceToolTarget | Promise<WorkspaceToolTarget>;
+  resolve(scope: WorkspaceRef, blobs?: unknown): WorkspaceToolTarget | Promise<WorkspaceToolTarget>;
 }
 
 export interface CreateCloudflareWorkspaceTargetOptions {
@@ -174,7 +153,7 @@ export interface CreateCloudflareWorkspaceTargetOptions {
  * descriptor.
  */
 export function createCloudflareWorkspaceTarget(
-  options: CreateCloudflareWorkspaceTargetOptions
+  options: CreateCloudflareWorkspaceTargetOptions,
 ): FlaryWorkspaceTargetResolver {
   return {
     async resolve(scopeInput: ResolvedWorkspaceScope) {
@@ -184,9 +163,7 @@ export function createCloudflareWorkspaceTarget(
       }
       const sql = directSql(options.binding);
       if (sql) {
-        const { ShellWorkspace } = await import(
-          "../storage/shell-workspace.js"
-        );
+        const { ShellWorkspace } = await import("../storage/shell-workspace.js");
         return new ShellWorkspace({
           sql: sql as never,
           scope,
@@ -226,23 +203,14 @@ export interface HandleFlaryWorkspaceObjectRequestOptions<TEnv> {
  * requests must not route directly to this handler.
  */
 export async function handleFlaryWorkspaceObjectRequest<TEnv>(
-  options: HandleFlaryWorkspaceObjectRequestOptions<TEnv>
+  options: HandleFlaryWorkspaceObjectRequestOptions<TEnv>,
 ): Promise<Response> {
   try {
     if (options.request.method !== "POST") {
-      return workspaceJson(
-        { error: { code: "method_not_allowed", message: "Use POST" } },
-        405
-      );
+      return workspaceJson({ error: { code: "method_not_allowed", message: "Use POST" } }, 405);
     }
-    const method = new URL(options.request.url).pathname
-      .split("/")
-      .filter(Boolean)
-      .at(-1);
-    if (
-      !method ||
-      (!WORKSPACE_METHODS.has(method) && !method.startsWith("git_"))
-    ) {
+    const method = new URL(options.request.url).pathname.split("/").filter(Boolean).at(-1);
+    if (!method || (!WORKSPACE_METHODS.has(method) && !method.startsWith("git_"))) {
       return workspaceJson(
         {
           error: {
@@ -250,7 +218,7 @@ export async function handleFlaryWorkspaceObjectRequest<TEnv>(
             message: "The workspace operation is not available",
           },
         },
-        404
+        404,
       );
     }
     const body = (await options.request.json()) as {
@@ -259,10 +227,7 @@ export async function handleFlaryWorkspaceObjectRequest<TEnv>(
     };
     const scope = WorkspaceRefSchema.parse(body.scope);
     ensureWorkspaceOwner(options.state.storage.sql, scope);
-    const blobs =
-      typeof options.blobs === "function"
-        ? options.blobs(options.env)
-        : options.blobs;
+    const blobs = typeof options.blobs === "function" ? options.blobs(options.env) : options.blobs;
     const { ShellWorkspace } = await import("../storage/shell-workspace.js");
     const workspace = new ShellWorkspace({
       sql: options.state.storage.sql as never,
@@ -275,42 +240,37 @@ export async function handleFlaryWorkspaceObjectRequest<TEnv>(
         workspace,
         "__checkpoint",
         {
-          id: `before_${method}_${crypto
-            .randomUUID()
-            .replaceAll("-", "")}`.slice(0, 200),
+          id: `before_${method}_${crypto.randomUUID().replaceAll("-", "")}`.slice(0, 200),
           sessionId: scope.workspaceId,
           metadata: { beforeOperation: method },
         },
         scope,
         blobs,
-        options.state.storage
+        options.state.storage,
       );
     }
     const output = method.startsWith("git_")
       ? await callGit(workspace, method.slice(4), body.input, options.env)
       : method.startsWith("__")
-      ? await callWorkspaceControl(
-          workspace,
-          method,
-          body.input,
-          scope,
-          blobs,
-          options.state.storage
-        )
-      : await callWorkspace(workspace, method, body.input);
+        ? await callWorkspaceControl(
+            workspace,
+            method,
+            body.input,
+            scope,
+            blobs,
+            options.state.storage,
+          )
+        : await callWorkspace(workspace, method, body.input);
     return workspaceJson({ output: redactSecrets(output) });
   } catch (error) {
     return workspaceJson(
       {
         error: {
           code: "workspace_operation_failed",
-          message: redactErrorMessage(
-            error,
-            "The workspace operation failed"
-          ).slice(0, 500),
+          message: redactErrorMessage(error, "The workspace operation failed").slice(0, 500),
         },
       },
-      400
+      400,
     );
   }
 }
@@ -325,7 +285,7 @@ export async function handleFlaryWorkspaceObjectRequest<TEnv>(
 export class FlaryWorkspaceDurableObject<TEnv = Record<string, unknown>> {
   constructor(
     protected readonly state: FlaryWorkspaceObjectState,
-    protected readonly env: TEnv
+    protected readonly env: TEnv,
   ) {}
 
   fetch(request: Request): Promise<Response> {
@@ -386,28 +346,17 @@ export async function createCloudflareWorkspaceConnection(
   options: {
     readonly approveWrites?: boolean;
     readonly hiddenPaths?: readonly string[];
-  } = {}
+  } = {},
 ) {
   const scope = WorkspaceRefSchema.parse(scopeInput);
-  const stub = namespace.get(
-    namespace.idFromName(await cloudflareWorkspaceObjectName(scope))
-  );
-  const hiddenPaths = (options.hiddenPaths ?? []).map((path) =>
-    path.replace(/^\/+|\/+$/g, "")
-  );
+  const stub = namespace.get(namespace.idFromName(await cloudflareWorkspaceObjectName(scope)));
+  const hiddenPaths = (options.hiddenPaths ?? []).map((path) => path.replace(/^\/+|\/+$/g, ""));
   const hidden = (path: unknown): boolean =>
     typeof path === "string" &&
-    hiddenPaths.some(
-      (prefix) => path === prefix || path.startsWith(`${prefix}/`)
-    );
+    hiddenPaths.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
   const call = async (name: string, input: unknown): Promise<unknown> => {
     if (isRecord(input)) {
-      const directPaths = [
-        input.path,
-        input.from,
-        input.to,
-        input.compareToPath,
-      ];
+      const directPaths = [input.path, input.from, input.to, input.compareToPath];
       const editPaths = Array.isArray(input.edits)
         ? input.edits.flatMap((edit) => (isRecord(edit) ? [edit.path] : []))
         : [];
@@ -416,32 +365,25 @@ export async function createCloudflareWorkspaceConnection(
       }
     }
     const response = await stub.fetch(
-      new Request(
-        `https://flary.internal/workspace/${encodeURIComponent(name)}`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ scope, input }),
-        }
-      )
+      new Request(`https://flary.internal/workspace/${encodeURIComponent(name)}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ scope, input }),
+      }),
     );
     const body = await response.json().catch(() => undefined);
     if (!response.ok || !isRecord(body) || !("output" in body)) {
       throw new Error(
-        isRecord(body) &&
-        isRecord(body.error) &&
-        typeof body.error.message === "string"
+        isRecord(body) && isRecord(body.error) && typeof body.error.message === "string"
           ? body.error.message
-          : "The workspace operation failed"
+          : "The workspace operation failed",
       );
     }
     const output = body.output;
     if (name === "list" && isRecord(output) && Array.isArray(output.files)) {
       return {
         ...output,
-        files: output.files.filter(
-          (file) => !isRecord(file) || !hidden(file.path)
-        ),
+        files: output.files.filter((file) => !isRecord(file) || !hidden(file.path)),
       };
     }
     if (name === "glob" && isRecord(output) && Array.isArray(output.paths)) {
@@ -450,9 +392,7 @@ export async function createCloudflareWorkspaceConnection(
     if (name === "grep" && isRecord(output) && Array.isArray(output.files)) {
       return {
         ...output,
-        files: output.files.filter(
-          (file) => !isRecord(file) || !hidden(file.path)
-        ),
+        files: output.files.filter((file) => !isRecord(file) || !hidden(file.path)),
       };
     }
     return output;
@@ -494,8 +434,7 @@ export async function createCloudflareWorkspaceConnection(
         name,
         description,
         operation,
-        requiresApproval:
-          operation === "write" && options.approveWrites !== false,
+        requiresApproval: operation === "write" && options.approveWrites !== false,
         inputSchema: z.toJSONSchema(fileInputSchemas[name]),
       })),
       ...[...GIT_METHODS].map((name) => ({
@@ -522,7 +461,7 @@ function workspaceRef(scope: ResolvedWorkspaceScope): WorkspaceRef {
 
 function workspaceProxy(
   stub: CloudflareWorkspaceObjectStub,
-  scope: WorkspaceRef
+  scope: WorkspaceRef,
 ): WorkspaceToolTarget {
   const call = async (method: string, input: unknown): Promise<unknown> => {
     const response = await stub.fetch(
@@ -530,16 +469,14 @@ function workspaceProxy(
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ scope, input }),
-      })
+      }),
     );
     const body = await response.json().catch(() => undefined);
     if (!response.ok) {
       throw new Error(
-        isRecord(body) &&
-        isRecord(body.error) &&
-        typeof body.error.message === "string"
+        isRecord(body) && isRecord(body.error) && typeof body.error.message === "string"
           ? body.error.message
-          : "The workspace operation failed"
+          : "The workspace operation failed",
       );
     }
     if (!isRecord(body) || !("output" in body)) {
@@ -548,59 +485,41 @@ function workspaceProxy(
     return body.output;
   };
   return {
-    read: (input) =>
-      call("read", input) as ReturnType<WorkspaceToolTarget["read"]>,
-    write: (input) =>
-      call("write", input) as ReturnType<WorkspaceToolTarget["write"]>,
-    edit: (input) =>
-      call("edit", input) as ReturnType<WorkspaceToolTarget["edit"]>,
+    read: (input) => call("read", input) as ReturnType<WorkspaceToolTarget["read"]>,
+    write: (input) => call("write", input) as ReturnType<WorkspaceToolTarget["write"]>,
+    edit: (input) => call("edit", input) as ReturnType<WorkspaceToolTarget["edit"]>,
     applyPatch: (input) =>
-      call("applyPatch", input) as ReturnType<
-        WorkspaceToolTarget["applyPatch"]
-      >,
-    delete: (input) =>
-      call("delete", input) as ReturnType<WorkspaceToolTarget["delete"]>,
-    move: (input) =>
-      call("move", input) as ReturnType<WorkspaceToolTarget["move"]>,
-    copy: (input) =>
-      call("copy", input) as ReturnType<WorkspaceToolTarget["copy"]>,
-    list: (input) =>
-      call("list", input) as ReturnType<WorkspaceToolTarget["list"]>,
-    stat: (path) =>
-      call("stat", path) as ReturnType<WorkspaceToolTarget["stat"]>,
-    glob: (input) =>
-      call("glob", input) as ReturnType<WorkspaceToolTarget["glob"]>,
-    grep: (input) =>
-      call("grep", input) as ReturnType<WorkspaceToolTarget["grep"]>,
-    diff: (input) =>
-      call("diff", input) as ReturnType<WorkspaceToolTarget["diff"]>,
-    batchEdit: (input) =>
-      call("batchEdit", input) as ReturnType<WorkspaceToolTarget["batchEdit"]>,
+      call("applyPatch", input) as ReturnType<WorkspaceToolTarget["applyPatch"]>,
+    delete: (input) => call("delete", input) as ReturnType<WorkspaceToolTarget["delete"]>,
+    move: (input) => call("move", input) as ReturnType<WorkspaceToolTarget["move"]>,
+    copy: (input) => call("copy", input) as ReturnType<WorkspaceToolTarget["copy"]>,
+    list: (input) => call("list", input) as ReturnType<WorkspaceToolTarget["list"]>,
+    stat: (path) => call("stat", path) as ReturnType<WorkspaceToolTarget["stat"]>,
+    glob: (input) => call("glob", input) as ReturnType<WorkspaceToolTarget["glob"]>,
+    grep: (input) => call("grep", input) as ReturnType<WorkspaceToolTarget["grep"]>,
+    diff: (input) => call("diff", input) as ReturnType<WorkspaceToolTarget["diff"]>,
+    batchEdit: (input) => call("batchEdit", input) as ReturnType<WorkspaceToolTarget["batchEdit"]>,
   };
 }
 
 async function callWorkspace(
   workspace: ShellWorkspace,
   method: string,
-  input: unknown
+  input: unknown,
 ): Promise<unknown> {
   const operation = workspace[method as keyof ShellWorkspace];
   if (typeof operation !== "function") {
     throw new Error("The workspace operation is not available");
   }
-  const normalizedInput =
-    method === "stat" && isRecord(input) ? input.path : input;
-  return (operation as (value: unknown) => Promise<unknown>).call(
-    workspace,
-    normalizedInput
-  );
+  const normalizedInput = method === "stat" && isRecord(input) ? input.path : input;
+  return (operation as (value: unknown) => Promise<unknown>).call(workspace, normalizedInput);
 }
 
 async function callGit(
   workspace: ShellWorkspace,
   method: string,
   input: unknown,
-  env: unknown
+  env: unknown,
 ): Promise<unknown> {
   if (!GIT_METHODS.has(method)) {
     throw new Error("The Git operation is not available");
@@ -610,8 +529,8 @@ async function callGit(
     typeof record.FLARY_GIT_TOKEN === "string"
       ? record.FLARY_GIT_TOKEN
       : typeof record.GITHUB_TOKEN === "string"
-      ? record.GITHUB_TOKEN
-      : undefined;
+        ? record.GITHUB_TOKEN
+        : undefined;
   const provider = workspace.gitTools(token ? { token } : undefined);
   const tool = (
     provider.tools as Record<
@@ -631,17 +550,15 @@ async function callWorkspaceControl(
   inputValue: unknown,
   scope: WorkspaceRef,
   blobs: unknown,
-  storage?: { readonly sql?: unknown; readonly deleteAll?: () => Promise<void> }
+  storage?: { readonly sql?: unknown; readonly deleteAll?: () => Promise<void> },
 ): Promise<unknown> {
   const input = isRecord(inputValue) ? inputValue : {};
   if (method === "__seed") {
     return retrySafeHostOperation(storage?.sql, method, input, async () => {
-      if (!Array.isArray(input.files))
-        throw new Error("Workspace seed needs files");
+      if (!Array.isArray(input.files)) throw new Error("Workspace seed needs files");
       const files = [];
       for (const value of input.files) {
-        if (!isRecord(value))
-          throw new Error("A workspace seed file is invalid");
+        if (!isRecord(value)) throw new Error("A workspace seed file is invalid");
         files.push(
           await workspace.write({
             path: value.path,
@@ -649,7 +566,7 @@ async function callWorkspaceControl(
             encoding: value.encoding,
             mediaType: value.mediaType,
             expectedSha256: value.expectedSha256,
-          } as never)
+          } as never),
         );
       }
       return { seeded: true as const, files };
@@ -674,15 +591,13 @@ async function callWorkspaceControl(
       };
     });
   }
-  const repository =
-    typeof input.repository === "string" ? input.repository : scope.projectId;
+  const repository = typeof input.repository === "string" ? input.repository : scope.projectId;
   const recallScope = {
     kind: "session" as const,
     organizationId: scope.organizationId,
     appId: scope.appId,
     projectId: scope.projectId,
-    sessionId:
-      typeof input.sessionId === "string" ? input.sessionId : scope.workspaceId,
+    sessionId: typeof input.sessionId === "string" ? input.sessionId : scope.workspaceId,
   };
   if (method === "__destroy") {
     await workspace.delete({ path: "", recursive: true });
@@ -737,10 +652,7 @@ async function callWorkspaceControl(
         mediaType: file.mediaType,
       });
     }
-    const forkId =
-      typeof input.id === "string"
-        ? input.id
-        : `fork_${input.commitId}`.slice(0, 200);
+    const forkId = typeof input.id === "string" ? input.id : `fork_${input.commitId}`.slice(0, 200);
     const result = await new FlaryHistoryProjector(store).checkpoint({
       id: forkId,
       repository,
@@ -767,7 +679,7 @@ async function callWorkspaceControl(
       repository,
       recallScope,
       scope.branch,
-      typeof input.limit === "number" ? input.limit : 30
+      typeof input.limit === "number" ? input.limit : 30,
     );
     return {
       repository,
@@ -785,7 +697,7 @@ async function callWorkspaceControl(
         recallScope,
         typeof input.baseCommitId === "string" ? input.baseCommitId : undefined,
         input.headCommitId,
-        scope.branch
+        scope.branch,
       ),
     };
   }
@@ -797,9 +709,7 @@ async function callWorkspaceControl(
     if (!commit) throw new Error("The workspace checkpoint was not found");
     const existing = await workspace.list({});
     const kept = new Set(
-      commit.files
-        .filter((file) => !file.path.startsWith("sessions/"))
-        .map((file) => file.path)
+      commit.files.filter((file) => !file.path.startsWith("sessions/")).map((file) => file.path),
     );
     for (const file of existing.files) {
       if (!kept.has(file.path)) await workspace.delete({ path: file.path });
@@ -840,24 +750,17 @@ async function callWorkspaceControl(
           sha256: file.sha256,
           ...(!text ? { metadata: { encoding: "base64" } } : {}),
         };
-      })
+      }),
     );
     const latest = await store.latest(repository, recallScope, scope.branch);
     const prior = new Map(
-      (latest?.files ?? []).map((file) => [
-        file.path,
-        file.sha256 ?? file.content,
-      ])
+      (latest?.files ?? []).map((file) => [file.path, file.sha256 ?? file.content]),
     );
-    const current = new Map(
-      files.map((file) => [file.path, file.sha256 ?? file.content])
-    );
+    const current = new Map(files.map((file) => [file.path, file.sha256 ?? file.content]));
     const changedFiles = [
       ...new Set([
         ...files
-          .filter(
-            (file) => prior.get(file.path) !== (file.sha256 ?? file.content)
-          )
+          .filter((file) => prior.get(file.path) !== (file.sha256 ?? file.content))
           .map((file) => file.path),
         ...[...prior.keys()].filter((path) => !current.has(path)),
       ]),
@@ -866,17 +769,13 @@ async function callWorkspaceControl(
       files
         .map((file) => `${file.path}\u0000${file.sha256 ?? file.content}`)
         .sort()
-        .join("\u0000")
+        .join("\u0000"),
     );
     const git = await readGitCheckpoint(workspace);
     const previousMetadata = isRecord(latest?.metadata) ? latest.metadata : {};
-    const previousGit = isRecord(previousMetadata.git)
-      ? previousMetadata.git
-      : {};
+    const previousGit = isRecord(previousMetadata.git) ? previousMetadata.git : {};
     const baseGitCommit =
-      typeof previousGit.baseCommit === "string"
-        ? previousGit.baseCommit
-        : git.currentCommit;
+      typeof previousGit.baseCommit === "string" ? previousGit.baseCommit : git.currentCommit;
     const gitMetadata = {
       ...(baseGitCommit ? { baseCommit: baseGitCommit } : {}),
       ...(git.currentCommit ? { currentCommit: git.currentCommit } : {}),
@@ -893,9 +792,7 @@ async function callWorkspaceControl(
       reason: "dirty_turn",
       files,
       metadata: {
-        ...(typeof input.submissionId === "string"
-          ? { submissionId: input.submissionId }
-          : {}),
+        ...(typeof input.submissionId === "string" ? { submissionId: input.submissionId } : {}),
         ...(isRecord(input.modelPin) ? { modelPin: input.modelPin } : {}),
         treeHash,
         changedFiles,
@@ -926,14 +823,9 @@ async function callWorkspaceControl(
 function destructiveWorkspaceOperation(method: string): boolean {
   if (["delete", "move", "batchEdit"].includes(method)) return true;
   if (!method.startsWith("git_")) return false;
-  return new Set([
-    "git_clone",
-    "git_rm",
-    "git_commit",
-    "git_checkout",
-    "git_pull",
-    "git_init",
-  ]).has(method);
+  return new Set(["git_clone", "git_rm", "git_commit", "git_checkout", "git_pull", "git_init"]).has(
+    method,
+  );
 }
 
 async function readGitCheckpoint(workspace: ShellWorkspace): Promise<{
@@ -966,22 +858,15 @@ async function readGitCheckpoint(workspace: ShellWorkspace): Promise<{
   const branchValue = isRecord(branch) ? branch : {};
   return {
     ...(typeof head.oid === "string" ? { currentCommit: head.oid } : {}),
-    ...(typeof branchValue.current === "string"
-      ? { branch: branchValue.current }
-      : {}),
+    ...(typeof branchValue.current === "string" ? { branch: branchValue.current } : {}),
     status: Array.isArray(status) ? status : [],
     diff: Array.isArray(diff) ? diff : [],
   };
 }
 
 async function sha256Text(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value)
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function deleteR2Prefix(bucket: unknown, prefix: string): Promise<void> {
@@ -995,11 +880,7 @@ async function deleteR2Prefix(bucket: unknown, prefix: string): Promise<void> {
   let cursor: string | undefined;
   do {
     const page = await (
-      bucket.list as (input: {
-        prefix: string;
-        cursor?: string;
-        limit?: number;
-      }) => Promise<{
+      bucket.list as (input: { prefix: string; cursor?: string; limit?: number }) => Promise<{
         objects?: Array<{ key?: unknown }>;
         truncated?: boolean;
         cursor?: string;
@@ -1009,10 +890,7 @@ async function deleteR2Prefix(bucket: unknown, prefix: string): Promise<void> {
       if (typeof object.key === "string")
         await (bucket.delete as (key: string) => Promise<unknown>)(object.key);
     }
-    cursor =
-      page.truncated && typeof page.cursor === "string"
-        ? page.cursor
-        : undefined;
+    cursor = page.truncated && typeof page.cursor === "string" ? page.cursor : undefined;
   } while (cursor);
 }
 
@@ -1024,7 +902,7 @@ async function retrySafeHostOperation<T>(
   sqlValue: unknown,
   operation: string,
   input: Record<string, unknown>,
-  execute: () => Promise<T>
+  execute: () => Promise<T>,
 ): Promise<T> {
   const requestId = requireHostRequestId(input);
   const sql = sqlValue as WorkspaceHostSql | undefined;
@@ -1042,7 +920,7 @@ async function retrySafeHostOperation<T>(
   const rows = sql
     .exec(
       "SELECT operation, input_sha256, output_json FROM flary_workspace_host_operation WHERE request_id = ?",
-      requestId
+      requestId,
     )
     .toArray() as Array<{
     operation: string;
@@ -1063,14 +941,14 @@ async function retrySafeHostOperation<T>(
       requestId,
       operation,
       inputSha256,
-      new Date().toISOString()
+      new Date().toISOString(),
     );
   }
   const output = await execute();
   sql.exec(
     "UPDATE flary_workspace_host_operation SET output_json = ? WHERE request_id = ?",
     JSON.stringify(output),
-    requestId
+    requestId,
   );
   return output;
 }
@@ -1088,24 +966,18 @@ function sortJson(value: unknown): unknown {
   return Object.fromEntries(
     Object.keys(value)
       .sort()
-      .map((key) => [key, sortJson(value[key])])
+      .map((key) => [key, sortJson(value[key])]),
   );
 }
 
-export async function cloudflareWorkspaceObjectName(
-  scope: WorkspaceRef
-): Promise<string> {
+export async function cloudflareWorkspaceObjectName(scope: WorkspaceRef): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(
-      [
-        scope.organizationId,
-        scope.appId,
-        scope.projectId,
-        scope.workspaceId,
-        scope.branch,
-      ].join("\u0000")
-    )
+      [scope.organizationId, scope.appId, scope.projectId, scope.workspaceId, scope.branch].join(
+        "\u0000",
+      ),
+    ),
   );
   return `workspace_${[...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -1113,7 +985,7 @@ export async function cloudflareWorkspaceObjectName(
 }
 
 function isNamespace(
-  value: CreateCloudflareWorkspaceTargetOptions["binding"]
+  value: CreateCloudflareWorkspaceTargetOptions["binding"],
 ): value is CloudflareWorkspaceObjectNamespace {
   return (
     "idFromName" in value &&
@@ -1124,14 +996,12 @@ function isNamespace(
 }
 
 function isBindingResolver(
-  value: CreateCloudflareWorkspaceTargetOptions["binding"]
+  value: CreateCloudflareWorkspaceTargetOptions["binding"],
 ): value is CloudflareWorkspaceBindingResolver {
   return "resolve" in value && typeof value.resolve === "function";
 }
 
-function directSql(
-  value: CreateCloudflareWorkspaceTargetOptions["binding"]
-): unknown | undefined {
+function directSql(value: CreateCloudflareWorkspaceTargetOptions["binding"]): unknown | undefined {
   if ("sql" in value) return value.sql;
   if ("storage" in value && isRecord(value.storage)) return value.storage.sql;
   return undefined;
@@ -1146,10 +1016,7 @@ function workspaceJson(value: unknown, status = 200): Response {
 
 function ensureWorkspaceOwner(sqlValue: unknown, scope: WorkspaceRef): void {
   const sql = sqlValue as {
-    exec<T = Record<string, unknown>>(
-      query: string,
-      ...bindings: unknown[]
-    ): { toArray(): T[] };
+    exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): { toArray(): T[] };
   };
   sql.exec(`
     CREATE TABLE IF NOT EXISTS flary_workspace_owner (
@@ -1159,15 +1026,12 @@ function ensureWorkspaceOwner(sqlValue: unknown, scope: WorkspaceRef): void {
   `);
   const row = sql
     .exec<{ scope_json: string }>(
-      "SELECT scope_json FROM flary_workspace_owner WHERE singleton = 1"
+      "SELECT scope_json FROM flary_workspace_owner WHERE singleton = 1",
     )
     .toArray()[0];
   const serialized = JSON.stringify(scope);
   if (!row) {
-    sql.exec(
-      "INSERT INTO flary_workspace_owner (singleton, scope_json) VALUES (1, ?)",
-      serialized
-    );
+    sql.exec("INSERT INTO flary_workspace_owner (singleton, scope_json) VALUES (1, ?)", serialized);
     return;
   }
   if (row.scope_json !== serialized) {

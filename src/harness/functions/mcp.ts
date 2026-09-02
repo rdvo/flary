@@ -16,11 +16,11 @@ export interface FlaryMcpRuntimeOptions {
 /** Build a safe MCP connection for an explicit HTTPS source URL. */
 export function createMcpConnection(
   source: FlaryMcpSource,
-  options: FlaryMcpRuntimeOptions = {}
+  options: FlaryMcpRuntimeOptions = {},
 ): FlaryMcpConnection {
   if (!source.url) {
     throw new Error(
-      `MCP source '${source.namespace}' needs a URL or an application connection resolver.`
+      `MCP source '${source.namespace}' needs a URL or an application connection resolver.`,
     );
   }
   const endpoint: McpEndpoint = {
@@ -47,12 +47,8 @@ export function createMcpConnection(
         const argumentsInput =
           source.session === "run" && options.sessionId
             ? { ...input.arguments, session_id: options.sessionId }
-            : input.arguments ?? {};
-        const result = await client.call(
-          input.name,
-          argumentsInput,
-          options.credentials
-        );
+            : (input.arguments ?? {});
+        const result = await client.call(input.name, argumentsInput, options.credentials);
         return { toolResult: result.content, isError: result.isError };
       },
     },
@@ -63,16 +59,14 @@ export function createMcpConnection(
 export async function mcpSessionUuid(seed?: string): Promise<string> {
   if (!seed) return crypto.randomUUID();
   const digest = new Uint8Array(
-    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(seed))
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(seed)),
   );
   const bytes = digest.slice(0, 16);
   // UUID version 8 permits application-defined bytes while keeping the RFC
   // variant bits. The seed stays private and cannot be recovered from this ID.
   bytes[6] = (bytes[6]! & 0x0f) | 0x80;
   bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = [...bytes]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
   return [
     hex.slice(0, 8),
     hex.slice(8, 12),

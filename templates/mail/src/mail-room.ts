@@ -14,8 +14,7 @@ export class MailRoom extends DurableObject<Env> {
     }
     const userId = request.headers.get("x-flary-mail-user");
     const mailboxId = request.headers.get("x-flary-mail-mailbox");
-    if (!userId || !mailboxId)
-      return new Response("Unauthorized.", { status: 401 });
+    if (!userId || !mailboxId) return new Response("Unauthorized.", { status: 401 });
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
@@ -33,8 +32,7 @@ export class MailRoom extends DurableObject<Env> {
     const payload = JSON.stringify(event);
     let delivered = 0;
     for (const socket of this.ctx.getWebSockets()) {
-      const attachment =
-        socket.deserializeAttachment() as SocketAttachment | null;
+      const attachment = socket.deserializeAttachment() as SocketAttachment | null;
       if (attachment?.mailboxId !== event.mailboxId) continue;
       try {
         socket.send(payload);
@@ -46,18 +44,11 @@ export class MailRoom extends DurableObject<Env> {
     return delivered;
   }
 
-  async webSocketMessage(
-    socket: WebSocket,
-    message: string | ArrayBuffer
-  ): Promise<void> {
+  async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
     if (typeof message === "string" && message === "ping") socket.send("pong");
   }
 
-  async webSocketClose(
-    socket: WebSocket,
-    code: number,
-    reason: string
-  ): Promise<void> {
+  async webSocketClose(socket: WebSocket, code: number, reason: string): Promise<void> {
     socket.close(code, reason);
   }
 }

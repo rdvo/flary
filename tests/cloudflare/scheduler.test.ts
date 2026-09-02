@@ -56,8 +56,5 @@ test("dispatches claimed schedules in one parallel batch", async () => {
 
   assert.equal(result.claimed, 2);
   assert.equal(result.dispatched, 2);
-  assert.deepEqual(dispatched.sort(), [
-    "schedule:one:100",
-    "schedule:two:100",
-  ]);
+  assert.deepEqual(dispatched.sort(), ["schedule:one:100", "schedule:two:100"]);
 });

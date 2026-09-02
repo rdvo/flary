@@ -21,10 +21,7 @@ const RUN_ID = "run_approval_test";
 const CALL_ID = "call_original_write";
 const IDEMPOTENCY_KEY = "write_original_key";
 
-function decision(
-  requestId: string,
-  status: "approved" | "rejected" | "expired",
-) {
+function decision(requestId: string, status: "approved" | "rejected" | "expired") {
   return ApprovalDecisionSchema.parse({
     requestId,
     status,
@@ -37,9 +34,9 @@ function findRecord(
   store: InMemoryToolApprovalStore,
   toolCall: DurableToolCallSnapshot,
 ): DurableApprovalRecord | undefined {
-  return store.snapshot().find((candidate) =>
-    JSON.stringify(candidate.toolCall) === JSON.stringify(toolCall),
-  );
+  return store
+    .snapshot()
+    .find((candidate) => JSON.stringify(candidate.toolCall) === JSON.stringify(toolCall));
 }
 
 function createRuntime(options: {
@@ -86,9 +83,7 @@ function createRuntime(options: {
         arguments: input as JsonObject,
         operation: context.operation,
         resourceKey: context.resourceKey,
-        ...(context.idempotencyKey
-          ? { idempotencyKey: context.idempotencyKey }
-          : {}),
+        ...(context.idempotencyKey ? { idempotencyKey: context.idempotencyKey } : {}),
       });
       let record = findRecord(options.store, toolCall);
       if (!record) {
@@ -100,8 +95,7 @@ function createRuntime(options: {
           requestedBy: { id: "agent", kind: "agent", version: "1" },
           toolCallId: context.callId,
           requestedAt: new Date().toISOString(),
-          expiresAt:
-            options.expiresAt ?? new Date(Date.now() + 60_000).toISOString(),
+          expiresAt: options.expiresAt ?? new Date(Date.now() + 60_000).toISOString(),
           context: { toolId: tool.id, operation: context.operation },
         });
         record = options.store.create({ request, toolCall });
@@ -111,7 +105,7 @@ function createRuntime(options: {
           approvalId: request.id,
         });
       }
-      const resolved = record.decision ?? await options.store.wait(record.request.id);
+      const resolved = record.decision ?? (await options.store.wait(record.request.id));
       if (resolved.status !== "approved") {
         throw new Error(`Approval ${resolved.status}.`);
       }
@@ -134,8 +128,12 @@ test("an approval pauses the exact write and resumes it once", async () => {
   });
   let settled = false;
   pending.then(
-    () => { settled = true; },
-    () => { settled = true; },
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
   );
   await new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -174,13 +172,7 @@ test("an approval pauses the exact write and resumes it once", async () => {
   assert.equal(calls.length, 1);
   assert.deepEqual(
     events.map((event) => event.type),
-    [
-      "approval.requested",
-      "approval.resolved",
-      "tool.started",
-      "tool.completed",
-      "tool.completed",
-    ],
+    ["approval.requested", "approval.resolved", "tool.started", "tool.completed", "tool.completed"],
   );
 });
 
@@ -242,9 +234,7 @@ test("rejection and expiration never execute the write", async () => {
       journal,
       events,
       calls,
-      ...(status === "expired"
-        ? { expiresAt: new Date(Date.now() - 1_000).toISOString() }
-        : {}),
+      ...(status === "expired" ? { expiresAt: new Date(Date.now() - 1_000).toISOString() } : {}),
     });
     const call = runtime.call({
       id: "files.write",
@@ -259,10 +249,7 @@ test("rejection and expiration never execute the write", async () => {
     }
     await assert.rejects(call, /Approval (rejected|expired)/);
     assert.equal(calls.length, 0);
-    assert.equal(
-      (await journal.get(RUN_ID, `${CALL_ID}_${status}`))?.state,
-      undefined,
-    );
+    assert.equal((await journal.get(RUN_ID, `${CALL_ID}_${status}`))?.state, undefined);
   }
 });
 

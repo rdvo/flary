@@ -1,23 +1,15 @@
 import { CredentialRecoveryUnavailableError } from "./provider-credentials";
 
-export const UNSETTLED_SUBMISSION_STATUSES = [
-  "processing",
-  "admitted",
-] as const;
+export const UNSETTLED_SUBMISSION_STATUSES = ["processing", "admitted"] as const;
 
 export function isUnsettledSubmissionStatus(status: string): boolean {
   return (UNSETTLED_SUBMISSION_STATUSES as readonly string[]).includes(status);
 }
 
-export async function recoverUnsettledSubmissions<
-  T extends { id: string; status: string },
->(
+export async function recoverUnsettledSubmissions<T extends { id: string; status: string }>(
   submissions: readonly T[],
   prepare: (submission: T) => Promise<string>,
-  fail: (
-    submission: T,
-    error: CredentialRecoveryUnavailableError,
-  ) => Promise<void>,
+  fail: (submission: T, error: CredentialRecoveryUnavailableError) => Promise<void>,
 ): Promise<Map<string, string>> {
   const recovered = new Map<string, string>();
   for (const submission of submissions) {

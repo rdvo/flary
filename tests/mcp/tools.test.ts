@@ -4,10 +4,7 @@ import test from "node:test";
 import { resolveAgentMode } from "../../src/harness/contracts/modes.js";
 import type { ToolLifecycleEvent } from "../../src/harness/contracts/tools.js";
 import { InMemoryToolExecutionJournal } from "../../src/harness/execution/tool-journal.js";
-import {
-  McpTenantIsolationError,
-  createMcpTools,
-} from "../../src/harness/mcp/tools.js";
+import { McpTenantIsolationError, createMcpTools } from "../../src/harness/mcp/tools.js";
 import { McpToolCache } from "../../src/harness/mcp/client.js";
 
 const endpoint = {
@@ -62,15 +59,12 @@ function createMcpFetch() {
                 isError: false,
               };
             })();
-    return new Response(
-      JSON.stringify({ jsonrpc: "2.0", id: body.id, result }),
-      {
-        headers: {
-          "content-type": "application/json",
-          "mcp-session-id": "session_1",
-        },
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result }), {
+      headers: {
+        "content-type": "application/json",
+        "mcp-session-id": "session_1",
       },
-    );
+    });
   };
   return {
     fetcher,
@@ -79,10 +73,7 @@ function createMcpFetch() {
   };
 }
 
-function findTool(
-  tools: Awaited<ReturnType<typeof createMcpTools>>,
-  name: string,
-) {
+function findTool(tools: Awaited<ReturnType<typeof createMcpTools>>, name: string) {
   const tool = tools.find((candidate) => candidate.name === name);
   assert.ok(tool, `Expected Flue tool ${name}`);
   return tool;
@@ -139,10 +130,7 @@ test("MCP descriptors stay lazy and durable calls do not expose credentials", as
     input: { id: search[0].id },
   })) as any;
   assert.equal(described.tool.inputSchema.properties.title.type, "string");
-  assert.equal(
-    JSON.stringify(described).includes("top-secret-token"),
-    false,
-  );
+  assert.equal(JSON.stringify(described).includes("top-secret-token"), false);
 
   const invocation = {
     id: search[0].id,
@@ -164,8 +152,7 @@ test("MCP descriptors stay lazy and durable calls do not expose credentials", as
   assert.equal(approvals, 1);
   assert.equal(
     remote.requests.every(
-      (request) =>
-        request.headers.get("authorization") === "Bearer top-secret-token",
+      (request) => request.headers.get("authorization") === "Bearer top-secret-token",
     ),
     true,
   );
@@ -318,15 +305,11 @@ test("MCP authenticated sessions are isolated between users", async () => {
 
   assert.equal(initializeCalls, 2);
   assert.equal(
-    remote.requests.some(
-      (request) => request.headers.get("authorization") === "Bearer token-a",
-    ),
+    remote.requests.some((request) => request.headers.get("authorization") === "Bearer token-a"),
     true,
   );
   assert.equal(
-    remote.requests.some(
-      (request) => request.headers.get("authorization") === "Bearer token-b",
-    ),
+    remote.requests.some((request) => request.headers.get("authorization") === "Bearer token-b"),
     true,
   );
 });

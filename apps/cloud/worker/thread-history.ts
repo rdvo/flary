@@ -16,14 +16,10 @@ import type { Env } from "./env";
 import { artifactStore, repository } from "./recall";
 
 export const ThreadHistoryListInputSchema = ThreadHistoryListRequestSchema;
-export type ThreadHistoryListInput = z.input<
-  typeof ThreadHistoryListInputSchema
->;
+export type ThreadHistoryListInput = z.input<typeof ThreadHistoryListInputSchema>;
 
 export const ThreadHistoryDiffInputSchema = ThreadHistoryDiffRequestSchema;
-export type ThreadHistoryDiffInput = z.infer<
-  typeof ThreadHistoryDiffInputSchema
->;
+export type ThreadHistoryDiffInput = z.infer<typeof ThreadHistoryDiffInputSchema>;
 
 function historyScope(binding: ThreadBinding) {
   return {
@@ -78,10 +74,7 @@ export async function diffThreadHistory(
   return ThreadHistoryDiffResponseSchema.parse({ diff });
 }
 
-function requireHistoryStore(
-  env: Env,
-  binding: ThreadBinding,
-): ArtifactHistoryStore {
+function requireHistoryStore(env: Env, binding: ThreadBinding): ArtifactHistoryStore {
   const store = artifactStore(env, binding);
   if (!store) throw new Error("history_unavailable");
   return store;

@@ -1,8 +1,4 @@
-import {
-  PromptCompileOptionsSchema,
-  PromptInputTypeSchema,
-  PromptSourceSchema,
-} from "./types.js";
+import { PromptCompileOptionsSchema, PromptInputTypeSchema, PromptSourceSchema } from "./types.js";
 import type {
   CompiledPrompt,
   PromptCompileOptions,
@@ -22,23 +18,13 @@ export async function compilePrompt(
   const document = parsePromptDocument(source.content, source.path);
   const slug = promptSlugFromPath(source.path, options.rootDir);
   const placeholderPaths = findTemplatePaths(document.body, source.path);
-  const definitions = normalizeInputDefinitions(
-    document.frontmatter.input,
-    placeholderPaths,
-  );
+  const definitions = normalizeInputDefinitions(document.frontmatter.input, placeholderPaths);
   const rendered =
     options.values === undefined
       ? document.body
-      : renderPromptTemplate(
-          document.body,
-          options.values,
-          definitions,
-          source.path,
-        );
+      : renderPromptTemplate(document.body, options.values, definitions, source.path);
   const fixedModel =
-    document.frontmatter.model === "inherit"
-      ? undefined
-      : document.frontmatter.model;
+    document.frontmatter.model === "inherit" ? undefined : document.frontmatter.model;
   const resolvedModel = fixedModel ?? options.callerModel;
 
   return {
@@ -84,10 +70,7 @@ export function promptSlugFromPath(path: string, rootDir?: string): string {
   }
 
   const slug = relative.slice(0, -".prompt.md".length);
-  if (
-    !slug ||
-    slug.split("/").some((segment) => !segment || segment === "." || segment === "..")
-  ) {
+  if (!slug || slug.split("/").some((segment) => !segment || segment === "." || segment === "..")) {
     throwCompileError(
       makeDiagnostic({
         code: "INVALID_PROMPT_SLUG",
@@ -100,11 +83,15 @@ export function promptSlugFromPath(path: string, rootDir?: string): string {
 }
 
 function normalizeInputDefinitions(
-  declared: Record<string, string | {
-    type?: "any" | "string" | "number" | "boolean" | "object" | "array" | "json";
-    required?: boolean;
-    description?: string;
-  }>,
+  declared: Record<
+    string,
+    | string
+    | {
+        type?: "any" | "string" | "number" | "boolean" | "object" | "array" | "json";
+        required?: boolean;
+        description?: string;
+      }
+  >,
   placeholders: string[],
 ): Record<string, PromptInputDefinition> {
   const result: Record<string, PromptInputDefinition> = {};
@@ -134,7 +121,5 @@ function normalizeInputDefinitions(
 async function sha256(value: string): Promise<string> {
   const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }

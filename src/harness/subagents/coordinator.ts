@@ -16,8 +16,8 @@ import {
   type SubagentConversationTurn,
   type SubagentMailboxMessage,
   type SubagentThread,
-} from "../contracts/subagents";
-import { selectSeededTurns } from "./context";
+} from "../contracts/subagents.js";
+import { selectSeededTurns } from "./context.js";
 
 export interface SubagentCoordinatorOptions {
   sessionId: string;
@@ -92,10 +92,7 @@ export class InMemorySubagentCoordinator {
   spawn(input: SpawnSubagentRequestInput): SubagentThread {
     const request = SpawnSubagentRequestSchema.parse(input);
     this.assertSession(request.sessionId);
-    const cached = this.readIdempotent<SubagentThread>(
-      "spawn",
-      request.idempotencyKey
-    );
+    const cached = this.readIdempotent<SubagentThread>("spawn", request.idempotencyKey);
     if (cached) return cached;
     if (this.#policy.mode === "disabled") {
       throw new SubagentPolicyError("Subagent delegation is disabled");
@@ -108,7 +105,7 @@ export class InMemorySubagentCoordinator {
     }
 
     const descendants = [...this.#threads.values()].filter(
-      (thread) => thread.parentThreadId !== undefined
+      (thread) => thread.parentThreadId !== undefined,
     );
     if (descendants.length >= this.#policy.maxTotalChildren) {
       throw new SubagentPolicyError("Subagent total limit reached");
@@ -116,7 +113,7 @@ export class InMemorySubagentCoordinator {
     const activeChildren = descendants.filter(
       (thread) =>
         thread.parentThreadId === parent.threadId &&
-        ["queued", "running", "waiting"].includes(thread.status)
+        ["queued", "running", "waiting"].includes(thread.status),
     );
     if (activeChildren.length >= this.#policy.maxConcurrentChildren) {
       throw new SubagentPolicyError("Subagent concurrency limit reached");
@@ -125,7 +122,7 @@ export class InMemorySubagentCoordinator {
     const now = this.#now().toISOString();
     const seededTurns = selectSeededTurns(
       this.#turns.get(parent.threadId) ?? [],
-      request.seedTurns
+      request.seedTurns,
     );
     const threadId = `thread_${this.#id()}`;
     const thread = SubagentThreadSchema.parse({
@@ -162,10 +159,7 @@ export class InMemorySubagentCoordinator {
   send(input: SendSubagentMessageRequestInput): SubagentMailboxMessage {
     const request = SendSubagentMessageRequestSchema.parse(input);
     this.assertSession(request.sessionId);
-    const cached = this.readIdempotent<SubagentMailboxMessage>(
-      "message",
-      request.idempotencyKey
-    );
+    const cached = this.readIdempotent<SubagentMailboxMessage>("message", request.idempotencyKey);
     if (cached) return cached;
     const from = this.requireThread(request.fromThreadId);
     const to = this.requireThread(request.toThreadId);
@@ -195,7 +189,7 @@ export class InMemorySubagentCoordinator {
     this.assertSession(request.sessionId);
     const cached = this.readIdempotent<SubagentThread>(
       `control:${request.action}`,
-      request.idempotencyKey
+      request.idempotencyKey,
     );
     if (cached) return cached;
     const thread = this.requireThread(request.threadId);
@@ -206,9 +200,7 @@ export class InMemorySubagentCoordinator {
       output: request.output ?? thread.output,
       error: request.error ?? thread.error,
       updatedAt: now,
-      completedAt: ["complete", "fail", "cancel", "close"].includes(
-        request.action
-      )
+      completedAt: ["complete", "fail", "cancel", "close"].includes(request.action)
         ? now
         : thread.completedAt,
     });
@@ -217,25 +209,16 @@ export class InMemorySubagentCoordinator {
       next,
       activityForAction(request.action),
       undefined,
-      request.targetThreadId
-        ? { targetThreadId: request.targetThreadId }
-        : undefined
+      request.targetThreadId ? { targetThreadId: request.targetThreadId } : undefined,
     );
-    this.writeIdempotent(
-      `control:${request.action}`,
-      request.idempotencyKey,
-      next
-    );
+    this.writeIdempotent(`control:${request.action}`, request.idempotencyKey, next);
     return structuredClone(next);
   }
 
   readMessages(threadId: string, afterSequence = 0): SubagentMailboxMessage[] {
     this.requireThread(threadId);
     return this.#messages
-      .filter(
-        (message) =>
-          message.toThreadId === threadId && message.sequence > afterSequence
-      )
+      .filter((message) => message.toThreadId === threadId && message.sequence > afterSequence)
       .map((message) => structuredClone(message));
   }
 
@@ -249,7 +232,7 @@ export class InMemorySubagentCoordinator {
     thread: SubagentThread,
     kind: SubagentActivityEvent["kind"],
     triggerMessageId?: string,
-    payload?: Record<string, string>
+    payload?: Record<string, string>,
   ): void {
     this.#events.push(
       SubagentActivityEventSchema.parse({
@@ -263,7 +246,7 @@ export class InMemorySubagentCoordinator {
         occurredAt: this.#now().toISOString(),
         triggerMessageId,
         payload,
-      })
+      }),
     );
   }
 
@@ -296,31 +279,21 @@ export class InMemorySubagentCoordinator {
     return `${scope}:${key}`;
   }
 
-  private readIdempotent<T>(
-    scope: string,
-    key: string | undefined
-  ): T | undefined {
+  private readIdempotent<T>(scope: string, key: string | undefined): T | undefined {
     if (!key) return undefined;
     const value = this.#idempotency.get(this.idempotencyKey(scope, key));
     return value === undefined ? undefined : structuredClone(value as T);
   }
 
-  private writeIdempotent(
-    scope: string,
-    key: string | undefined,
-    value: unknown
-  ): void {
+  private writeIdempotent(scope: string, key: string | undefined, value: unknown): void {
     if (!key) return;
-    this.#idempotency.set(
-      this.idempotencyKey(scope, key),
-      structuredClone(value)
-    );
+    this.#idempotency.set(this.idempotencyKey(scope, key), structuredClone(value));
   }
 }
 
 function statusForAction(
   action: SubagentControlRequest["action"],
-  current: SubagentThread["status"]
+  current: SubagentThread["status"],
 ): SubagentThread["status"] {
   switch (action) {
     case "start":
@@ -342,7 +315,7 @@ function statusForAction(
 }
 
 function activityForAction(
-  action: SubagentControlRequest["action"]
+  action: SubagentControlRequest["action"],
 ): SubagentActivityEvent["kind"] {
   switch (action) {
     case "start":

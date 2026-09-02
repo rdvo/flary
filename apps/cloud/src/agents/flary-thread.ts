@@ -16,12 +16,7 @@ import {
 import { parseThreadName } from "flary/storage";
 import { createAuth } from "../../worker/auth";
 import { createDb } from "../../worker/db";
-import {
-  flaryApp,
-  flaryThread,
-  flaryThreadSubmission,
-  member,
-} from "../../worker/db/schema";
+import { flaryApp, flaryThread, flaryThreadSubmission, member } from "../../worker/db/schema";
 import type { Env } from "../../worker/env";
 import { FlaryThreadMetadataStore } from "flary/cloudflare";
 import { resolveAgentMode, resolveLiveUserInput } from "flary";
@@ -88,16 +83,11 @@ async function loadThreadBinding(
       : {}),
     createdAt: (value.createdAt ?? new Date()).toISOString(),
     updatedAt: (value.updatedAt ?? new Date()).toISOString(),
-    ...(jsonObject(value.metadataJson)
-      ? { metadata: jsonObject(value.metadataJson) }
-      : {}),
+    ...(jsonObject(value.metadataJson) ? { metadata: jsonObject(value.metadataJson) } : {}),
   });
 }
 
-async function loadRecentSubmissions(
-  env: Env,
-  ref: ReturnType<typeof parseThreadName>,
-) {
+async function loadRecentSubmissions(env: Env, ref: ReturnType<typeof parseThreadName>) {
   const rows = await createDb(env.DB)
     .select()
     .from(flaryThreadSubmission)
@@ -107,9 +97,7 @@ async function loadRecentSubmissions(
         eq(flaryThreadSubmission.appId, ref.appId),
         eq(flaryThreadSubmission.agentId, ref.agentId),
         eq(flaryThreadSubmission.threadId, ref.threadId),
-        inArray(flaryThreadSubmission.status, [
-          ...UNSETTLED_SUBMISSION_STATUSES,
-        ]),
+        inArray(flaryThreadSubmission.status, [...UNSETTLED_SUBMISSION_STATUSES]),
       ),
     )
     .orderBy(desc(flaryThreadSubmission.createdAt))
@@ -123,17 +111,13 @@ async function loadRecentSubmissions(
     model: jsonObject(row.modelJson)
       ? ModelSelectionSchema.parse(jsonObject(row.modelJson))
       : undefined,
-    thinkingLevel: row.thinkingLevel
-      ? ReasoningEffortSchema.parse(row.thinkingLevel)
-      : undefined,
+    thinkingLevel: row.thinkingLevel ? ReasoningEffortSchema.parse(row.thinkingLevel) : undefined,
     cacheRetention: PromptCacheRetentionSchema.parse(row.cacheRetention),
     credential: AdmittedProviderCredentialSchema.parse({
       provider: row.provider,
       source: row.credentialSource,
       billingMode: row.billingMode,
-      ...(row.credentialConnectionId
-        ? { connectionId: row.credentialConnectionId }
-        : {}),
+      ...(row.credentialConnectionId ? { connectionId: row.credentialConnectionId } : {}),
       version: row.credentialVersion,
       generation: row.credentialGeneration,
       connectionRef: row.credentialConnectionRef,
@@ -166,10 +150,7 @@ export const route: AgentRouteHandler = async (context, next) => {
   const isInternal =
     Boolean(internalToken) &&
     internalToken ===
-      (await internalRequestToken(
-        env.BETTER_AUTH_SECRET,
-        context.req.param("id") ?? "",
-      ));
+      (await internalRequestToken(env.BETTER_AUTH_SECRET, context.req.param("id") ?? ""));
   if (!session?.user && !isInternal) {
     return context.json({ error: "Sign in is required" }, 401);
   }
@@ -179,10 +160,7 @@ export const route: AgentRouteHandler = async (context, next) => {
   if (context.req.raw.method === "POST" && !isInternal) {
     const admissionId = context.req.raw.headers.get("x-flary-admission-id");
     if (!admissionId) {
-      return context.json(
-        { error: "Use the authenticated Flary thread message endpoint" },
-        409,
-      );
+      return context.json({ error: "Use the authenticated Flary thread message endpoint" }, 409);
     }
     const admission = await createDb(env.DB)
       .select({ id: flaryThreadSubmission.id })
@@ -264,12 +242,12 @@ export default defineAgent<Env>(async ({ env, id }) => {
       submissions.filter((submission) => Boolean(submission.model)),
       async (submission) =>
         requireRecoveredFlueModel(
-            env,
-            binding,
-            submission.model!,
-            submission.userId ?? binding.createdBy.id,
-            submission.credential,
-          ),
+          env,
+          binding,
+          submission.model!,
+          submission.userId ?? binding.createdBy.id,
+          submission.credential,
+        ),
       async (submission, error) => {
         await createDb(env.DB)
           .update(flaryThreadSubmission)
@@ -281,40 +259,33 @@ export default defineAgent<Env>(async ({ env, id }) => {
           .where(
             and(
               eq(flaryThreadSubmission.id, submission.id),
-              inArray(flaryThreadSubmission.status, [
-                ...UNSETTLED_SUBMISSION_STATUSES,
-              ]),
+              inArray(flaryThreadSubmission.status, [...UNSETTLED_SUBMISSION_STATUSES]),
             ),
           );
       },
     );
-    const submission = submissions.find((candidate) =>
-      recovered.has(candidate.id),
-    );
+    const submission = submissions.find((candidate) => recovered.has(candidate.id));
     const model = submission
       ? recovered.get(submission.id)!
-      : env.FLARY_DEFAULT_MODEL ?? DEFAULT_MODEL;
+      : (env.FLARY_DEFAULT_MODEL ?? DEFAULT_MODEL);
     const threadToolset = await createThreadTools(env, binding);
     return {
       model,
-      instructions:
-        [
-          "You are a Flary durable thread agent.",
-          binding.workspace
-            ? `Work only within workspace ${binding.workspace.workspaceId} on branch ${binding.workspace.branch}.`
-            : "Work only within the authorized workspace.",
-          binding.persona ? `Persona: ${binding.persona}.` : "",
-          `Active mode: ${activeMode.name ?? activeMode.id}.`,
-          activeMode.prompt,
-          FLARY_LAZY_TOOL_INSTRUCTIONS,
-          "Use approved tools only. Keep responses clear and concise.",
-        ]
-          .filter(Boolean)
-          .join(" "),
+      instructions: [
+        "You are a Flary durable thread agent.",
+        binding.workspace
+          ? `Work only within workspace ${binding.workspace.workspaceId} on branch ${binding.workspace.branch}.`
+          : "Work only within the authorized workspace.",
+        binding.persona ? `Persona: ${binding.persona}.` : "",
+        `Active mode: ${activeMode.name ?? activeMode.id}.`,
+        activeMode.prompt,
+        FLARY_LAZY_TOOL_INSTRUCTIONS,
+        "Use approved tools only. Keep responses clear and concise.",
+      ]
+        .filter(Boolean)
+        .join(" "),
       thinkingLevel: normalizeFlueThinkingLevel(
-        submission?.thinkingLevel ??
-          binding.defaultThinkingLevel ??
-          "medium",
+        submission?.thinkingLevel ?? binding.defaultThinkingLevel ?? "medium",
       ),
       tools: threadToolset.tools,
       ...(threadToolset.approvalContinuation
@@ -325,17 +296,14 @@ export default defineAgent<Env>(async ({ env, id }) => {
   }
   return {
     model: env.FLARY_DEFAULT_MODEL ?? DEFAULT_MODEL,
-    instructions:
-      [
-        "You are a Flary durable thread agent.",
-        "Work only within the authorized workspace.",
-        "Use approved tools only. Keep responses clear and concise.",
-      ]
-        .filter(Boolean)
-        .join(" "),
-    thinkingLevel: normalizeFlueThinkingLevel(
-      "medium",
-    ),
+    instructions: [
+      "You are a Flary durable thread agent.",
+      "Work only within the authorized workspace.",
+      "Use approved tools only. Keep responses clear and concise.",
+    ]
+      .filter(Boolean)
+      .join(" "),
+    thinkingLevel: normalizeFlueThinkingLevel("medium"),
     tools: [],
     durability: {
       maxAttempts: 10,
@@ -351,7 +319,10 @@ export const cloudflare = extend({
       readonly flaryMetadata: FlaryThreadMetadataStore;
       readonly #env: Env;
 
-      constructor(ctx: { storage: { sql: ConstructorParameters<typeof FlaryThreadMetadataStore>[0] } }, env: Env) {
+      constructor(
+        ctx: { storage: { sql: ConstructorParameters<typeof FlaryThreadMetadataStore>[0] } },
+        env: Env,
+      ) {
         super(ctx, env);
         this.#env = env;
         this.flaryMetadata = new FlaryThreadMetadataStore(
@@ -392,19 +363,19 @@ export const cloudflare = extend({
       }
 
       async decideApproval(decision: ApprovalDecision): Promise<{ ok: true }> {
-        const hasLiveWaiter = this.flaryMetadata.hasApprovalWaiter(
-          decision.requestId,
-        );
+        const hasLiveWaiter = this.flaryMetadata.hasApprovalWaiter(decision.requestId);
         const changed = this.flaryMetadata.decideApproval(decision);
         if (changed && !hasLiveWaiter) {
-          await (this as unknown as {
-            schedule(
-              delaySeconds: number,
-              callback: "__flueWakeAgentSubmissions",
-              payload: undefined,
-              options?: { idempotent?: boolean },
-            ): Promise<unknown>;
-          }).schedule(0, "__flueWakeAgentSubmissions", undefined, {
+          await (
+            this as unknown as {
+              schedule(
+                delaySeconds: number,
+                callback: "__flueWakeAgentSubmissions",
+                payload: undefined,
+                options?: { idempotent?: boolean },
+              ): Promise<unknown>;
+            }
+          ).schedule(0, "__flueWakeAgentSubmissions", undefined, {
             idempotent: false,
           });
         }
@@ -418,10 +389,7 @@ export const cloudflare = extend({
       respondToUserInput(responseInput: UserInputResponse) {
         const response = UserInputResponseSchema.parse(responseInput);
         const record = this.flaryMetadata.respondToUserInput(response);
-        const live = resolveLiveUserInput(
-          (this as unknown as { name: string }).name,
-          response,
-        );
+        const live = resolveLiveUserInput((this as unknown as { name: string }).name, response);
         return { live, record };
       }
     },

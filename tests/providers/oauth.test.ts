@@ -1,17 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  ProviderOAuthSessionSchema,
-} from "../../src/harness/contracts/connections.js";
+import { ProviderOAuthSessionSchema } from "../../src/harness/contracts/connections.js";
 import {
   completeProviderOAuth,
   pollProviderOAuth,
   startProviderOAuth,
 } from "../../src/harness/providers/oauth.js";
-import {
-  resolveNativeCachePolicy,
-} from "../../src/harness/providers/cache.js";
+import { resolveNativeCachePolicy } from "../../src/harness/providers/cache.js";
 
 test("starts and polls an OpenAI device login without exposing private state", async () => {
   const originalFetch = globalThis.fetch;
@@ -77,8 +73,7 @@ test("supports local browser callbacks and rejects a mismatched OAuth state", as
   await assert.rejects(
     completeProviderOAuth({
       privateState: anthropic.privateState,
-      authorizationResult:
-        "http://localhost:54545/callback?code=code-1&state=wrong-state",
+      authorizationResult: "http://localhost:54545/callback?code=code-1&state=wrong-state",
     }),
     /state mismatch/i,
   );
@@ -166,7 +161,6 @@ test("reports requested and effective native cache policies", () => {
 });
 
 function testJwt(payload: Record<string, unknown>): string {
-  const encode = (value: unknown) => Buffer.from(JSON.stringify(value))
-    .toString("base64url");
+  const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
   return `${encode({ alg: "none" })}.${encode(payload)}.signature`;
 }

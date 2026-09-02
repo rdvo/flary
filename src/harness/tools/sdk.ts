@@ -4,12 +4,8 @@ import {
   JsonObjectSchema,
   type ToolCatalogDefinitionInput,
   type ToolOperation,
-} from "../contracts/index";
-import type {
-  ToolCapabilityContext,
-  ToolCatalog,
-  ToolCatalogRegistration,
-} from "./catalog";
+} from "../contracts/index.js";
+import type { ToolCapabilityContext, ToolCatalog, ToolCatalogRegistration } from "./catalog.js";
 
 export interface DefineFlaryToolOptions<
   TInput extends z.ZodType,
@@ -27,13 +23,8 @@ export interface DefineFlaryToolOptions<
   secretRefs?: string[];
   requiresApproval?: boolean;
   concurrencyKey?: string;
-  resourceKey?:
-    | string
-    | ((input: z.output<TInput>) => string | undefined);
-  execute(
-    input: z.output<TInput>,
-    context: ToolCapabilityContext,
-  ): unknown | PromiseLike<unknown>;
+  resourceKey?: string | ((input: z.output<TInput>) => string | undefined);
+  execute(input: z.output<TInput>, context: ToolCapabilityContext): unknown | PromiseLike<unknown>;
 }
 
 export interface DefinedFlaryTool {
@@ -55,9 +46,7 @@ export interface FlaryToolset {
 export function defineFlaryTool<
   TInput extends z.ZodType,
   TOutput extends z.ZodType | undefined = undefined,
->(
-  options: DefineFlaryToolOptions<TInput, TOutput>,
-): DefinedFlaryTool {
+>(options: DefineFlaryToolOptions<TInput, TOutput>): DefinedFlaryTool {
   const resourceKey = options.resourceKey;
   const definition: ToolCatalogDefinitionInput = {
     id: options.id,
@@ -68,16 +57,12 @@ export function defineFlaryTool<
     capabilities: options.capabilities ?? [],
     tags: options.tags ?? [],
     ...(options.description ? { description: options.description } : {}),
-    ...(options.output
-      ? { outputSchema: toJsonSchema(options.output) }
-      : {}),
+    ...(options.output ? { outputSchema: toJsonSchema(options.output) } : {}),
     ...(options.secretRefs ? { secretRefs: options.secretRefs } : {}),
     ...(options.requiresApproval !== undefined
       ? { requiresApproval: options.requiresApproval }
       : {}),
-    ...(options.concurrencyKey
-      ? { concurrencyKey: options.concurrencyKey }
-      : {}),
+    ...(options.concurrencyKey ? { concurrencyKey: options.concurrencyKey } : {}),
   };
 
   return {
@@ -94,10 +79,7 @@ export function defineFlaryTool<
           ? {
               resourceKey:
                 typeof resourceKey === "function"
-                  ? (input: unknown) =>
-                      resourceKey(
-                        options.input.parse(input) as z.output<TInput>,
-                      )
+                  ? (input: unknown) => resourceKey(options.input.parse(input) as z.output<TInput>)
                   : resourceKey,
             }
           : {}),
@@ -107,9 +89,7 @@ export function defineFlaryTool<
   };
 }
 
-export function defineFlaryToolset(
-  tools: readonly DefinedFlaryTool[],
-): FlaryToolset {
+export function defineFlaryToolset(tools: readonly DefinedFlaryTool[]): FlaryToolset {
   const ids = new Set<string>();
   for (const tool of tools) {
     if (ids.has(tool.id)) throw new Error(`Duplicate Flary tool: ${tool.id}`);

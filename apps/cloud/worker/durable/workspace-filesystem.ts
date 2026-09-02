@@ -29,7 +29,7 @@ export class WorkspaceFilesystem {
 
   constructor(
     private readonly state: DurableObjectState,
-    private readonly env: Env
+    private readonly env: Env,
   ) {}
 
   async fetch(request: Request): Promise<Response> {
@@ -49,9 +49,7 @@ export class WorkspaceFilesystem {
         return Response.json(await this.createUploadTicket(workspace, request));
       }
       if (request.method === "POST" && path.endsWith("/download-ticket")) {
-        return Response.json(
-          await this.createDownloadTicket(workspace, request)
-        );
+        return Response.json(await this.createDownloadTicket(workspace, request));
       }
       if (request.method === "PUT" && path.endsWith("/upload")) {
         return this.upload(workspace, request);
@@ -65,71 +63,52 @@ export class WorkspaceFilesystem {
 
       const input = await request.json();
       if (path.endsWith("/write")) {
-        return Response.json(
-          await workspace.write(ProjectFileWriteRequestSchema.parse(input)),
-          { status: 201 }
-        );
+        return Response.json(await workspace.write(ProjectFileWriteRequestSchema.parse(input)), {
+          status: 201,
+        });
       }
       if (path.endsWith("/read")) {
-        return Response.json(
-          await workspace.read(ProjectFileReadRequestSchema.parse(input))
-        );
+        return Response.json(await workspace.read(ProjectFileReadRequestSchema.parse(input)));
       }
       if (path.endsWith("/stat")) {
         const parsed = ProjectFileReadRequestSchema.parse(input);
         return Response.json({ file: await workspace.stat(parsed.path) });
       }
       if (path.endsWith("/list")) {
-        return Response.json(
-          await workspace.list(ProjectFileListRequestSchema.parse(input))
-        );
+        return Response.json(await workspace.list(ProjectFileListRequestSchema.parse(input)));
       }
       if (path.endsWith("/delete")) {
-        return Response.json(
-          await workspace.delete(ProjectFileDeleteRequestSchema.parse(input))
-        );
+        return Response.json(await workspace.delete(ProjectFileDeleteRequestSchema.parse(input)));
       }
       if (path.endsWith("/move")) {
-        return Response.json(
-          await workspace.move(ProjectFileMoveRequestSchema.parse(input))
-        );
+        return Response.json(await workspace.move(ProjectFileMoveRequestSchema.parse(input)));
       }
       if (path.endsWith("/edit")) {
-        return Response.json(
-          await workspace.edit(ProjectFileEditRequestSchema.parse(input))
-        );
+        return Response.json(await workspace.edit(ProjectFileEditRequestSchema.parse(input)));
       }
       return Response.json({ error: "Not found" }, { status: 404 });
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Workspace operation failed";
+      const message = error instanceof Error ? error.message : "Workspace operation failed";
       return Response.json(
         {
           error: message,
           issues: error instanceof z.ZodError ? error.issues : undefined,
         },
-        { status: workspaceErrorStatus(message, error) }
+        { status: workspaceErrorStatus(message, error) },
       );
     }
   }
 
   private async createUploadTicket(
     workspace: ShellWorkspace,
-    request: Request
+    request: Request,
   ): Promise<WorkspaceTransferTicket> {
-    const input = WorkspaceUploadTicketRequestSchema.parse(
-      await request.json()
-    );
-    const ticket = this.createTicket(
-      "upload",
-      input.path,
-      input.expiresInSeconds,
-      {
-        size: input.size,
-        sha256: input.sha256,
-        mediaType: input.mediaType,
-      }
-    );
+    const input = WorkspaceUploadTicketRequestSchema.parse(await request.json());
+    const ticket = this.createTicket("upload", input.path, input.expiresInSeconds, {
+      size: input.size,
+      sha256: input.sha256,
+      mediaType: input.mediaType,
+    });
     this.state.storage.sql.exec(
       `INSERT INTO flary_workspace_transfer_tokens
         (token, operation, path, size, sha256, media_type, expires_at)
@@ -139,29 +118,22 @@ export class WorkspaceFilesystem {
       input.size,
       input.sha256,
       input.mediaType,
-      ticket.expiresAt
+      ticket.expiresAt,
     );
     return WorkspaceTransferTicketSchema.parse(ticket);
   }
 
   private async createDownloadTicket(
     workspace: ShellWorkspace,
-    request: Request
+    request: Request,
   ): Promise<WorkspaceTransferTicket> {
-    const input = WorkspaceDownloadTicketRequestSchema.parse(
-      await request.json()
-    );
+    const input = WorkspaceDownloadTicketRequestSchema.parse(await request.json());
     const file = await workspace.stat(input.path);
-    const ticket = this.createTicket(
-      "download",
-      input.path,
-      input.expiresInSeconds,
-      {
-        size: file.size,
-        sha256: file.sha256,
-        mediaType: file.mediaType,
-      }
-    );
+    const ticket = this.createTicket("download", input.path, input.expiresInSeconds, {
+      size: file.size,
+      sha256: file.sha256,
+      mediaType: file.mediaType,
+    });
     this.state.storage.sql.exec(
       `INSERT INTO flary_workspace_transfer_tokens
         (token, operation, path, size, sha256, media_type, expires_at)
@@ -171,22 +143,16 @@ export class WorkspaceFilesystem {
       file.size,
       file.sha256,
       file.mediaType,
-      ticket.expiresAt
+      ticket.expiresAt,
     );
     return WorkspaceTransferTicketSchema.parse(ticket);
   }
 
-  private async upload(
-    workspace: ShellWorkspace,
-    request: Request
-  ): Promise<Response> {
+  private async upload(workspace: ShellWorkspace, request: Request): Promise<Response> {
     const ticket = this.requireTicket(request, "upload");
     const bytes = new Uint8Array(await request.arrayBuffer());
     if (bytes.byteLength !== ticket.size) {
-      return Response.json(
-        { error: "Upload size does not match the ticket" },
-        { status: 409 }
-      );
+      return Response.json({ error: "Upload size does not match the ticket" }, { status: 409 });
     }
     const result = await workspace.writeBytes({
       path: ticket.path,
@@ -198,10 +164,7 @@ export class WorkspaceFilesystem {
     return Response.json(result, { status: 201 });
   }
 
-  private async download(
-    workspace: ShellWorkspace,
-    request: Request
-  ): Promise<Response> {
+  private async download(workspace: ShellWorkspace, request: Request): Promise<Response> {
     const ticket = this.requireTicket(request, "download");
     const result = await workspace.read({
       path: ticket.path,
@@ -210,7 +173,7 @@ export class WorkspaceFilesystem {
     const bytes = decodeWorkspaceFileContent(result.content, "base64");
     const body = bytes.buffer.slice(
       bytes.byteOffset,
-      bytes.byteOffset + bytes.byteLength
+      bytes.byteOffset + bytes.byteLength,
     ) as ArrayBuffer;
     return new Response(body, {
       headers: {
@@ -226,11 +189,9 @@ export class WorkspaceFilesystem {
     operation: "upload" | "download",
     path: string,
     expiresInSeconds: number,
-    details: Pick<WorkspaceTransferTicket, "size" | "sha256" | "mediaType">
+    details: Pick<WorkspaceTransferTicket, "size" | "sha256" | "mediaType">,
   ): WorkspaceTransferTicket {
-    const expiresAt = new Date(
-      Date.now() + expiresInSeconds * 1_000
-    ).toISOString();
+    const expiresAt = new Date(Date.now() + expiresInSeconds * 1_000).toISOString();
     return WorkspaceTransferTicketSchema.parse({
       token: `${crypto.randomUUID()}${crypto.randomUUID()}`,
       operation,
@@ -242,7 +203,7 @@ export class WorkspaceFilesystem {
 
   private requireTicket(
     request: Request,
-    operation: "upload" | "download"
+    operation: "upload" | "download",
   ): {
     token: string;
     operation: string;
@@ -266,7 +227,7 @@ export class WorkspaceFilesystem {
       }>(
         `SELECT token, operation, path, size, sha256, media_type, expires_at
            FROM flary_workspace_transfer_tokens WHERE token = ?`,
-        token
+        token,
       )
       .toArray()[0];
     if (!row || row.operation !== operation) {
@@ -282,7 +243,7 @@ export class WorkspaceFilesystem {
   private deleteTicket(token: string): void {
     this.state.storage.sql.exec(
       "DELETE FROM flary_workspace_transfer_tokens WHERE token = ?",
-      token
+      token,
     );
   }
 
@@ -326,11 +287,11 @@ export class WorkspaceFilesystem {
         expires_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS flary_workspace_transfer_expiry_idx
-        ON flary_workspace_transfer_tokens(expires_at)`
+        ON flary_workspace_transfer_tokens(expires_at)`,
     );
     try {
       this.state.storage.sql.exec(
-        "ALTER TABLE flary_workspace_scope ADD COLUMN branch TEXT NOT NULL DEFAULT 'main'"
+        "ALTER TABLE flary_workspace_scope ADD COLUMN branch TEXT NOT NULL DEFAULT 'main'",
       );
     } catch {
       // The column already exists on current Durable Object databases.
@@ -344,7 +305,7 @@ export class WorkspaceFilesystem {
         branch: string;
       }>(
         `SELECT organization_id, app_id, project_id, workspace_id, branch
-           FROM flary_workspace_scope WHERE singleton = 1`
+           FROM flary_workspace_scope WHERE singleton = 1`,
       )
       .toArray()[0];
     const storedScope = existing
@@ -377,7 +338,7 @@ export class WorkspaceFilesystem {
       scope.projectId,
       scope.workspaceId,
       scope.branch,
-      new Date().toISOString()
+      new Date().toISOString(),
     );
     return scope;
   }
@@ -394,10 +355,7 @@ function workspaceErrorStatus(message: string, error: unknown): number {
   ) {
     return 409;
   }
-  if (
-    message.includes("integrity check") ||
-    message.includes("Stored bytes are missing")
-  ) {
+  if (message.includes("integrity check") || message.includes("Stored bytes are missing")) {
     return 500;
   }
   return 400;

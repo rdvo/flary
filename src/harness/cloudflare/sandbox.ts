@@ -4,12 +4,12 @@ import {
   SandboxInputSchema,
   type CodeExecutionRequest,
   type CodeExecutionResult,
-} from "../contracts/code-execution";
+} from "../contracts/code-execution.js";
 import {
   clipText,
   type CodeExecutionAdapter,
   type CodeExecutionContext,
-} from "../execution/adapters";
+} from "../execution/adapters.js";
 import type { FlarySandboxToolsetOptions } from "../flue/toolset.js";
 
 export interface SandboxAdapterOptions {
@@ -42,10 +42,7 @@ export class CloudflareSandboxAdapter implements CodeExecutionAdapter {
   }
 
   supports(request: CodeExecutionRequest): boolean {
-    return (
-      request.runtime !== "isolate" &&
-      request.operation === this.operation
-    );
+    return request.runtime !== "isolate" && request.operation === this.operation;
   }
 
   async execute(
@@ -71,9 +68,7 @@ export class CloudflareSandboxAdapter implements CodeExecutionAdapter {
         await sandbox.writeFile(
           `/workspace/${file.path}`,
           file.content,
-          file.encoding === "base64"
-            ? { encoding: "base64" }
-            : { encoding: "utf-8" },
+          file.encoding === "base64" ? { encoding: "base64" } : { encoding: "utf-8" },
         );
       }
       const result = await sandbox.exec(input.command, {
@@ -87,14 +82,8 @@ export class CloudflareSandboxAdapter implements CodeExecutionAdapter {
         },
       });
       const completedAt = new Date().toISOString();
-      const stdout = clipText(
-        result.stdout,
-        request.limits.maxOutputBytes,
-      );
-      const stderr = clipText(
-        result.stderr,
-        request.limits.maxOutputBytes,
-      );
+      const stdout = clipText(result.stdout, request.limits.maxOutputBytes);
+      const stderr = clipText(result.stderr, request.limits.maxOutputBytes);
       const response: CodeExecutionResult = result.success
         ? {
             executionId: request.executionId,

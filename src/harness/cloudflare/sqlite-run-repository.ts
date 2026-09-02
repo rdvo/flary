@@ -26,22 +26,13 @@ interface SqlRows<T> {
 }
 
 interface SqlStorage {
-  exec<T = Record<string, unknown>>(
-    query: string,
-    ...bindings: unknown[]
-  ): SqlRows<T>;
+  exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): SqlRows<T>;
 }
 
 /** Durable user-input records owned by the Runtime Durable Object. */
 export interface FlaryUserInputRepository {
-  createUserInput(
-    runId: string,
-    request: UserInputRequest,
-  ): Promise<UserInputRequest>;
-  getUserInput(
-    runId: string,
-    requestId: string,
-  ): Promise<UserInputRecord | undefined>;
+  createUserInput(runId: string, request: UserInputRequest): Promise<UserInputRequest>;
+  getUserInput(runId: string, requestId: string): Promise<UserInputRecord | undefined>;
   listUserInput(runId: string): Promise<UserInputRecord[]>;
   respondToUserInput(
     runId: string,
@@ -110,10 +101,7 @@ export class SqliteFlaryRunRepository implements FlaryRunRepository, FlaryUserIn
     `);
   }
 
-  async createUserInput(
-    runId: string,
-    requestInput: UserInputRequest,
-  ): Promise<UserInputRequest> {
+  async createUserInput(runId: string, requestInput: UserInputRequest): Promise<UserInputRequest> {
     const canonicalRunId = await this.canonicalRunId(runId, true);
     const request = UserInputRequestSchema.parse(requestInput);
     const now = new Date().toISOString();
@@ -137,10 +125,7 @@ export class SqliteFlaryRunRepository implements FlaryRunRepository, FlaryUserIn
     return UserInputRequestSchema.parse(JSON.parse(row.request_json));
   }
 
-  async getUserInput(
-    runId: string,
-    requestId: string,
-  ): Promise<UserInputRecord | undefined> {
+  async getUserInput(runId: string, requestId: string): Promise<UserInputRecord | undefined> {
     const canonicalRunId = await this.canonicalRunId(runId, true);
     const row = this.first<{ request_json: string; response_json: string | null }>(
       `SELECT request_json, response_json FROM flary_function_user_input
@@ -153,11 +138,14 @@ export class SqliteFlaryRunRepository implements FlaryRunRepository, FlaryUserIn
 
   async listUserInput(runId: string): Promise<UserInputRecord[]> {
     const canonicalRunId = await this.canonicalRunId(runId, true);
-    return this.#sql.exec<{ request_json: string; response_json: string | null }>(
-      `SELECT request_json, response_json FROM flary_function_user_input
+    return this.#sql
+      .exec<{ request_json: string; response_json: string | null }>(
+        `SELECT request_json, response_json FROM flary_function_user_input
        WHERE run_id = ? ORDER BY created_at ASC, request_id ASC`,
-      canonicalRunId,
-    ).toArray().map((row) => this.userInputRecord(row));
+        canonicalRunId,
+      )
+      .toArray()
+      .map((row) => this.userInputRecord(row));
   }
 
   async respondToUserInput(
@@ -208,9 +196,7 @@ export class SqliteFlaryRunRepository implements FlaryRunRepository, FlaryUserIn
       trusted.agentId,
       idempotencyKey,
     );
-    return row
-      ? FlaryRunRecordSchema.parse(JSON.parse(row.record_json))
-      : undefined;
+    return row ? FlaryRunRecordSchema.parse(JSON.parse(row.record_json)) : undefined;
   }
 
   async create(recordInput: FlaryRunRecord): Promise<FlaryRunRecord> {
@@ -239,9 +225,7 @@ export class SqliteFlaryRunRepository implements FlaryRunRepository, FlaryUserIn
        WHERE run_id = ? LIMIT 1`,
       runId,
     );
-    return row
-      ? FlaryRunRecordSchema.parse(JSON.parse(row.record_json))
-      : undefined;
+    return row ? FlaryRunRecordSchema.parse(JSON.parse(row.record_json)) : undefined;
   }
 
   async findInputAdmission(
@@ -255,9 +239,7 @@ export class SqliteFlaryRunRepository implements FlaryRunRepository, FlaryUserIn
       runId,
       idempotencyKey,
     );
-    return row
-      ? FlueAdmissionSchema.parse(JSON.parse(row.admission_json))
-      : undefined;
+    return row ? FlueAdmissionSchema.parse(JSON.parse(row.admission_json)) : undefined;
   }
 
   async setAdmission(
@@ -266,16 +248,18 @@ export class SqliteFlaryRunRepository implements FlaryRunRepository, FlaryUserIn
     admissionInput: FlueAdmission,
   ): Promise<boolean> {
     const admission = FlueAdmissionSchema.parse(admissionInput);
-    const inserted = this.#sql.exec<{ run_id: string }>(
-      `INSERT OR IGNORE INTO flary_function_run_inputs (
+    const inserted = this.#sql
+      .exec<{ run_id: string }>(
+        `INSERT OR IGNORE INTO flary_function_run_inputs (
          run_id, idempotency_key, admission_json, created_at
        ) VALUES (?, ?, ?, ?)
        RETURNING run_id`,
-      runId,
-      idempotencyKey,
-      JSON.stringify(admission),
-      new Date().toISOString(),
-    ).toArray();
+        runId,
+        idempotencyKey,
+        JSON.stringify(admission),
+        new Date().toISOString(),
+      )
+      .toArray();
     if (inserted.length === 0) return false;
     const record = await this.required(runId);
     await this.write({
@@ -286,10 +270,7 @@ export class SqliteFlaryRunRepository implements FlaryRunRepository, FlaryUserIn
     return true;
   }
 
-  async setResult(
-    runId: string,
-    resultInput: RunResult,
-  ): Promise<FlaryRunRecord> {
+  async setResult(runId: string, resultInput: RunResult): Promise<FlaryRunRecord> {
     const record = await this.required(runId);
     const next = FlaryRunRecordSchema.parse({
       ...record,
@@ -340,19 +321,22 @@ export class SqliteFlaryRunRepository implements FlaryRunRepository, FlaryUserIn
 
   async events(runId: string, afterSequence: number): Promise<RunEvent[]> {
     await this.required(runId);
-    return this.#sql.exec<{ sequence: number; event_json: string }>(
-      `SELECT sequence, event_json FROM flary_function_run_events
+    return this.#sql
+      .exec<{ sequence: number; event_json: string }>(
+        `SELECT sequence, event_json FROM flary_function_run_events
        WHERE run_id = ? AND sequence > ?
        ORDER BY sequence ASC`,
-      runId,
-      afterSequence,
-    ).toArray().map((row) =>
-      RunEventSchema.parse({
-        ...JSON.parse(row.event_json),
-        id: `event_${runId}_${row.sequence}`,
-        sequence: row.sequence,
-      })
-    );
+        runId,
+        afterSequence,
+      )
+      .toArray()
+      .map((row) =>
+        RunEventSchema.parse({
+          ...JSON.parse(row.event_json),
+          id: `event_${runId}_${row.sequence}`,
+          sequence: row.sequence,
+        }),
+      );
   }
 
   private first<T>(query: string, ...bindings: unknown[]): T | undefined {
@@ -370,15 +354,14 @@ export class SqliteFlaryRunRepository implements FlaryRunRepository, FlaryUserIn
    * while the Flary Runtime stores the parent function run id. Resolve that
    * private alias before reading or writing user-input records.
    */
-  private async canonicalRunId(
-    runId: string,
-    allowStandalone = false,
-  ): Promise<string> {
+  private async canonicalRunId(runId: string, allowStandalone = false): Promise<string> {
     const direct = await this.get(runId);
     if (direct) return direct.runId;
-    const rows = this.#sql.exec<{ run_id: string; record_json: string }>(
-      `SELECT run_id, record_json FROM flary_function_runs`,
-    ).toArray();
+    const rows = this.#sql
+      .exec<{ run_id: string; record_json: string }>(
+        `SELECT run_id, record_json FROM flary_function_runs`,
+      )
+      .toArray();
     for (const row of rows) {
       try {
         const record = FlaryRunRecordSchema.parse(JSON.parse(row.record_json));

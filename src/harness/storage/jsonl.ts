@@ -3,7 +3,7 @@ import {
   StorageRecordSchema,
   type JsonValue,
   type StorageRecord,
-} from "./records";
+} from "./records.js";
 
 export class JsonlParseError extends Error {
   readonly lineNumber: number;
@@ -141,4 +141,3 @@ export async function* importJsonlLines(
     yield parsed.data;
   }
 }
-

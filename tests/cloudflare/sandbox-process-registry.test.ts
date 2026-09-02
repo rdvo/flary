@@ -20,23 +20,14 @@ function sqlStore() {
   const database = new DatabaseSync(":memory:") as unknown as SqlDatabase;
   return {
     database,
-    exec<T = Record<string, unknown>>(
-      query: string,
-      ...bindings: unknown[]
-    ): { toArray(): T[] } {
+    exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): { toArray(): T[] } {
       const trimmed = query.trim().toLowerCase();
-      if (
-        bindings.length === 0 &&
-        !/^(select|with|pragma|explain)\b/.test(trimmed)
-      ) {
+      if (bindings.length === 0 && !/^(select|with|pragma|explain)\b/.test(trimmed)) {
         database.exec(query);
         return { toArray: () => [] };
       }
       const statement = database.prepare(query);
-      if (
-        /^(select|with|pragma|explain)\b/.test(trimmed) ||
-        /\breturning\b/.test(trimmed)
-      ) {
+      if (/^(select|with|pragma|explain)\b/.test(trimmed) || /\breturning\b/.test(trimmed)) {
         return { toArray: () => statement.all(...bindings) as T[] };
       }
       statement.run(...bindings);
@@ -62,7 +53,7 @@ test("sandbox process state and lifecycle survive registry restart", async () =>
     await hashSandboxEnvironment({
       PATH: "/usr/bin",
       OPENAI_API_KEY: "sk-never-persist-this",
-    })
+    }),
   );
   const first = new SqliteSandboxProcessRegistry(sql, { now: clock });
   const created = await first.create({
@@ -87,22 +78,14 @@ test("sandbox process state and lifecycle survive registry restart", async () =>
 
   assert.deepEqual(
     (await restarted.readLifecycle(created.id)).map((event) => event.action),
-    ["created", "started", "slept", "woke", "completed"]
+    ["created", "started", "slept", "woke", "completed"],
   );
-  await assert.rejects(
-    restarted.cancel(created.id),
-    /cannot move from completed to cancelled/
-  );
+  await assert.rejects(restarted.cancel(created.id), /cannot move from completed to cancelled/);
 
   const storedJson = sql.database
-    .prepare(
-      "SELECT record_json FROM flary_sandbox_processes WHERE process_id = ?"
-    )
+    .prepare("SELECT record_json FROM flary_sandbox_processes WHERE process_id = ?")
     .all(created.id);
-  assert.equal(
-    JSON.stringify(storedJson).includes("sk-never-persist-this"),
-    false
-  );
+  assert.equal(JSON.stringify(storedJson).includes("sk-never-persist-this"), false);
 });
 
 test("sandbox process output is chunked, byte bounded, and replayable by cursor", async () => {
@@ -127,12 +110,12 @@ test("sandbox process output is chunked, byte bounded, and replayable by cursor"
   });
   assert.deepEqual(
     chunks.map((chunk) => chunk.text),
-    ["ab", "😀", "cdef"]
+    ["ab", "😀", "cdef"],
   );
   assert.equal(chunks.at(-1)?.truncated, true);
   assert.equal(
     chunks.reduce((total, chunk) => total + chunk.byteLength, 0),
-    10
+    10,
   );
 
   const afterFirst = await registry.readOutput("process_output", {
@@ -140,7 +123,7 @@ test("sandbox process output is chunked, byte bounded, and replayable by cursor"
   });
   assert.deepEqual(
     afterFirst.map((chunk) => chunk.text),
-    ["😀", "cdef"]
+    ["😀", "cdef"],
   );
   assert.deepEqual(
     await registry.appendOutput({
@@ -148,14 +131,14 @@ test("sandbox process output is chunked, byte bounded, and replayable by cursor"
       stream: "stderr",
       text: "not stored",
     }),
-    []
+    [],
   );
   assert.deepEqual(
     {
       outputBytes: (await registry.get("process_output"))?.outputBytes,
       outputTruncated: (await registry.get("process_output"))?.outputTruncated,
     },
-    { outputBytes: 10, outputTruncated: true }
+    { outputBytes: 10, outputTruncated: true },
   );
 
   const exact = new SqliteSandboxProcessRegistry(sqlStore(), {
@@ -178,7 +161,7 @@ test("sandbox process output is chunked, byte bounded, and replayable by cursor"
         text: "abcd",
       })
     )[0]?.truncated,
-    false
+    false,
   );
   const marker = await exact.appendOutput({
     processId: "process_exact_output",
@@ -191,7 +174,7 @@ test("sandbox process output is chunked, byte bounded, and replayable by cursor"
       byteLength,
       truncated,
     })),
-    [{ text: "", byteLength: 0, truncated: true }]
+    [{ text: "", byteLength: 0, truncated: true }],
   );
 });
 
@@ -219,10 +202,8 @@ test("stdin and signal requests are durable and resolve once", async () => {
 
   const restarted = new SqliteSandboxProcessRegistry(sql, { now: clock });
   assert.deepEqual(
-    (await restarted.listControlRequests("process_control")).map(
-      (request) => request.kind
-    ),
-    ["stdin", "signal"]
+    (await restarted.listControlRequests("process_control")).map((request) => request.kind),
+    ["stdin", "signal"],
   );
   const resolved = await restarted.resolveControlRequest({
     requestId: "control_stdin",
@@ -235,7 +216,7 @@ test("stdin and signal requests are durable and resolve once", async () => {
         status: "pending",
       })
     ).map((request) => request.id),
-    ["control_signal"]
+    ["control_signal"],
   );
   assert.equal(
     (
@@ -245,7 +226,7 @@ test("stdin and signal requests are durable and resolve once", async () => {
         errorCode: "late_failure",
       })
     ).status,
-    "delivered"
+    "delivered",
   );
   assert.equal(
     (
@@ -255,7 +236,7 @@ test("stdin and signal requests are durable and resolve once", async () => {
         data: "continue\n",
       })
     ).status,
-    "delivered"
+    "delivered",
   );
 });
 
@@ -268,7 +249,7 @@ test("process contracts reject raw environments and invalid transitions", async 
       command: "env",
       environment: { TOKEN: "secret" },
     }).success,
-    false
+    false,
   );
 
   const registry = new SqliteSandboxProcessRegistry(sqlStore(), {
@@ -286,7 +267,7 @@ test("process contracts reject raw environments and invalid transitions", async 
       stream: "stdout",
       text: "too early",
     }),
-    /cannot accept output while queued/
+    /cannot accept output while queued/,
   );
   await assert.rejects(
     registry.requestSignal({
@@ -294,6 +275,6 @@ test("process contracts reject raw environments and invalid transitions", async 
       processId: "process_invalid",
       signal: "SIGTERM",
     }),
-    /cannot accept control requests while queued/
+    /cannot accept control requests while queued/,
   );
 });

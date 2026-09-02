@@ -1,11 +1,4 @@
-import {
-  StrictMode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type FormEvent,
-} from "react";
+import { StrictMode, useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Archive as ArchiveIcon,
@@ -133,9 +126,7 @@ function Access({ gate }: { gate: "setup" | "login" }) {
       await api(gate === "setup" ? "/api/setup" : "/api/auth/sign-in/email", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(
-          Object.fromEntries(new FormData(event.currentTarget))
-        ),
+        body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget))),
       });
       location.reload();
     } catch (cause) {
@@ -163,12 +154,7 @@ function Access({ gate }: { gate: "setup" | "login" }) {
             <>
               <label>
                 Setup token
-                <input
-                  name="token"
-                  type="password"
-                  required
-                  autoComplete="off"
-                />
+                <input name="token" type="password" required autoComplete="off" />
               </label>
               <label>
                 Name
@@ -187,9 +173,7 @@ function Access({ gate }: { gate: "setup" | "login" }) {
               type="password"
               minLength={gate === "setup" ? 10 : undefined}
               required
-              autoComplete={
-                gate === "setup" ? "new-password" : "current-password"
-              }
+              autoComplete={gate === "setup" ? "new-password" : "current-password"}
             />
           </label>
           {error ? <p className="error">{error}</p> : null}
@@ -222,16 +206,13 @@ function Composer({
     setError(undefined);
     try {
       const data = new FormData(form);
-      const files = [
-        ...((form.elements.namedItem("attachments") as HTMLInputElement)
-          .files ?? []),
-      ];
+      const files = [...((form.elements.namedItem("attachments") as HTMLInputElement).files ?? [])];
       const attachments = await Promise.all(
         files.map(async (file) => ({
           filename: file.name,
           type: file.type || "application/octet-stream",
           contentBase64: await fileBase64(file),
-        }))
+        })),
       );
       await api("/api/messages", {
         method: "POST",
@@ -258,11 +239,7 @@ function Composer({
       onSent();
       onClose();
     } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "The message could not be saved."
-      );
+      setError(cause instanceof Error ? cause.message : "The message could not be saved.");
     } finally {
       setBusy(false);
     }
@@ -305,9 +282,7 @@ function Composer({
             <input
               name="cc"
               type="text"
-              defaultValue={
-                draft ? parseAddresses(draft.ccJson).join(", ") : ""
-              }
+              defaultValue={draft ? parseAddresses(draft.ccJson).join(", ") : ""}
             />
           </label>
           <label className="line">
@@ -315,9 +290,7 @@ function Composer({
             <input
               name="bcc"
               type="text"
-              defaultValue={
-                draft ? parseAddresses(draft.bccJson).join(", ") : ""
-              }
+              defaultValue={draft ? parseAddresses(draft.bccJson).join(", ") : ""}
             />
           </label>
           <label className="line">
@@ -326,11 +299,7 @@ function Composer({
               name="subject"
               type="text"
               defaultValue={
-                draft
-                  ? draft.subject
-                  : reply
-                  ? `Re: ${reply.subject.replace(/^re:\s*/i, "")}`
-                  : ""
+                draft ? draft.subject : reply ? `Re: ${reply.subject.replace(/^re:\s*/i, "")}` : ""
               }
               required
             />
@@ -368,13 +337,7 @@ function Composer({
   );
 }
 
-function MemberPanel({
-  mailboxes,
-  onClose,
-}: {
-  mailboxes: Mailbox[];
-  onClose(): void;
-}) {
+function MemberPanel({ mailboxes, onClose }: { mailboxes: Mailbox[]; onClose(): void }) {
   const [members, setMembers] = useState<Member[]>([]);
   const [result, setResult] = useState("");
   const loadMembers = useCallback(async () => {
@@ -383,9 +346,7 @@ function MemberPanel({
   }, []);
   useEffect(() => {
     void loadMembers().catch((cause) =>
-      setResult(
-        cause instanceof Error ? cause.message : "Members could not be loaded."
-      )
+      setResult(cause instanceof Error ? cause.message : "Members could not be loaded."),
     );
   }, [loadMembers]);
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -403,17 +364,11 @@ function MemberPanel({
           mailboxIds: data.getAll("mailboxIds"),
         }),
       });
-      setResult(
-        "Member added. Share the temporary password through a secure channel."
-      );
+      setResult("Member added. Share the temporary password through a secure channel.");
       form.reset();
       await loadMembers();
     } catch (cause) {
-      setResult(
-        cause instanceof Error
-          ? cause.message
-          : "The member could not be added."
-      );
+      setResult(cause instanceof Error ? cause.message : "The member could not be added.");
     }
   }
   return (
@@ -431,9 +386,7 @@ function MemberPanel({
         <div className="member-list" aria-label="Current members">
           {members.map((member) => (
             <article key={member.id}>
-              <div className="avatar small">
-                {member.name.slice(0, 1).toUpperCase()}
-              </div>
+              <div className="avatar small">{member.name.slice(0, 1).toUpperCase()}</div>
               <div>
                 <strong>{member.name}</strong>
                 <p>{member.email}</p>
@@ -459,12 +412,7 @@ function MemberPanel({
             <legend>Mailboxes</legend>
             {mailboxes.map((mailbox) => (
               <label className="check" key={mailbox.id}>
-                <input
-                  name="mailboxIds"
-                  value={mailbox.id}
-                  type="checkbox"
-                  defaultChecked
-                />
+                <input name="mailboxIds" value={mailbox.id} type="checkbox" defaultChecked />
                 {mailbox.address}
               </label>
             ))}
@@ -479,11 +427,7 @@ function MemberPanel({
   );
 }
 
-function MailApp({
-  user,
-}: {
-  user: { id: string; name: string; email: string; role: string };
-}) {
+function MailApp({ user }: { user: { id: string; name: string; email: string; role: string } }) {
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
   const [mailboxId, setMailboxId] = useState("");
   const [folder, setFolder] = useState<MailFolder>("inbox");
@@ -507,30 +451,26 @@ function MailApp({
   const loadThreads = useCallback(async () => {
     if (!mailboxId) return;
     const value = await api<{ threads: ThreadSummary[] }>(
-      `/api/threads?mailboxId=${encodeURIComponent(mailboxId)}&folder=${folder}`
+      `/api/threads?mailboxId=${encodeURIComponent(mailboxId)}&folder=${folder}`,
     );
     setThreads(value.threads);
     setThreadId((current) =>
       current && value.threads.some((item) => item.id === current)
         ? current
         : window.matchMedia("(min-width: 801px)").matches
-        ? value.threads[0]?.id
-        : undefined
+          ? value.threads[0]?.id
+          : undefined,
     );
   }, [mailboxId, folder]);
   const loadDetail = useCallback(async () => {
     if (!threadId) return setDetail(undefined);
-    const value = await api<ThreadDetail>(
-      `/api/threads/${encodeURIComponent(threadId)}`
-    );
+    const value = await api<ThreadDetail>(`/api/threads/${encodeURIComponent(threadId)}`);
     setDetail(value);
     const unread = value.messages.filter(
-      (message) => !message.isRead && message.direction === "inbound"
+      (message) => !message.isRead && message.direction === "inbound",
     );
     await Promise.all(
-      unread.map((message) =>
-        api(`/api/messages/${message.id}/read`, { method: "POST" })
-      )
+      unread.map((message) => api(`/api/messages/${message.id}/read`, { method: "POST" })),
     );
   }, [threadId]);
 
@@ -581,14 +521,11 @@ function MailApp({
       threads.filter((thread) => {
         const query = search.trim().toLowerCase();
         if (!query) return true;
-        return [
-          thread.fromName,
-          thread.fromAddress,
-          thread.subject,
-          thread.snippet,
-        ].some((value) => value?.toLowerCase().includes(query));
+        return [thread.fromName, thread.fromAddress, thread.subject, thread.snippet].some((value) =>
+          value?.toLowerCase().includes(query),
+        );
       }),
-    [search, threads]
+    [search, threads],
   );
 
   async function move(messageId: string, destination: MailFolder) {
@@ -637,9 +574,7 @@ function MailApp({
                   <Icon aria-hidden="true" />
                 </i>
                 <span>{item.label}</span>
-                {item.id === "inbox" && mailbox?.unread ? (
-                  <em>{mailbox.unread}</em>
-                ) : null}
+                {item.id === "inbox" && mailbox?.unread ? <em>{mailbox.unread}</em> : null}
               </button>
             );
           })}
@@ -662,10 +597,7 @@ function MailApp({
             <p className="eyebrow">Mailbox</p>
             <div className="mailbox-picker">
               <Mail aria-hidden="true" />
-              <select
-                value={mailboxId}
-                onChange={(event) => setMailboxId(event.target.value)}
-              >
+              <select value={mailboxId} onChange={(event) => setMailboxId(event.target.value)}>
                 {mailboxes.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.address}
@@ -674,11 +606,7 @@ function MailApp({
               </select>
             </div>
           </div>
-          <button
-            className="icon"
-            onClick={() => void loadThreads()}
-            aria-label="Refresh"
-          >
+          <button className="icon" onClick={() => void loadThreads()} aria-label="Refresh">
             <RefreshCw aria-hidden="true" />
           </button>
         </header>
@@ -720,10 +648,8 @@ function MailApp({
                 {search
                   ? "No messages match this search."
                   : folder === "inbox"
-                  ? `Messages sent to ${
-                      mailbox?.address ?? "this mailbox"
-                    } will arrive here.`
-                  : `The ${folder} folder is clear.`}
+                    ? `Messages sent to ${mailbox?.address ?? "this mailbox"} will arrive here.`
+                    : `The ${folder} folder is clear.`}
               </p>
             </div>
           )}
@@ -757,9 +683,7 @@ function MailApp({
                 </button>
                 <button
                   onClick={() => setThreadId(threads[currentIndex + 1]?.id)}
-                  disabled={
-                    currentIndex < 0 || currentIndex >= threads.length - 1
-                  }
+                  disabled={currentIndex < 0 || currentIndex >= threads.length - 1}
                   aria-label="Next conversation"
                 >
                   <ArrowDown aria-hidden="true" />
@@ -771,9 +695,7 @@ function MailApp({
                 <article key={message.id} className={message.direction}>
                   <header>
                     <div className="avatar small">
-                      {(message.fromName || message.fromAddress)
-                        .slice(0, 1)
-                        .toUpperCase()}
+                      {(message.fromName || message.fromAddress).slice(0, 1).toUpperCase()}
                     </div>
                     <div>
                       <strong>{message.fromName || message.fromAddress}</strong>
@@ -781,12 +703,8 @@ function MailApp({
                     </div>
                     <time>{new Date(message.createdAt).toLocaleString()}</time>
                   </header>
-                  <div className="body">
-                    {message.textBody || "(No text body)"}
-                  </div>
-                  {detail.attachments.filter(
-                    (item) => item.messageId === message.id
-                  ).length ? (
+                  <div className="body">{message.textBody || "(No text body)"}</div>
+                  {detail.attachments.filter((item) => item.messageId === message.id).length ? (
                     <div className="attachments">
                       {detail.attachments
                         .filter((item) => item.messageId === message.id)
@@ -798,13 +716,9 @@ function MailApp({
                         ))}
                     </div>
                   ) : null}
-                  {message.error ? (
-                    <p className="delivery-error">{message.error}</p>
-                  ) : null}
+                  {message.error ? <p className="delivery-error">{message.error}</p> : null}
                   <footer>
-                    <span className={`status ${message.status}`}>
-                      {message.status}
-                    </span>
+                    <span className={`status ${message.status}`}>{message.status}</span>
                     {message.status === "draft" ? (
                       <button onClick={() => setCompose({ draft: message })}>
                         <FileText aria-hidden="true" /> Edit draft
@@ -816,10 +730,7 @@ function MailApp({
                     )}
                     <button
                       onClick={() =>
-                        void move(
-                          message.id,
-                          folder === "trash" ? "inbox" : "archive"
-                        )
+                        void move(message.id, folder === "trash" ? "inbox" : "archive")
                       }
                     >
                       {folder === "trash" ? (
@@ -860,10 +771,7 @@ function MailApp({
             <div className="route-line" />
             <p className="eyebrow">Flary Mail</p>
             <h1>Your project has a mailroom.</h1>
-            <p>
-              Choose a conversation or write a new message from{" "}
-              {mailbox?.address}.
-            </p>
+            <p>Choose a conversation or write a new message from {mailbox?.address}.</p>
             <button className="primary" onClick={() => setCompose({})}>
               Compose message
             </button>
@@ -965,5 +873,5 @@ function fileBase64(file: File): Promise<string> {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <Root />
-  </StrictMode>
+  </StrictMode>,
 );

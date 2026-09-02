@@ -7,8 +7,8 @@ import {
   NonEmptyStringSchema,
   PositiveIntegerSchema,
   ReferenceSchema,
-} from "./common";
-import { ModelSelectionSchema } from "./provider";
+} from "./common.js";
+import { ModelSelectionSchema } from "./provider.js";
 
 // Select how a run returns its result.
 export const ExecutionModeSchema = z.enum(["sync", "async", "stream"]);
@@ -108,9 +108,7 @@ export type ExecutionLimits = z.infer<typeof ExecutionLimitsSchema>;
 
 // Reference an execution profile by ID.
 export const ExecutionProfileReferenceSchema = ReferenceSchema;
-export type ExecutionProfileReference = z.infer<
-  typeof ExecutionProfileReferenceSchema
->;
+export type ExecutionProfileReference = z.infer<typeof ExecutionProfileReferenceSchema>;
 
 // Define the model and limits for one execution.
 export const ExecutionProfileSchema = z

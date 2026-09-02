@@ -1,10 +1,5 @@
 export type FlaryUiJson =
-  | null
-  | boolean
-  | number
-  | string
-  | FlaryUiJson[]
-  | { [key: string]: FlaryUiJson };
+  null | boolean | number | string | FlaryUiJson[] | { [key: string]: FlaryUiJson };
 
 export interface FlaryUiRecord {
   sequence: number;
@@ -55,9 +50,7 @@ function text(value: unknown): string {
 }
 
 function number(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0
-    ? value
-    : undefined;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 function json(value: unknown): FlaryUiJson | undefined {
@@ -69,17 +62,12 @@ function json(value: unknown): FlaryUiJson | undefined {
   }
 }
 
-function content(
-  value: unknown,
-  seen: WeakSet<object> = new WeakSet(),
-  depth = 0
-): string {
+function content(value: unknown, seen: WeakSet<object> = new WeakSet(), depth = 0): string {
   if (typeof value === "string") return value;
   if (!value || typeof value !== "object" || depth >= 32) return "";
   if (seen.has(value)) return "";
   seen.add(value);
-  if (Array.isArray(value))
-    return value.map((item) => content(item, seen, depth + 1)).join("");
+  if (Array.isArray(value)) return value.map((item) => content(item, seen, depth + 1)).join("");
   const valueObject = object(value);
   const direct = text(valueObject.text) || text(valueObject.delta);
   if (direct) return direct;
@@ -87,9 +75,7 @@ function content(
   return nested === undefined ? "" : content(nested, seen, depth + 1);
 }
 
-export function normalizeFlaryUiRecords(
-  values: readonly unknown[]
-): FlaryUiRecord[] {
+export function normalizeFlaryUiRecords(values: readonly unknown[]): FlaryUiRecord[] {
   return values
     .flatMap((value) => {
       const record = object(value);
@@ -112,22 +98,17 @@ export function normalizeFlaryUiRecords(
 
 export function mergeFlaryUiRecords(
   current: readonly FlaryUiRecord[],
-  incoming: readonly FlaryUiRecord[]
+  incoming: readonly FlaryUiRecord[],
 ): FlaryUiRecord[] {
   if (!incoming.length) return [...current];
   const records = new Map(current.map((record) => [record.sequence, record]));
   for (const record of incoming) records.set(record.sequence, record);
-  return [...records.values()].sort(
-    (left, right) => left.sequence - right.sequence
-  );
+  return [...records.values()].sort((left, right) => left.sequence - right.sequence);
 }
 
 function safeError(value: unknown): string {
   const message = text(value) || text(object(value).message);
-  if (
-    /<\/?(?:html|head|body|style|svg)\b/i.test(message) ||
-    /ray id:/i.test(message)
-  ) {
+  if (/<\/?(?:html|head|body|style|svg)\b/i.test(message) || /ray id:/i.test(message)) {
     return "The provider rejected the request. Check the selected connection.";
   }
   return message.replace(/\s+/g, " ").trim().slice(0, 1_000);
@@ -138,20 +119,14 @@ function toolIdentity(record: FlaryUiRecord) {
   const result = object(record.payload.result);
   const input = object(call.arguments ?? result.input ?? record.payload.input);
   const wrapper =
-    text(
-      call.toolId ??
-        result.toolId ??
-        record.payload.toolId ??
-        record.payload.toolName
-    ) || "tool";
+    text(call.toolId ?? result.toolId ?? record.payload.toolId ?? record.payload.toolName) ||
+    "tool";
   const nested = /^(?:flary__)?tool_(?:call|batch)$/.test(wrapper)
     ? text(input.id ?? input.toolId)
     : "";
   const name = (nested || wrapper).replace(/^flary__/, "");
   return {
-    id:
-      text(call.id ?? result.callId ?? record.payload.callId) ||
-      `${name}:${record.sequence}`,
+    id: text(call.id ?? result.callId ?? record.payload.callId) || `${name}:${record.sequence}`,
     name,
     input: nested ? object(input.input ?? input.arguments) : input,
     result,
@@ -163,58 +138,34 @@ function friendlyTool(name: string, state: FlaryUiActivity["state"]): string {
   const past = state === "completed";
   const failed = state === "failed";
   if (/search/i.test(normalized))
-    return failed
-      ? "Tool search failed"
-      : past
-      ? "Searched tools"
-      : "Searching tools";
+    return failed ? "Tool search failed" : past ? "Searched tools" : "Searching tools";
   if (/describe/i.test(normalized))
-    return failed
-      ? "Tool schema failed"
-      : past
-      ? "Loaded tool schema"
-      : "Loading tool schema";
+    return failed ? "Tool schema failed" : past ? "Loaded tool schema" : "Loading tool schema";
   if (/read/i.test(normalized))
-    return failed
-      ? "Read failed"
-      : past
-      ? `Read with ${normalized}`
-      : `Reading with ${normalized}`;
+    return failed ? "Read failed" : past ? `Read with ${normalized}` : `Reading with ${normalized}`;
   if (/write|edit/i.test(normalized))
     return failed
       ? "Edit failed"
       : past
-      ? `Edited with ${normalized}`
-      : `Editing with ${normalized}`;
-  return failed
-    ? `${normalized} failed`
-    : past
-    ? `Used ${normalized}`
-    : `Using ${normalized}`;
+        ? `Edited with ${normalized}`
+        : `Editing with ${normalized}`;
+  return failed ? `${normalized} failed` : past ? `Used ${normalized}` : `Using ${normalized}`;
 }
 
 function recordFailure(record: FlaryUiRecord): string {
   const response = object(record.payload.response);
   const result = object(record.payload.result);
   return safeError(
-    record.payload.error ??
-      result.error ??
-      response.error ??
-      record.payload.message
+    record.payload.error ?? result.error ?? response.error ?? record.payload.message,
   );
 }
 
 function turnId(record: FlaryUiRecord): string {
-  return (
-    text(record.payload.turnId ?? record.payload.runId) ||
-    `turn:${record.sequence}`
-  );
+  return text(record.payload.turnId ?? record.payload.runId) || `turn:${record.sequence}`;
 }
 
 /** Convert the durable public ledger into a stable chat and work timeline. */
-export function projectFlaryUiTurns(
-  records: readonly FlaryUiRecord[]
-): FlaryUiTurn[] {
+export function projectFlaryUiTurns(records: readonly FlaryUiRecord[]): FlaryUiTurn[] {
   const turns: FlaryUiTurn[] = [];
   let current: FlaryUiTurn | undefined;
   let assistant: FlaryUiMessage | undefined;
@@ -255,9 +206,7 @@ export function projectFlaryUiTurns(
       const turn = ensureTurn(record);
       if (record.type === "message.user") {
         const messageText = content(
-          record.payload.message ??
-            record.payload.content ??
-            record.payload.text
+          record.payload.message ?? record.payload.content ?? record.payload.text,
         );
         if (messageText)
           turn.messages.push({
@@ -317,9 +266,7 @@ export function projectFlaryUiTurns(
       record.type === "tool.batch"
     ) {
       const durationMs = number(record.payload.durationMs);
-      const failed =
-        text(record.payload.state) === "failed" ||
-        Boolean(record.payload.error);
+      const failed = text(record.payload.state) === "failed" || Boolean(record.payload.error);
       const label =
         record.type === "tool.search"
           ? `Searched tools${
@@ -328,10 +275,10 @@ export function projectFlaryUiTurns(
                 : ""
             }`
           : record.type === "tool.describe"
-          ? `Loaded ${text(record.payload.toolId) || "tool schema"}`
-          : failed
-          ? "Parallel tool batch failed"
-          : `Ran ${number(record.payload.callCount) ?? 0} tools in parallel`;
+            ? `Loaded ${text(record.payload.toolId) || "tool schema"}`
+            : failed
+              ? "Parallel tool batch failed"
+              : `Ran ${number(record.payload.callCount) ?? 0} tools in parallel`;
       turn.activity.push({
         id: `${record.type}:${record.sequence}`,
         label,
@@ -339,17 +286,11 @@ export function projectFlaryUiTurns(
         state: failed ? "failed" : "completed",
         sequence: record.sequence,
         ...(durationMs !== undefined ? { durationMs } : {}),
-        ...(json(
-          record.payload.query ? { query: record.payload.query } : undefined
-        ) !== undefined
+        ...(json(record.payload.query ? { query: record.payload.query } : undefined) !== undefined
           ? { request: json({ query: record.payload.query }) }
           : {}),
-        ...(json(record.payload) !== undefined
-          ? { response: json(record.payload) }
-          : {}),
-        ...(failed && recordFailure(record)
-          ? { detail: recordFailure(record) }
-          : {}),
+        ...(json(record.payload) !== undefined ? { response: json(record.payload) } : {}),
+        ...(failed && recordFailure(record) ? { detail: recordFailure(record) } : {}),
       });
       continue;
     }
@@ -361,20 +302,20 @@ export function projectFlaryUiTurns(
       const state: FlaryUiActivity["state"] = record.type.endsWith("failed")
         ? "failed"
         : record.type.endsWith("paused")
-        ? "waiting"
-        : record.type.endsWith("completed")
-        ? "completed"
-        : "running";
+          ? "waiting"
+          : record.type.endsWith("completed")
+            ? "completed"
+            : "running";
       const next: FlaryUiActivity = {
         id: key,
         label:
           state === "failed"
             ? "Code Mode failed"
             : state === "waiting"
-            ? "Code Mode needs approval"
-            : state === "completed"
-            ? "Completed Code Mode"
-            : "Running Code Mode",
+              ? "Code Mode needs approval"
+              : state === "completed"
+                ? "Completed Code Mode"
+                : "Running Code Mode",
         kind: "tool",
         state,
         sequence: record.sequence,
@@ -384,9 +325,7 @@ export function projectFlaryUiTurns(
         ...(json(record.payload.usage) !== undefined
           ? { response: json(record.payload.usage) }
           : {}),
-        ...(state === "failed" && recordFailure(record)
-          ? { detail: recordFailure(record) }
-          : {}),
+        ...(state === "failed" && recordFailure(record) ? { detail: recordFailure(record) } : {}),
       };
       if (index === undefined) {
         activities.set(key, turn.activity.length);
@@ -405,9 +344,7 @@ export function projectFlaryUiTurns(
         kind: "tool",
         state: "running",
         sequence: record.sequence,
-        ...(Object.keys(tool.input).length
-          ? { request: json(tool.input) }
-          : {}),
+        ...(Object.keys(tool.input).length ? { request: json(tool.input) } : {}),
       });
       continue;
     }
@@ -419,7 +356,7 @@ export function projectFlaryUiTurns(
       const failed =
         Boolean(tool.result.error) ||
         ["failed", "error"].includes(
-          text(tool.result.status ?? record.payload.outcome).toLowerCase()
+          text(tool.result.status ?? record.payload.outcome).toLowerCase(),
         );
       const next: FlaryUiActivity = {
         id: key,
@@ -427,21 +364,13 @@ export function projectFlaryUiTurns(
         kind: "tool",
         state: failed ? "failed" : "completed",
         sequence: record.sequence,
-        ...(Object.keys(tool.input).length
-          ? { request: json(tool.input) }
-          : {}),
-        ...(json(
-          tool.result.output ?? tool.result.value ?? tool.result.data
-        ) !== undefined
+        ...(Object.keys(tool.input).length ? { request: json(tool.input) } : {}),
+        ...(json(tool.result.output ?? tool.result.value ?? tool.result.data) !== undefined
           ? {
-              response: json(
-                tool.result.output ?? tool.result.value ?? tool.result.data
-              ),
+              response: json(tool.result.output ?? tool.result.value ?? tool.result.data),
             }
           : {}),
-        ...(failed && recordFailure(record)
-          ? { detail: recordFailure(record) }
-          : {}),
+        ...(failed && recordFailure(record) ? { detail: recordFailure(record) } : {}),
       };
       if (index === undefined) {
         activities.set(key, turn.activity.length);
@@ -450,29 +379,19 @@ export function projectFlaryUiTurns(
       continue;
     }
 
-    if (
-      record.type === "approval.requested" ||
-      record.type === "input.requested"
-    ) {
+    if (record.type === "approval.requested" || record.type === "input.requested") {
       const approvalId = text(
-        record.payload.approvalId ??
-          object(record.payload.request).id ??
-          record.payload.requestId
+        record.payload.approvalId ?? object(record.payload.request).id ?? record.payload.requestId,
       );
       turn.status = "waiting";
       turn.activity.push({
         id: `${record.type}:${record.sequence}`,
-        label:
-          record.type === "approval.requested"
-            ? "Waiting for approval"
-            : "Waiting for input",
+        label: record.type === "approval.requested" ? "Waiting for approval" : "Waiting for input",
         kind: "approval",
         state: "waiting",
         sequence: record.sequence,
         ...(approvalId ? { approvalId } : {}),
-        ...(json(record.payload) !== undefined
-          ? { request: json(record.payload) }
-          : {}),
+        ...(json(record.payload) !== undefined ? { request: json(record.payload) } : {}),
       });
       continue;
     }
@@ -488,18 +407,10 @@ export function projectFlaryUiTurns(
       continue;
     }
 
-    if (
-      record.type === "message.assistant" ||
-      record.type.includes("assistant")
-    ) {
+    if (record.type === "message.assistant" || record.type.includes("assistant")) {
       const delta = text(record.payload.delta);
       const messageText =
-        delta ||
-        content(
-          record.payload.message ??
-            record.payload.content ??
-            record.payload.text
-        );
+        delta || content(record.payload.message ?? record.payload.content ?? record.payload.text);
       if (!messageText) continue;
       if (delta) {
         if (!assistant) {
@@ -514,8 +425,7 @@ export function projectFlaryUiTurns(
         assistant.text += delta;
       } else if (
         !turn.messages.some(
-          (message) =>
-            message.role === "assistant" && message.text === messageText
+          (message) => message.role === "assistant" && message.text === messageText,
         )
       ) {
         assistant = {
@@ -537,22 +447,16 @@ export function projectFlaryUiTurns(
     ) {
       turn.status = "failed";
       turn.error =
-        failure ||
-        (record.type === "turn.aborted"
-          ? "The turn was stopped."
-          : "The turn failed.");
+        failure || (record.type === "turn.aborted" ? "The turn was stopped." : "The turn failed.");
     } else if (record.type === "turn.completed") {
       turn.status = "completed";
       turn.completedAt = record.occurredAt;
-      for (const item of turn.activity)
-        if (item.state === "running") item.state = "completed";
+      for (const item of turn.activity) if (item.state === "running") item.state = "completed";
       current = undefined;
       assistant = undefined;
     }
   }
-  return turns.filter(
-    (turn) => turn.messages.length || turn.activity.length || turn.error
-  );
+  return turns.filter((turn) => turn.messages.length || turn.activity.length || turn.error);
 }
 
 export function flaryUiTurnIsActive(turns: readonly FlaryUiTurn[]): boolean {

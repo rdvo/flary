@@ -1,22 +1,10 @@
 import { z } from "zod";
 
-import {
-  ExecutionLimitsSchema,
-  type ExecutionLimits,
-} from "./execution";
-import {
-  IdentifierSchema,
-  MetadataSchema,
-  NonEmptyStringSchema,
-} from "./common";
+import { ExecutionLimitsSchema, type ExecutionLimits } from "./execution.js";
+import { IdentifierSchema, MetadataSchema, NonEmptyStringSchema } from "./common.js";
 
 // Agent modes are permission profiles. They do not create a second runtime.
-export const BuiltInAgentModeIdSchema = z.enum([
-  "ask",
-  "plan",
-  "build",
-  "review",
-]);
+export const BuiltInAgentModeIdSchema = z.enum(["ask", "plan", "build", "review"]);
 export type BuiltInAgentModeId = z.infer<typeof BuiltInAgentModeIdSchema>;
 
 export const AgentModeIdSchema = IdentifierSchema;
@@ -74,14 +62,11 @@ export const AgentModeTransitionSchema = z
   .strict();
 export type AgentModeTransition = z.infer<typeof AgentModeTransitionSchema>;
 
-const builtin = (mode: AgentModeInput): AgentMode =>
-  AgentModeSchema.parse(mode);
+const builtin = (mode: AgentModeInput): AgentMode => AgentModeSchema.parse(mode);
 
 // Keep defaults conservative. Applications can define a custom profile, but
 // a custom profile must still pass through AgentModeSchema and policy checks.
-export const BUILT_IN_AGENT_MODES: Readonly<
-  Record<BuiltInAgentModeId, AgentMode>
-> = Object.freeze({
+export const BUILT_IN_AGENT_MODES: Readonly<Record<BuiltInAgentModeId, AgentMode>> = Object.freeze({
   ask: builtin({
     id: "ask",
     name: "Ask",
@@ -159,9 +144,7 @@ export function resolveAgentMode(
 }
 
 export function listBuiltInAgentModes(): AgentMode[] {
-  return Object.values(BUILT_IN_AGENT_MODES).map((mode) =>
-    AgentModeSchema.parse(mode),
-  );
+  return Object.values(BUILT_IN_AGENT_MODES).map((mode) => AgentModeSchema.parse(mode));
 }
 
 export type { ExecutionLimits };

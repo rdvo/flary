@@ -5,10 +5,7 @@ export interface FlaryReactAgentClient {
   readonly threads: {
     list(): Promise<ThreadBinding[]>;
     create(input: { title?: string }): Promise<FlaryAgentThreadHandle>;
-    open(input: {
-      organizationId: string;
-      threadId: string;
-    }): Promise<FlaryAgentThreadHandle>;
+    open(input: { organizationId: string; threadId: string }): Promise<FlaryAgentThreadHandle>;
   };
 }
 
@@ -18,9 +15,4 @@ export interface FlaryPendingMessage {
   createdAt: string;
 }
 
-export type FlaryConnectionState =
-  | "idle"
-  | "connecting"
-  | "live"
-  | "reconnecting"
-  | "offline";
+export type FlaryConnectionState = "idle" | "connecting" | "live" | "reconnecting" | "offline";

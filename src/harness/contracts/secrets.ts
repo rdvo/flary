@@ -6,7 +6,7 @@ import {
   NonEmptyStringSchema,
   TimestampSchema,
   VersionSchema,
-} from "./common";
+} from "./common.js";
 
 // Limit where a secret can be used.
 export const SecretScopeSchema = z.enum([
@@ -101,9 +101,7 @@ export const SecretRequestMetadataSchema = z
     inputHash: NonEmptyStringSchema.max(128),
   })
   .strict();
-export type SecretRequestMetadata = z.infer<
-  typeof SecretRequestMetadataSchema
->;
+export type SecretRequestMetadata = z.infer<typeof SecretRequestMetadataSchema>;
 
 /** A secret value accepted only by the protected secret-fulfillment route. */
 export const SecretRequestFulfillmentInputSchema = z
@@ -113,9 +111,7 @@ export const SecretRequestFulfillmentInputSchema = z
     expiresAt: TimestampSchema.optional(),
   })
   .strict();
-export type SecretRequestFulfillmentInput = z.infer<
-  typeof SecretRequestFulfillmentInputSchema
->;
+export type SecretRequestFulfillmentInput = z.infer<typeof SecretRequestFulfillmentInputSchema>;
 
 /** Safe result returned to the agent after the vault stores the credential. */
 export const SecretRequestResultSchema = z
@@ -140,9 +136,7 @@ export const ConnectionSecretInputSchema = z
     expiresAt: TimestampSchema.optional(),
   })
   .strict();
-export type ConnectionSecretInput = z.infer<
-  typeof ConnectionSecretInputSchema
->;
+export type ConnectionSecretInput = z.infer<typeof ConnectionSecretInputSchema>;
 
 // Keep the persisted secret shape free of secret values.
 export const SecretSchema = SecretMetadataSchema;

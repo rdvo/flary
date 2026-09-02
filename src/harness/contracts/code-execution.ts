@@ -8,13 +8,10 @@ import {
   NonEmptyStringSchema,
   PositiveIntegerSchema,
   TimestampSchema,
-} from "./common";
+} from "./common.js";
 
 // Select the isolated runtime for one operation.
-export const CodeExecutionEngineSchema = z.enum([
-  "dynamic-worker",
-  "sandbox",
-]);
+export const CodeExecutionEngineSchema = z.enum(["dynamic-worker", "sandbox"]);
 export type CodeExecutionEngine = z.infer<typeof CodeExecutionEngineSchema>;
 
 // Let the router select the smallest runtime that can complete the operation.
@@ -22,26 +19,16 @@ export const CodeExecutionEngineRequestSchema = z.union([
   z.literal("auto"),
   CodeExecutionEngineSchema,
 ]);
-export type CodeExecutionEngineRequest = z.infer<
-  typeof CodeExecutionEngineRequestSchema
->;
+export type CodeExecutionEngineRequest = z.infer<typeof CodeExecutionEngineRequestSchema>;
 
 // State the minimum runtime needed by the operation.
-export const CodeExecutionRuntimeSchema = z.enum([
-  "auto",
-  "isolate",
-  "linux",
-]);
-export type CodeExecutionRuntime = z.infer<
-  typeof CodeExecutionRuntimeSchema
->;
+export const CodeExecutionRuntimeSchema = z.enum(["auto", "isolate", "linux"]);
+export type CodeExecutionRuntime = z.infer<typeof CodeExecutionRuntimeSchema>;
 
 export const CodeExecutionLimitsSchema = z
   .object({
     timeoutMs: PositiveIntegerSchema.max(60 * 60 * 1000).default(60_000),
-    maxOutputBytes: PositiveIntegerSchema.max(10 * 1024 * 1024).default(
-      512 * 1024,
-    ),
+    maxOutputBytes: PositiveIntegerSchema.max(10 * 1024 * 1024).default(512 * 1024),
   })
   .strict();
 export type CodeExecutionLimits = z.output<typeof CodeExecutionLimitsSchema>;
@@ -68,17 +55,11 @@ export const CodeExecutionRequestSchema = z
     metadata: MetadataSchema.optional(),
   })
   .strict();
-export type CodeExecutionRequestInput = z.input<
-  typeof CodeExecutionRequestSchema
->;
-export type CodeExecutionRequest = z.output<
-  typeof CodeExecutionRequestSchema
->;
+export type CodeExecutionRequestInput = z.input<typeof CodeExecutionRequestSchema>;
+export type CodeExecutionRequest = z.output<typeof CodeExecutionRequestSchema>;
 
 export const CodeExecutionStatusSchema = z.enum(["completed", "failed"]);
-export type CodeExecutionStatus = z.infer<
-  typeof CodeExecutionStatusSchema
->;
+export type CodeExecutionStatus = z.infer<typeof CodeExecutionStatusSchema>;
 
 export const CodeExecutionResultSchema = z
   .object({
@@ -105,9 +86,7 @@ export const CodeExecutionResultSchema = z
       });
     }
   });
-export type CodeExecutionResult = z.output<
-  typeof CodeExecutionResultSchema
->;
+export type CodeExecutionResult = z.output<typeof CodeExecutionResultSchema>;
 
 export const CodeExecutionEventSchema = z
   .object({
@@ -127,9 +106,7 @@ export const CodeExecutionEventSchema = z
     metadata: MetadataSchema.optional(),
   })
   .strict();
-export type CodeExecutionEvent = z.output<
-  typeof CodeExecutionEventSchema
->;
+export type CodeExecutionEvent = z.output<typeof CodeExecutionEventSchema>;
 
 export const CodeModeInputSchema = z
   .object({
@@ -147,9 +124,7 @@ export const SandboxFileSchema = z
       .max(1_024)
       .refine(
         (value) =>
-          !value.startsWith("/") &&
-          !value.includes("\\") &&
-          !value.split("/").includes(".."),
+          !value.startsWith("/") && !value.includes("\\") && !value.split("/").includes(".."),
         "File paths must stay inside the workspace",
       ),
     content: z.string().max(5 * 1024 * 1024),
@@ -170,8 +145,7 @@ export const SandboxInputSchema = z
       .max(1_024)
       .default("/workspace")
       .refine(
-        (value) =>
-          value === "/workspace" || value.startsWith("/workspace/"),
+        (value) => value === "/workspace" || value.startsWith("/workspace/"),
         "cwd must stay inside /workspace",
       ),
     destroyAfter: z.boolean().default(false),

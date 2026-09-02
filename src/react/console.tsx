@@ -1,11 +1,4 @@
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type FormEvent,
-  type ReactNode,
-} from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import type { FlaryAgentThreadHandle } from "../harness/client/functions.js";
 import type { ThreadBinding } from "../harness/contracts/index.js";
@@ -47,16 +40,7 @@ function duration(value?: number): string | undefined {
 }
 
 function icon(
-  name:
-    | "plus"
-    | "send"
-    | "stop"
-    | "trash"
-    | "chevron"
-    | "tool"
-    | "spark"
-    | "check"
-    | "error"
+  name: "plus" | "send" | "stop" | "trash" | "chevron" | "tool" | "spark" | "check" | "error",
 ) {
   const paths: Record<typeof name, ReactNode> = {
     plus: (
@@ -105,13 +89,9 @@ function icon(
 
 function ActivityIcon({ item }: { item: FlaryUiActivity }) {
   if (item.state === "failed")
-    return (
-      <span className="flary-activity-icon is-failed">{icon("error")}</span>
-    );
+    return <span className="flary-activity-icon is-failed">{icon("error")}</span>;
   if (item.state === "completed")
-    return (
-      <span className="flary-activity-icon is-complete">{icon("check")}</span>
-    );
+    return <span className="flary-activity-icon is-complete">{icon("check")}</span>;
   if (item.kind === "reasoning")
     return <span className="flary-activity-icon is-live">{icon("spark")}</span>;
   return <span className="flary-activity-icon is-live">{icon("tool")}</span>;
@@ -126,20 +106,15 @@ function ActivityRow({
   onApprove(id: string): Promise<void>;
   onReject(id: string): Promise<void>;
 }) {
-  const hasDetail =
-    item.request !== undefined || item.response !== undefined || item.detail;
+  const hasDetail = item.request !== undefined || item.response !== undefined || item.detail;
   const content = (
     <>
       <ActivityIcon item={item} />
       <span className="flary-activity-label">{item.label}</span>
       {duration(item.durationMs) ? (
-        <span className="flary-activity-duration">
-          {duration(item.durationMs)}
-        </span>
+        <span className="flary-activity-duration">{duration(item.durationMs)}</span>
       ) : null}
-      {hasDetail ? (
-        <span className="flary-activity-chevron">{icon("chevron")}</span>
-      ) : null}
+      {hasDetail ? <span className="flary-activity-chevron">{icon("chevron")}</span> : null}
     </>
   );
   return (
@@ -199,33 +174,21 @@ function WorkRail({
         0,
         ((turn.completedAt ? Date.parse(turn.completedAt) : Date.now()) -
           Date.parse(turn.startedAt)) /
-          1_000
+          1_000,
       )
     : undefined;
   const label =
     turn.status === "working"
-      ? `Working${
-          elapsed !== undefined
-            ? ` for ${Math.max(1, Math.round(elapsed))}s`
-            : ""
-        }`
+      ? `Working${elapsed !== undefined ? ` for ${Math.max(1, Math.round(elapsed))}s` : ""}`
       : turn.status === "waiting"
-      ? "Waiting"
-      : turn.status === "failed"
-      ? "Stopped"
-      : `Worked${
-          elapsed !== undefined
-            ? ` for ${Math.max(1, Math.round(elapsed))}s`
-            : ""
-        }`;
+        ? "Waiting"
+        : turn.status === "failed"
+          ? "Stopped"
+          : `Worked${elapsed !== undefined ? ` for ${Math.max(1, Math.round(elapsed))}s` : ""}`;
   return (
     <details
       className="flary-work-rail"
-      open={
-        turn.status === "working" ||
-        turn.status === "waiting" ||
-        turn.status === "failed"
-      }
+      open={turn.status === "working" || turn.status === "waiting" || turn.status === "failed"}
     >
       <summary>
         <span className={`flary-work-state is-${turn.status}`} />
@@ -237,12 +200,7 @@ function WorkRail({
       </summary>
       <div className="flary-work-items">
         {turn.activity.map((item) => (
-          <ActivityRow
-            key={item.id}
-            item={item}
-            onApprove={onApprove}
-            onReject={onReject}
-          />
+          <ActivityRow key={item.id} item={item} onApprove={onApprove} onReject={onReject} />
         ))}
         {turn.error ? (
           <div className="flary-turn-error">
@@ -269,19 +227,13 @@ function Transcript({
   onReject(id: string): Promise<void>;
 }) {
   const end = useRef<HTMLDivElement>(null);
-  useEffect(
-    () => end.current?.scrollIntoView({ block: "end" }),
-    [turns, pending]
-  );
+  useEffect(() => end.current?.scrollIntoView({ block: "end" }), [turns, pending]);
   return (
     <div className="flary-transcript" aria-live="polite">
       {turns.map((turn) => (
         <section className="flary-turn" key={turn.id}>
           {turn.messages.map((message) => (
-            <div
-              className={`flary-message is-${message.role}`}
-              key={message.id}
-            >
+            <div className={`flary-message is-${message.role}`} key={message.id}>
               <div className="flary-message-body">{message.text}</div>
             </div>
           ))}
@@ -340,9 +292,7 @@ function Composer({
         }}
         disabled={disabled}
         rows={2}
-        placeholder={
-          disabled ? "Open a thread to start" : "Ask the agent anything"
-        }
+        placeholder={disabled ? "Open a thread to start" : "Ask the agent anything"}
         aria-label="Message"
       />
       <div className="flary-composer-footer">
@@ -391,7 +341,7 @@ export function FlaryAgentConsole({
 
   const sortedBindings = useMemo(
     () => [...bindings].sort((a, b) => timeOf(b) - timeOf(a)),
-    [bindings]
+    [bindings],
   );
   const open = async (binding: ThreadBinding) => {
     const next = await agent.threads.open({
@@ -412,9 +362,7 @@ export function FlaryAgentConsole({
       })
       .catch((cause) => {
         if (!disposed)
-          setListError(
-            cause instanceof Error ? cause.message : "Threads are unavailable."
-          );
+          setListError(cause instanceof Error ? cause.message : "Threads are unavailable.");
       })
       .finally(() => {
         if (!disposed) setLoading(false);
@@ -432,18 +380,12 @@ export function FlaryAgentConsole({
       const created = await agent.threads.create({ title: "New thread" });
       setBindings((current) => [
         created.binding,
-        ...current.filter(
-          (item) => item.thread.threadId !== created.ref.threadId
-        ),
+        ...current.filter((item) => item.thread.threadId !== created.ref.threadId),
       ]);
       setThread(created);
       onThreadChange?.(created);
     } catch (cause) {
-      setListError(
-        cause instanceof Error
-          ? cause.message
-          : "The thread could not be created."
-      );
+      setListError(cause instanceof Error ? cause.message : "The thread could not be created.");
     } finally {
       setCreating(false);
     }
@@ -458,7 +400,7 @@ export function FlaryAgentConsole({
             threadId: binding.thread.threadId,
           });
     setBindings((current) =>
-      current.filter((item) => item.thread.threadId !== binding.thread.threadId)
+      current.filter((item) => item.thread.threadId !== binding.thread.threadId),
     );
     if (thread?.ref.threadId === binding.thread.threadId) {
       setThread(null);
@@ -468,11 +410,7 @@ export function FlaryAgentConsole({
       await target.delete();
     } catch (cause) {
       setBindings((current) => [binding, ...current]);
-      setListError(
-        cause instanceof Error
-          ? cause.message
-          : "The thread could not be deleted."
-      );
+      setListError(cause instanceof Error ? cause.message : "The thread could not be deleted.");
     }
   };
 
@@ -495,11 +433,7 @@ export function FlaryAgentConsole({
       <aside className="flary-thread-panel">
         <div className="flary-panel-heading">
           <span>Threads</span>
-          <button
-            type="button"
-            onClick={() => void createThread()}
-            disabled={creating}
-          >
+          <button type="button" onClick={() => void createThread()} disabled={creating}>
             {icon("plus")}
             <b>{creating ? "Creating" : "New"}</b>
           </button>
@@ -509,9 +443,7 @@ export function FlaryAgentConsole({
           {sortedBindings.map((binding) => (
             <div
               className={`flary-thread-item ${
-                binding.thread.threadId === thread?.ref.threadId
-                  ? "is-active"
-                  : ""
+                binding.thread.threadId === thread?.ref.threadId ? "is-active" : ""
               }`}
               key={binding.thread.threadId}
             >
@@ -570,11 +502,7 @@ export function FlaryAgentConsole({
           </div>
         )}
         {realtime.error ? (
-          <button
-            type="button"
-            className="flary-runtime-error"
-            onClick={realtime.reconnect}
-          >
+          <button type="button" className="flary-runtime-error" onClick={realtime.reconnect}>
             {realtime.error}
             <span>Reconnect</span>
           </button>

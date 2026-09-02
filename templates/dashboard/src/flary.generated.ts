@@ -2,7 +2,11 @@
 type GeneratedConfig = {
   readonly model: string;
   readonly provider: "google" | "openai" | "anthropic" | "workers-ai" | "none";
-  readonly features: { readonly mcp: boolean; readonly browser: boolean; readonly sandbox: boolean };
+  readonly features: {
+    readonly mcp: boolean;
+    readonly browser: boolean;
+    readonly sandbox: boolean;
+  };
   readonly authMode: "personal" | "existing";
   readonly widget: boolean;
 };

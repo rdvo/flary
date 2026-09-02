@@ -33,10 +33,12 @@ test("Flue 2.0.2 exposes the complete Flary session adapter", async () => {
   const loaded = await loadPinnedFlue2Runtime();
   assert.equal(loaded.version, "2.0.2");
   assert.deepEqual(loaded.capabilities, FLUE_2_0_2_FLARY_CAPABILITIES);
-  assert.doesNotThrow(() => assertInteractiveSessionEngine({
-    pin: { id: "flue-2", version: "2.0.2", revision: "npm:2.0.2" },
-    capabilities: loaded.capabilities,
-  }));
+  assert.doesNotThrow(() =>
+    assertInteractiveSessionEngine({
+      pin: { id: "flue-2", version: "2.0.2", revision: "npm:2.0.2" },
+      capabilities: loaded.capabilities,
+    }),
+  );
 });
 
 test("engine migration checks parity before reading the source archive", async () => {
@@ -80,12 +82,13 @@ test("Flue 2 pins the model before admission and reuses it after eviction", asyn
       return { submissionId: "sub_pinned", cursor: "4" };
     },
   });
-  const makeEngine = () => createFlue2SessionEngine({
-    state: new SqliteFlue2SessionEngineStateStore(sql),
-    transport,
-    control: controlStub(),
-    resolveModel: () => `openai/model-generation-${++modelResolution}`,
-  });
+  const makeEngine = () =>
+    createFlue2SessionEngine({
+      state: new SqliteFlue2SessionEngineStateStore(sql),
+      transport,
+      control: controlStub(),
+      resolveModel: () => `openai/model-generation-${++modelResolution}`,
+    });
 
   const input = {
     agentId: "coder",
@@ -96,10 +99,7 @@ test("Flue 2 pins the model before admission and reuses it after eviction", asyn
   await assert.rejects(makeEngine().submit(input), /evicted/);
   const admitted = await makeEngine().submit(input);
   assert.equal(admitted.submissionId, "sub_pinned");
-  assert.deepEqual(submittedModels, [
-    "openai/model-generation-1",
-    "openai/model-generation-1",
-  ]);
+  assert.deepEqual(submittedModels, ["openai/model-generation-1", "openai/model-generation-1"]);
 
   const replayed = await makeEngine().submit(input);
   assert.equal(replayed.duplicate, true);
@@ -174,12 +174,13 @@ test("Flue 2 manual compaction and rollback use the durable control plane", asyn
       return { marker };
     },
   });
-  const makeEngine = () => createFlue2SessionEngine({
-    state: new InMemoryFlue2SessionEngineStateStore(),
-    transport: transportStub(),
-    control,
-    resolveModel: () => "openai/gpt-test",
-  });
+  const makeEngine = () =>
+    createFlue2SessionEngine({
+      state: new InMemoryFlue2SessionEngineStateStore(),
+      transport: transportStub(),
+      control,
+      resolveModel: () => "openai/gpt-test",
+    });
   await makeEngine().compact("coder", "thread_branch", "manual");
   await makeEngine().rollback({
     agentId: "coder",
@@ -207,8 +208,12 @@ test("Flue 2 canonical export and restore are exact and hash checked", async () 
   };
   let restored: unknown;
   const control = controlStub({
-    async exportCanonical() { return structuredClone(canonical); },
-    async restoreCanonical(input) { restored = structuredClone(input.payload); },
+    async exportCanonical() {
+      return structuredClone(canonical);
+    },
+    async restoreCanonical(input) {
+      restored = structuredClone(input.payload);
+    },
   });
   const engine = createFlue2SessionEngine({
     state: new InMemoryFlue2SessionEngineStateStore(),
@@ -254,7 +259,9 @@ function fakeEngine(
   return {
     pin: { id, version: "test", revision: "test" },
     capabilities,
-    async submit() { return { submissionId: "sub_1", cursor: "0" }; },
+    async submit() {
+      return { submissionId: "sub_1", cursor: "0" };
+    },
     async observe() {},
     async cancel() {},
     async compact() {},
@@ -270,7 +277,9 @@ function fakeEngine(
       };
     },
     async restore() {},
-    async active() { return false; },
+    async active() {
+      return false;
+    },
     ...overrides,
   };
 }
@@ -279,8 +288,12 @@ function transportStub(
   overrides: Partial<Flue2SessionEngineTransport> = {},
 ): Flue2SessionEngineTransport {
   return {
-    async submit() { return { submissionId: "sub_1", cursor: "0" }; },
-    async observe() { return { outcome: "completed" }; },
+    async submit() {
+      return { submissionId: "sub_1", cursor: "0" };
+    },
+    async observe() {
+      return { outcome: "completed" };
+    },
     async cancel() {},
     ...overrides,
   };
@@ -292,9 +305,13 @@ function controlStub(
   return {
     async compact() {},
     async rollback() {},
-    async exportCanonical() { return { batches: [] }; },
+    async exportCanonical() {
+      return { batches: [] };
+    },
     async restoreCanonical() {},
-    async active() { return false; },
+    async active() {
+      return false;
+    },
     async resumeApprovals() {},
     ...overrides,
   };
@@ -303,10 +320,7 @@ function controlStub(
 function sqlStore() {
   const database = new DatabaseSync(":memory:");
   return {
-    exec<T = Record<string, unknown>>(
-      query: string,
-      ...bindings: unknown[]
-    ): { toArray(): T[] } {
+    exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): { toArray(): T[] } {
       const trimmed = query.trim().toLowerCase();
       if (bindings.length === 0 && !/^(select|with|pragma|explain)\b/.test(trimmed)) {
         database.exec(query);

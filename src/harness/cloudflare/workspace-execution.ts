@@ -8,10 +8,7 @@ type WorkspaceSandbox = Pick<
 >;
 
 interface WorkspaceExecutionSql {
-  exec<T = Record<string, unknown>>(
-    query: string,
-    ...bindings: unknown[]
-  ): { toArray(): T[] };
+  exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): { toArray(): T[] };
 }
 
 interface WorkspaceExecutionRow {
@@ -81,9 +78,11 @@ export class CloudflareSandboxWorkspaceBackend implements WorkspaceExecutionBack
 
   async prepare(): Promise<void> {
     if (this.#prepared) return;
-    const latest = this.#sql.exec<{ value_json: string }>(
-      "SELECT value_json FROM flary_workspace_execution_state WHERE key = 'latest-backup'",
-    ).toArray()[0];
+    const latest = this.#sql
+      .exec<{ value_json: string }>(
+        "SELECT value_json FROM flary_workspace_execution_state WHERE key = 'latest-backup'",
+      )
+      .toArray()[0];
     if (latest) {
       await this.#sandbox.restoreBackup(JSON.parse(latest.value_json) as DirectoryBackup);
     } else {
@@ -153,14 +152,16 @@ export class CloudflareSandboxWorkspaceBackend implements WorkspaceExecutionBack
 
   async #hydrateSandbox(): Promise<void> {
     const listing = await this.#workspace.call("list", {});
-    const files = Array.isArray(record(listing).files) ? record(listing).files as unknown[] : [];
+    const files = Array.isArray(record(listing).files) ? (record(listing).files as unknown[]) : [];
     for (const item of files) {
       const file = record(item);
       if (typeof file.path !== "string" || excluded(file.path)) continue;
-      const opened = record(await this.#workspace.call("read", {
-        path: file.path,
-        encoding: binaryMediaType(String(file.mediaType ?? "")) ? "base64" : "utf8",
-      }));
+      const opened = record(
+        await this.#workspace.call("read", {
+          path: file.path,
+          encoding: binaryMediaType(String(file.mediaType ?? "")) ? "base64" : "utf8",
+        }),
+      );
       const absolute = `/workspace/${file.path.replace(/^\/+/, "")}`;
       await this.#sandbox.mkdir(absolute.split("/").slice(0, -1).join("/") || "/workspace", {
         recursive: true,
@@ -176,8 +177,8 @@ export class CloudflareSandboxWorkspaceBackend implements WorkspaceExecutionBack
       recursive: true,
       includeHidden: true,
     });
-    const sandboxFiles = scan.files.filter((file) =>
-      file.type === "file" && !excluded(file.relativePath),
+    const sandboxFiles = scan.files.filter(
+      (file) => file.type === "file" && !excluded(file.relativePath),
     );
     const existing = record(await this.#workspace.call("list", {}));
     const current = new Set(
@@ -223,21 +224,19 @@ export class CloudflareSandboxWorkspaceBackend implements WorkspaceExecutionBack
   }
 
   #storedOperation(operationId: string): WorkspaceExecutionResult | undefined {
-    const row = this.#sql.exec<WorkspaceExecutionRow>(
-      `SELECT operation_id, state, backup_json, checkpoint_json
+    const row = this.#sql
+      .exec<WorkspaceExecutionRow>(
+        `SELECT operation_id, state, backup_json, checkpoint_json
        FROM flary_workspace_execution WHERE operation_id = ?`,
-      operationId,
-    ).toArray()[0];
+        operationId,
+      )
+      .toArray()[0];
     if (!row) return undefined;
     return {
       operationId: row.operation_id,
       state: row.state,
-      ...(row.backup_json
-        ? { backup: JSON.parse(row.backup_json) as DirectoryBackup }
-        : {}),
-      ...(row.checkpoint_json
-        ? { checkpoint: JSON.parse(row.checkpoint_json) }
-        : {}),
+      ...(row.backup_json ? { backup: JSON.parse(row.backup_json) as DirectoryBackup } : {}),
+      ...(row.checkpoint_json ? { checkpoint: JSON.parse(row.checkpoint_json) } : {}),
     };
   }
 }
@@ -269,21 +268,32 @@ export class CloudflareComputerWorkspaceBackend implements WorkspaceExecutionBac
 
 function excluded(path: string): boolean {
   const normalized = path.replace(/^\/+/, "");
-  return normalized === "node_modules" || normalized.startsWith("node_modules/") ||
-    normalized === ".cache" || normalized.startsWith(".cache/") ||
-    normalized === ".npm" || normalized.startsWith(".npm/") ||
-    normalized === ".pnpm-store" || normalized.startsWith(".pnpm-store/");
+  return (
+    normalized === "node_modules" ||
+    normalized.startsWith("node_modules/") ||
+    normalized === ".cache" ||
+    normalized.startsWith(".cache/") ||
+    normalized === ".npm" ||
+    normalized.startsWith(".npm/") ||
+    normalized === ".pnpm-store" ||
+    normalized.startsWith(".pnpm-store/")
+  );
 }
 
 function binaryMediaType(value: string): boolean {
-  return value.length > 0 && !value.startsWith("text/") &&
-    !value.includes("json") && !value.includes("javascript") &&
-    !value.includes("typescript") && !value.includes("yaml") &&
-    !value.includes("xml");
+  return (
+    value.length > 0 &&
+    !value.startsWith("text/") &&
+    !value.includes("json") &&
+    !value.includes("javascript") &&
+    !value.includes("typescript") &&
+    !value.includes("yaml") &&
+    !value.includes("xml")
+  );
 }
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : {};
 }

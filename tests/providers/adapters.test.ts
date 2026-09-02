@@ -72,9 +72,9 @@ test("OpenAI-compatible streaming returns normalized deltas and final response",
     baseUrl: "https://gateway.example/v1",
     fetch: async () =>
       sseResponse([
-        "data: {\"id\":\"resp_1\",\"model\":\"gpt-5.6-sol\",\"choices\":[{\"delta\":{\"role\":\"assistant\"},\"finish_reason\":null}]}\n\n",
-        "data: {\"id\":\"resp_1\",\"choices\":[{\"delta\":{\"content\":\"Hel\"},\"finish_reason\":null}]}\n",
-        "\ndata: {\"id\":\"resp_1\",\"choices\":[{\"delta\":{\"content\":\"lo\"},\"finish_reason\":\"stop\"}]}\n\n",
+        'data: {"id":"resp_1","model":"gpt-5.6-sol","choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}\n\n',
+        'data: {"id":"resp_1","choices":[{"delta":{"content":"Hel"},"finish_reason":null}]}\n',
+        '\ndata: {"id":"resp_1","choices":[{"delta":{"content":"lo"},"finish_reason":"stop"}]}\n\n',
         "data: [DONE]\n\n",
       ]),
   });
@@ -83,7 +83,7 @@ test("OpenAI-compatible streaming returns normalized deltas and final response",
 
   assert.deepEqual(
     events.map((event) => event.type),
-    ["start", "text_delta", "text_delta", "finish"]
+    ["start", "text_delta", "text_delta", "finish"],
   );
   assert.equal(events[1]?.type === "text_delta" ? events[1].delta : "", "Hel");
   const finish = events.at(-1);
@@ -142,10 +142,10 @@ test("Anthropic Messages streaming normalizes message events", async () => {
     baseUrl: "https://anthropic.example/v1",
     fetch: async () =>
       sseResponse([
-        "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_2\",\"model\":\"claude-opus-5\",\"usage\":{\"input_tokens\":3}}}\n\n",
-        "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hi\"}}\n\n",
-        "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":2}}\n\n",
-        "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+        'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_2","model":"claude-opus-5","usage":{"input_tokens":3}}}\n\n',
+        'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}\n\n',
+        'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}\n\n',
+        'event: message_stop\ndata: {"type":"message_stop"}\n\n',
       ]),
   });
 
@@ -153,12 +153,12 @@ test("Anthropic Messages streaming normalizes message events", async () => {
     adapter.stream({
       ...request,
       model: "claude-opus-5",
-    })
+    }),
   );
 
   assert.deepEqual(
     events.map((event) => event.type),
-    ["start", "usage", "text_delta", "usage", "finish"]
+    ["start", "usage", "text_delta", "usage", "finish"],
   );
   const finish = events.at(-1);
   assert.equal(finish?.type, "finish");
@@ -177,22 +177,26 @@ test("Gemini streams provider deltas and sends the selected thinking level", asy
       requestedUrl = String(input);
       body = JSON.parse(String(init?.body)) as Record<string, any>;
       return sseResponse([
-        "data: {\"responseId\":\"gemini-1\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Fast \"}]}}]}\n\n",
-        "data: {\"responseId\":\"gemini-1\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"reply\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":3,\"candidatesTokenCount\":2,\"totalTokenCount\":5}}\n\n",
+        'data: {"responseId":"gemini-1","candidates":[{"content":{"parts":[{"text":"Fast "}]}}]}\n\n',
+        'data: {"responseId":"gemini-1","candidates":[{"content":{"parts":[{"text":"reply"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":2,"totalTokenCount":5}}\n\n',
       ]);
     },
   });
 
-  const events = await collect(adapter.stream({
-    ...request,
-    model: "gemini-3.7-flash",
-    reasoningEffort: "low",
-  }));
+  const events = await collect(
+    adapter.stream({
+      ...request,
+      model: "gemini-3.7-flash",
+      reasoningEffort: "low",
+    }),
+  );
 
   assert.match(requestedUrl, /:streamGenerateContent\?alt=sse/);
   assert.deepEqual(body?.generationConfig?.thinkingConfig, { thinkingLevel: "LOW" });
   assert.deepEqual(
-    events.filter((event) => event.type === "text_delta").map((event) => event.type === "text_delta" ? event.delta : ""),
+    events
+      .filter((event) => event.type === "text_delta")
+      .map((event) => (event.type === "text_delta" ? event.delta : "")),
     ["Fast ", "reply"],
   );
   const finish = events.at(-1);

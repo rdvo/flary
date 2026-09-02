@@ -29,11 +29,14 @@ test("routes every turn through authenticated Flary thread admission", async () 
     fetch: async (input, init) => {
       requestUrl = String(input);
       requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      return Response.json({
-        streamUrl: "/streams/thread",
-        offset: "0",
-        submissionId: "submission_123",
-      }, { status: 202 });
+      return Response.json(
+        {
+          streamUrl: "/streams/thread",
+          offset: "0",
+          submissionId: "submission_123",
+        },
+        { status: 202 },
+      );
     },
   });
 
@@ -53,10 +56,7 @@ test("routes every turn through authenticated Flary thread admission", async () 
     },
   );
 
-  assert.equal(
-    requestUrl,
-    "https://cloud.flary.test/api/apps/app_123/threads/thread_123/messages",
-  );
+  assert.equal(requestUrl, "https://cloud.flary.test/api/apps/app_123/threads/thread_123/messages");
   assert.equal(result.submissionId, "submission_123");
   assert.deepEqual(requestBody, {
     message: "Hello",
@@ -73,11 +73,14 @@ test("the prompt alias also uses Flary admission", async () => {
     baseUrl: "https://cloud.flary.test",
     fetch: async (input) => {
       requestUrl = String(input);
-      return Response.json({
-        streamUrl: "/streams/thread",
-        offset: "0",
-        submissionId: "submission_456",
-      }, { status: 202 });
+      return Response.json(
+        {
+          streamUrl: "/streams/thread",
+          offset: "0",
+          submissionId: "submission_456",
+        },
+        { status: 202 },
+      );
     },
   });
 
@@ -145,7 +148,10 @@ test("routes aborts and attachments through the authenticated thread proxy", asy
   };
 
   await client.abort(ref);
-  assert.match(requests[0]!, /\/api\/apps\/app_123\/threads\/thread_123\/flue\/agents\/support\/.+\/abort$/);
+  assert.match(
+    requests[0]!,
+    /\/api\/apps\/app_123\/threads\/thread_123\/flue\/agents\/support\/.+\/abort$/,
+  );
   assert.match(
     client.attachmentUrl(ref, "file_123"),
     /\/api\/apps\/app_123\/threads\/thread_123\/flue\/agents\/support\/.+\/attachments\/file_123$/,
@@ -175,12 +181,16 @@ test("fulfills a secret request without using a thread message route", async () 
       });
     },
   });
-  const result = await client.fulfillSecretRequest({
-    organizationId: "org_123",
-    appId: "app_123",
-    agentId: "support",
-    threadId: "thread_123",
-  }, "secret_request_1", { value: "raw-value" });
+  const result = await client.fulfillSecretRequest(
+    {
+      organizationId: "org_123",
+      appId: "app_123",
+      agentId: "support",
+      threadId: "thread_123",
+    },
+    "secret_request_1",
+    { value: "raw-value" },
+  );
 
   assert.equal(
     requestUrl,

@@ -7,28 +7,27 @@ order: 1
 
 Conversation state and workspace files are separate.
 
-| Data | Active storage | Durable or cold storage |
-| --- | --- | --- |
-| Canonical conversation and execution | Agent Durable Object | Encrypted R2 segments |
-| Public events, approvals, and audits | Thread Control SQLite | Compressed R2 ledger segments |
-| Workspace files and Git state | Workspace Durable Object | R2 blobs and checkpoints |
-| Thread list | D1 | Rebuildable from manifests |
-| Sandbox filesystem | Live Sandbox | R2 backups |
-| Attachments and large results | SQLite metadata | Encrypted R2 objects |
+| Data                                 | Active storage           | Durable or cold storage       |
+| ------------------------------------ | ------------------------ | ----------------------------- |
+| Canonical conversation and execution | Agent Durable Object     | Encrypted R2 segments         |
+| Public events, approvals, and audits | Thread Control SQLite    | Compressed R2 ledger segments |
+| Workspace files and Git state        | Workspace Durable Object | R2 blobs and checkpoints      |
+| Thread list                          | D1                       | Rebuildable from manifests    |
+| Sandbox filesystem                   | Live Sandbox             | R2 backups                    |
+| Attachments and large results        | SQLite metadata          | Encrypted R2 objects          |
 
-The transcript engine is internal. Normal application code uses thread APIs,
-not transcript-engine classes.
+The transcript engine is internal. Normal application code uses thread APIs, not transcript-engine
+classes.
 
 ## One session store
 
-Flary owns the session transcript and audit history. An application that uses
-Flary does not need to copy each message, tool call, result, or error into its
-own KV or database. Export records to a separate compliance or observability
-system only when the application has that explicit requirement.
+Flary owns the session transcript and audit history. An application that uses Flary does not need to
+copy each message, tool call, result, or error into its own KV or database. Export records to a
+separate compliance or observability system only when the application has that explicit requirement.
 
-Keep only the application fields that Flary cannot know, such as a tenant ID,
-a product record ID, display settings, or a thread-list index. Store the Flary
-thread ID with those fields. Read the session data when you need it:
+Keep only the application fields that Flary cannot know, such as a tenant ID, a product record ID,
+display settings, or a thread-list index. Store the Flary thread ID with those fields. Read the
+session data when you need it:
 
 ```ts
 const thread = await api.coder.threads.open({ threadId });
@@ -40,33 +39,27 @@ const records = await thread.audit.list({
 const jsonl = await thread.audit.export();
 ```
 
-Use `audit.list()` for the UI, support tools, and live diagnosis. Use
-`audit.export()` for a portable, ordered JSONL record. Both methods enforce the
-same tenant access rules as the thread.
+Use `audit.list()` for the UI, support tools, and live diagnosis. Use `audit.export()` for a
+portable, ordered JSONL record. Both methods enforce the same tenant access rules as the thread.
 
 ## Files
 
-Files written in `/workspace` are synchronized to durable workspace storage.
-Every completed coding turn records a tree hash, Git state, changed files,
-diff, checks, environment hash, and artifact references. A replacement
-Sandbox restores the last complete checkpoint from R2.
+Files written in `/workspace` are synchronized to durable workspace storage. Every completed coding
+turn records a tree hash, Git state, changed files, diff, checks, environment hash, and artifact
+references. A replacement Sandbox restores the last complete checkpoint from R2.
 
 ## Read old sessions
 
-Use thread history and event APIs for normal reads. Use authenticated JSONL
-export for a complete portable archive. Import and restore verify hashes before
-they create live thread state.
+Use thread history and event APIs for normal reads. Use authenticated JSONL export for a complete
+portable archive. Import and restore verify hashes before they create live thread state.
 
-The public audit includes ordered messages, provider turns, tool search,
-Code Mode, tool calls, results, approvals, errors, usage, and prompt hashes.
-The exact rendered system prompt is stored only in the encrypted canonical R2
-archive. It is not copied into the public ledger. Provider credentials, native
-cache state, and private reasoning are never exposed by the audit API.
+The public audit includes ordered messages, provider turns, tool search, Code Mode, tool calls,
+results, approvals, errors, usage, and prompt hashes. The exact rendered system prompt is stored
+only in the encrypted canonical R2 archive. It is not copied into the public ledger. Provider
+credentials, native cache state, and private reasoning are never exposed by the audit API.
 
-Flary keeps the latest 10,000 public records in Thread Control SQLite. It seals
-older records into encrypted R2 segments. This keeps active reads fast without
-losing the session history.
+Flary keeps the latest 10,000 public records in Thread Control SQLite. It seals older records into
+encrypted R2 segments. This keeps active reads fast without losing the session history.
 
-Deleting a thread cascades through transcript state, projections, D1 indexes,
-R2 archives, attachments, child threads, schedules, audits, processes, and
-workspace state.
+Deleting a thread cascades through transcript state, projections, D1 indexes, R2 archives,
+attachments, child threads, schedules, audits, processes, and workspace state.

@@ -77,4 +77,3 @@ export const BlobReferenceSchema = BlobRefSchema;
 export function parseBlobRef(value: unknown): BlobRef {
   return BlobRefSchema.parse(value);
 }
-

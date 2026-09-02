@@ -5,53 +5,50 @@ section: Reference
 order: 2
 ---
 
-`app.serve()` is the normal HTTP surface for function-first applications. It
-creates function routes and validates inputs and outputs. Mount
-`createFlaryRunRouter` only when you need the lower-level generic run API or a
-custom Flue integration.
+`app.serve()` is the normal HTTP surface for function-first applications. It creates function routes
+and validates inputs and outputs. Mount `createFlaryRunRouter` only when you need the lower-level
+generic run API or a custom Flue integration.
 
-`app.serve()` also registers the persistent-agent API for each `app.agent()`
-export. You do not write an `app.get()` or `app.post()` route for each action.
-Use its `prefix` option or mount the returned Hono application in an existing
-Hono server.
+`app.serve()` also registers the persistent-agent API for each `app.agent()` export. You do not
+write an `app.get()` or `app.post()` route for each action. Use its `prefix` option or mount the
+returned Hono application in an existing Hono server.
 
 ## Function routes
 
 For a function named `support`, `app.serve({ support })` creates:
 
-| Method | Route | Purpose |
-| --- | --- | --- |
-| POST | /functions/support | Validate input and return output |
-| POST | /functions/support/runs | Admit a durable function run |
-| GET | /functions/support/runs/:runId | Read status and output |
-| POST | /functions/support/runs/:runId/cancel | Request cancellation |
-| GET | /functions/support/runs/:runId/approvals | List pending approvals |
-| POST | /functions/support/runs/:runId/approvals/:approvalId | Decide approval |
-| GET | /functions/support/runs/:runId/user-input | List pending questions |
-| POST | /functions/support/runs/:runId/user-input/:requestId | Resume with input |
+| Method | Route                                                | Purpose                          |
+| ------ | ---------------------------------------------------- | -------------------------------- |
+| POST   | /functions/support                                   | Validate input and return output |
+| POST   | /functions/support/runs                              | Admit a durable function run     |
+| GET    | /functions/support/runs/:runId                       | Read status and output           |
+| POST   | /functions/support/runs/:runId/cancel                | Request cancellation             |
+| GET    | /functions/support/runs/:runId/approvals             | List pending approvals           |
+| POST   | /functions/support/runs/:runId/approvals/:approvalId | Decide approval                  |
+| GET    | /functions/support/runs/:runId/user-input            | List pending questions           |
+| POST   | /functions/support/runs/:runId/user-input/:requestId | Resume with input                |
 
-The function client calls these routes through `client.support()` and
-`client.support.start()`. The client currently polls durable status for a
-remote function run. Use the low-level event route when the host requires an
-SSE cursor.
+The function client calls these routes through `client.support()` and `client.support.start()`. The
+client currently polls durable status for a remote function run. Use the low-level event route when
+the host requires an SSE cursor.
 
 ## Persistent agent routes
 
-For an agent named `coder`, `app.serve({ coder })` creates authenticated routes
-for these resource families:
+For an agent named `coder`, `app.serve({ coder })` creates authenticated routes for these resource
+families:
 
-| Resource | Examples |
-| --- | --- |
-| Threads | create, list, inspect, rename, archive, unarchive, pin, delete |
-| Turns | send, queue, steer, edit, interrupt, rollback, compact, read history |
-| Models | get, list allowed, set future default, read model history |
-| Human control | approvals, user input, goals, unread cursor |
-| Subagents | spawn, list, send, wait, interrupt, resume, close |
-| Operations | audit, schedules, Recall, checkpoints, diff, restore, processes, Browser Run |
+| Resource      | Examples                                                                     |
+| ------------- | ---------------------------------------------------------------------------- |
+| Threads       | create, list, inspect, rename, archive, unarchive, pin, delete               |
+| Turns         | send, queue, steer, edit, interrupt, rollback, compact, read history         |
+| Models        | get, list allowed, set future default, read model history                    |
+| Human control | approvals, user input, goals, unread cursor                                  |
+| Subagents     | spawn, list, send, wait, interrupt, resume, close                            |
+| Operations    | audit, schedules, Recall, checkpoints, diff, restore, processes, Browser Run |
 
 Use the typed client instead of constructing these paths by hand:
 
-~~~ts
+```ts
 const thread = await api.coder.threads.open({
   organizationId: "acme",
   threadId: savedThreadId,
@@ -61,91 +58,88 @@ await thread.send({ message: "Continue the task." });
 for await (const event of thread.stream({ after: savedCursor })) {
   render(event);
 }
-~~~
+```
 
-The model stream uses the generated Flue route. Control and projection routes
-use the Flary host API. Both validate the same authenticated thread binding.
+The model stream uses the generated Flue route. Control and projection routes use the Flary host
+API. Both validate the same authenticated thread binding.
 
 ## Hibernating WebSocket control
 
-`thread.connect()` first creates a short-lived, single-use ticket through an
-authenticated HTTP route. The client then opens the returned `wss:` URL. The
-Thread Control Durable Object consumes the ticket and can hibernate while the
-connection stays open.
+`thread.connect()` first creates a short-lived, single-use ticket through an authenticated HTTP
+route. The client then opens the returned `wss:` URL. The Thread Control Durable Object consumes the
+ticket and can hibernate while the connection stays open.
 
-Client frames are versioned Zod records. Commands include a request ID and an
-idempotency key. Supported commands cover send, steer, interrupt, approval,
-user input, subagent control, process control, and Browser Run takeover. Server
-frames are `ready`, `events`, `accepted`, `result`, `error`,
-`resync_required`, and `pong`.
+Client frames are versioned Zod records. Commands include a request ID and an idempotency key.
+Supported commands cover send, steer, interrupt, approval, user input, subagent control, process
+control, and Browser Run takeover. Server frames are `ready`, `events`, `accepted`, `result`,
+`error`, `resync_required`, and `pong`.
 
-The client acknowledges durable numeric cursors. If its cursor is outside the
-bounded socket replay window, the server sends `resync_required`; use HTTP or
-SSE to read the older records before reconnecting.
+The client acknowledges durable numeric cursors. If its cursor is outside the bounded socket replay
+window, the server sends `resync_required`; use HTTP or SSE to read the older records before
+reconnecting.
 
 ## Low-level run routes
 
-Mount `createFlaryRunRouter` below a route that already authenticates the
-request. Flary resolves trusted context through the host callback.
+Mount `createFlaryRunRouter` below a route that already authenticates the request. Flary resolves
+trusted context through the host callback.
 
 ## Routes
 
-| Method | Route | Purpose |
-| --- | --- | --- |
-| POST | /runs | Admit one agent or workflow run |
-| GET | /runs/:runId | Read current status and result |
-| GET | /runs/:runId/events | Replay and stream normalized SSE |
-| POST | /runs/:runId/input | Resume a waiting run |
-| POST | /runs/:runId/cancel | Request cancellation |
+| Method | Route               | Purpose                          |
+| ------ | ------------------- | -------------------------------- |
+| POST   | /runs               | Admit one agent or workflow run  |
+| GET    | /runs/:runId        | Read current status and result   |
+| GET    | /runs/:runId/events | Replay and stream normalized SSE |
+| POST   | /runs/:runId/input  | Resume a waiting run             |
+| POST   | /runs/:runId/cancel | Request cancellation             |
 
-The create body includes requestId, channelId, input, optional execution,
-profileId, idempotencyKey, requestedAt, traceContext, and metadata. It does
-not include tenantId, agentId, roles, scopes, or credentials.
+The create body includes requestId, channelId, input, optional execution, profileId, idempotencyKey,
+requestedAt, traceContext, and metadata. It does not include tenantId, agentId, roles, scopes, or
+credentials.
 
 ## SSE cursor
 
 Send either afterSequence as a query value or Last-Event-ID as a header:
 
-~~~text
+```text
 GET /v1/agents/support/runs/run_123/events?afterSequence=41
 Last-Event-ID: 41
 Accept: text/event-stream
-~~~
+```
 
 The server sends a numeric event ID, an event type, and a JSON payload:
 
-~~~text
+```text
 id: 42
 event: message.delta
 data: {"sequence":42,"type":"message.delta","payload":{"delta":"Hello"}}
-~~~
+```
 
-Heartbeat events keep an active connection visible. The client must ignore
-heartbeats when rendering message content.
+Heartbeat events keep an active connection visible. The client must ignore heartbeats when rendering
+message content.
 
 ## Event families
 
-Normalized events include run admission and settlement, model and reasoning
-deltas, tool start and completion, approval requests and decisions, waiting and
-resumed state, user input, usage, checkpoint, completion, failure, and
-cancellation.
+Normalized events include run admission and settlement, model and reasoning deltas, tool start and
+completion, approval requests and decisions, waiting and resumed state, user input, usage,
+checkpoint, completion, failure, and cancellation.
 
 Validate every event with RunEventSchema before rendering or storing it:
 
-~~~ts
+```ts
 import { RunEventSchema } from "flary/contracts";
 
 const event = RunEventSchema.parse(incomingEvent);
 if (event.type === "tool.started") {
   showToolActivity(event.payload);
 }
-~~~
+```
 
 ## Errors
 
 The host router returns a stable error envelope:
 
-~~~json
+```json
 {
   "error": {
     "type": "invalid_request",
@@ -153,8 +147,8 @@ The host router returns a stable error envelope:
     "details": []
   }
 }
-~~~
+```
 
-Provider failures, missing credentials, approval denial, invalid mode access,
-and uncertain tool outcomes use typed error codes. Do not expose provider
-tokens, authorization codes, or raw upstream responses to the client.
+Provider failures, missing credentials, approval denial, invalid mode access, and uncertain tool
+outcomes use typed error codes. Do not expose provider tokens, authorization codes, or raw upstream
+responses to the client.

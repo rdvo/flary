@@ -4,7 +4,10 @@ export const SecretNameSchema = z
   .string()
   .min(1)
   .max(512)
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/, "Secret names must contain only safe identifier characters");
+  .regex(
+    /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/,
+    "Secret names must contain only safe identifier characters",
+  );
 
 const SecretRefCanonicalSchema = z
   .object({
@@ -96,10 +99,7 @@ export interface EnvelopeDecryptOptions {
 /** Provider-neutral contract for authenticated envelope encryption. */
 export interface EnvelopeEncryptor {
   encrypt(plaintext: Uint8Array, options: EnvelopeEncryptOptions): Promise<EncryptedEnvelope>;
-  decrypt(
-    envelope: EncryptedEnvelope,
-    options?: EnvelopeDecryptOptions,
-  ): Promise<Uint8Array>;
+  decrypt(envelope: EncryptedEnvelope, options?: EnvelopeDecryptOptions): Promise<Uint8Array>;
 }
 
 export interface SecretProvider {

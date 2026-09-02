@@ -11,14 +11,8 @@ import {
 } from "../src/mail/index.ts";
 
 test("mail helpers normalize addresses and reply subjects", () => {
-  assert.equal(
-    normalizeMailAddress("Flary <Admin@Example.com>"),
-    "admin@example.com"
-  );
-  assert.equal(
-    normalizeMailSubject("Re: Fwd:  Account   access "),
-    "Account access"
-  );
+  assert.equal(normalizeMailAddress("Flary <Admin@Example.com>"), "admin@example.com");
+  assert.equal(normalizeMailSubject("Re: Fwd:  Account   access "), "Account access");
   assert.equal(replySubject("Account access"), "Re: Account access");
   assert.equal(replySubject("RE: Account access"), "RE: Account access");
 });
@@ -26,7 +20,7 @@ test("mail helpers normalize addresses and reply subjects", () => {
 test("reply headers preserve a bounded RFC message chain", () => {
   const headers = createReplyThreadHeaders(
     "<child@example.com>",
-    "<root@example.com> <parent@example.com>"
+    "<root@example.com> <parent@example.com>",
   );
   assert.deepEqual(headers, {
     "In-Reply-To": "<child@example.com>",
@@ -52,18 +46,9 @@ test("thread keys prefer the root reference", async () => {
 
 test("the mail template keeps Better Auth account identities issuer scoped", async () => {
   const [migration, schema, components] = await Promise.all([
-    readFile(
-      new URL("../templates/mail/migrations/0001_mail.sql", import.meta.url),
-      "utf8"
-    ),
-    readFile(
-      new URL("../templates/mail/src/db/schema.ts", import.meta.url),
-      "utf8"
-    ),
-    readFile(
-      new URL("../templates/mail/components.json", import.meta.url),
-      "utf8"
-    ),
+    readFile(new URL("../templates/mail/migrations/0001_mail.sql", import.meta.url), "utf8"),
+    readFile(new URL("../templates/mail/src/db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../templates/mail/components.json", import.meta.url), "utf8"),
   ]);
   assert.match(migration, /issuer TEXT NOT NULL/);
   assert.match(migration, /UNIQUE\(issuer, account_id\)/);

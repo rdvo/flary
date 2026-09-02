@@ -25,23 +25,14 @@ type SqlDatabase = {
 function sqlStore(): SubagentCoordinatorSqlStorage {
   const database = new DatabaseSync(":memory:") as unknown as SqlDatabase;
   return {
-    exec<T = Record<string, unknown>>(
-      query: string,
-      ...bindings: unknown[]
-    ): { toArray(): T[] } {
+    exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): { toArray(): T[] } {
       const trimmed = query.trim().toLowerCase();
-      if (
-        bindings.length === 0 &&
-        !/^(select|with|pragma|explain|update)\b/.test(trimmed)
-      ) {
+      if (bindings.length === 0 && !/^(select|with|pragma|explain|update)\b/.test(trimmed)) {
         database.exec(query);
         return { toArray: () => [] };
       }
       const statement = database.prepare(query);
-      if (
-        /^(select|with|pragma|explain)\b/.test(trimmed) ||
-        /\breturning\b/.test(trimmed)
-      ) {
+      if (/^(select|with|pragma|explain)\b/.test(trimmed) || /\breturning\b/.test(trimmed)) {
         return { toArray: () => statement.all(...bindings) as T[] };
       }
       statement.run(...bindings);
@@ -206,7 +197,7 @@ test("SQLite applies concurrent and total spawn limits in transactions", () => {
       }),
     (error: unknown) =>
       error instanceof SubagentPolicyError &&
-      error.message === "Subagent concurrency limit reached"
+      error.message === "Subagent concurrency limit reached",
   );
   assert.equal(coordinator.listThreads().length, 2);
   assert.equal(coordinator.readActivity().length, 1);
@@ -237,8 +228,7 @@ test("SQLite applies concurrent and total spawn limits in transactions", () => {
         seedTurns: 0,
       }),
     (error: unknown) =>
-      error instanceof SubagentPolicyError &&
-      error.message === "Subagent total limit reached"
+      error instanceof SubagentPolicyError && error.message === "Subagent total limit reached",
   );
 });
 
@@ -291,13 +281,11 @@ test("SQLite restores queued and interrupt mailbox messages with shared cursors"
   });
   assert.deepEqual(
     restarted.readMessages(child.threadId).map((message) => message.mode),
-    ["queue", "interrupt"]
+    ["queue", "interrupt"],
   );
   assert.deepEqual(
-    restarted
-      .readMessages(child.threadId, queued.sequence)
-      .map((message) => message.id),
-    [interrupt.id]
+    restarted.readMessages(child.threadId, queued.sequence).map((message) => message.id),
+    [interrupt.id],
   );
   assert.deepEqual(
     restarted.send({
@@ -308,11 +296,11 @@ test("SQLite restores queued and interrupt mailbox messages with shared cursors"
       toThreadId: child.threadId,
       content: "Ignored replay input",
     }),
-    queued
+    queued,
   );
   assert.deepEqual(
     restarted.readActivity().map((event) => event.kind),
-    ["spawned", "interacted", "interacted"]
+    ["spawned", "interacted", "interacted"],
   );
 });
 
@@ -360,7 +348,7 @@ test("SQLite restores control state and rejects a changed durable identity", () 
       threadId: child.threadId,
       action: "start",
     }),
-    running
+    running,
   );
   const completed = restarted.control({
     requestId: "complete_child",
@@ -385,6 +373,6 @@ test("SQLite restores control state and rejects a changed durable identity", () 
         },
         policy,
       }),
-    /identity does not match/
+    /identity does not match/,
   );
 });

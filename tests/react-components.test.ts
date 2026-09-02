@@ -49,15 +49,17 @@ test("FlaryUserInput renders choices and a free-form answer", () => {
         request: {
           id: "input_1",
           threadId: "thread_1",
-          questions: [{
-            header: "Delivery",
-            question: "When should we deliver?",
-            options: [
-              { label: "Today", description: "Fastest available" },
-              { label: "Tomorrow", description: "More selection" },
-            ],
-            multiSelect: false,
-          }],
+          questions: [
+            {
+              header: "Delivery",
+              question: "When should we deliver?",
+              options: [
+                { label: "Today", description: "Fastest available" },
+                { label: "Tomorrow", description: "More selection" },
+              ],
+              multiSelect: false,
+            },
+          ],
           requestedBy: { id: "agent", kind: "agent", version: "1" },
           requestedAt: new Date(0).toISOString(),
         },

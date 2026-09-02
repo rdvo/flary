@@ -44,9 +44,7 @@ test("accepts W3C trace context and rejects invalid IDs", () => {
 
   assert.throws(() => TraceParentSchema.parse(traceparent.toUpperCase()));
   assert.throws(() =>
-    TraceParentSchema.parse(
-      "00-00000000000000000000000000000000-00f067aa0ba902b7-01"
-    )
+    TraceParentSchema.parse("00-00000000000000000000000000000000-00f067aa0ba902b7-01"),
   );
 });
 
@@ -70,7 +68,7 @@ test("validates span kind, status, and time order", () => {
       status: "ok",
       startedAt: "2026-07-28T12:00:01.000Z",
       endedAt: "2026-07-28T12:00:00.000Z",
-    })
+    }),
   );
 });
 
@@ -91,16 +89,11 @@ test("normalizes token, cache, reasoning, media, provider, and cost data", () =>
 
   assert.equal(usage.totalTokens, 140);
   assert.equal(usage.cost?.state, "known");
-  assert.deepEqual(
-    CostSchema.parse({ state: "unknown", reason: "not billed" }),
-    {
-      state: "unknown",
-      reason: "not billed",
-    }
-  );
-  assert.throws(() =>
-    CostSchema.parse({ state: "known", microUnits: 1.5, unit: "USD" })
-  );
+  assert.deepEqual(CostSchema.parse({ state: "unknown", reason: "not billed" }), {
+    state: "unknown",
+    reason: "not billed",
+  });
+  assert.throws(() => CostSchema.parse({ state: "known", microUnits: 1.5, unit: "USD" }));
   assert.throws(() => CostSchema.parse({ state: "known", unit: "USD" }));
 });
 
@@ -118,7 +111,7 @@ test("references contain only safe metadata and reject raw content", () => {
       kind: "prompt",
       id: "prompt-1",
       content: "a secret prompt",
-    })
+    }),
   );
 });
 
@@ -216,6 +209,6 @@ test("validates typed telemetry event families", () => {
         model: reference("model", "openai/gpt-5"),
         promptText: "must not be stored in telemetry",
       },
-    })
+    }),
   );
 });

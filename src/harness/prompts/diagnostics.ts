@@ -1,17 +1,11 @@
 import { z } from "zod";
 
-import {
-  PromptDiagnostic,
-  PromptDiagnosticSchema,
-} from "./types";
+import { PromptDiagnostic, PromptDiagnosticSchema } from "./types.js";
 
 export class PromptCompileError extends Error {
   readonly diagnostics: PromptDiagnostic[];
 
-  constructor(
-    diagnostics: PromptDiagnostic | PromptDiagnostic[],
-    options?: { cause?: unknown }
-  ) {
+  constructor(diagnostics: PromptDiagnostic | PromptDiagnostic[], options?: { cause?: unknown }) {
     const parsedDiagnostics = z
       .array(PromptDiagnosticSchema)
       .parse(Array.isArray(diagnostics) ? diagnostics : [diagnostics]);
@@ -34,8 +28,7 @@ export class PromptCompileError extends Error {
 export { PromptCompileError as PromptCompilationError };
 
 export function makeDiagnostic(
-  diagnostic: Omit<PromptDiagnostic, "severity"> &
-    Partial<Pick<PromptDiagnostic, "severity">>
+  diagnostic: Omit<PromptDiagnostic, "severity"> & Partial<Pick<PromptDiagnostic, "severity">>,
 ): PromptDiagnostic {
   return PromptDiagnosticSchema.parse({
     severity: "error",
@@ -45,28 +38,24 @@ export function makeDiagnostic(
 
 export function formatDiagnostic(diagnostic: PromptDiagnostic): string {
   const location = diagnostic.file
-    ? `${diagnostic.file}${
-        diagnostic.line === undefined ? "" : `:${diagnostic.line}`
-      }${
+    ? `${diagnostic.file}${diagnostic.line === undefined ? "" : `:${diagnostic.line}`}${
         diagnostic.column === undefined ? "" : `:${diagnostic.column}`
       }`
     : undefined;
-  const prefix = location
-    ? `${location} [${diagnostic.code}]`
-    : `[${diagnostic.code}]`;
+  const prefix = location ? `${location} [${diagnostic.code}]` : `[${diagnostic.code}]`;
   return `${prefix} ${diagnostic.message}`;
 }
 
 export function throwCompileError(
   diagnostics: PromptDiagnostic | PromptDiagnostic[],
-  cause?: unknown
+  cause?: unknown,
 ): never {
   throw new PromptCompileError(diagnostics, { cause });
 }
 
 export function diagnosticFromZod(
   error: z.ZodError,
-  options: { code?: string; file?: string; prefix?: string } = {}
+  options: { code?: string; file?: string; prefix?: string } = {},
 ): PromptDiagnostic[] {
   const code = options.code ?? "INVALID_ARGUMENT";
   return error.issues.map((issue) => {
@@ -82,7 +71,7 @@ export function diagnosticFromZod(
 
 export function throwZodBoundaryError(
   error: unknown,
-  options: { code?: string; file?: string; prefix?: string } = {}
+  options: { code?: string; file?: string; prefix?: string } = {},
 ): never {
   if (error instanceof z.ZodError) {
     throwCompileError(diagnosticFromZod(error, options), error);

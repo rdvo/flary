@@ -8,13 +8,15 @@ import {
   type RecallOpenRequest,
   type RecallResult,
   type RecallSearchRequest,
-} from "../contracts/recall";
-import type { RecallScope } from "../contracts/recall";
+} from "../contracts/recall.js";
+import type { RecallScope } from "../contracts/recall.js";
 
 export interface RecallIndex {
   upsert(documents: readonly RecallDocumentInput[]): Promise<void>;
   delete(ids: readonly string[]): Promise<void>;
-  search(request: RecallSearchRequest): Promise<ReturnType<typeof RecallSearchResponseSchema.parse>>;
+  search(
+    request: RecallSearchRequest,
+  ): Promise<ReturnType<typeof RecallSearchResponseSchema.parse>>;
   open(request: RecallOpenRequest): Promise<RecallDocument | undefined>;
 }
 
@@ -33,10 +35,7 @@ function scopeContains(parent: RecallScope, child: RecallScope): boolean {
     case "session":
       return child.sessionId === parent.sessionId;
     case "project":
-      return (
-        child.appId === parent.appId &&
-        child.projectId === parent.projectId
-      );
+      return child.appId === parent.appId && child.projectId === parent.projectId;
     case "app":
       return child.appId === parent.appId;
     case "organization":
@@ -51,9 +50,7 @@ function makeSnippet(content: string, query: string): string {
   if (position < 0) return compact.slice(0, 317) + "...";
   const start = Math.max(0, position - 110);
   const end = Math.min(compact.length, start + 320);
-  return (start > 0 ? "..." : "") +
-    compact.slice(start, end) +
-    (end < compact.length ? "..." : "");
+  return (start > 0 ? "..." : "") + compact.slice(start, end) + (end < compact.length ? "..." : "");
 }
 
 function scoreDocument(content: string, query: string): number {
@@ -75,12 +72,11 @@ function resultFor(
   request: RecallSearchRequest,
   score: number,
 ): RecallResult {
-  const matchType =
-    normalize(document.content).includes(normalize(request.query))
-      ? "exact"
-      : request.mode === "semantic"
-        ? "semantic"
-        : "hybrid";
+  const matchType = normalize(document.content).includes(normalize(request.query))
+    ? "exact"
+    : request.mode === "semantic"
+      ? "semantic"
+      : "hybrid";
   return {
     id: document.id,
     snippet: makeSnippet(document.content, request.query),
@@ -124,18 +120,14 @@ export class InMemoryRecallIndex implements RecallIndex {
         score: scoreDocument(document.content, request.query),
         exact: normalize(document.content).includes(normalize(request.query)),
       }))
-      .filter((item) =>
-        request.mode === "exact" ? item.exact : item.score > 0,
-      )
+      .filter((item) => (request.mode === "exact" ? item.exact : item.score > 0))
       .sort(
         (left, right) =>
           right.score - left.score ||
           right.document.createdAt.localeCompare(left.document.createdAt),
       )
       .slice(0, request.limit)
-      .map(({ document, score }) =>
-        resultFor(document, request, score),
-      );
+      .map(({ document, score }) => resultFor(document, request, score));
     return RecallSearchResponseSchema.parse({ results });
   }
 
@@ -150,9 +142,7 @@ export class InMemoryRecallIndex implements RecallIndex {
   }
 
   documents(): RecallDocument[] {
-    return [...this.#documents.values()].map((document) =>
-      RecallDocumentSchema.parse(document),
-    );
+    return [...this.#documents.values()].map((document) => RecallDocumentSchema.parse(document));
   }
 }
 
@@ -170,10 +160,7 @@ export class RecallService {
 
 type TurbopufferFilter = [string, string, unknown];
 
-function recallFilters(
-  scope: RecallScope,
-  kinds?: readonly string[],
-): TurbopufferFilter[] {
+function recallFilters(scope: RecallScope, kinds?: readonly string[]): TurbopufferFilter[] {
   const filters: TurbopufferFilter[] = [];
   if (scope.organizationId) {
     filters.push(["organization_id", "Eq", scope.organizationId]);
@@ -196,7 +183,7 @@ export interface TurbopufferRecallIndexOptions {
 type TurbopufferRow = {
   id: string;
   score?: number;
-  "$dist"?: number;
+  $dist?: number;
   attributes?: Record<string, unknown>;
 };
 
@@ -254,12 +241,7 @@ export class TurbopufferRecallIndex implements RecallIndex {
   async search(requestInput: RecallSearchRequest) {
     const request = RecallSearchRequestSchema.parse(requestInput);
     const filters = recallFilters(request.scope, request.kinds);
-    const includeAttributes = [
-      "content",
-      "kind",
-      "reference_json",
-      "metadata_json",
-    ];
+    const includeAttributes = ["content", "kind", "reference_json", "metadata_json"];
     const vector =
       request.mode !== "exact" && this.options.embed
         ? await this.options.embed(request.query)
@@ -295,30 +277,21 @@ export class TurbopufferRecallIndex implements RecallIndex {
     const rows = Array.isArray(body.rows)
       ? (body.rows as TurbopufferRow[])
       : Array.isArray(body.results)
-        ? ((body.results[0] as { rows?: unknown[] } | undefined)?.rows ??
-            []) as TurbopufferRow[]
+        ? (((body.results[0] as { rows?: unknown[] } | undefined)?.rows ?? []) as TurbopufferRow[])
         : [];
-    const results = rows
-      .map((row) => {
-        const attributes = row.attributes ?? {};
-        const reference = JSON.parse(String(attributes.reference_json ?? "{}"));
-        return {
-          id: String(row.id),
-          snippet: makeSnippet(
-            String(attributes.content ?? ""),
-            request.query,
-          ),
-          reference,
-          score: Number(row.score ?? row["$dist"] ?? 0),
-          matchType:
-            request.mode === "exact"
-              ? "exact"
-              : request.mode === "semantic"
-                ? "semantic"
-                : "hybrid",
-          metadata: JSON.parse(String(attributes.metadata_json ?? "{}")),
-        };
-      });
+    const results = rows.map((row) => {
+      const attributes = row.attributes ?? {};
+      const reference = JSON.parse(String(attributes.reference_json ?? "{}"));
+      return {
+        id: String(row.id),
+        snippet: makeSnippet(String(attributes.content ?? ""), request.query),
+        reference,
+        score: Number(row.score ?? row["$dist"] ?? 0),
+        matchType:
+          request.mode === "exact" ? "exact" : request.mode === "semantic" ? "semantic" : "hybrid",
+        metadata: JSON.parse(String(attributes.metadata_json ?? "{}")),
+      };
+    });
     return RecallSearchResponseSchema.parse({ results });
   }
 
@@ -344,9 +317,7 @@ export class TurbopufferRecallIndex implements RecallIndex {
         "created_at",
       ],
     });
-    const row = Array.isArray(body.rows)
-      ? (body.rows as TurbopufferRow[])[0]
-      : undefined;
+    const row = Array.isArray(body.rows) ? (body.rows as TurbopufferRow[])[0] : undefined;
     if (!row) return undefined;
     const attributes = row.attributes ?? {};
     const document = RecallDocumentSchema.parse({
@@ -386,10 +357,7 @@ export class TurbopufferRecallIndex implements RecallIndex {
     results?: Array<{ rows?: unknown[] }>;
   }> {
     const response = await this.request(
-      this.baseUrl +
-        "/v2/namespaces/" +
-        encodeURIComponent(this.options.namespace) +
-        suffix,
+      this.baseUrl + "/v2/namespaces/" + encodeURIComponent(this.options.namespace) + suffix,
       {
         method: "POST",
         headers: {
@@ -400,13 +368,11 @@ export class TurbopufferRecallIndex implements RecallIndex {
       },
     );
     if (!response.ok) {
-      throw new Error(
-        "Turbopuffer recall request failed with HTTP " + response.status,
-      );
+      throw new Error("Turbopuffer recall request failed with HTTP " + response.status);
     }
     const payload: unknown = await response.json();
     if (!payload || typeof payload !== "object") return {};
     return payload as { rows?: unknown[] };
   }
 }
-export { ArtifactRecallIndexer } from "./artifacts";
+export { ArtifactRecallIndexer } from "./artifacts.js";

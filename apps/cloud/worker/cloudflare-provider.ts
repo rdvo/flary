@@ -33,12 +33,7 @@ export async function getCloudflareAIGatewayProvider(
   const connection = rows[0];
   if (!connection?.accountId || !connection.gatewayId) return null;
 
-  const apiToken = await getCloudflareAccessToken(
-    env,
-    database,
-    organizationId,
-    userId,
-  );
+  const apiToken = await getCloudflareAccessToken(env, database, organizationId, userId);
   if (!apiToken) return null;
 
   const headers = new Headers();

@@ -51,23 +51,18 @@ test("the OSS host router lists and resolves structured user input", async () =>
     service,
   });
 
-  const pending = await router.request(
-    "/apps/relayr/threads/thread_1/user-input",
-  );
-  const pendingBody = await pending.json() as {
+  const pending = await router.request("/apps/relayr/threads/thread_1/user-input");
+  const pendingBody = (await pending.json()) as {
     requests: Array<{ request: { id: string } }>;
   };
   assert.equal(pending.status, 200);
   assert.equal(pendingBody.requests[0]?.request.id, "input_1");
 
-  const response = await router.request(
-    "/apps/relayr/threads/thread_1/user-input/input_1",
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ answers: { Scope: "API" } }),
-    },
-  );
+  const response = await router.request("/apps/relayr/threads/thread_1/user-input/input_1", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ answers: { Scope: "API" } }),
+  });
   assert.equal(response.status, 200);
   assert.equal(answered, "API");
   assert.deepEqual(await response.json(), { live: true });
@@ -77,11 +72,13 @@ test("secret requests accept values only at the protected fulfillment route", as
   const request = UserInputRequestSchema.parse({
     id: "secret_1",
     threadId: "thread_1",
-    questions: [{
-      header: "Secure credential",
-      question: "Enter the token in the protected form.",
-      options: [],
-    }],
+    questions: [
+      {
+        header: "Secure credential",
+        question: "Enter the token in the protected form.",
+        options: [],
+      },
+    ],
     requestedBy: { id: "agent_1", kind: "agent", version: "1" },
     requestedAt: "2026-08-26T12:00:00.000Z",
     metadata: {
@@ -133,25 +130,19 @@ test("secret requests accept values only at the protected fulfillment route", as
     },
   });
 
-  const unsafe = await router.request(
-    "/apps/relayr/threads/thread_1/user-input/secret_1",
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ response: "raw-token-must-not-enter-thread" }),
-    },
-  );
+  const unsafe = await router.request("/apps/relayr/threads/thread_1/user-input/secret_1", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ response: "raw-token-must-not-enter-thread" }),
+  });
   assert.equal(unsafe.status, 409);
   assert.equal(storedValue, "");
 
-  const response = await router.request(
-    "/apps/relayr/threads/thread_1/secret-requests/secret_1",
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ value: "github-secret-value" }),
-    },
-  );
+  const response = await router.request("/apps/relayr/threads/thread_1/secret-requests/secret_1", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ value: "github-secret-value" }),
+  });
   assert.equal(response.status, 200);
   assert.equal(storedValue, "github-secret-value");
   assert.deepEqual(safeAnswers, {

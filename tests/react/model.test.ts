@@ -10,7 +10,7 @@ import {
 const record = (
   sequence: number,
   recordType: string,
-  publicPayload: Record<string, unknown> = {}
+  publicPayload: Record<string, unknown> = {},
 ) => ({
   sequence,
   recordType,
@@ -58,7 +58,7 @@ test("the React projector creates one durable turn and one ordered work rail", (
     [
       ["user", "Check revenue"],
       ["assistant", "Revenue is $250."],
-    ]
+    ],
   );
   assert.deepEqual(
     turns[0]?.activity.map((item) => item.label),
@@ -67,25 +67,20 @@ test("the React projector creates one durable turn and one ordered work rail", (
       "Completed Code Mode",
       "Searched tools · 2 found",
       "Used tracked get stats",
-    ]
+    ],
   );
-  assert.equal(
-    turns[0]?.activity.filter((item) => item.kind === "reasoning").length,
-    1
-  );
+  assert.equal(turns[0]?.activity.filter((item) => item.kind === "reasoning").length, 1);
 });
 
 test("record merge replaces replay duplicates by durable sequence", () => {
-  const first = normalizeFlaryUiRecords([
-    record(1, "message.user", { message: "one" }),
-  ]);
+  const first = normalizeFlaryUiRecords([record(1, "message.user", { message: "one" })]);
   const second = normalizeFlaryUiRecords([
     record(1, "message.user", { message: "one" }),
     record(2, "message.assistant", { message: "two" }),
   ]);
   assert.deepEqual(
     mergeFlaryUiRecords(first, second).map((item) => item.sequence),
-    [1, 2]
+    [1, 2],
   );
 });
 
@@ -98,7 +93,7 @@ test("assistant projection ignores empty and cyclic content", () => {
       record(2, "message.assistant", {}),
       record(3, "message.assistant", { message: cyclic }),
       record(4, "message.assistant", { message: { content: "Hi" } }),
-    ])
+    ]),
   );
 
   assert.deepEqual(
@@ -106,7 +101,7 @@ test("assistant projection ignores empty and cyclic content", () => {
     [
       ["user", "Hello"],
       ["assistant", "Hi"],
-    ]
+    ],
   );
 });
 
@@ -118,7 +113,7 @@ test("approval records pause the turn without exposing private data", () => {
         approvalId: "approval_1",
         operation: "workspace.publish",
       }),
-    ])
+    ]),
   );
   assert.equal(turns[0]?.status, "waiting");
   assert.equal(turns[0]?.activity[0]?.approvalId, "approval_1");

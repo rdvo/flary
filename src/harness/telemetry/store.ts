@@ -36,12 +36,8 @@ export interface TelemetryAggregate {
 
 export interface TelemetryStore {
   append(event: TelemetryEvent): Promise<StoredTelemetryEvent>;
-  appendMany(
-    events: readonly TelemetryEvent[]
-  ): Promise<readonly StoredTelemetryEvent[]>;
-  read(
-    options?: TelemetryReadOptions
-  ): Promise<readonly StoredTelemetryEvent[]>;
+  appendMany(events: readonly TelemetryEvent[]): Promise<readonly StoredTelemetryEvent[]>;
+  read(options?: TelemetryReadOptions): Promise<readonly StoredTelemetryEvent[]>;
   readTrace(traceId: TraceId): Promise<readonly StoredTelemetryEvent[]>;
   readRun(runId: string): Promise<readonly StoredTelemetryEvent[]>;
   readChildren(parentSpanId: SpanId): Promise<readonly StoredTelemetryEvent[]>;
@@ -54,21 +50,12 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function matches(
-  entry: StoredTelemetryEvent,
-  options: TelemetryReadOptions
-): boolean {
+function matches(entry: StoredTelemetryEvent, options: TelemetryReadOptions): boolean {
   const { event } = entry;
-  if (
-    options.afterSequence !== undefined &&
-    entry.sequence <= options.afterSequence
-  ) {
+  if (options.afterSequence !== undefined && entry.sequence <= options.afterSequence) {
     return false;
   }
-  if (
-    options.traceId !== undefined &&
-    event.traceContext.traceId !== options.traceId
-  ) {
+  if (options.traceId !== undefined && event.traceContext.traceId !== options.traceId) {
     return false;
   }
   if (options.runId !== undefined && event.runId !== options.runId) {
@@ -103,11 +90,9 @@ export class InMemoryTelemetryStore implements TelemetryStore {
   }
 
   async appendMany(
-    eventInputs: readonly TelemetryEvent[]
+    eventInputs: readonly TelemetryEvent[],
   ): Promise<readonly StoredTelemetryEvent[]> {
-    const events = eventInputs.map((event) =>
-      TelemetryEventSchema.parse(event)
-    );
+    const events = eventInputs.map((event) => TelemetryEventSchema.parse(event));
     for (const event of events) {
       if (this.ids.has(event.id)) {
         throw new Error(`Telemetry event '${event.id}' already exists`);
@@ -130,17 +115,10 @@ export class InMemoryTelemetryStore implements TelemetryStore {
     }));
   }
 
-  async read(
-    options: TelemetryReadOptions = {}
-  ): Promise<readonly StoredTelemetryEvent[]> {
+  async read(options: TelemetryReadOptions = {}): Promise<readonly StoredTelemetryEvent[]> {
     const limit = options.limit ?? Number.POSITIVE_INFINITY;
-    if (
-      (limit !== Number.POSITIVE_INFINITY && !Number.isInteger(limit)) ||
-      limit < 0
-    ) {
-      throw new RangeError(
-        "Telemetry read limit must be a non-negative integer"
-      );
+    if ((limit !== Number.POSITIVE_INFINITY && !Number.isInteger(limit)) || limit < 0) {
+      throw new RangeError("Telemetry read limit must be a non-negative integer");
     }
     const result: StoredTelemetryEvent[] = [];
     for (const entry of this.entries) {
@@ -159,9 +137,7 @@ export class InMemoryTelemetryStore implements TelemetryStore {
     return this.read({ runId });
   }
 
-  async readChildren(
-    parentSpanId: SpanId
-  ): Promise<readonly StoredTelemetryEvent[]> {
+  async readChildren(parentSpanId: SpanId): Promise<readonly StoredTelemetryEvent[]> {
     return this.read({ parentSpanId });
   }
 
@@ -179,10 +155,7 @@ export class InMemoryTelemetryStore implements TelemetryStore {
     let hasCost = false;
 
     for (const entry of entries) {
-      if (
-        entry.event.type !== "model" ||
-        entry.event.payload.action !== "completed"
-      ) {
+      if (entry.event.type !== "model" || entry.event.payload.action !== "completed") {
         continue;
       }
       const usage = entry.event.payload.usage;
@@ -239,9 +212,7 @@ export class InMemoryTelemetryStore implements TelemetryStore {
     };
   }
 
-  async *replay(
-    options: TelemetryReadOptions = {}
-  ): AsyncIterable<StoredTelemetryEvent> {
+  async *replay(options: TelemetryReadOptions = {}): AsyncIterable<StoredTelemetryEvent> {
     for (const entry of await this.read(options)) yield entry;
   }
 
@@ -255,15 +226,11 @@ export class InMemoryTelemetryStore implements TelemetryStore {
   }
 }
 
-function addUsage(
-  usage: NormalizedUsage,
-  add: (key: string, value: number) => void
-): void {
+function addUsage(usage: NormalizedUsage, add: (key: string, value: number) => void): void {
   if (usage.inputTokens !== undefined) add("inputTokens", usage.inputTokens);
   if (usage.outputTokens !== undefined) add("outputTokens", usage.outputTokens);
   if (usage.totalTokens !== undefined) add("totalTokens", usage.totalTokens);
-  if (usage.reasoning?.tokens !== undefined)
-    add("reasoningTokens", usage.reasoning.tokens);
+  if (usage.reasoning?.tokens !== undefined) add("reasoningTokens", usage.reasoning.tokens);
   if (usage.cache?.readTokens !== undefined) {
     add("cacheReadTokens", usage.cache.readTokens);
   } else if (usage.cache?.readInputTokens !== undefined) {

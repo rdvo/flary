@@ -1,14 +1,14 @@
 # Clean authoring syntax proposal
 
-Status: design only. The public documentation must use the current API until
-one of these forms is implemented and released.
+Status: design only. The public documentation must use the current API until one of these forms is
+implemented and released.
 
 ## Design rules
 
-1. The first example must have no runtime limits, durability settings, model
-   routing, or policy objects.
-2. The application supplies safe defaults for model selection, compaction,
-   durability, replay, and limits.
+1. The first example must have no runtime limits, durability settings, model routing, or policy
+   objects.
+2. The application supplies safe defaults for model selection, compaction, durability, replay, and
+   limits.
 3. The method name states intent: prompt, read, write, or agent.
 4. Zod remains the runtime contract for input and output.
 5. Advanced controls are optional modifiers, not fields in every definition.
@@ -24,8 +24,8 @@ import { flary, z } from "flary";
 export const app = flary("openai/gpt-5");
 ```
 
-The object form remains available when an application needs bindings,
-authentication, or provider routing.
+The object form remains available when an application needs bindings, authentication, or provider
+routing.
 
 ### Native read tool
 
@@ -57,20 +57,22 @@ export const refundOrder = app.write(
 );
 ```
 
-`write` means approval and idempotency by default. A product can relax the
-approval only through a trusted application policy.
+`write` means approval and idempotency by default. A product can relax the approval only through a
+trusted application policy.
 
 ### Prompt function
 
 ```ts
-export const support = app.prompt(
-  z.object({ question: z.string().min(1) }),
-  z.object({
-    answer: z.string(),
-    sources: z.array(z.url()),
-  }),
-  ({ question }) => `Answer with product facts and sources.\n\n${question}`,
-).using(searchDocs, github);
+export const support = app
+  .prompt(
+    z.object({ question: z.string().min(1) }),
+    z.object({
+      answer: z.string(),
+      sources: z.array(z.url()),
+    }),
+    ({ question }) => `Answer with product facts and sources.\n\n${question}`,
+  )
+  .using(searchDocs, github);
 ```
 
 The value stays callable:
@@ -82,14 +84,13 @@ const answer = await support({ question: "How do I upgrade?" });
 ### Persistent agent
 
 ```ts
-export const coder = app.agent(
-  "coder",
-  "Help the user complete coding work. Inspect files before changing them.",
-).using(workspace, shell, github);
+export const coder = app
+  .agent("coder", "Help the user complete coding work. Inspect files before changing them.")
+  .using(workspace, shell, github);
 ```
 
-The application model, automatic compaction, durable recovery, and safe
-limits apply without extra fields.
+The application model, automatic compaction, durable recovery, and safe limits apply without extra
+fields.
 
 ### MCP and OpenAPI
 
@@ -100,24 +101,21 @@ const billing = app.api("billing", "./openapi/billing.yaml");
 export const tools = app.tools(searchDocs, github, billing);
 ```
 
-Names come from the declared tool or connection. `app.tools()` rejects a
-duplicate name.
+Names come from the declared tool or connection. `app.tools()` rejects a duplicate name.
 
 ### Advanced controls stay readable
 
 ```ts
-export const coder = app.agent(
-  "coder",
-  "Implement the task and verify the result.",
-)
+export const coder = app
+  .agent("coder", "Implement the task and verify the result.")
   .using(workspace, shell, github)
   .models("openai/gpt-5", "anthropic/claude-sonnet")
   .subagents({ reviewer })
   .budget("team");
 ```
 
-`budget("team")` is a named application preset. The common path does not show
-raw step, token, cost, child, and tool-call numbers.
+`budget("team")` is a named application preset. The common path does not show raw step, token, cost,
+child, and tool-call numbers.
 
 ## Alternative A: one compact object
 
@@ -131,8 +129,8 @@ export const coder = app.agent({
 });
 ```
 
-It is easy to type, but large definitions can become another configuration
-object. Prefer this only if method chaining is rejected.
+It is easy to type, but large definitions can become another configuration object. Prefer this only
+if method chaining is rejected.
 
 ## Alternative B: schema-first builders
 
@@ -145,8 +143,8 @@ export const support = app
   .run(({ question }) => `Answer with sources.\n\n${question}`);
 ```
 
-This reads well, but it creates more intermediate builder types and makes some
-TypeScript errors harder to understand.
+This reads well, but it creates more intermediate builder types and makes some TypeScript errors
+harder to understand.
 
 ## Recommendation
 
@@ -160,5 +158,5 @@ Prototype the verb API as additive overloads:
 - `app.api(namespace, spec)`
 - `app.tools(...sources)`
 
-Keep the current object API as the complete low-level form. Compile both forms
-into the same internal definitions. Do not create a second runtime.
+Keep the current object API as the complete low-level form. Compile both forms into the same
+internal definitions. Do not create a second runtime.

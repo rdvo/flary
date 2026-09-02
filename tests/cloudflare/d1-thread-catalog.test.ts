@@ -66,7 +66,10 @@ test("D1 thread catalog lists only the requested tenant and agent", async () => 
     applicationId: "coder",
     agentId: "coder",
   });
-  assert.deepEqual(rows.map((row) => row.thread.threadId), ["thread-a"]);
+  assert.deepEqual(
+    rows.map((row) => row.thread.threadId),
+    ["thread-a"],
+  );
 
   const deletion = await catalog.putDeletion({
     id: "delete_thread_a",
@@ -78,11 +81,13 @@ test("D1 thread catalog lists only the requested tenant and agent", async () => 
   });
   assert.equal(deletion.status, "accepted");
   assert.equal(
-    (await catalog.getDeletion({
-      tenantId: "tenant-a",
-      applicationId: "coder",
-      deletionId: "delete_thread_a",
-    }))?.threadId,
+    (
+      await catalog.getDeletion({
+        tenantId: "tenant-a",
+        applicationId: "coder",
+        deletionId: "delete_thread_a",
+      })
+    )?.threadId,
     "thread-a",
   );
 });

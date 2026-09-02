@@ -133,10 +133,9 @@ test("workspace tools are lazy, typed, and approval-aware", async () => {
   assert.equal(registered.descriptors.length, 18);
   const write = await catalog.load({ id: "workspace.file.write" });
   assert.equal(write?.capability.requiresApproval, true);
-  const read = await catalog.loadHandle<
-    { path: string; encoding: "utf8" },
-    { content: string }
-  >({ id: "workspace.file.read" });
+  const read = await catalog.loadHandle<{ path: string; encoding: "utf8" }, { content: string }>({
+    id: "workspace.file.read",
+  });
   assert.ok(read);
   assert.equal(
     (await read.invoke({ path: file.path, encoding: "utf8" })).content,
@@ -148,13 +147,11 @@ test("workspace tools are lazy, typed, and approval-aware", async () => {
     /relative|canonical|segments/i,
   );
   assert.equal(
-    (await catalog.load({ id: "workspace.git.status" }))?.capability
-      .requiresApproval,
+    (await catalog.load({ id: "workspace.git.status" }))?.capability.requiresApproval,
     false,
   );
   assert.equal(
-    (await catalog.load({ id: "workspace.git.merge" }))?.capability
-      .requiresApproval,
+    (await catalog.load({ id: "workspace.git.merge" }))?.capability.requiresApproval,
     true,
   );
 });
@@ -163,10 +160,7 @@ test("workspace tool prefixes isolate multiple branches in one catalog", async (
   const catalog = new InMemoryToolCatalog();
   registerWorkspaceTools(catalog, target(), { prefix: "branch.main" });
   assert.ok(await catalog.load({ id: "branch.main.workspace.file.read" }));
-  assert.equal(
-    await catalog.load({ id: "workspace.file.read" }),
-    undefined,
-  );
+  assert.equal(await catalog.load({ id: "workspace.file.read" }), undefined);
 });
 
 test("workspace tools reject an invalid host target response", async () => {
@@ -177,8 +171,5 @@ test("workspace tools reject an invalid host target response", async () => {
   const read = await catalog.loadHandle({ id: "workspace.file.read" });
   assert.ok(read);
 
-  await assert.rejects(
-    () => read.invoke({ path: "src/index.ts", encoding: "utf8" }),
-    /file/i,
-  );
+  await assert.rejects(() => read.invoke({ path: "src/index.ts", encoding: "utf8" }), /file/i);
 });

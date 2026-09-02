@@ -17,23 +17,14 @@ function sqlStore() {
   const database = new DatabaseSync(":memory:") as unknown as SqlDatabase;
   return {
     database,
-    exec<T = Record<string, unknown>>(
-      query: string,
-      ...bindings: unknown[]
-    ): { toArray(): T[] } {
+    exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): { toArray(): T[] } {
       const trimmed = query.trim().toLowerCase();
-      if (
-        bindings.length === 0 &&
-        !/^(select|with|pragma|explain)\b/.test(trimmed)
-      ) {
+      if (bindings.length === 0 && !/^(select|with|pragma|explain)\b/.test(trimmed)) {
         database.exec(query);
         return { toArray: () => [] };
       }
       const statement = database.prepare(query);
-      if (
-        /^(select|with|pragma|explain)\b/.test(trimmed) ||
-        /\breturning\b/.test(trimmed)
-      ) {
+      if (/^(select|with|pragma|explain)\b/.test(trimmed) || /\breturning\b/.test(trimmed)) {
         return { toArray: () => statement.all(...bindings) as T[] };
       }
       statement.run(...bindings);
@@ -98,20 +89,18 @@ test("SQLite telemetry preserves append-only IDs and ordered queries after resta
   const stored = await first.appendMany([modelEvent, toolEvent]);
   assert.deepEqual(
     stored.map((entry) => entry.sequence),
-    [1, 2]
+    [1, 2],
   );
   assert.deepEqual(observed, [1, 2]);
 
   const restarted = new SqliteTelemetryStore(sql);
   assert.deepEqual(
-    (await restarted.readRun("run_sqlite_telemetry")).map(
-      (entry) => entry.event.id
-    ),
-    ["model_sqlite_1", "tool_sqlite_1"]
+    (await restarted.readRun("run_sqlite_telemetry")).map((entry) => entry.event.id),
+    ["model_sqlite_1", "tool_sqlite_1"],
   );
   assert.deepEqual(
     (await restarted.readChildren(root.spanId)).map((entry) => entry.event.id),
-    ["tool_sqlite_1"]
+    ["tool_sqlite_1"],
   );
   assert.deepEqual(
     (
@@ -122,7 +111,7 @@ test("SQLite telemetry preserves append-only IDs and ordered queries after resta
         limit: 1,
       })
     ).map((entry) => entry.sequence),
-    [2]
+    [2],
   );
 
   const replayed: number[] = [];
@@ -174,7 +163,7 @@ test("SQLite telemetry aggregation matches the reference store", async () => {
       cacheReadTokens: 7,
       cacheWriteTokens: 2,
       costState: "unknown",
-    }
+    },
   );
 });
 
@@ -185,10 +174,7 @@ test("SQLite telemetry validates empty and invalid read windows", async () => {
   assert.deepEqual(await store.read({ limit: 0 }), []);
   await assert.rejects(
     store.read({ afterSequence: -1 }),
-    /sequence must be a non-negative safe integer/
+    /sequence must be a non-negative safe integer/,
   );
-  await assert.rejects(
-    store.read({ limit: 1.5 }),
-    /limit must be a non-negative integer/
-  );
+  await assert.rejects(store.read({ limit: 1.5 }), /limit must be a non-negative integer/);
 });

@@ -9,15 +9,7 @@ import { InMemoryToolCatalog } from "../../src/harness/tools/catalog.ts";
 import { LazyToolRuntime } from "../../src/harness/tools/runtime.ts";
 import { defineFlaryTool } from "../../src/harness/tools/sdk.ts";
 
-const sources = [
-  "local",
-  "mcp",
-  "openapi",
-  "workspace",
-  "r2",
-  "sandbox",
-  "browser",
-] as const;
+const sources = ["local", "mcp", "openapi", "workspace", "r2", "sandbox", "browser"] as const;
 
 test("every write source replays a completed call after runtime eviction", async () => {
   const sql = sqlStore();
@@ -106,10 +98,7 @@ function runtime(catalog: InMemoryToolCatalog, sql: ReturnType<typeof sqlStore>,
 function sqlStore() {
   const database = new DatabaseSync(":memory:");
   return {
-    exec<T = Record<string, unknown>>(
-      query: string,
-      ...bindings: unknown[]
-    ): { toArray(): T[] } {
+    exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): { toArray(): T[] } {
       const trimmed = query.trim().toLowerCase();
       if (bindings.length === 0 && !/^(select|with|pragma|explain)\b/.test(trimmed)) {
         database.exec(query);

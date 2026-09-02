@@ -146,7 +146,7 @@ test("serve exposes direct and durable-style function routes", async () => {
   const handle = (await admitted.json()) as { runId: string };
   const result = await worker.request(`http://local/runs/${handle.runId}`);
   assert.equal(result.status, 200);
-  assert.deepEqual((await result.json() as { result: unknown }).result, {
+  assert.deepEqual(((await result.json()) as { result: unknown }).result, {
     message: "Hello Grace",
   });
 });

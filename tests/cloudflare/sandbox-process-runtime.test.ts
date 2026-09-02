@@ -95,11 +95,13 @@ test("durable sandbox runtime drives live start, stdin, signals, and attach", as
   assert.match(String(calls.find((call) => call.name === "exec")?.values[0]), /base64 -d/);
   onExit?.(0);
   await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.deepEqual(settlements, [{
-    processId: "process_1",
-    state: "completed",
-    exitCode: 0,
-  }]);
+  assert.deepEqual(settlements, [
+    {
+      processId: "process_1",
+      state: "completed",
+      exitCode: 0,
+    },
+  ]);
 });
 
 function sqlite() {

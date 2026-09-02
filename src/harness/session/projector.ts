@@ -49,10 +49,9 @@ export class FlarySessionProjector {
         : typeof event.occurredAt === "string"
           ? event.occurredAt
           : new Date().toISOString();
-    const turnId = stringValue(event.turnId) ??
-      (eventType === "submission-settled"
-        ? stringValue(event.submissionId)
-        : undefined);
+    const turnId =
+      stringValue(event.turnId) ??
+      (eventType === "submission-settled" ? stringValue(event.submissionId) : undefined);
     const payload = SessionJsonObjectSchema.parse(
       redactProviderPrivate(
         eventType,
@@ -76,9 +75,7 @@ export class FlarySessionProjector {
         ? { toolCallId: stringValue(event.toolCallId ?? event.callId) }
         : {}),
       ...(stringValue(event.parentId) ? { parentId: stringValue(event.parentId) } : {}),
-      ...(input.encryptedContentRef
-        ? { encryptedContentRef: input.encryptedContentRef }
-        : {}),
+      ...(input.encryptedContentRef ? { encryptedContentRef: input.encryptedContentRef } : {}),
     });
   }
 }
@@ -87,15 +84,17 @@ function redactProviderPrivate(
   eventType: string,
   value: Record<string, unknown>,
 ): Record<string, unknown> {
-  const privateKey = /^(?:responseId|previousResponse|nativeSession|cache|continuation|credential|apiKey|secret|encryptedReasoning)/i;
-  const reasoningEvent =
-    eventType === "message-delta" && value.kind === "reasoning";
+  const privateKey =
+    /^(?:responseId|previousResponse|nativeSession|cache|continuation|credential|apiKey|secret|encryptedReasoning)/i;
+  const reasoningEvent = eventType === "message-delta" && value.kind === "reasoning";
   const walk = (candidate: unknown, key = ""): unknown => {
     if (privateKey.test(key)) return "[REDACTED]";
-    if ((reasoningEvent && /^(text|delta|content)$/i.test(key)) ||
-        (eventType === "message-delta" &&
-        key.toLowerCase().includes("reasoning")) &&
-        (typeof candidate === "string" || Array.isArray(candidate))) {
+    if (
+      (reasoningEvent && /^(text|delta|content)$/i.test(key)) ||
+      (eventType === "message-delta" &&
+        key.toLowerCase().includes("reasoning") &&
+        (typeof candidate === "string" || Array.isArray(candidate)))
+    ) {
       return "[PROVIDER_PRIVATE_REASONING]";
     }
     if (Array.isArray(candidate)) return candidate.map((item) => walk(item));
@@ -119,16 +118,18 @@ function producerForEvent(
     return undefined;
   }
   const value = candidate as Record<string, unknown>;
-  const provider = typeof value.provider === "string"
-    ? value.provider
-    : typeof value.providerId === "string"
-      ? value.providerId
-      : undefined;
-  const model = typeof value.model === "string"
-    ? value.model
-    : typeof value.id === "string"
-      ? value.id
-      : undefined;
+  const provider =
+    typeof value.provider === "string"
+      ? value.provider
+      : typeof value.providerId === "string"
+        ? value.providerId
+        : undefined;
+  const model =
+    typeof value.model === "string"
+      ? value.model
+      : typeof value.id === "string"
+        ? value.id
+        : undefined;
   if (!provider || !model) return undefined;
   return {
     provider,
@@ -137,9 +138,7 @@ function producerForEvent(
   };
 }
 
-function recordTypeForProjectedEvent(
-  event: Readonly<Record<string, unknown>>,
-): SessionRecordType {
+function recordTypeForProjectedEvent(event: Readonly<Record<string, unknown>>): SessionRecordType {
   const type = typeof event.type === "string" ? event.type : "unknown";
   if (type === "conversation-reset") return "compaction.window";
   // Flue can start and complete more than one assistant message inside one
@@ -149,14 +148,12 @@ function recordTypeForProjectedEvent(
     return "message.assistant";
   }
   if (type === "message-delta") {
-    return event.kind === "reasoning"
-      ? "message.reasoning"
-      : "message.assistant";
+    return event.kind === "reasoning" ? "message.reasoning" : "message.assistant";
   }
   if (type === "message-appended") {
     const message = jsonObject(
       event.message && typeof event.message === "object"
-        ? event.message as Record<string, unknown>
+        ? (event.message as Record<string, unknown>)
         : {},
     );
     return message.role === "user" ? "message.user" : "message.assistant";
@@ -178,11 +175,8 @@ export function recordTypeForEvent(type: string): SessionRecordType {
   if (type === "turn.completed") return "turn.completed";
   if (type === "turn.aborted") return "turn.aborted";
   if (type === "message.user") return "message.user";
-  if (
-    type === "message.assistant" ||
-    type === "message" ||
-    type === "message_end"
-  ) return "message.assistant";
+  if (type === "message.assistant" || type === "message" || type === "message_end")
+    return "message.assistant";
   if (type.startsWith("thinking") || type.includes("reasoning")) {
     return "message.reasoning";
   }
@@ -232,7 +226,5 @@ function stringValue(value: unknown): string | undefined {
 }
 
 function numeric(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0
-    ? value
-    : undefined;
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
 }

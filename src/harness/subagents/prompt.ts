@@ -7,7 +7,7 @@ import {
 
 export function buildSubagentTaskPrompt(
   inputThread: SubagentThread,
-  inputTurns: readonly SubagentConversationTurn[]
+  inputTurns: readonly SubagentConversationTurn[],
 ): string {
   const thread = SubagentThreadSchema.parse(inputThread);
   const seededIds = new Set(thread.seededTurnIds);
@@ -17,8 +17,7 @@ export function buildSubagentTaskPrompt(
     .map((turn) => ({
       ...turn,
       messages: turn.messages.filter(
-        (message) =>
-          thread.contextSeed.includeSystem || message.role !== "system"
+        (message) => thread.contextSeed.includeSystem || message.role !== "system",
       ),
     }))
     .filter((turn) => turn.messages.length > 0)
@@ -32,8 +31,8 @@ export function buildSubagentTaskPrompt(
         (turn) =>
           `## Turn ${turn.ordinal}\n${turn.messages
             .map((message) => `${message.role}: ${message.content}`)
-            .join("\n")}`
-      )
+            .join("\n")}`,
+      ),
     );
   }
 
@@ -44,9 +43,7 @@ export function buildSubagentTaskPrompt(
   return `${sections.join("\n\n")}\n`;
 }
 
-function verbosityInstruction(
-  verbosity: NonNullable<SubagentThread["verbosity"]>
-): string {
+function verbosityInstruction(verbosity: NonNullable<SubagentThread["verbosity"]>): string {
   if (verbosity === "low") {
     return "Be concise. Return only the result and essential evidence.";
   }

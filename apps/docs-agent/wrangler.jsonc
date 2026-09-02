@@ -9,7 +9,7 @@
   "preview_urls": false,
   "worker_loaders": [
     {
-      "binding": "LOADER"
-    }
-  ]
+      "binding": "LOADER",
+    },
+  ],
 }

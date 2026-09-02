@@ -3,7 +3,7 @@ import {
   UserInputResponseSchema,
   type UserInputRequest,
   type UserInputResponse,
-} from "../contracts/index";
+} from "../contracts/index.js";
 
 type PendingResolver = {
   resolve(response: UserInputResponse): void;
@@ -17,10 +17,7 @@ const pending = new Map<string, Map<string, PendingResolver>>();
  * The Durable Object must also persist the request. If the isolate restarts,
  * the host re-drives a new turn with `frameRestoredUserInputResponse`.
  */
-export function waitForUserInput(
-  threadKey: string,
-  requestId: string,
-): Promise<UserInputResponse> {
+export function waitForUserInput(threadKey: string, requestId: string): Promise<UserInputResponse> {
   return new Promise((resolve) => {
     const byRequest = pending.get(threadKey) ?? new Map();
     byRequest.set(requestId, { resolve });
@@ -28,10 +25,7 @@ export function waitForUserInput(
   });
 }
 
-export function resolveLiveUserInput(
-  threadKey: string,
-  responseInput: UserInputResponse,
-): boolean {
+export function resolveLiveUserInput(threadKey: string, responseInput: UserInputResponse): boolean {
   const response = UserInputResponseSchema.parse(responseInput);
   const byRequest = pending.get(threadKey);
   const resolver = byRequest?.get(response.requestId);

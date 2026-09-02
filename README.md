@@ -2,13 +2,13 @@
 
 **Build durable AI agents in TypeScript. Deploy them to your Cloudflare account.**
 
-Flary is an open-source framework for typed AI functions and persistent agent
-threads. It supplies tools, MCP and OpenAPI connections, approvals, durable
-history, workspaces, provider switching, subagents, and realtime events. You
-own the Worker, Cloudflare resources, provider accounts, secrets, and data.
+Flary is an open-source framework for typed AI functions and persistent agent threads. It supplies
+tools, MCP and OpenAPI connections, approvals, durable history, workspaces, provider switching,
+subagents, and realtime events. You own the Worker, Cloudflare resources, provider accounts,
+secrets, and data.
 
-Flary does not need a VPS. It generates the Cloudflare Worker and durable
-resources that your project uses.
+Flary does not need a VPS. It generates the Cloudflare Worker and durable resources that your
+project uses.
 
 ## Create a project
 
@@ -18,17 +18,16 @@ npx flary create
 
 The guided command asks what you want to build:
 
-- **Personal dashboard:** first-owner login, a WebSocket-first durable thread console,
-  provider setup, and secret-health status.
-- **Agent backend:** typed functions and persistent agents for an existing
-  website, CMS, bot, or application.
-- **Flary Mail:** a self-hosted business inbox with inbound mail, replies,
-  drafts, sent mail, team members, attachments, and live updates.
+- **Personal dashboard:** first-owner login, a WebSocket-first durable thread console, provider
+  setup, and secret-health status.
+- **Agent backend:** typed functions and persistent agents for an existing website, CMS, bot, or
+  application.
+- **Flary Mail:** a self-hosted business inbox with inbound mail, replies, drafts, sent mail, team
+  members, attachments, and live updates.
 
-It then signs in with Wrangler OAuth, lets you choose an AI provider, creates
-the required Cloudflare resources, uploads secrets, deploys, and checks the
-result. Browser Run and Sandbox are optional. The default setup does not need
-Docker.
+It then signs in with Wrangler OAuth, lets you choose an AI provider, creates the required
+Cloudflare resources, uploads secrets, deploys, and checks the result. Browser Run and Sandbox are
+optional. The default setup does not need Docker.
 
 For an automated setup:
 
@@ -41,8 +40,8 @@ npx flary create my-flary \
   --yes
 ```
 
-Use `flary init` instead when you only want typed Flary files in an existing
-project and do not want Flary to change its deployment system.
+Use `flary init` instead when you only want typed Flary files in an existing project and do not want
+Flary to change its deployment system.
 
 ### Create a mail inbox
 
@@ -56,20 +55,19 @@ npx flary create my-mail \
   --yes
 ```
 
-Flary uses Wrangler OAuth. You do not need a Flary API key or a separate
-OAuth client for the CLI flow. The deploy command enables Email Routing and
-Email Sending for the domain. Enabling Email Routing replaces the domain's
-MX records, so use a domain that does not already receive mail elsewhere.
+Flary uses Wrangler OAuth. You do not need a Flary API key or a separate OAuth client for the CLI
+flow. The deploy command enables Email Routing and Email Sending for the domain. Enabling Email
+Routing replaces the domain's MX records, so use a domain that does not already receive mail
+elsewhere.
 
-Mail data stays in your Cloudflare account. D1 stores mailbox state and
-message metadata. R2 stores raw messages and attachments. A Queue handles
-parse and send work. One hibernating Durable Object per mailbox sends
-WebSocket updates to connected inbox clients. The responsive web UI uses
-Tailwind CSS and is ready for shadcn/ui components. KV is not used.
+Mail data stays in your Cloudflare account. D1 stores mailbox state and message metadata. R2 stores
+raw messages and attachments. A Queue handles parse and send work. One hibernating Durable Object
+per mailbox sends WebSocket updates to connected inbox clients. The responsive web UI uses Tailwind
+CSS and is ready for shadcn/ui components. KV is not used.
 
-Cloudflare also offers outbound SMTP submission at
-`smtp.mx.cloudflare.net:465`. It does not offer IMAP or POP, so external mail
-client synchronization requires a separate IMAP/JMAP or provider bridge.
+Cloudflare also offers outbound SMTP submission at `smtp.mx.cloudflare.net:465`. It does not offer
+IMAP or POP, so external mail client synchronization requires a separate IMAP/JMAP or provider
+bridge.
 
 ## A typed function
 
@@ -91,13 +89,13 @@ export const summarize = app.fn({
   `,
 });
 
-const result = await summarize({ text: "A long document..." });
+const result = await summarize({ text: "The quarter closed above plan." });
 ```
 
 ## A persistent agent
 
-An agent defines persistent behavior. Each thread has durable messages, tools,
-approvals, usage, and recovery state.
+An agent defines persistent behavior. Each thread has durable messages, tools, approvals, usage, and
+recovery state.
 
 ```ts
 const tools = app.tools({
@@ -108,7 +106,7 @@ const tools = app.tools({
       z.object({
         title: z.string(),
         url: z.string().url(),
-      })
+      }),
     ),
     run: ({ query }) => searchDocumentation(query),
   }),
@@ -122,17 +120,15 @@ export const support = app.agent({
 });
 ```
 
-The model starts with one bounded `execute` tool and protected user-input and
-secret controls. Every persistent agent also gets lazy public `web_search` and
-`web_fetch` through Parallel's anonymous Search MCP. Application, MCP,
-OpenAPI, workspace, and Sandbox tools stay in a private catalog. Code Mode can
-search the catalog, load one selected schema, call a tool, or batch independent
-reads. Adding many tools does not place every schema in every model request.
-Set `web: false` on the application or agent when public web access is not
-allowed.
+The model starts with one bounded `execute` tool and protected user-input and secret controls. Every
+persistent agent also gets lazy public `web_search` and `web_fetch` through Parallel's anonymous
+Search MCP. Application, MCP, OpenAPI, workspace, and Sandbox tools stay in a private catalog. Code
+Mode can search the catalog, load one selected schema, call a tool, or batch independent reads.
+Adding many tools does not place every schema in every model request. Set `web: false` on the
+application or agent when public web access is not allowed.
 
-Read [Tools, MCP, and OpenAPI](https://flary.dev/docs/tools/) for the exact
-default tool surface, lazy discovery flow, approvals, and audit records.
+Read [Tools, MCP, and OpenAPI](https://flary.dev/docs/tools/) for the exact default tool surface,
+lazy discovery flow, approvals, and audit records.
 
 Serve the function and agent from one generated Worker:
 
@@ -141,9 +137,9 @@ export const functions = { summarize, support };
 export default app.serve(functions);
 ```
 
-Your web UI, Telegram bot, Discord bot, mobile app, or backend can open a
-thread, send messages, stream events, reconnect from a cursor, and respond to
-approvals. You do not write a route for each agent operation.
+Your web UI, Telegram bot, Discord bot, mobile app, or backend can open a thread, send messages,
+stream events, reconnect from a cursor, and respond to approvals. You do not write a route for each
+agent operation.
 
 ### Persistent files
 
@@ -157,15 +153,14 @@ export const writer = app.agent({
 });
 ```
 
-The agent receives lazy `workspace` tools for list, stat, glob, grep, read,
-diff, write, edit, apply-patch, batch-edit, copy, move, delete, and Git. Small
-files stay in Durable Object SQLite. Large files spill to R2. Flary restores
-the same workspace when the thread resumes and creates a checkpoint after each
-turn.
+The agent receives lazy `workspace` tools for list, stat, glob, grep, read, diff, write, edit,
+apply-patch, batch-edit, copy, move, delete, and Git. Small files stay in Durable Object SQLite.
+Large files spill to R2. Flary restores the same workspace when the thread resumes and creates a
+checkpoint after each turn.
 
-Use `workspace: "project"` when authenticated threads in one tenant project
-must share the same files. Use the detailed form to set draft-write policy,
-hidden paths, branches, or a custom namespace:
+Use `workspace: "project"` when authenticated threads in one tenant project must share the same
+files. Use the detailed form to set draft-write policy, hidden paths, branches, or a custom
+namespace:
 
 ```ts
 workspace: {
@@ -175,8 +170,8 @@ workspace: {
 }
 ```
 
-Add `app.sandbox()` to the normal tool registry when the agent must run builds,
-tests, or long-lived processes against `/workspace`.
+Add `app.sandbox()` to the normal tool registry when the agent must run builds, tests, or long-lived
+processes against `/workspace`.
 
 ## Core terms
 
@@ -200,9 +195,16 @@ tests, or long-lived processes against `/workspace`.
 9. [Tracked product agent](https://flary.dev/docs/examples/tracked-agent/)
 10. [Florist storefront agent](https://flary.dev/docs/examples/florist-agent/)
 
-Advanced low-level modules remain available from focused package exports. Most
-applications should start with `flary()`, `app.fn()`, `app.agent()`,
-`app.tools()`, and the generated host.
+Advanced low-level modules remain available from focused package exports. Most applications should
+start with `flary()`, `app.fn()`, `app.agent()`, `app.tools()`, and the generated host.
+
+## Project policies
+
+- [Architecture](ARCHITECTURE.md)
+- [Changelog](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security](SECURITY.md)
+- [Node.js version policy](NODE_VERSION_POLICY.md)
 
 ## License
 

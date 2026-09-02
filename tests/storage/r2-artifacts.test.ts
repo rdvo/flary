@@ -73,11 +73,7 @@ test("R2 artifact history is immutable and searchable by tenant scope", async ()
     (await history.list("session-history", commit.scope)).map((item) => item.id),
     ["commit_1"],
   );
-  const hits = await history.searchExact(
-    "session-history",
-    commit.scope,
-    "passkeys",
-  );
+  const hits = await history.searchExact("session-history", commit.scope, "passkeys");
   assert.equal(hits[0]?.path, "decisions/auth.md");
   assert.equal(hits[0]?.lineStart, 1);
 });

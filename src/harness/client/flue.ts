@@ -63,8 +63,7 @@ import {
 import { ThreadRefSchema } from "../contracts/tenancy.js";
 import { threadName } from "../storage/scopes.js";
 
-export interface CreateFlaryThreadClientOptions
-  extends Omit<CreateFlueClientOptions, "baseUrl"> {
+export interface CreateFlaryThreadClientOptions extends Omit<CreateFlueClientOptions, "baseUrl"> {
   /** Flary application origin or API base. */
   baseUrl: string;
   /** Flue mount below baseUrl. */
@@ -79,23 +78,22 @@ export interface FlaryRealtimeSocket {
   readonly readyState: number;
   addEventListener(
     type: "open" | "message" | "close" | "error",
-    listener: (event: any) => void
+    listener: (event: any) => void,
   ): void;
   removeEventListener?(
     type: "open" | "message" | "close" | "error",
-    listener: (event: any) => void
+    listener: (event: any) => void,
   ): void;
   send(data: string): void;
   close(code?: number, reason?: string): void;
 }
 
-export interface FlaryRealtimeConnection
-  extends AsyncIterable<RealtimeServerFrame> {
+export interface FlaryRealtimeConnection extends AsyncIterable<RealtimeServerFrame> {
   events(): AsyncIterable<RealtimeServerFrame>;
   command(
     command: RealtimeCommandName,
     input?: Readonly<Record<string, unknown>>,
-    options?: { requestId?: string; idempotencyKey?: string }
+    options?: { requestId?: string; idempotencyKey?: string },
   ): Promise<unknown>;
   acknowledge(cursor: number): void;
   close(code?: number, reason?: string): void;
@@ -106,13 +104,11 @@ export interface FlaryTerminalTicket {
   readonly expiresAt: string;
 }
 
-export interface FlaryThreadMessageOptions
-  extends Omit<ThreadMessageRequest, "message"> {
+export interface FlaryThreadMessageOptions extends Omit<ThreadMessageRequest, "message"> {
   message: string;
 }
 
-export interface FlaryThreadClientCreateOptions
-  extends Omit<ThreadCreateRequest, "workspace"> {
+export interface FlaryThreadClientCreateOptions extends Omit<ThreadCreateRequest, "workspace"> {
   /** Advanced callers can pin a workspace. Otherwise the host creates a
    * tenant-safe blank workspace for this thread. */
   workspace?: ThreadCreateRequest["workspace"];
@@ -122,15 +118,11 @@ export interface FlaryThreadClientCreateOptions
 export interface FlaryRecallSearchOptions {
   query: string;
   mode?: "exact" | "semantic" | "hybrid";
-  kinds?: Array<
-    "message" | "plan" | "decision" | "file" | "tool" | "run" | "event"
-  >;
+  kinds?: Array<"message" | "plan" | "decision" | "file" | "tool" | "run" | "event">;
   limit?: number;
 }
 
-export type FlaryRecallOpenOptions =
-  | { id: string }
-  | { reference: RecallReference };
+export type FlaryRecallOpenOptions = { id: string } | { reference: RecallReference };
 
 export class FlaryThreadClient {
   readonly flue: FlueClient;
@@ -172,73 +164,63 @@ export class FlaryThreadClient {
     });
   }
 
-  send(
-    ref: ThreadRef,
-    options: AgentPromptOptions | FlaryThreadMessageOptions
-  ) {
+  send(ref: ThreadRef, options: AgentPromptOptions | FlaryThreadMessageOptions) {
     // Route every turn through Flary admission. This keeps credential checks,
     // idempotency, mode policy, and model snapshots on one authenticated path.
     return this.submit(ref, options);
   }
 
-  async submit(
-    refInput: ThreadRef,
-    options: FlaryThreadMessageOptions
-  ): Promise<AgentSendResult> {
+  async submit(refInput: ThreadRef, options: FlaryThreadMessageOptions): Promise<AgentSendResult> {
     const ref = ThreadRefSchema.parse(refInput);
     const body = ThreadMessageRequestSchema.parse(options);
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
+        ref.appId,
       )}/threads/${encodeURIComponent(ref.threadId)}/messages`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-      }
+      },
     );
     return value as AgentSendResult;
   }
 
   async edit(
     refInput: ThreadRef,
-    input: import("../contracts/threads.js").ThreadEditRequest
+    input: import("../contracts/threads.js").ThreadEditRequest,
   ): Promise<AgentSendResult> {
     const ref = ThreadRefSchema.parse(refInput);
     const body = ThreadEditRequestSchema.parse(input);
     return (await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
+        ref.appId,
       )}/threads/${encodeURIComponent(ref.threadId)}/messages/edit`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-      }
+      },
     )) as AgentSendResult;
   }
 
-  async create(
-    options: FlaryThreadClientCreateOptions
-  ): Promise<ThreadBinding> {
+  async create(options: FlaryThreadClientCreateOptions): Promise<ThreadBinding> {
     const body = { ...options };
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        body.workspace?.appId ?? body.agentId ?? "flary-thread"
+        body.workspace?.appId ?? body.agentId ?? "flary-thread",
       )}/threads`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-      }
+      },
     );
     return ThreadBindingSchema.parse((value as { binding: unknown }).binding);
   }
 
   async list(appId: string): Promise<ThreadBinding[]> {
-    const value = await this.apiJson(
-      `${this.#apiPath}/apps/${encodeURIComponent(appId)}/threads`
-    );
+    const value = await this.apiJson(`${this.#apiPath}/apps/${encodeURIComponent(appId)}/threads`);
     return ThreadListResponseSchema.parse(value).threads;
   }
 
@@ -246,29 +228,29 @@ export class FlaryThreadClient {
     const ref = ThreadRefSchema.parse(refInput);
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
-      )}/threads/${encodeURIComponent(ref.threadId)}`
+        ref.appId,
+      )}/threads/${encodeURIComponent(ref.threadId)}`,
     );
     return ThreadBindingSchema.parse((value as { binding: unknown }).binding);
   }
 
   async connect(
     refInput: ThreadRef,
-    input: { after?: number; includeChildren?: boolean } = {}
+    input: { after?: number; includeChildren?: boolean } = {},
   ): Promise<FlaryRealtimeConnection> {
     const ref = ThreadRefSchema.parse(refInput);
     const ticketInput = RealtimeTicketRequestSchema.parse(input);
     const value = RealtimeTicketResponseSchema.parse(
       await this.apiJson(
         `${this.#apiPath}/apps/${encodeURIComponent(
-          ref.appId
+          ref.appId,
         )}/threads/${encodeURIComponent(ref.threadId)}/realtime-ticket`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(ticketInput),
-        }
-      )
+        },
+      ),
     );
     const factory =
       this.#webSocketFactory ??
@@ -278,8 +260,7 @@ export class FlaryThreadClient {
             WebSocket?: new (url: string) => FlaryRealtimeSocket;
           }
         ).WebSocket;
-        if (!Constructor)
-          throw new Error("A WebSocket implementation is required");
+        if (!Constructor) throw new Error("A WebSocket implementation is required");
         return new Constructor(url);
       });
     const socket = factory(value.url);
@@ -289,15 +270,8 @@ export class FlaryThreadClient {
 
   process(
     refInput: ThreadRef,
-    action:
-      | "start"
-      | "attach"
-      | "stdin"
-      | "signal"
-      | "resize"
-      | "sleep"
-      | "wake",
-    input: Readonly<Record<string, unknown>>
+    action: "start" | "attach" | "stdin" | "signal" | "resize" | "sleep" | "wake",
+    input: Readonly<Record<string, unknown>>,
   ): Promise<unknown> {
     return this.control(refInput, `processes/${action}`, input);
   }
@@ -306,8 +280,8 @@ export class FlaryThreadClient {
     const ref = ThreadRefSchema.parse(refInput);
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
-      )}/threads/${encodeURIComponent(ref.threadId)}/processes`
+        ref.appId,
+      )}/threads/${encodeURIComponent(ref.threadId)}/processes`,
     );
     return Array.isArray((value as { processes?: unknown }).processes)
       ? (value as { processes: unknown[] }).processes
@@ -317,7 +291,7 @@ export class FlaryThreadClient {
   browser(
     refInput: ThreadRef,
     action: "status" | "takeover" | "input" | "release" | "close",
-    input: Readonly<Record<string, unknown>> = {}
+    input: Readonly<Record<string, unknown>> = {},
   ): Promise<unknown> {
     return this.control(refInput, `browser/${action}`, input);
   }
@@ -326,66 +300,56 @@ export class FlaryThreadClient {
     const ref = ThreadRefSchema.parse(refInput);
     await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
+        ref.appId,
       )}/threads/${encodeURIComponent(ref.threadId)}/archive`,
-      { method: "POST" }
+      { method: "POST" },
     );
   }
 
-  async fork(
-    refInput: ThreadRef,
-    options: ThreadForkRequest = {}
-  ): Promise<ThreadBinding> {
+  async fork(refInput: ThreadRef, options: ThreadForkRequest = {}): Promise<ThreadBinding> {
     const ref = ThreadRefSchema.parse(refInput);
     const body = ThreadForkRequestSchema.parse(options);
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
+        ref.appId,
       )}/threads/${encodeURIComponent(ref.threadId)}/fork`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-      }
+      },
     );
     return ThreadBindingSchema.parse((value as { binding: unknown }).binding);
   }
 
-  async setMode(
-    refInput: ThreadRef,
-    mode: string,
-    reason?: string
-  ): Promise<ThreadBinding> {
+  async setMode(refInput: ThreadRef, mode: string, reason?: string): Promise<ThreadBinding> {
     const ref = ThreadRefSchema.parse(refInput);
     const body = ThreadModeRequestSchema.parse({ mode, reason });
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
+        ref.appId,
       )}/threads/${encodeURIComponent(ref.threadId)}/mode`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-      }
+      },
     );
     return ThreadBindingSchema.parse((value as { binding: unknown }).binding);
   }
 
-  async setConnections(
-    refInput: ThreadRef,
-    connectionIds: string[]
-  ): Promise<ThreadBinding> {
+  async setConnections(refInput: ThreadRef, connectionIds: string[]): Promise<ThreadBinding> {
     const ref = ThreadRefSchema.parse(refInput);
     const body = ThreadConnectionsRequestSchema.parse({ connectionIds });
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
+        ref.appId,
       )}/threads/${encodeURIComponent(ref.threadId)}/connections`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-      }
+      },
     );
     return ThreadBindingSchema.parse((value as { binding: unknown }).binding);
   }
@@ -394,8 +358,8 @@ export class FlaryThreadClient {
     const ref = ThreadRefSchema.parse(refInput);
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
-      )}/threads/${encodeURIComponent(ref.threadId)}/model`
+        ref.appId,
+      )}/threads/${encodeURIComponent(ref.threadId)}/model`,
     );
     return (value as { model: unknown }).model;
   }
@@ -404,29 +368,26 @@ export class FlaryThreadClient {
     const ref = ThreadRefSchema.parse(refInput);
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
-      )}/threads/${encodeURIComponent(ref.threadId)}/models`
+        ref.appId,
+      )}/threads/${encodeURIComponent(ref.threadId)}/models`,
     );
     return Array.isArray((value as { models?: unknown }).models)
       ? (value as { models: unknown[] }).models
       : [];
   }
 
-  async modelSet(
-    refInput: ThreadRef,
-    input: ThreadModelSetRequest
-  ): Promise<unknown> {
+  async modelSet(refInput: ThreadRef, input: ThreadModelSetRequest): Promise<unknown> {
     const ref = ThreadRefSchema.parse(refInput);
     const body = ThreadModelSetRequestSchema.parse(input);
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
+        ref.appId,
       )}/threads/${encodeURIComponent(ref.threadId)}/model`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-      }
+      },
     );
     return (value as { model: unknown }).model;
   }
@@ -435,8 +396,8 @@ export class FlaryThreadClient {
     const ref = ThreadRefSchema.parse(refInput);
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
-      )}/threads/${encodeURIComponent(ref.threadId)}/model/history`
+        ref.appId,
+      )}/threads/${encodeURIComponent(ref.threadId)}/model/history`,
     );
     return Array.isArray((value as { history?: unknown }).history)
       ? (value as { history: unknown[] }).history
@@ -447,8 +408,8 @@ export class FlaryThreadClient {
     const ref = ThreadRefSchema.parse(refInput);
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
-      )}/threads/${encodeURIComponent(ref.threadId)}/approvals`
+        ref.appId,
+      )}/threads/${encodeURIComponent(ref.threadId)}/approvals`,
     );
     return Array.isArray((value as { approvals?: unknown }).approvals)
       ? (value as { approvals: unknown[] }).approvals
@@ -459,8 +420,8 @@ export class FlaryThreadClient {
     const ref = ThreadRefSchema.parse(refInput);
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
-      )}/threads/${encodeURIComponent(ref.threadId)}/user-input`
+        ref.appId,
+      )}/threads/${encodeURIComponent(ref.threadId)}/user-input`,
     );
     const requests =
       typeof value === "object" && value !== null && "requests" in value
@@ -471,24 +432,18 @@ export class FlaryThreadClient {
       : [];
   }
 
-  async respondToUserInput(
-    refInput: ThreadRef,
-    requestId: string,
-    responseInput: unknown
-  ) {
+  async respondToUserInput(refInput: ThreadRef, requestId: string, responseInput: unknown) {
     const ref = ThreadRefSchema.parse(refInput);
     const response = UserInputAnswerRequestSchema.parse(responseInput);
     return this.apiJson(
-      `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
-      )}/threads/${encodeURIComponent(
-        ref.threadId
+      `${this.#apiPath}/apps/${encodeURIComponent(ref.appId)}/threads/${encodeURIComponent(
+        ref.threadId,
       )}/user-input/${encodeURIComponent(requestId)}`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(response),
-      }
+      },
     );
   }
 
@@ -497,24 +452,18 @@ export class FlaryThreadClient {
    * value is sent only to that route. It is not sent as a thread command or
    * user-input response.
    */
-  async fulfillSecretRequest(
-    refInput: ThreadRef,
-    requestId: string,
-    inputValue: unknown
-  ) {
+  async fulfillSecretRequest(refInput: ThreadRef, requestId: string, inputValue: unknown) {
     const ref = ThreadRefSchema.parse(refInput);
     const input = SecretRequestFulfillmentInputSchema.parse(inputValue);
     const value = await this.apiJson(
-      `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
-      )}/threads/${encodeURIComponent(
-        ref.threadId
+      `${this.#apiPath}/apps/${encodeURIComponent(ref.appId)}/threads/${encodeURIComponent(
+        ref.threadId,
       )}/secret-requests/${encodeURIComponent(requestId)}`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(input),
-      }
+      },
     );
     const response = value as { secret?: unknown };
     const secret = ConnectionSecretMetadataSchema.parse(response.secret);
@@ -532,55 +481,50 @@ export class FlaryThreadClient {
 
   async historyCheckpoints(
     refInput: ThreadRef,
-    options?: { limit?: number }
+    options?: { limit?: number },
   ): Promise<ThreadHistoryListResponse> {
     const ref = ThreadRefSchema.parse(refInput);
     const query =
-      options?.limit === undefined
-        ? ""
-        : `?limit=${encodeURIComponent(String(options.limit))}`;
+      options?.limit === undefined ? "" : `?limit=${encodeURIComponent(String(options.limit))}`;
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
-      )}/threads/${encodeURIComponent(ref.threadId)}/history${query}`
+        ref.appId,
+      )}/threads/${encodeURIComponent(ref.threadId)}/history${query}`,
     );
     return ThreadHistoryListResponseSchema.parse(value);
   }
 
   async historyDiff(
     refInput: ThreadRef,
-    input: { baseCommitId?: string; headCommitId: string }
+    input: { baseCommitId?: string; headCommitId: string },
   ): Promise<ThreadHistoryDiffResponse> {
     const ref = ThreadRefSchema.parse(refInput);
     const body = ThreadHistoryDiffRequestSchema.parse(input);
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
+        ref.appId,
       )}/threads/${encodeURIComponent(ref.threadId)}/history/diff`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-      }
+      },
     );
     return ThreadHistoryDiffResponseSchema.parse(value);
   }
 
-  async historyRestore(
-    refInput: ThreadRef,
-    input: { commitId: string }
-  ): Promise<unknown> {
+  async historyRestore(refInput: ThreadRef, input: { commitId: string }): Promise<unknown> {
     const ref = ThreadRefSchema.parse(refInput);
     const body = ThreadHistoryRestoreRequestSchema.parse(input);
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
+        ref.appId,
       )}/threads/${encodeURIComponent(ref.threadId)}/history/restore`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-      }
+      },
     );
     return (value as { result?: unknown }).result;
   }
@@ -589,18 +533,16 @@ export class FlaryThreadClient {
     const ref = ThreadRefSchema.parse(refInput);
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
-      )}/threads/${encodeURIComponent(ref.threadId)}/cursor`
+        ref.appId,
+      )}/threads/${encodeURIComponent(ref.threadId)}/cursor`,
     );
-    return ThreadOperationalStateSchema.shape.cursor.parse(
-      (value as { cursor: unknown }).cursor
-    );
+    return ThreadOperationalStateSchema.shape.cursor.parse((value as { cursor: unknown }).cursor);
   }
 
   async decideApproval(
     refInput: ThreadRef,
     approvalId: string,
-    decision: Omit<ApprovalDecision, "requestId">
+    decision: Omit<ApprovalDecision, "requestId">,
   ): Promise<void> {
     const ref = ThreadRefSchema.parse(refInput);
     const body = ApprovalDecisionSchema.parse({
@@ -608,58 +550,50 @@ export class FlaryThreadClient {
       requestId: approvalId,
     });
     await this.apiJson(
-      `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
-      )}/threads/${encodeURIComponent(
-        ref.threadId
+      `${this.#apiPath}/apps/${encodeURIComponent(ref.appId)}/threads/${encodeURIComponent(
+        ref.threadId,
       )}/approvals/${encodeURIComponent(approvalId)}`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-      }
+      },
     );
   }
 
   async recallSearch(refInput: ThreadRef, options: FlaryRecallSearchOptions) {
     const ref = ThreadRefSchema.parse(refInput);
-    const mode = options.mode
-      ? RecallSearchModeSchema.parse(options.mode)
-      : undefined;
+    const mode = options.mode ? RecallSearchModeSchema.parse(options.mode) : undefined;
     const kinds = options.kinds?.map((kind) => RecallKindSchema.parse(kind));
     const query = new URLSearchParams({ query: options.query });
     if (mode) query.set("mode", mode);
     if (kinds?.length) query.set("kinds", kinds.join(","));
     if (options.limit !== undefined) query.set("limit", String(options.limit));
     const value = await this.apiJson(
-      `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
-      )}/threads/${encodeURIComponent(
-        ref.threadId
-      )}/recall/search?${query.toString()}`
+      `${this.#apiPath}/apps/${encodeURIComponent(ref.appId)}/threads/${encodeURIComponent(
+        ref.threadId,
+      )}/recall/search?${query.toString()}`,
     );
     return RecallSearchResponseSchema.parse(value);
   }
 
   async recallOpen(
     refInput: ThreadRef,
-    options: FlaryRecallOpenOptions
+    options: FlaryRecallOpenOptions,
   ): Promise<RecallDocument | undefined> {
     const ref = ThreadRefSchema.parse(refInput);
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
+        ref.appId,
       )}/threads/${encodeURIComponent(ref.threadId)}/recall/open`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(options),
-      }
+      },
     );
     const document = (value as { document?: unknown }).document;
-    return document === undefined
-      ? undefined
-      : RecallDocumentSchema.parse(document);
+    return document === undefined ? undefined : RecallDocumentSchema.parse(document);
   }
 
   async rename(refInput: ThreadRef, title: string): Promise<ThreadBinding> {
@@ -667,13 +601,13 @@ export class FlaryThreadClient {
     const body = ThreadRenameRequestSchema.parse({ title });
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
+        ref.appId,
       )}/threads/${encodeURIComponent(ref.threadId)}/rename`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-      }
+      },
     );
     return ThreadBindingSchema.parse((value as { binding: unknown }).binding);
   }
@@ -683,21 +617,14 @@ export class FlaryThreadClient {
   }
 
   async pin(refInput: ThreadRef, pinned = true): Promise<ThreadBinding> {
-    return this.bindingMutation(
-      refInput,
-      "pin",
-      ThreadPinRequestSchema.parse({ pinned })
-    );
+    return this.bindingMutation(refInput, "pin", ThreadPinRequestSchema.parse({ pinned }));
   }
 
-  async markRead(
-    refInput: ThreadRef,
-    throughSequence?: number
-  ): Promise<ThreadBinding> {
+  async markRead(refInput: ThreadRef, throughSequence?: number): Promise<ThreadBinding> {
     return this.bindingMutation(
       refInput,
       "read",
-      ThreadReadRequestSchema.parse({ throughSequence })
+      ThreadReadRequestSchema.parse({ throughSequence }),
     );
   }
 
@@ -705,42 +632,37 @@ export class FlaryThreadClient {
     const ref = ThreadRefSchema.parse(refInput);
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
+        ref.appId,
       )}/threads/${encodeURIComponent(ref.threadId)}`,
-      { method: "DELETE" }
+      { method: "DELETE" },
     );
     return ThreadDeletionSchema.parse(value);
   }
 
-  async deletion(
-    refInput: ThreadRef,
-    deletionId: string
-  ): Promise<ThreadDeletion> {
+  async deletion(refInput: ThreadRef, deletionId: string): Promise<ThreadDeletion> {
     const ref = ThreadRefSchema.parse(refInput);
     const value = await this.apiJson(
-      `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
-      )}/threads/${encodeURIComponent(
-        ref.threadId
-      )}/deletions/${encodeURIComponent(deletionId)}`
+      `${this.#apiPath}/apps/${encodeURIComponent(ref.appId)}/threads/${encodeURIComponent(
+        ref.threadId,
+      )}/deletions/${encodeURIComponent(deletionId)}`,
     );
     return ThreadDeletionSchema.parse(value);
   }
 
   async terminalTicket(
     refInput: ThreadRef,
-    input: { readonly cols?: number; readonly rows?: number } = {}
+    input: { readonly cols?: number; readonly rows?: number } = {},
   ): Promise<FlaryTerminalTicket> {
     const ref = ThreadRefSchema.parse(refInput);
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
+        ref.appId,
       )}/threads/${encodeURIComponent(ref.threadId)}/terminal-ticket`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(input),
-      }
+      },
     );
     if (
       !value ||
@@ -758,39 +680,25 @@ export class FlaryThreadClient {
   }
 
   compact(refInput: ThreadRef, input: unknown = {}) {
-    return this.control(
-      refInput,
-      "compact",
-      ThreadCompactRequestSchema.parse(input)
-    );
+    return this.control(refInput, "compact", ThreadCompactRequestSchema.parse(input));
   }
 
   rollback(refInput: ThreadRef, input: unknown) {
-    return this.control(
-      refInput,
-      "rollback",
-      ThreadRollbackRequestSchema.parse(input)
-    );
+    return this.control(refInput, "rollback", ThreadRollbackRequestSchema.parse(input));
   }
 
   restore(refInput: ThreadRef, input: unknown) {
-    return this.control(
-      refInput,
-      "restore",
-      ThreadRestoreRequestSchema.parse(input)
-    );
+    return this.control(refInput, "restore", ThreadRestoreRequestSchema.parse(input));
   }
 
   async exportSession(refInput: ThreadRef): Promise<ThreadPortableArchive> {
     const ref = ThreadRefSchema.parse(refInput);
     const value = await this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
-      )}/threads/${encodeURIComponent(ref.threadId)}/export`
+        ref.appId,
+      )}/threads/${encodeURIComponent(ref.threadId)}/export`,
     );
-    return ThreadPortableArchiveSchema.parse(
-      (value as { archive: unknown }).archive
-    );
+    return ThreadPortableArchiveSchema.parse((value as { archive: unknown }).archive);
   }
 
   setGoal(refInput: ThreadRef, input: unknown) {
@@ -801,15 +709,15 @@ export class FlaryThreadClient {
     const ref = ThreadRefSchema.parse(refInput);
     return this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
+        ref.appId,
       )}/threads/${encodeURIComponent(ref.threadId)}/goal`,
-      { method: "DELETE" }
+      { method: "DELETE" },
     );
   }
 
   async turns(
     refInput: ThreadRef,
-    options: { after?: number; limit?: number; types?: readonly string[] } = {}
+    options: { after?: number; limit?: number; types?: readonly string[] } = {},
   ): Promise<readonly unknown[]> {
     const value = await this.listRecords(refInput, "turns", options);
     return Array.isArray((value as { turns?: unknown }).turns)
@@ -819,7 +727,7 @@ export class FlaryThreadClient {
 
   async audit(
     refInput: ThreadRef,
-    options: { after?: number; limit?: number; types?: readonly string[] } = {}
+    options: { after?: number; limit?: number; types?: readonly string[] } = {},
   ): Promise<readonly unknown[]> {
     const value = await this.listRecords(refInput, "audit", options);
     return Array.isArray((value as { records?: unknown }).records)
@@ -831,51 +739,44 @@ export class FlaryThreadClient {
     const ref = ThreadRefSchema.parse(refInput);
     return this.apiText(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
-      )}/threads/${encodeURIComponent(ref.threadId)}/audit/export`
+        ref.appId,
+      )}/threads/${encodeURIComponent(ref.threadId)}/audit/export`,
     );
   }
 
   subagent(
     refInput: ThreadRef,
-    action:
-      | "list"
-      | "spawn"
-      | "send"
-      | "wait"
-      | "interrupt"
-      | "resume"
-      | "close",
-    input: Readonly<Record<string, unknown>> = {}
+    action: "list" | "spawn" | "send" | "wait" | "interrupt" | "resume" | "close",
+    input: Readonly<Record<string, unknown>> = {},
   ) {
     const ref = ThreadRefSchema.parse(refInput);
     return this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
+        ref.appId,
       )}/threads/${encodeURIComponent(ref.threadId)}/subagents/${action}`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(input),
-      }
+      },
     ).then((value) => (value as { result: unknown }).result);
   }
 
   schedule(
     refInput: ThreadRef,
     action: "register" | "list" | "history" | "pause" | "resume" | "delete",
-    input: Readonly<Record<string, unknown>> = {}
+    input: Readonly<Record<string, unknown>> = {},
   ): Promise<unknown> {
     const ref = ThreadRefSchema.parse(refInput);
     return this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
+        ref.appId,
       )}/threads/${encodeURIComponent(ref.threadId)}/schedules/${action}`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(input),
-      }
+      },
     ).then((value) => (value as { result: unknown }).result);
   }
 
@@ -887,55 +788,39 @@ export class FlaryThreadClient {
   async history(
     refInput: ThreadRef,
     options?: FlueConversationHistoryOptions,
-    agentName = refInput.agentId
+    agentName = refInput.agentId,
   ) {
     const ref = ThreadRefSchema.parse(refInput);
-    return this.scopedFlue(ref).agents.history(
-      agentName,
-      this.id(ref),
-      options
-    );
+    return this.scopedFlue(ref).agents.history(agentName, this.id(ref), options);
   }
 
-  observe(
-    ref: ThreadRef,
-    options?: AgentConversationObserveOptions,
-    agentName = ref.agentId
-  ) {
+  observe(ref: ThreadRef, options?: AgentConversationObserveOptions, agentName = ref.agentId) {
     return this.scopedFlue(ThreadRefSchema.parse(ref)).agents.observe(
       agentName,
       this.id(ref),
-      options
+      options,
     );
   }
 
-  abort(
-    ref: ThreadRef,
-    options?: { signal?: AbortSignal },
-    agentName = ref.agentId
-  ) {
+  abort(ref: ThreadRef, options?: { signal?: AbortSignal }, agentName = ref.agentId) {
     return this.scopedFlue(ThreadRefSchema.parse(ref)).agents.abort(
       agentName,
       this.id(ref),
-      options
+      options,
     );
   }
 
-  attachmentUrl(
-    ref: ThreadRef,
-    attachmentId: string,
-    agentName = ref.agentId
-  ): string {
+  attachmentUrl(ref: ThreadRef, attachmentId: string, agentName = ref.agentId): string {
     return this.scopedFlue(ThreadRefSchema.parse(ref)).agents.attachmentUrl(
       agentName,
       this.id(ref),
-      attachmentId
+      attachmentId,
     );
   }
 
   private scopedFlue(ref: ThreadRef): FlueClient {
     const path = `${this.#apiPath}/apps/${encodeURIComponent(
-      ref.appId
+      ref.appId,
     )}/threads/${encodeURIComponent(ref.threadId)}/flue`;
     return createFlueClient({
       baseUrl: joinBaseUrl(this.#baseUrl, path),
@@ -945,22 +830,16 @@ export class FlaryThreadClient {
     });
   }
 
-  private async apiJson(
-    path: string,
-    init: RequestInit = {}
-  ): Promise<unknown> {
+  private async apiJson(path: string, init: RequestInit = {}): Promise<unknown> {
     const headers = new Headers(init.headers);
     if (this.#token) headers.set("authorization", `Bearer ${this.#token}`);
-    const configured =
-      typeof this.#headers === "function"
-        ? await this.#headers()
-        : this.#headers;
+    const configured = typeof this.#headers === "function" ? await this.#headers() : this.#headers;
     for (const [key, value] of Object.entries(configured ?? {})) {
       if (!headers.has(key)) headers.set(key, value);
     }
     const response = await this.#request(
       path.startsWith("http") ? path : `${this.#baseUrl}${path}`,
-      { ...init, headers }
+      { ...init, headers },
     );
     const body = await response.json().catch(() => undefined);
     if (!response.ok) {
@@ -972,12 +851,10 @@ export class FlaryThreadClient {
         typeof detail === "string"
           ? detail
           : typeof detail === "object" && detail !== null && "message" in detail
-          ? String((detail as { message: unknown }).message)
-          : undefined;
+            ? String((detail as { message: unknown }).message)
+            : undefined;
       throw new Error(
-        `Flary thread request failed (${response.status})${
-          message ? `: ${message}` : ""
-        }`
+        `Flary thread request failed (${response.status})${message ? `: ${message}` : ""}`,
       );
     }
     return body;
@@ -986,10 +863,7 @@ export class FlaryThreadClient {
   private async apiText(path: string): Promise<string> {
     const headers = new Headers();
     if (this.#token) headers.set("authorization", `Bearer ${this.#token}`);
-    const configured =
-      typeof this.#headers === "function"
-        ? await this.#headers()
-        : this.#headers;
+    const configured = typeof this.#headers === "function" ? await this.#headers() : this.#headers;
     for (const [key, value] of Object.entries(configured ?? {})) {
       headers.set(key, value);
     }
@@ -1005,7 +879,7 @@ export class FlaryThreadClient {
   private async bindingMutation(
     refInput: ThreadRef,
     action: string,
-    body: unknown
+    body: unknown,
   ): Promise<ThreadBinding> {
     const value = await this.control(refInput, action, body);
     return ThreadBindingSchema.parse((value as { binding: unknown }).binding);
@@ -1015,20 +889,20 @@ export class FlaryThreadClient {
     const ref = ThreadRefSchema.parse(refInput);
     return this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
+        ref.appId,
       )}/threads/${encodeURIComponent(ref.threadId)}/${action}`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-      }
+      },
     );
   }
 
   private listRecords(
     refInput: ThreadRef,
     action: string,
-    options: { after?: number; limit?: number; types?: readonly string[] }
+    options: { after?: number; limit?: number; types?: readonly string[] },
   ) {
     const ref = ThreadRefSchema.parse(refInput);
     const query = new URLSearchParams();
@@ -1038,18 +912,15 @@ export class FlaryThreadClient {
     const suffix = query.size ? `?${query.toString()}` : "";
     return this.apiJson(
       `${this.#apiPath}/apps/${encodeURIComponent(
-        ref.appId
-      )}/threads/${encodeURIComponent(ref.threadId)}/${action}${suffix}`
+        ref.appId,
+      )}/threads/${encodeURIComponent(ref.threadId)}/${action}${suffix}`,
     );
   }
 }
 
-function createRealtimeConnection(
-  socket: FlaryRealtimeSocket
-): FlaryRealtimeConnection {
+function createRealtimeConnection(socket: FlaryRealtimeSocket): FlaryRealtimeConnection {
   const frames: RealtimeServerFrame[] = [];
-  const waiters: Array<(value: IteratorResult<RealtimeServerFrame>) => void> =
-    [];
+  const waiters: Array<(value: IteratorResult<RealtimeServerFrame>) => void> = [];
   const commands = new Map<
     string,
     {
@@ -1065,9 +936,7 @@ function createRealtimeConnection(
   };
   socket.addEventListener("message", (event) => {
     try {
-      const frame = RealtimeServerFrameSchema.parse(
-        JSON.parse(String(event.data))
-      );
+      const frame = RealtimeServerFrameSchema.parse(JSON.parse(String(event.data)));
       push(frame);
       if (frame.type === "result") {
         commands.get(frame.requestId)?.resolve(frame.result);
@@ -1082,8 +951,7 @@ function createRealtimeConnection(
   });
   socket.addEventListener("close", () => {
     closed = true;
-    for (const waiter of waiters.splice(0))
-      waiter({ value: undefined, done: true });
+    for (const waiter of waiters.splice(0)) waiter({ value: undefined, done: true });
     for (const pending of commands.values())
       pending.reject(new Error("The realtime connection closed"));
     commands.clear();
@@ -1119,7 +987,7 @@ function createRealtimeConnection(
           idempotencyKey,
           command,
           input,
-        })
+        }),
       );
       return promise;
     },
@@ -1155,7 +1023,7 @@ function waitForRealtimeSocket(socket: FlaryRealtimeSocket): Promise<void> {
 }
 
 export function createFlaryThreadClient(
-  options: CreateFlaryThreadClientOptions
+  options: CreateFlaryThreadClientOptions,
 ): FlaryThreadClient {
   return new FlaryThreadClient(options);
 }
@@ -1164,9 +1032,7 @@ function joinBaseUrl(baseUrl: string, mountPath: string): string {
   const base = baseUrl.replace(/\/+$/, "");
   const mount = mountPath.replace(/^\/+|\/+$/g, "");
   if (!base && typeof location === "undefined") {
-    throw new Error(
-      "A Flary thread client needs an absolute baseUrl outside a browser"
-    );
+    throw new Error("A Flary thread client needs an absolute baseUrl outside a browser");
   }
   return `${base}/${mount}`;
 }

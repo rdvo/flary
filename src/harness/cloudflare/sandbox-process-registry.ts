@@ -7,12 +7,8 @@ import {
   TimestampSchema,
 } from "../contracts/common.js";
 
-export const SandboxEnvironmentHashSchema = z
-  .string()
-  .regex(/^sha256:[0-9a-f]{64}$/);
-export type SandboxEnvironmentHash = z.infer<
-  typeof SandboxEnvironmentHashSchema
->;
+export const SandboxEnvironmentHashSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/);
+export type SandboxEnvironmentHash = z.infer<typeof SandboxEnvironmentHashSchema>;
 
 export const SandboxProcessStatusSchema = z.enum([
   "queued",
@@ -52,9 +48,7 @@ export const SandboxProcessSchema = SandboxProcessCreateSchema.extend({
 export type SandboxProcess = z.output<typeof SandboxProcessSchema>;
 
 export const SandboxProcessOutputStreamSchema = z.enum(["stdout", "stderr"]);
-export type SandboxProcessOutputStream = z.infer<
-  typeof SandboxProcessOutputStreamSchema
->;
+export type SandboxProcessOutputStream = z.infer<typeof SandboxProcessOutputStreamSchema>;
 
 export const SandboxProcessOutputChunkSchema = z
   .object({
@@ -67,9 +61,7 @@ export const SandboxProcessOutputChunkSchema = z
     occurredAt: TimestampSchema,
   })
   .strict();
-export type SandboxProcessOutputChunk = z.output<
-  typeof SandboxProcessOutputChunkSchema
->;
+export type SandboxProcessOutputChunk = z.output<typeof SandboxProcessOutputChunkSchema>;
 
 const SandboxProcessControlBase = {
   id: IdentifierSchema,
@@ -89,13 +81,11 @@ export const SandboxProcessStdinRequestSchema = z
       .max(64 * 1024)
       .refine(
         (value) => new TextEncoder().encode(value).byteLength <= 64 * 1024,
-        "stdin data must not exceed 64 KiB"
+        "stdin data must not exceed 64 KiB",
       ),
   })
   .strict();
-export type SandboxProcessStdinRequest = z.output<
-  typeof SandboxProcessStdinRequestSchema
->;
+export type SandboxProcessStdinRequest = z.output<typeof SandboxProcessStdinRequestSchema>;
 
 export const SandboxProcessSignalRequestSchema = z
   .object({
@@ -113,40 +103,26 @@ export const SandboxProcessSignalRequestSchema = z
     ]),
   })
   .strict();
-export type SandboxProcessSignalRequest = z.output<
-  typeof SandboxProcessSignalRequestSchema
->;
+export type SandboxProcessSignalRequest = z.output<typeof SandboxProcessSignalRequestSchema>;
 
 export const SandboxProcessControlRequestSchema = z.discriminatedUnion("kind", [
   SandboxProcessStdinRequestSchema,
   SandboxProcessSignalRequestSchema,
 ]);
-export type SandboxProcessControlRequest = z.output<
-  typeof SandboxProcessControlRequestSchema
->;
+export type SandboxProcessControlRequest = z.output<typeof SandboxProcessControlRequestSchema>;
 
 export const SandboxProcessLifecycleEventSchema = z
   .object({
     cursor: z.number().int().positive(),
     processId: IdentifierSchema,
-    action: z.enum([
-      "created",
-      "started",
-      "slept",
-      "woke",
-      "completed",
-      "failed",
-      "cancelled",
-    ]),
+    action: z.enum(["created", "started", "slept", "woke", "completed", "failed", "cancelled"]),
     fromStatus: SandboxProcessStatusSchema.optional(),
     toStatus: SandboxProcessStatusSchema,
     occurredAt: TimestampSchema,
     details: JsonObjectSchema.optional(),
   })
   .strict();
-export type SandboxProcessLifecycleEvent = z.output<
-  typeof SandboxProcessLifecycleEventSchema
->;
+export type SandboxProcessLifecycleEvent = z.output<typeof SandboxProcessLifecycleEventSchema>;
 
 export interface SandboxProcessRegistryOptions {
   readonly maxOutputBytes?: number;
@@ -170,10 +146,7 @@ interface SqlRows<T> {
 }
 
 interface SqlStorage {
-  exec<T = Record<string, unknown>>(
-    query: string,
-    ...bindings: unknown[]
-  ): SqlRows<T>;
+  exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): SqlRows<T>;
 }
 
 interface ProcessRow {
@@ -203,11 +176,7 @@ interface LifecycleRow {
   event_json: string;
 }
 
-const terminalStatuses = new Set<SandboxProcessStatus>([
-  "completed",
-  "failed",
-  "cancelled",
-]);
+const terminalStatuses = new Set<SandboxProcessStatus>(["completed", "failed", "cancelled"]);
 
 /**
  * Durable process state for Cloudflare Sandbox sessions.
@@ -227,23 +196,19 @@ export class SqliteSandboxProcessRegistry {
       options.maxOutputBytes,
       1024 * 1024,
       10 * 1024 * 1024,
-      "maxOutputBytes"
+      "maxOutputBytes",
     );
     this.#maxChunkBytes = boundedPositiveLimit(
       options.maxChunkBytes,
       64 * 1024,
       256 * 1024,
-      "maxChunkBytes"
+      "maxChunkBytes",
     );
     if (this.#maxChunkBytes > this.#maxOutputBytes) {
-      throw new RangeError(
-        "maxChunkBytes must not be larger than maxOutputBytes"
-      );
+      throw new RangeError("maxChunkBytes must not be larger than maxOutputBytes");
     }
     if (this.#maxChunkBytes < 4) {
-      throw new RangeError(
-        "maxChunkBytes must be at least 4 to preserve UTF-8 characters"
-      );
+      throw new RangeError("maxChunkBytes must be at least 4 to preserve UTF-8 characters");
     }
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#sql.exec(`
@@ -327,7 +292,7 @@ export class SqliteSandboxProcessRegistry {
         `SELECT record_json
          FROM flary_sandbox_processes
          WHERE process_id = ?`,
-        id
+        id,
       )
       .toArray()[0];
     if (!row) return undefined;
@@ -338,7 +303,7 @@ export class SqliteSandboxProcessRegistry {
                 COALESCE(MAX(truncated), 0) AS truncated
          FROM flary_sandbox_process_output
          WHERE process_id = ?`,
-        id
+        id,
       )
       .toArray()[0];
     return SandboxProcessSchema.parse({
@@ -348,9 +313,7 @@ export class SqliteSandboxProcessRegistry {
     });
   }
 
-  async list(
-    options: SandboxProcessListOptions = {}
-  ): Promise<readonly SandboxProcess[]> {
+  async list(options: SandboxProcessListOptions = {}): Promise<readonly SandboxProcess[]> {
     const limit = readLimit(options.limit, 100, 1_000);
     const conditions: string[] = [];
     const bindings: unknown[] = [];
@@ -359,19 +322,14 @@ export class SqliteSandboxProcessRegistry {
       bindings.push(IdentifierSchema.parse(options.runId));
     }
     if (options.status !== undefined) {
-      const statuses = Array.isArray(options.status)
-        ? [...options.status]
-        : [options.status];
+      const statuses = Array.isArray(options.status) ? [...options.status] : [options.status];
       if (statuses.length === 0) return [];
-      const parsed = statuses.map((status) =>
-        SandboxProcessStatusSchema.parse(status)
-      );
+      const parsed = statuses.map((status) => SandboxProcessStatusSchema.parse(status));
       conditions.push(`status IN (${parsed.map(() => "?").join(", ")})`);
       bindings.push(...parsed);
     }
     bindings.push(limit);
-    const where =
-      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     return this.#sql
       .exec<ProcessRow>(
         `SELECT record_json
@@ -379,46 +337,36 @@ export class SqliteSandboxProcessRegistry {
          ${where}
          ORDER BY created_at ASC, process_id ASC
          LIMIT ?`,
-        ...bindings
+        ...bindings,
       )
       .toArray()
       .map((row) => SandboxProcessSchema.parse(JSON.parse(row.record_json)));
   }
 
   async start(processId: string): Promise<SandboxProcess> {
-    return this.#transition(
-      processId,
-      ["queued"],
-      "running",
-      "started",
-      (process, now) => ({ ...process, startedAt: now })
-    );
+    return this.#transition(processId, ["queued"], "running", "started", (process, now) => ({
+      ...process,
+      startedAt: now,
+    }));
   }
 
   async sleep(processId: string, sleepUntil?: string): Promise<SandboxProcess> {
-    const until =
-      sleepUntil === undefined ? undefined : TimestampSchema.parse(sleepUntil);
+    const until = sleepUntil === undefined ? undefined : TimestampSchema.parse(sleepUntil);
     return this.#transition(
       processId,
       ["running"],
       "sleeping",
       "slept",
       (process) => ({ ...process, sleepUntil: until }),
-      until ? { sleepUntil: until } : undefined
+      until ? { sleepUntil: until } : undefined,
     );
   }
 
   async wake(processId: string): Promise<SandboxProcess> {
-    return this.#transition(
-      processId,
-      ["sleeping"],
-      "running",
-      "woke",
-      (process) => {
-        const { sleepUntil: _sleepUntil, ...rest } = process;
-        return rest;
-      }
-    );
+    return this.#transition(processId, ["sleeping"], "running", "woke", (process) => {
+      const { sleepUntil: _sleepUntil, ...rest } = process;
+      return rest;
+    });
   }
 
   async complete(processId: string, exitCode = 0): Promise<SandboxProcess> {
@@ -431,22 +379,14 @@ export class SqliteSandboxProcessRegistry {
       "completed",
       "completed",
       (process, now) => {
-        const {
-          sleepUntil: _sleepUntil,
-          errorCode: _errorCode,
-          ...rest
-        } = process;
+        const { sleepUntil: _sleepUntil, errorCode: _errorCode, ...rest } = process;
         return { ...rest, exitCode, completedAt: now };
       },
-      { exitCode }
+      { exitCode },
     );
   }
 
-  async fail(
-    processId: string,
-    errorCode: string,
-    exitCode?: number
-  ): Promise<SandboxProcess> {
+  async fail(processId: string, errorCode: string, exitCode?: number): Promise<SandboxProcess> {
     const error = IdentifierSchema.parse(errorCode);
     if (exitCode !== undefined && !Number.isSafeInteger(exitCode)) {
       throw new RangeError("Sandbox process exit code must be an integer");
@@ -465,7 +405,7 @@ export class SqliteSandboxProcessRegistry {
           completedAt: now,
         };
       },
-      { errorCode: error, ...(exitCode === undefined ? {} : { exitCode }) }
+      { errorCode: error, ...(exitCode === undefined ? {} : { exitCode }) },
     );
   }
 
@@ -478,7 +418,7 @@ export class SqliteSandboxProcessRegistry {
       (process, now) => {
         const { sleepUntil: _sleepUntil, ...rest } = process;
         return { ...rest, completedAt: now };
-      }
+      },
     );
   }
 
@@ -491,14 +431,12 @@ export class SqliteSandboxProcessRegistry {
     const process = await this.#requireProcess(input.processId);
     if (!["running", "sleeping"].includes(process.status)) {
       throw new Error(
-        `Sandbox process '${process.id}' cannot accept output while ${process.status}`
+        `Sandbox process '${process.id}' cannot accept output while ${process.status}`,
       );
     }
     const stream = SandboxProcessOutputStreamSchema.parse(input.stream);
     const occurredAt = TimestampSchema.parse(input.occurredAt ?? this.#now());
-    let remaining =
-      this.#maxOutputBytes -
-      Math.min(process.outputBytes, this.#maxOutputBytes);
+    let remaining = this.#maxOutputBytes - Math.min(process.outputBytes, this.#maxOutputBytes);
     const encoded = new TextEncoder().encode(input.text);
     if (encoded.byteLength === 0 || process.outputTruncated) return [];
     const acceptedLength = Math.min(encoded.byteLength, remaining);
@@ -524,13 +462,11 @@ export class SqliteSandboxProcessRegistry {
           text,
           bytes.byteLength,
           truncated ? 1 : 0,
-          occurredAt
+          occurredAt,
         )
         .toArray()[0];
       if (!row) {
-        throw new Error(
-          `Output for sandbox process '${process.id}' was not stored`
-        );
+        throw new Error(`Output for sandbox process '${process.id}' was not stored`);
       }
       chunks.push(
         SandboxProcessOutputChunkSchema.parse({
@@ -541,14 +477,13 @@ export class SqliteSandboxProcessRegistry {
           byteLength: bytes.byteLength,
           truncated,
           occurredAt,
-        })
+        }),
       );
       offset = safeEnd;
       remaining -= bytes.byteLength;
     }
 
-    const outputTruncated =
-      acceptedLength < encoded.byteLength || offset < accepted.byteLength;
+    const outputTruncated = acceptedLength < encoded.byteLength || offset < accepted.byteLength;
     if (outputTruncated && !chunks.some((chunk) => chunk.truncated)) {
       const row = this.#sql
         .exec<{ cursor: number }>(
@@ -558,13 +493,11 @@ export class SqliteSandboxProcessRegistry {
            RETURNING cursor`,
           process.id,
           stream,
-          occurredAt
+          occurredAt,
         )
         .toArray()[0];
       if (!row) {
-        throw new Error(
-          `Output marker for sandbox process '${process.id}' was not stored`
-        );
+        throw new Error(`Output marker for sandbox process '${process.id}' was not stored`);
       }
       chunks.push(
         SandboxProcessOutputChunkSchema.parse({
@@ -575,14 +508,11 @@ export class SqliteSandboxProcessRegistry {
           byteLength: 0,
           truncated: true,
           occurredAt,
-        })
+        }),
       );
     }
 
-    const consumed = chunks.reduce(
-      (total, chunk) => total + chunk.byteLength,
-      0
-    );
+    const consumed = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
     this.#updateProcess({
       ...process,
       outputBytes: process.outputBytes + consumed,
@@ -594,7 +524,7 @@ export class SqliteSandboxProcessRegistry {
 
   async readOutput(
     processId: string,
-    options: SandboxProcessOutputReadOptions = {}
+    options: SandboxProcessOutputReadOptions = {},
   ): Promise<readonly SandboxProcessOutputChunk[]> {
     const id = IdentifierSchema.parse(processId);
     await this.#requireProcess(id);
@@ -610,7 +540,7 @@ export class SqliteSandboxProcessRegistry {
          LIMIT ?`,
         id,
         afterCursor,
-        limit
+        limit,
       )
       .toArray()
       .map((row) =>
@@ -622,7 +552,7 @@ export class SqliteSandboxProcessRegistry {
           byteLength: Number(row.byte_length),
           truncated: Boolean(row.truncated),
           occurredAt: row.occurred_at,
-        })
+        }),
       );
   }
 
@@ -663,7 +593,7 @@ export class SqliteSandboxProcessRegistry {
     options: {
       status?: SandboxProcessControlRequest["status"];
       limit?: number;
-    } = {}
+    } = {},
   ): Promise<readonly SandboxProcessControlRequest[]> {
     const id = IdentifierSchema.parse(processId);
     const status =
@@ -681,12 +611,10 @@ export class SqliteSandboxProcessRegistry {
          LIMIT ?`,
         id,
         ...(status === undefined ? [] : [status]),
-        limit
+        limit,
       )
       .toArray()
-      .map((row) =>
-        SandboxProcessControlRequestSchema.parse(JSON.parse(row.request_json))
-      );
+      .map((row) => SandboxProcessControlRequestSchema.parse(JSON.parse(row.request_json)));
   }
 
   async resolveControlRequest(input: {
@@ -701,15 +629,13 @@ export class SqliteSandboxProcessRegistry {
         `SELECT request_json
          FROM flary_sandbox_process_control
          WHERE request_id = ?`,
-        requestId
+        requestId,
       )
       .toArray()[0];
     if (!row) {
       throw new Error(`Sandbox control request '${requestId}' was not found`);
     }
-    const current = SandboxProcessControlRequestSchema.parse(
-      JSON.parse(row.request_json)
-    );
+    const current = SandboxProcessControlRequestSchema.parse(JSON.parse(row.request_json));
     if (current.status !== "pending") return current;
     const completedAt = TimestampSchema.parse(input.completedAt ?? this.#now());
     const resolved = SandboxProcessControlRequestSchema.parse({
@@ -727,14 +653,14 @@ export class SqliteSandboxProcessRegistry {
        WHERE request_id = ? AND status = 'pending'`,
       resolved.status,
       JSON.stringify(resolved),
-      requestId
+      requestId,
     );
     return clone(resolved);
   }
 
   async readLifecycle(
     processId: string,
-    options: SandboxProcessOutputReadOptions = {}
+    options: SandboxProcessOutputReadOptions = {},
   ): Promise<readonly SandboxProcessLifecycleEvent[]> {
     const id = IdentifierSchema.parse(processId);
     const afterCursor = cursor(options.afterCursor);
@@ -748,16 +674,14 @@ export class SqliteSandboxProcessRegistry {
          LIMIT ?`,
         id,
         afterCursor,
-        limit
+        limit,
       )
       .toArray()
-      .map((row) =>
-        SandboxProcessLifecycleEventSchema.parse(JSON.parse(row.event_json))
-      );
+      .map((row) => SandboxProcessLifecycleEventSchema.parse(JSON.parse(row.event_json)));
   }
 
   async #createControl(
-    input: z.input<typeof SandboxProcessControlRequestSchema>
+    input: z.input<typeof SandboxProcessControlRequestSchema>,
   ): Promise<SandboxProcessControlRequest> {
     const request = SandboxProcessControlRequestSchema.parse(input);
     const existing = this.#sql
@@ -765,13 +689,11 @@ export class SqliteSandboxProcessRegistry {
         `SELECT request_json
          FROM flary_sandbox_process_control
          WHERE request_id = ?`,
-        request.id
+        request.id,
       )
       .toArray()[0];
     if (existing) {
-      const stored = SandboxProcessControlRequestSchema.parse(
-        JSON.parse(existing.request_json)
-      );
+      const stored = SandboxProcessControlRequestSchema.parse(JSON.parse(existing.request_json));
       const sameRequest =
         stored.processId === request.processId &&
         stored.kind === request.kind &&
@@ -784,7 +706,7 @@ export class SqliteSandboxProcessRegistry {
     const process = await this.#requireProcess(request.processId);
     if (!["running", "sleeping"].includes(process.status)) {
       throw new Error(
-        `Sandbox process '${process.id}' cannot accept control requests while ${process.status}`
+        `Sandbox process '${process.id}' cannot accept control requests while ${process.status}`,
       );
     }
     this.#sql.exec(
@@ -796,7 +718,7 @@ export class SqliteSandboxProcessRegistry {
       request.kind,
       request.status,
       JSON.stringify(request),
-      request.requestedAt
+      request.requestedAt,
     );
     return clone(request);
   }
@@ -806,20 +728,14 @@ export class SqliteSandboxProcessRegistry {
     allowed: readonly SandboxProcessStatus[],
     target: SandboxProcessStatus,
     action: SandboxProcessLifecycleEvent["action"],
-    update: (
-      process: SandboxProcess,
-      now: string
-    ) => Omit<SandboxProcess, "status" | "updatedAt">,
-    details?: Record<string, string | number | boolean | null>
+    update: (process: SandboxProcess, now: string) => Omit<SandboxProcess, "status" | "updatedAt">,
+    details?: Record<string, string | number | boolean | null>,
   ): Promise<SandboxProcess> {
     const process = await this.#requireProcess(processId);
     if (process.status === target) return process;
-    if (
-      terminalStatuses.has(process.status) ||
-      !allowed.includes(process.status)
-    ) {
+    if (terminalStatuses.has(process.status) || !allowed.includes(process.status)) {
       throw new Error(
-        `Sandbox process '${process.id}' cannot move from ${process.status} to ${target}`
+        `Sandbox process '${process.id}' cannot move from ${process.status} to ${target}`,
       );
     }
     const now = TimestampSchema.parse(this.#now());
@@ -860,7 +776,7 @@ export class SqliteSandboxProcessRegistry {
       process.status,
       JSON.stringify(process),
       process.createdAt,
-      process.updatedAt
+      process.updatedAt,
     );
   }
 
@@ -873,7 +789,7 @@ export class SqliteSandboxProcessRegistry {
       process.status,
       JSON.stringify(process),
       process.updatedAt,
-      process.id
+      process.id,
     );
   }
 
@@ -888,13 +804,11 @@ export class SqliteSandboxProcessRegistry {
         input.fromStatus ?? null,
         input.toStatus,
         input.action,
-        input.occurredAt
+        input.occurredAt,
       )
       .toArray()[0];
     if (!row) {
-      throw new Error(
-        `Lifecycle event for sandbox process '${input.processId}' was not stored`
-      );
+      throw new Error(`Lifecycle event for sandbox process '${input.processId}' was not stored`);
     }
     const event = SandboxProcessLifecycleEventSchema.parse({
       ...input,
@@ -905,14 +819,14 @@ export class SqliteSandboxProcessRegistry {
        SET event_json = ?
        WHERE cursor = ?`,
       JSON.stringify(event),
-      event.cursor
+      event.cursor,
     );
   }
 }
 
 /** Hash a process environment without returning or storing its values. */
 export async function hashSandboxEnvironment(
-  environment: Readonly<Record<string, string>>
+  environment: Readonly<Record<string, string>>,
 ): Promise<SandboxEnvironmentHash> {
   const canonical = Object.keys(environment)
     .sort()
@@ -922,7 +836,7 @@ export async function hashSandboxEnvironment(
   return SandboxEnvironmentHashSchema.parse(
     `sha256:${[...new Uint8Array(digest)]
       .map((byte) => byte.toString(16).padStart(2, "0"))
-      .join("")}`
+      .join("")}`,
   );
 }
 
@@ -930,27 +844,19 @@ function boundedPositiveLimit(
   value: number | undefined,
   fallback: number,
   maximum: number,
-  name: string
+  name: string,
 ): number {
   const selected = value ?? fallback;
   if (!Number.isSafeInteger(selected) || selected <= 0 || selected > maximum) {
-    throw new RangeError(
-      `${name} must be a positive integer no larger than ${maximum}`
-    );
+    throw new RangeError(`${name} must be a positive integer no larger than ${maximum}`);
   }
   return selected;
 }
 
-function readLimit(
-  value: number | undefined,
-  fallback: number,
-  maximum: number
-): number {
+function readLimit(value: number | undefined, fallback: number, maximum: number): number {
   const selected = value ?? fallback;
   if (!Number.isSafeInteger(selected) || selected <= 0 || selected > maximum) {
-    throw new RangeError(
-      `Read limit must be an integer from 1 through ${maximum}`
-    );
+    throw new RangeError(`Read limit must be an integer from 1 through ${maximum}`);
   }
   return selected;
 }
@@ -963,11 +869,7 @@ function cursor(value: number | undefined): number {
   return selected;
 }
 
-function utf8Boundary(
-  bytes: Uint8Array,
-  start: number,
-  proposedEnd: number
-): number {
+function utf8Boundary(bytes: Uint8Array, start: number, proposedEnd: number): number {
   let end = proposedEnd;
   while (end > start) {
     try {

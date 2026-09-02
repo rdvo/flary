@@ -22,14 +22,13 @@ const github = app.mcp("github");
 export const tools = app.tools({ searchDocs, github });
 ```
 
-Importing this registry and assigning it to a function or agent completes
-registration. Local functions are read tools by default. Mark a tool as a
-write only when it changes external state; writes require approval by default.
+Importing this registry and assigning it to a function or agent completes registration. Local
+functions are read tools by default. Mark a tool as a write only when it changes external state;
+writes require approval by default.
 
 ## What the model sees
 
-Flary keeps the first model request small. A persistent agent can receive this
-model-visible core:
+Flary keeps the first model request small. A persistent agent can receive this model-visible core:
 
 | Tool                 | When it appears                                     | Purpose                                                                         |
 | -------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------- |
@@ -38,8 +37,8 @@ model-visible core:
 | `request_secret`     | Enabled by default when a secret host is configured | Ask through the protected credential UI without exposing the value to the model |
 | Subagent controls    | Delegation is enabled                               | Start, message, wait for, interrupt, and close durable child agents             |
 
-Application, MCP, OpenAPI, workspace, Sandbox, Browser Run, and R2 schemas do
-not all enter the first model request. They stay in Flary's private catalog.
+Application, MCP, OpenAPI, workspace, Sandbox, Browser Run, and R2 schemas do not all enter the
+first model request. They stay in Flary's private catalog.
 
 Inside `execute`, generated code uses four built-ins:
 
@@ -57,16 +56,16 @@ return tools.call({
 - `tools.search()` returns public metadata, not credentials.
 - `tools.describe()` loads the selected input and output schemas.
 - `tools.call()` runs one selected operation.
-- `tools.batch()` runs independent, approval-free reads concurrently. Writes
-  stay sequential so approval and replay order remain deterministic.
+- `tools.batch()` runs independent, approval-free reads concurrently. Writes stay sequential so
+  approval and replay order remain deterministic.
 
 ## Public web search is built in
 
-Every persistent `app.agent()` receives a lazy `web` source by default. It
-uses [Parallel's free anonymous Search MCP endpoint](https://docs.parallel.ai/integrations/mcp/quickstart)
-and exposes `web_search` and `web_fetch` only after Tool Search selects them.
-The tool schemas do not enter every model request, and Flary makes no network
-call until the agent needs current public information.
+Every persistent `app.agent()` receives a lazy `web` source by default. It uses
+[Parallel's free anonymous Search MCP endpoint](https://docs.parallel.ai/integrations/mcp/quickstart)
+and exposes `web_search` and `web_fetch` only after Tool Search selects them. The tool schemas do
+not enter every model request, and Flary makes no network call until the agent needs current public
+information.
 
 ```ts
 export const researcher = app.agent({
@@ -75,10 +74,10 @@ export const researcher = app.agent({
 });
 ```
 
-Flary derives one non-secret UUID from the durable thread ID and injects it as
-Parallel's `session_id`. Related searches in the same thread use the same
-identifier. A different thread receives a different identifier. Flary does
-not send the tenant ID, user ID, or raw thread ID to Parallel.
+Flary derives one non-secret UUID from the durable thread ID and injects it as Parallel's
+`session_id`. Related searches in the same thread use the same identifier. A different thread
+receives a different identifier. Flary does not send the tenant ID, user ID, or raw thread ID to
+Parallel.
 
 Disable web access for one agent or the full application:
 
@@ -91,8 +90,8 @@ export const offline = app.agent({
 });
 ```
 
-For higher limits, create a tenant-owned MCP connection in trusted host code
-and select it without placing the key in the model or source:
+For higher limits, create a tenant-owned MCP connection in trusted host code and select it without
+placing the key in the model or source:
 
 ```ts
 const app = flary({
@@ -101,24 +100,21 @@ const app = flary({
 });
 ```
 
-An explicit tool source with the `web` namespace replaces the built-in
-source. This lets a host use a different provider without changing agent
-code. Anonymous access is for light use. Production applications should use
-a tenant-owned Parallel key when they need higher or guaranteed limits.
+An explicit tool source with the `web` namespace replaces the built-in source. This lets a host use
+a different provider without changing agent code. Anonymous access is for light use. Production
+applications should use a tenant-owned Parallel key when they need higher or guaranteed limits.
 
-If the model already knows a stable catalog ID, it can skip search. If it also
-knows the input, it can skip describe. The fastest common path is one
-`tools.call()` inside `execute`.
+If the model already knows a stable catalog ID, it can skip search. If it also knows the input, it
+can skip describe. The fastest common path is one `tools.call()` inside `execute`.
 
-In the personal dashboard, open **Connections** and paste the server's HTTPS
-MCP URL. Flary discovers its OAuth service, opens the consent page, receives
-the callback in your Worker, encrypts the credential, checks the tool list,
-and makes the tools available to new agent turns. You do not edit TypeScript
-or copy an MCP token.
+In the personal dashboard, open **Connections** and paste the server's HTTPS MCP URL. Flary
+discovers its OAuth service, opens the consent page, receives the callback in your Worker, encrypts
+the credential, checks the tool list, and makes the tools available to new agent turns. You do not
+edit TypeScript or copy an MCP token.
 
-The backend template stays code-first. Its optional GitHub example generates
-the source and trusted token resolver. A custom backend can declare a logical
-source and resolve it from its own connection store:
+The backend template stays code-first. Its optional GitHub example generates the source and trusted
+token resolver. A custom backend can declare a logical source and resolve it from its own connection
+store:
 
 ```ts
 const connections = app.mcp({
@@ -139,23 +135,22 @@ const billing = app.openapi({
 
 ## Built-in coding tools
 
-`app.workspace()` is a complete durable file and Git source. It adds `list`,
-`stat`, `glob`, `grep`, `read`, `diff`, `write`, `edit`, `batchEdit`, `move`,
-`delete`, and the governed Git operations. File writes and state-changing Git
-operations require approval by default.
+`app.workspace()` is a complete durable file and Git source. It adds `list`, `stat`, `glob`, `grep`,
+`read`, `diff`, `write`, `edit`, `batchEdit`, `move`, `delete`, and the governed Git operations.
+File writes and state-changing Git operations require approval by default.
 
-`app.sandbox()` is separate. It runs Linux commands, tests, builds, package
-installation, and durable processes. Use the workspace source for file and Git
-state. Use the Sandbox source for programs that need a Linux process.
+`app.sandbox()` is separate. It runs Linux commands, tests, builds, package installation, and
+durable processes. Use the workspace source for file and Git state. Use the Sandbox source for
+programs that need a Linux process.
 
-See the [complete Codex-style coding agent](/docs/examples/coding-agent/) for
-the real starter files, every tool name, the isolated executor flow, a durable
-reviewer subagent, checkpoints, and reconnect code.
+See the [complete Codex-style coding agent](/docs/examples/coding-agent/) for the real starter
+files, every tool name, the isolated executor flow, a durable reviewer subagent, checkpoints, and
+reconnect code.
 
 ## Customer files in your own R2 bucket
 
-Use `app.r2()` when an agent must work on files that already live in an R2
-bucket. Bind the bucket to the Worker, then pin a tenant prefix in the source:
+Use `app.r2()` when an agent must work on files that already live in an R2 bucket. Bind the bucket
+to the Worker, then pin a tenant prefix in the source:
 
 ```ts
 const customerFiles = app.r2({
@@ -167,41 +162,36 @@ const customerFiles = app.r2({
 
 export const siteEditor = app.agent({
   name: "site-editor",
-  instructions:
-    "Edit only the customer's site files. Explain changes before writing.",
+  instructions: "Edit only the customer's site files. Explain changes before writing.",
   tools: app.tools({ files: customerFiles }),
 });
 ```
 
-`{tenantId}` is replaced by the authenticated tenant on the server. The
-browser sends only the thread ID. It never sends a bucket name, prefix, or
-R2 credential. Reads are lazy; writes require approval and pass through the
-normal Flary journal.
+`{tenantId}` is replaced by the authenticated tenant on the server. The browser sends only the
+thread ID. It never sends a bucket name, prefix, or R2 credential. Reads are lazy; writes require
+approval and pass through the normal Flary journal.
 
 Add the binding to the Worker's Wrangler configuration:
 
 ```jsonc
 {
-  "r2_buckets": [{ "binding": "CUSTOMER_FILES", "bucket_name": "my-app-files" }]
+  "r2_buckets": [{ "binding": "CUSTOMER_FILES", "bucket_name": "my-app-files" }],
 }
 ```
 
-For separate customer buckets or AWS S3, keep the same `app.r2()` source but
-set `connection` and provide a trusted `resolveR2` adapter. Do not expose
-S3 credentials to the model or the browser. The adapter must enforce the
-tenant, bucket, and prefix before it returns file tools.
+For separate customer buckets or AWS S3, keep the same `app.r2()` source but set `connection` and
+provide a trusted `resolveR2` adapter. Do not expose S3 credentials to the model or the browser. The
+adapter must enforce the tenant, bucket, and prefix before it returns file tools.
 
 ## Small core, lazy extensions
 
-The model sees one bounded `execute` tool. The tool instructions include the
-names and purpose of configured core workspace, shell, and browser actions.
-The agent therefore knows that actions such as `workspace.grep`,
-`workspace.edit`, and `shell.exec` exist without a catalog search.
+The model sees one bounded `execute` tool. The tool instructions include the names and purpose of
+configured core workspace, shell, and browser actions. The agent therefore knows that actions such
+as `workspace.grep`, `workspace.edit`, and `shell.exec` exist without a catalog search.
 
-The exact action schemas are still lazy. Generated code describes a selected
-action before it calls it. MCP, OpenAPI, local functions, skills, and large or
-changing catalogs stay lazy by default. Flary does not list every local tool
-name in each model request.
+The exact action schemas are still lazy. Generated code describes a selected action before it calls
+it. MCP, OpenAPI, local functions, skills, and large or changing catalogs stay lazy by default.
+Flary does not list every local tool name in each model request.
 
 Use `eagerTools` for a very small set of frequent local tools:
 
@@ -213,27 +203,23 @@ export const analyst = app.agent({
 });
 ```
 
-Only these IDs enter the core instructions. Their schemas stay lazy. The
-agent uses `tools.search` and `tools.describe` for all other catalog items.
-This keeps the prompt small when an application has many tools.
+Only these IDs enter the core instructions. Their schemas stay lazy. The agent uses `tools.search`
+and `tools.describe` for all other catalog items. This keeps the prompt small when an application
+has many tools.
 
-Search, describe, batch, tool-call, and Code Mode lifecycle records are
-durable session events. Public records include bounded duration and usage
-data. Flary redacts secrets and does not store generated Code Mode source in
-the public ledger.
+Search, describe, batch, tool-call, and Code Mode lifecycle records are durable session events.
+Public records include bounded duration and usage data. Flary redacts secrets and does not store
+generated Code Mode source in the public ledger.
 
-This is a provider-neutral runtime. OpenAI, Anthropic, Google, and other
-providers receive the same public tool contract. Flary owns discovery,
-execution, approval, replay, and audit behavior instead of depending on one
-provider's private tool protocol.
+This is a provider-neutral runtime. OpenAI, Anthropic, Google, and other providers receive the same
+public tool contract. Flary owns discovery, execution, approval, replay, and audit behavior instead
+of depending on one provider's private tool protocol.
 
-Every call passes through capability checks, policy, approval, input
-validation, redaction, limits, and durable replay. Provider, MCP, and API
-credentials stay in trusted host code.
+Every call passes through capability checks, policy, approval, input validation, redaction, limits,
+and durable replay. Provider, MCP, and API credentials stay in trusted host code.
 
-OpenAPI `GET`, `HEAD`, and `OPTIONS` operations are reads by default. Mutating
-methods require approval by default. A remote specification cannot lower that
-protection.
+OpenAPI `GET`, `HEAD`, and `OPTIONS` operations are reads by default. Mutating methods require
+approval by default. A remote specification cannot lower that protection.
 
 ## Tested starter source
 

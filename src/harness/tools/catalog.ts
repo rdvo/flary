@@ -16,7 +16,7 @@ import {
   type ToolCatalogSearchResult,
   type ToolCapabilityDescriptor,
   type ToolOperation,
-} from "../contracts/tools";
+} from "../contracts/tools.js";
 
 export type ToolSecretValue = string | Uint8Array;
 
@@ -69,12 +69,8 @@ export interface ToolCatalog {
     registration: ToolCatalogRegistration<TInput, TOutput>,
   ): ToolCapabilityDescriptor;
   unregister(toolId: string): boolean;
-  search(
-    request?: ToolCatalogSearchRequestInput,
-  ): Promise<ToolCatalogSearchResponse>;
-  load(
-    request: ToolCatalogLoadRequestInput,
-  ): Promise<ToolCatalogLoadResponse | undefined>;
+  search(request?: ToolCatalogSearchRequestInput): Promise<ToolCatalogSearchResponse>;
+  load(request: ToolCatalogLoadRequestInput): Promise<ToolCatalogLoadResponse | undefined>;
   loadHandle<TInput = unknown, TOutput = unknown>(
     request: ToolCatalogLoadRequestInput,
   ): Promise<CapabilityHandle<TInput, TOutput> | undefined>;
@@ -92,10 +88,7 @@ export class ToolCatalogError extends Error {
     | "secret_not_declared"
     | "secret_unavailable";
 
-  constructor(
-    code: ToolCatalogError["code"],
-    message: string,
-  ) {
+  constructor(code: ToolCatalogError["code"], message: string) {
     super(message);
     this.name = "ToolCatalogError";
     this.code = code;
@@ -165,8 +158,8 @@ function scoreTool(
 
   return {
     score: Math.min(1, bestScore),
-    matchedOn: [...matchedOn].filter((field) =>
-      ToolCatalogMatchFieldSchema.safeParse(field).success,
+    matchedOn: [...matchedOn].filter(
+      (field) => ToolCatalogMatchFieldSchema.safeParse(field).success,
     ),
   };
 }
@@ -178,11 +171,7 @@ function matchesFilters(
   if (request.kinds.length > 0 && !request.kinds.includes(definition.kind)) {
     return false;
   }
-  if (
-    request.capabilities.some(
-      (capability) => !definition.capabilities.includes(capability),
-    )
-  ) {
+  if (request.capabilities.some((capability) => !definition.capabilities.includes(capability))) {
     return false;
   }
   if (request.tags.some((tag) => !definition.tags.includes(tag))) return false;
@@ -295,9 +284,7 @@ export class InMemoryToolCatalog implements ToolCatalog {
       capability,
       execute: registration.execute as ToolExecutor,
       resourceKey: registration.resourceKey as
-        | string
-        | ((input: unknown) => string | undefined)
-        | undefined,
+        string | ((input: unknown) => string | undefined) | undefined,
     };
     this.#tools.set(definition.id, stored);
     this.#capabilities.set(capability.id, definition.id);
@@ -323,10 +310,7 @@ export class InMemoryToolCatalog implements ToolCatalog {
         const result = scoreTool(stored.definition, request.query);
         return { stored, ...result };
       })
-      .filter(
-        ({ score, matchedOn }) =>
-          !request.query || (score > 0 && matchedOn.length > 0),
-      )
+      .filter(({ score, matchedOn }) => !request.query || (score > 0 && matchedOn.length > 0))
       .sort(
         (left, right) =>
           right.score - left.score ||
@@ -343,9 +327,7 @@ export class InMemoryToolCatalog implements ToolCatalog {
       }),
     );
     const nextCursor =
-      start + request.limit < ranked.length
-        ? String(start + request.limit)
-        : undefined;
+      start + request.limit < ranked.length ? String(start + request.limit) : undefined;
     return ToolCatalogSearchResponseSchema.parse({ results, nextCursor });
   }
 
@@ -367,10 +349,7 @@ export class InMemoryToolCatalog implements ToolCatalog {
     const request = ToolCatalogLoadRequestSchema.parse(requestInput);
     const stored = this.#tools.get(request.id);
     return stored
-      ? (makeCapability(stored, this.#secretProvider) as CapabilityHandle<
-          TInput,
-          TOutput
-        >)
+      ? (makeCapability(stored, this.#secretProvider) as CapabilityHandle<TInput, TOutput>)
       : undefined;
   }
 }

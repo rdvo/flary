@@ -88,11 +88,7 @@ test("OpenAI Responses resumes by response ID and sequence", async () => {
   assert.equal(interrupted?.streamSequence, 1);
 
   const recovered = [];
-  for await (const event of adapter.recover(
-    request,
-    interrupted!,
-    context,
-  )) {
+  for await (const event of adapter.recover(request, interrupted!, context)) {
     recovered.push(event);
   }
 
@@ -138,11 +134,14 @@ test("OpenAI Responses requests a streamable reasoning summary", async () => {
     checkpoints: new InMemoryProviderCheckpointStore(),
   };
 
-  for await (const _event of adapter.start({
-    model: "gpt-5",
-    messages: [{ role: "user", content: "hello" }],
-    reasoningEffort: "high",
-  }, context)) {
+  for await (const _event of adapter.start(
+    {
+      model: "gpt-5",
+      messages: [{ role: "user", content: "hello" }],
+      reasoningEffort: "high",
+    },
+    context,
+  )) {
     // Consume the complete response.
   }
 
@@ -173,11 +172,14 @@ test("Gemini durable requests preserve the selected thinking level", async () =>
     checkpoints: new InMemoryProviderCheckpointStore(),
   };
 
-  for await (const _event of adapter.start({
-    model: "gemini-3.7-flash",
-    messages: [{ role: "user", content: "hello" }],
-    reasoningEffort: "low",
-  }, context)) {
+  for await (const _event of adapter.start(
+    {
+      model: "gemini-3.7-flash",
+      messages: [{ role: "user", content: "hello" }],
+      reasoningEffort: "low",
+    },
+    context,
+  )) {
     // Consume the complete response.
   }
 
@@ -206,9 +208,7 @@ test("continuation keeps persisted assistant output before tool results", () => 
     status: "waiting_for_tool",
     partialText: "I will check.",
     partialReasoning: "",
-    toolCalls: [
-      { id: "tool-1", name: "check", arguments: { id: 1 } },
-    ],
+    toolCalls: [{ id: "tool-1", name: "check", arguments: { id: 1 } }],
     attempt: 1,
     idempotencyKey: "request-1",
     updatedAt: "2026-07-28T12:00:00.000Z",
@@ -242,15 +242,11 @@ test("unknown providers require an explicit retry", async () => {
     events[0]?.type === "error" ? events[0].error.code : undefined,
     "explicit_retry_required",
   );
-  assert.equal(
-    (await checkpoints.get("run-1", "model-1"))?.status,
-    "interrupted",
-  );
+  assert.equal((await checkpoints.get("run-1", "model-1"))?.status, "interrupted");
 });
 
 function sse(events: unknown[]): Response {
-  return new Response(
-    events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""),
-    { headers: { "content-type": "text/event-stream" } },
-  );
+  return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+    headers: { "content-type": "text/event-stream" },
+  });
 }

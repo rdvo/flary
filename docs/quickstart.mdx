@@ -14,14 +14,12 @@ order: 1
 | Your own web or mobile UI               | **Agent backend**, then [build your UI](/docs/clients/) |
 | A self-hosted business inbox            | **Flary Mail**                                          |
 
-The dashboard starter includes first-owner login, the production React and
-WebSocket thread console, provider setup, MCP connections, approvals, tool
-activity, and secret-health status. The backend is headless and exposes the
-same durable agent runtime through typed APIs.
+The dashboard starter includes first-owner login, the production React and WebSocket thread console,
+provider setup, MCP connections, approvals, tool activity, and secret-health status. The backend is
+headless and exposes the same durable agent runtime through typed APIs.
 
-The mail starter receives and sends mail for selected addresses. It includes
-inbox, sent, draft, archive, spam, and trash folders; replies and attachments;
-team access; and WebSocket updates.
+The mail starter receives and sends mail for selected addresses. It includes inbox, sent, draft,
+archive, spam, and trash folders; replies and attachments; team access; and WebSocket updates.
 
 ## 2. Start the wizard
 
@@ -33,32 +31,28 @@ The default setup does not need Docker. Browser Run and Sandbox are optional.
 
 ## 3. Sign in to Cloudflare
 
-The wizard starts Wrangler OAuth. Sign in in the browser and select the
-Cloudflare account that will own the deployment. Flary stores the selected
-account ID in `.flary/project.json`. It never reads or stores Wrangler's
-access token.
+The wizard starts Wrangler OAuth. Sign in in the browser and select the Cloudflare account that will
+own the deployment. Flary stores the selected account ID in `.flary/project.json`. It never reads or
+stores Wrangler's access token.
 
 ## 4. Choose an AI provider
 
-Choose OpenAI, Anthropic, Cloudflare Workers AI, or skip provider setup. API
-keys are entered in a hidden prompt. Workers AI does not need a provider key.
+Choose OpenAI, Anthropic, Cloudflare Workers AI, or skip provider setup. API keys are entered in a
+hidden prompt. Workers AI does not need a provider key.
 
-The personal dashboard does not ask for an MCP token. After deployment, open
-**Connections**, paste an MCP server URL, and complete the server's login. For
-the backend template, the optional GitHub example uses a fine-grained GitHub
-token during setup.
+The personal dashboard does not ask for an MCP token. After deployment, open **Connections**, paste
+an MCP server URL, and complete the server's login. For the backend template, the optional GitHub
+example uses a fine-grained GitHub token during setup.
 
-Local secrets go in `.dev.vars` with file mode `0600`. Production values are
-uploaded as Worker secrets. They do not enter source files or command
-arguments.
+Local secrets go in `.dev.vars` with file mode `0600`. Production values are uploaded as Worker
+secrets. They do not enter source files or command arguments.
 
 ## 5. Deploy
 
-The wizard installs packages, builds the Worker, creates required Cloudflare
-resources, uploads secrets, applies database migrations, deploys, and checks
-`/health`. For mail projects, it also enables Email Routing and Email Sending.
-Email Routing replaces the domain's MX records. The wizard asks for explicit
-approval before it makes this change.
+The wizard installs packages, builds the Worker, creates required Cloudflare resources, uploads
+secrets, applies database migrations, deploys, and checks `/health`. For mail projects, it also
+enables Email Routing and Email Sending. Email Routing replaces the domain's MX records. The wizard
+asks for explicit approval before it makes this change.
 
 If setup stops, continue from the project directory:
 
@@ -70,20 +64,18 @@ npx flary doctor
 
 ## 6. Use the result
 
-For a dashboard, open the printed setup URL and create the first owner with
-`FLARY_SETUP_TOKEN` from the generated `.dev.vars` file. Registration closes
-after that owner is created. Direct Better Auth registration is disabled.
-Open **Connections** to add an MCP server by URL.
+For a dashboard, open the printed setup URL and create the first owner with `FLARY_SETUP_TOKEN` from
+the generated `.dev.vars` file. Registration closes after that owner is created. Direct Better Auth
+registration is disabled. Open **Connections** to add an MCP server by URL.
 
-For a personal backend, use `FLARY_ACCESS_TOKEN` from `.dev.vars` as a bearer
-token. Existing-application authentication stays closed in production until
-you add a trusted identity resolver.
+For a personal backend, use `FLARY_ACCESS_TOKEN` from `.dev.vars` as a bearer token.
+Existing-application authentication stays closed in production until you add a trusted identity
+resolver.
 
-For mail, open the printed `/setup` URL and use `FLARY_SETUP_TOKEN` to create
-the first owner. The CLI uses Wrangler OAuth, so it does not need a Flary API
-key or a separate OAuth client. D1 stores mail state, R2 stores raw mail and
-attachments, Queues handle parse and send work, and a hibernating Durable
-Object sends live WebSocket events. The template does not use KV.
+For mail, open the printed `/setup` URL and use `FLARY_SETUP_TOKEN` to create the first owner. The
+CLI uses Wrangler OAuth, so it does not need a Flary API key or a separate OAuth client. D1 stores
+mail state, R2 stores raw mail and attachments, Queues handle parse and send work, and a hibernating
+Durable Object sends live WebSocket events. The template does not use KV.
 
 Next, choose one guide:
 
@@ -93,8 +85,8 @@ Next, choose one guide:
 
 ## Automated setup
 
-Non-interactive setup must state every required choice. Provider keys come
-from the process environment.
+Non-interactive setup must state every required choice. Provider keys come from the process
+environment.
 
 ```bash
 OPENAI_API_KEY=... npx flary create my-flary \

@@ -17,23 +17,22 @@ const tools = app.tools({
 });
 ```
 
-The catalog includes navigation, DOM and accessibility snapshots, clicks,
-typing, selection, scrolling, screenshots, traces, console and network
-inspection, downloads, bounded JavaScript, and session recovery.
+The catalog includes navigation, DOM and accessibility snapshots, clicks, typing, selection,
+scrolling, screenshots, traces, console and network inspection, downloads, bounded JavaScript, and
+session recovery.
 
-Security defaults require approval for a new origin and for login, submission,
-purchase, permission, upload, or destructive actions. Private networks,
-metadata endpoints, unsafe redirects, and DNS rebinding are blocked. Page
-instructions are untrusted.
+Security defaults require approval for a new origin and for login, submission, purchase, permission,
+upload, or destructive actions. Private networks, metadata endpoints, unsafe redirects, and DNS
+rebinding are blocked. Page instructions are untrusted.
 
-Cookies and browser state are encrypted in R2 and scoped to one tenant and
-thread. A person can take control through the thread WebSocket without
-receiving raw CDP credentials. Agent browser actions pause during takeover.
+Cookies and browser state are encrypted in R2 and scoped to one tenant and thread. A person can take
+control through the thread WebSocket without receiving raw CDP credentials. Agent browser actions
+pause during takeover.
 
-Browser Run is optional. Its binding is generated only when an application
-registers `app.browser()`.
+Browser Run is optional. Its binding is generated only when an application registers
+`app.browser()`.
 
-Use the built-in `web_search` and `web_fetch` tools when the agent only needs
-public information or page text. Use Browser Run when it must interact with a
-page, keep cookies, take a screenshot, or let a person take control. Web
-search is enabled by default and does not require a Browser Run binding.
+Use the built-in `web_search` and `web_fetch` tools when the agent only needs public information or
+page text. Use Browser Run when it must interact with a page, keep cookies, take a screenshot, or
+let a person take control. Web search is enabled by default and does not require a Browser Run
+binding.

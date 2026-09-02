@@ -69,22 +69,15 @@ test("deleted BYOK recovery cannot fall back to a managed credential", async () 
   assert.equal(managed?.source, "managed");
 
   await assert.rejects(
-    requireRecoveredFlueModel(
-      env,
-      binding,
-      selection,
-      "user-1",
-      {
-        provider: "openai",
-        source: "tenant_byok",
-        billingMode: "byok",
-        connectionId: "deleted-byok-connection",
-        version: 2,
-        generation: "connection-2",
-        connectionRef:
-          "f84c6a283f51ec6ba07ebf0da01c76730d4d472d5ef433b183a539c96eea7485",
-      },
-    ),
+    requireRecoveredFlueModel(env, binding, selection, "user-1", {
+      provider: "openai",
+      source: "tenant_byok",
+      billingMode: "byok",
+      connectionId: "deleted-byok-connection",
+      version: 2,
+      generation: "connection-2",
+      connectionRef: "f84c6a283f51ec6ba07ebf0da01c76730d4d472d5ef433b183a539c96eea7485",
+    }),
     (error: unknown) =>
       error instanceof CredentialRecoveryUnavailableError &&
       error.code === "credential_recovery_unavailable",
@@ -102,10 +95,7 @@ test("a completed BYOK turn cannot block a new managed turn after restart", asyn
     async (submission) => {
       prepared.push(submission.id);
       if (submission.source === "tenant_byok") {
-        throw new CredentialRecoveryUnavailableError(
-          "deleted-byok-reference",
-          "openai",
-        );
+        throw new CredentialRecoveryUnavailableError("deleted-byok-reference", "openai");
       }
       return "managed-provider/model";
     },
@@ -128,10 +118,7 @@ test("one unavailable unsettled credential does not stop unrelated recovery", as
     ],
     async (submission) => {
       if (submission.source === "tenant_byok") {
-        throw new CredentialRecoveryUnavailableError(
-          "deleted-byok-reference",
-          "openai",
-        );
+        throw new CredentialRecoveryUnavailableError("deleted-byok-reference", "openai");
       }
       return "managed-provider/model";
     },

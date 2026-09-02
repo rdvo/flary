@@ -6,7 +6,7 @@ import {
   NonEmptyStringSchema,
   ReferenceSchema,
   TimestampSchema,
-} from "./common";
+} from "./common.js";
 
 // Identify the owner type for a run.
 export const IdentityKindSchema = z.enum(["user", "service", "agent", "system"]);

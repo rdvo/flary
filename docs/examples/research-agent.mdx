@@ -5,8 +5,8 @@ section: Examples
 order: 3
 ---
 
-A research function has a clear input and output. Start it as a durable run
-when the caller can disconnect before the report is ready.
+A research function has a clear input and output. Start it as a durable run when the caller can
+disconnect before the report is ready.
 
 ```ts
 import { flary, z } from "flary";
@@ -38,8 +38,8 @@ Question: ${question}
 });
 ```
 
-Resolve `approved-sources` in trusted host code. Its credentials do not enter
-the prompt or tool schema.
+Resolve `approved-sources` in trusted host code. Its credentials do not enter the prompt or tool
+schema.
 
 ```ts
 const run = await api.research.start({

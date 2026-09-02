@@ -1,7 +1,5 @@
 .docs-body {
-  background:
-    linear-gradient(90deg, rgba(76, 54, 37, 0.022) 1px, transparent 1px),
-    #fbfaf7;
+  background: linear-gradient(90deg, rgba(76, 54, 37, 0.022) 1px, transparent 1px), #fbfaf7;
   background-size: min(12vw, 160px) 100%;
 }
 
@@ -48,8 +46,12 @@
   transform: rotate(45deg);
 }
 
-.flary-chat__cat::before { left: 2px; }
-.flary-chat__cat::after { right: 2px; }
+.flary-chat__cat::before {
+  left: 2px;
+}
+.flary-chat__cat::after {
+  right: 2px;
+}
 
 .flary-chat__cat i,
 .flary-chat__cat i::before,
@@ -95,7 +97,9 @@
   backdrop-filter: blur(18px);
 }
 
-.flary-chat__panel[hidden] { display: none; }
+.flary-chat__panel[hidden] {
+  display: none;
+}
 
 .flary-chat__panel > header {
   display: flex;
@@ -106,9 +110,17 @@
   border-bottom: 1px solid rgba(45, 33, 22, 0.12);
 }
 
-.flary-chat__identity { display: grid; gap: 2px; }
-.flary-chat__panel > header strong { font-size: 14px; }
-.flary-chat__panel > header span { color: var(--muted); font-size: 11px; }
+.flary-chat__identity {
+  display: grid;
+  gap: 2px;
+}
+.flary-chat__panel > header strong {
+  font-size: 14px;
+}
+.flary-chat__panel > header span {
+  color: var(--muted);
+  font-size: 11px;
+}
 .flary-chat__header-actions {
   display: flex;
   gap: 4px;
@@ -158,7 +170,9 @@
   border-right: 1px solid rgba(45, 33, 22, 0.11);
 }
 
-.flary-chat__sessions[hidden] { display: none; }
+.flary-chat__sessions[hidden] {
+  display: none;
+}
 
 .flary-chat__sessions > div:first-child {
   display: flex;
@@ -267,11 +281,25 @@
   font-size: 12px;
 }
 
-.flary-chat__session-actions button:first-child::before { content: "✎"; }
-.flary-chat__session-actions button:last-child::before { content: "×"; font-size: 16px; }
-.flary-chat__session-actions button[data-confirm="true"] { width: auto; padding: 0 6px; color: #9c342b; font-size: 9px; }
-.flary-chat__session-actions button[data-confirm="true"]::before { content: none; }
-.flary-chat__session-actions button:hover { background: rgba(43, 34, 27, 0.07); }
+.flary-chat__session-actions button:first-child::before {
+  content: "✎";
+}
+.flary-chat__session-actions button:last-child::before {
+  content: "×";
+  font-size: 16px;
+}
+.flary-chat__session-actions button[data-confirm="true"] {
+  width: auto;
+  padding: 0 6px;
+  color: #9c342b;
+  font-size: 9px;
+}
+.flary-chat__session-actions button[data-confirm="true"]::before {
+  content: none;
+}
+.flary-chat__session-actions button:hover {
+  background: rgba(43, 34, 27, 0.07);
+}
 
 .flary-chat__session-rename {
   width: calc(100% - 12px);
@@ -326,7 +354,10 @@
   white-space: pre-wrap;
 }
 
-.flary-chat__message a { color: #8b431f; text-decoration: underline; }
+.flary-chat__message a {
+  color: #8b431f;
+  text-decoration: underline;
+}
 .flary-chat__message code {
   padding: 1px 4px;
   color: #5e351f;
@@ -473,7 +504,9 @@
 }
 
 @keyframes flary-chat-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -496,7 +529,11 @@
   clip: rect(0 0 0 0);
 }
 
-.flary-chat__conversation form > div { display: flex; gap: 8px; align-items: flex-end; }
+.flary-chat__conversation form > div {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
 .flary-chat__panel textarea {
   flex: 1;
   min-height: 44px;
@@ -510,7 +547,10 @@
   outline: none;
 }
 
-.flary-chat__panel textarea:focus { border-color: #a8552c; box-shadow: 0 0 0 3px rgba(201, 103, 45, 0.12); }
+.flary-chat__panel textarea:focus {
+  border-color: #a8552c;
+  box-shadow: 0 0 0 3px rgba(201, 103, 45, 0.12);
+}
 .flary-chat__conversation form button {
   min-height: 42px;
   padding: 0 14px;
@@ -520,41 +560,49 @@
   border: 0;
   border-radius: 10px;
 }
-.flary-chat__conversation form button:disabled { cursor: wait; opacity: 0.55; }
+.flary-chat__conversation form button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
 
 .flary-chat__conversation > footer {
   padding: 0 13px 11px;
   color: var(--muted);
   font-size: 10px;
 }
-.flary-chat__conversation > footer a { color: #8b431f; }
+.flary-chat__conversation > footer a {
+  color: #8b431f;
+}
 
 @media (max-width: 700px) {
-  .flary-chat { right: 14px; bottom: 14px; }
+  .flary-chat {
+    right: 14px;
+    bottom: 14px;
+  }
   .flary-chat__panel {
     bottom: 56px;
     width: calc(100vw - 28px);
     height: min(650px, calc(100vh - 86px));
   }
-  .flary-chat__body { grid-template-columns: 1fr; }
+  .flary-chat__body {
+    grid-template-columns: 1fr;
+  }
   .flary-chat__sessions {
     position: absolute;
     z-index: 3;
     inset: 62px 0 0;
     border-right: 0;
   }
-  .flary-chat__messages { padding: 18px 16px; }
+  .flary-chat__messages {
+    padding: 18px 16px;
+  }
 }
 
 .docs-body::before {
   inset: -35% -20% auto;
   height: 52rem;
   opacity: 0.4;
-  background: radial-gradient(
-    ellipse at 55% 0%,
-    rgba(224, 164, 105, 0.26),
-    transparent 64%
-  );
+  background: radial-gradient(ellipse at 55% 0%, rgba(224, 164, 105, 0.26), transparent 64%);
   filter: blur(40px);
   animation: none;
 }
@@ -863,8 +911,7 @@
   border-radius: 4px;
   color: #eef0f5;
   background:
-    radial-gradient(circle at 100% 0%, rgba(201, 103, 45, 0.15), transparent 35%),
-    #181a20 !important;
+    radial-gradient(circle at 100% 0%, rgba(201, 103, 45, 0.15), transparent 35%), #181a20 !important;
   font-size: 13px;
   line-height: 1.7;
   tab-size: 2;
@@ -913,11 +960,7 @@
   padding: 1px;
   border: 1px solid rgba(122, 64, 40, 0.2);
   border-radius: 6px;
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.78),
-    rgba(244, 237, 226, 0.72)
-  );
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.78), rgba(244, 237, 226, 0.72));
   box-shadow: 0 18px 48px rgba(65, 43, 29, 0.08);
 }
 
@@ -927,12 +970,7 @@
   top: 0;
   bottom: 0;
   width: 34%;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(212, 120, 58, 0.14),
-    transparent
-  );
+  background: linear-gradient(90deg, transparent, rgba(212, 120, 58, 0.14), transparent);
   transform: translateX(-120%);
   animation: agent-flow-beam 8s ease-in-out infinite;
 }

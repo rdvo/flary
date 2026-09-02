@@ -29,10 +29,10 @@ test("batch schema describes every catalog call instead of an untyped array", ()
 });
 
 test("catalog calls normalize common model-generated aliases", () => {
-  assert.deepEqual(
-    normalizeCatalogCall({ toolId: "stats", arguments: { range: "today" } }),
-    { id: "stats", input: { range: "today" } },
-  );
+  assert.deepEqual(normalizeCatalogCall({ toolId: "stats", arguments: { range: "today" } }), {
+    id: "stats",
+    input: { range: "today" },
+  });
   assert.deepEqual(
     normalizeCatalogCall({ name: "get_trend", parameters: { granularity: "hourly" } }),
     { id: "get_trend", input: { granularity: "hourly" } },

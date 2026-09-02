@@ -32,9 +32,14 @@ test("trusted Codex resolution refreshes once, preserves identity, and uses a D1
   let refreshes = 0;
   globalThis.fetch = async () => {
     refreshes += 1;
-    const payload = btoa(JSON.stringify({
-      "https://api.openai.com/auth": { chatgpt_account_id: "kept-account" },
-    })).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+    const payload = btoa(
+      JSON.stringify({
+        "https://api.openai.com/auth": { chatgpt_account_id: "kept-account" },
+      }),
+    )
+      .replaceAll("+", "-")
+      .replaceAll("/", "_")
+      .replaceAll("=", "");
     return Response.json({
       access_token: `header.${payload}.signature`,
       refresh_token: "new-refresh",
@@ -86,11 +91,15 @@ test("trusted aliases accept isolated OpenAI and Codex registrations", () => {
   assert.equal(codex.contextWindow > 0, true);
   assert.equal(codex.maxTokens, 128_000);
   assert.equal(codex.api, "openai-codex-responses");
-  assert.throws(() => registerTrustedProviderAlias({
-    provider: "openai",
-    providerAlias: "shared",
-    apiKey: "test-openai-key",
-  }), /alias is invalid/);
+  assert.throws(
+    () =>
+      registerTrustedProviderAlias({
+        provider: "openai",
+        providerAlias: "shared",
+        apiKey: "test-openai-key",
+      }),
+    /alias is invalid/,
+  );
 });
 
 class OAuthDatabase implements ProviderOAuthD1 {
@@ -126,15 +135,22 @@ class OAuthDatabase implements ProviderOAuthD1 {
       run: async () => {
         const input = values();
         if (query.startsWith("CREATE TABLE")) return changed(0);
-        if (query.includes("DELETE FROM flary_provider_credential_refresh_lock") && query.includes("expires_at")) {
+        if (
+          query.includes("DELETE FROM flary_provider_credential_refresh_lock") &&
+          query.includes("expires_at")
+        ) {
           const current = this.locks.get(input[0] as string);
-          if (current && current.expiresAt <= (input[1] as number)) this.locks.delete(input[0] as string);
+          if (current && current.expiresAt <= (input[1] as number))
+            this.locks.delete(input[0] as string);
           return changed(0);
         }
         if (query.includes("INSERT OR IGNORE INTO flary_provider_credential_refresh_lock")) {
           const connectionId = input[0] as string;
           if (this.locks.has(connectionId)) return changed(0);
-          this.locks.set(connectionId, { lockId: input[1] as string, expiresAt: input[2] as number });
+          this.locks.set(connectionId, {
+            lockId: input[1] as string,
+            expiresAt: input[2] as number,
+          });
           return changed(1);
         }
         if (query.includes("DELETE FROM flary_provider_credential_refresh_lock")) {

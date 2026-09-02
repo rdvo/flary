@@ -1,11 +1,5 @@
-import {
-  SessionRecordSchema,
-  type SessionRecord,
-} from "./contracts.js";
-import {
-  canonicalSessionJson,
-  verifySessionChain,
-} from "./integrity.js";
+import { SessionRecordSchema, type SessionRecord } from "./contracts.js";
+import { canonicalSessionJson, verifySessionChain } from "./integrity.js";
 
 export class SessionJsonlError extends Error {
   readonly lineNumber: number;
@@ -30,11 +24,12 @@ export function exportSessionJsonl(records: Iterable<SessionRecord>): string {
 export function streamSessionJsonl(
   records: Iterable<SessionRecord> | AsyncIterable<SessionRecord>,
 ): ReadableStream<Uint8Array> {
-  const iterator = Symbol.asyncIterator in Object(records)
-    ? (records as AsyncIterable<SessionRecord>)[Symbol.asyncIterator]()
-    : (async function* () {
-        yield* records as Iterable<SessionRecord>;
-      })();
+  const iterator =
+    Symbol.asyncIterator in Object(records)
+      ? (records as AsyncIterable<SessionRecord>)[Symbol.asyncIterator]()
+      : (async function* () {
+          yield* records as Iterable<SessionRecord>;
+        })();
   const encoder = new TextEncoder();
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
@@ -44,7 +39,9 @@ export function streamSessionJsonl(
           controller.close();
           return;
         }
-        controller.enqueue(encoder.encode(`${canonicalSessionJson(SessionRecordSchema.parse(next.value))}\n`));
+        controller.enqueue(
+          encoder.encode(`${canonicalSessionJson(SessionRecordSchema.parse(next.value))}\n`),
+        );
       } catch (error) {
         controller.error(error);
       }
@@ -80,9 +77,7 @@ export async function importSessionJsonl(input: string): Promise<SessionRecord[]
     await verifySessionChain(records);
   } catch (error) {
     throw new SessionJsonlError(
-      error instanceof Error &&
-        "sequence" in error &&
-        typeof error.sequence === "number"
+      error instanceof Error && "sequence" in error && typeof error.sequence === "number"
         ? error.sequence
         : 1,
       error instanceof Error ? error.message : "The integrity chain is invalid",

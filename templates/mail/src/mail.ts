@@ -52,10 +52,7 @@ type MessageRow = {
   createdAt: number;
 };
 
-export async function receiveEmail(
-  message: ForwardableEmailMessage,
-  env: Env
-): Promise<void> {
+export async function receiveEmail(message: ForwardableEmailMessage, env: Env): Promise<void> {
   if (message.rawSize > 25 * 1024 * 1024) {
     message.setReject("Message exceeds the 25 MiB mailbox limit.");
     return;
@@ -84,7 +81,7 @@ export async function receiveEmail(
       id, mailbox_id, direction, folder, status, message_id, from_address,
       to_json, subject, raw_object_key, is_read, created_at, updated_at
     ) VALUES (?, ?, 'inbound', 'inbox', 'queued', ?, ?, ?, ?, ?, 0, ?, ?)
-  `
+  `,
   )
     .bind(
       id,
@@ -95,7 +92,7 @@ export async function receiveEmail(
       message.headers.get("subject") ?? "",
       rawObjectKey,
       Date.now(),
-      Date.now()
+      Date.now(),
     )
     .run();
   if (!inserted.meta.changes) {
@@ -108,15 +105,12 @@ export async function receiveEmail(
   } satisfies MailQueueJob);
 }
 
-export async function processInbound(
-  env: Env,
-  messageId: string
-): Promise<void> {
+export async function processInbound(env: Env, messageId: string): Promise<void> {
   const pending = await env.MAIL_DB.prepare(
     `
     SELECT id, mailbox_id AS mailboxId, raw_object_key AS rawObjectKey
     FROM mail_message WHERE id = ? AND direction = 'inbound' AND status = 'queued'
-  `
+  `,
   )
     .bind(messageId)
     .first<{ id: string; mailboxId: string; rawObjectKey: string }>();
@@ -129,16 +123,16 @@ export async function processInbound(
     ? normalizeMailAddress(parsed.from.address)
     : "unknown@invalid.local";
   const to = (parsed.to ?? []).flatMap((address) =>
-    address.address ? [normalizeMailAddress(address.address)] : []
+    address.address ? [normalizeMailAddress(address.address)] : [],
   );
   const cc = (parsed.cc ?? []).flatMap((address) =>
-    address.address ? [normalizeMailAddress(address.address)] : []
+    address.address ? [normalizeMailAddress(address.address)] : [],
   );
   const participants = [fromAddress, ...to, ...cc];
   const messageHeader = parsed.messageId?.trim() || null;
   const references = Array.isArray(parsed.references)
     ? parsed.references.join(" ")
-    : parsed.references ?? null;
+    : (parsed.references ?? null);
   const threadId = await stableId(
     `${pending.mailboxId}:${await mailThreadKey({
       messageId: messageHeader,
@@ -146,7 +140,7 @@ export async function processInbound(
       references,
       subject: parsed.subject ?? "",
       participants,
-    })}`
+    })}`,
   );
   const now = parsed.date ? new Date(parsed.date).getTime() : Date.now();
   const safeNow = Number.isFinite(now) ? now : Date.now();
@@ -169,7 +163,7 @@ export async function processInbound(
         id, message_id, filename, content_type, size, object_key,
         content_id, disposition
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `
+    `,
       ).bind(
         attachmentId,
         messageId,
@@ -178,8 +172,8 @@ export async function processInbound(
         contentByteLength(attachment.content),
         objectKey,
         attachment.contentId ?? null,
-        attachment.disposition === "inline" ? "inline" : "attachment"
-      )
+        attachment.disposition === "inline" ? "inline" : "attachment",
+      ),
     );
   }
 
@@ -196,7 +190,7 @@ export async function processInbound(
         unread_count = mail_thread.unread_count + 1,
         last_message_at = MAX(mail_thread.last_message_at, excluded.last_message_at),
         updated_at = excluded.updated_at
-    `
+    `,
     ).bind(
       threadId,
       pending.mailboxId,
@@ -204,7 +198,7 @@ export async function processInbound(
       JSON.stringify([...new Set(participants)]),
       safeNow,
       safeNow,
-      Date.now()
+      Date.now(),
     ),
     env.MAIL_DB.prepare(
       `
@@ -214,7 +208,7 @@ export async function processInbound(
         to_json = ?, cc_json = ?, reply_to = ?, subject = ?, text_body = ?,
         html_body = ?, created_at = ?, delivered_at = ?, updated_at = ?
       WHERE id = ?
-    `
+    `,
     ).bind(
       threadId,
       messageHeader,
@@ -231,7 +225,7 @@ export async function processInbound(
       safeNow,
       Date.now(),
       Date.now(),
-      messageId
+      messageId,
     ),
     ...attachmentStatements,
   ]);
@@ -241,11 +235,9 @@ export async function processInbound(
 export async function composeMessage(
   env: Env,
   userId: string,
-  input: ComposeInput
+  input: ComposeInput,
 ): Promise<{ id: string; threadId: string }> {
-  const mailbox = await env.MAIL_DB.prepare(
-    "SELECT id, address, name FROM mailbox WHERE id = ?"
-  )
+  const mailbox = await env.MAIL_DB.prepare("SELECT id, address, name FROM mailbox WHERE id = ?")
     .bind(input.mailboxId)
     .first<MailboxRow>();
   if (!mailbox) throw new Error("Mailbox not found.");
@@ -253,8 +245,7 @@ export async function composeMessage(
   const to = input.to.map(normalizeMailAddress);
   const cc = (input.cc ?? []).map(normalizeMailAddress);
   const bcc = (input.bcc ?? []).map(normalizeMailAddress);
-  if (to.length + cc.length + bcc.length === 0)
-    throw new Error("Add at least one recipient.");
+  if (to.length + cc.length + bcc.length === 0) throw new Error("Add at least one recipient.");
   if (to.length + cc.length + bcc.length > 50)
     throw new Error("One message can have at most 50 recipients.");
 
@@ -267,7 +258,7 @@ export async function composeMessage(
       SELECT thread_id AS threadId, message_id AS messageId,
              references_header AS referencesHeader, subject
       FROM mail_message WHERE id = ? AND mailbox_id = ?
-    `
+    `,
     )
       .bind(input.replyToMessageId, mailbox.id)
       .first<{
@@ -280,16 +271,13 @@ export async function composeMessage(
       throw new Error("The original message cannot be used for a reply.");
     threadId = parent.threadId;
     subject = replySubject(parent.subject);
-    headers = createReplyThreadHeaders(
-      parent.messageId,
-      parent.referencesHeader
-    );
+    headers = createReplyThreadHeaders(parent.messageId, parent.referencesHeader);
   } else {
     threadId = await stableId(
       `${mailbox.id}:${await mailThreadKey({
         subject,
         participants: [mailbox.address, ...to, ...cc],
-      })}`
+      })}`,
     );
   }
 
@@ -298,7 +286,7 @@ export async function composeMessage(
   const attachments = input.attachments ?? [];
   const totalAttachmentBytes = attachments.reduce(
     (total, item) => total + base64ByteLength(item.contentBase64),
-    0
+    0,
   );
   if (totalAttachmentBytes > 4 * 1024 * 1024)
     throw new Error("Attachments must total 4 MiB or less.");
@@ -317,15 +305,15 @@ export async function composeMessage(
       INSERT INTO mail_attachment (
         id, message_id, filename, content_type, size, object_key, disposition
       ) VALUES (?, ?, ?, ?, ?, ?, 'attachment')
-    `
+    `,
       ).bind(
         attachmentId,
         id,
         item.filename,
         item.type || "application/octet-stream",
         content.byteLength,
-        objectKey
-      )
+        objectKey,
+      ),
     );
   }
 
@@ -341,7 +329,7 @@ export async function composeMessage(
         message_count = mail_thread.message_count + 1,
         last_message_at = excluded.last_message_at,
         updated_at = excluded.updated_at
-    `
+    `,
     ).bind(
       threadId,
       mailbox.id,
@@ -349,7 +337,7 @@ export async function composeMessage(
       JSON.stringify([mailbox.address, ...to, ...cc]),
       now,
       now,
-      now
+      now,
     ),
     env.MAIL_DB.prepare(
       `
@@ -359,7 +347,7 @@ export async function composeMessage(
         to_json, cc_json, bcc_json, subject, text_body, html_body,
         is_read, created_by, created_at, updated_at
       ) VALUES (?, ?, ?, 'outbound', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
-    `
+    `,
     ).bind(
       id,
       mailbox.id,
@@ -378,7 +366,7 @@ export async function composeMessage(
       input.html ?? null,
       userId,
       now,
-      now
+      now,
     ),
     ...attachmentStatements,
   ]);
@@ -397,7 +385,7 @@ export async function sendOutbound(env: Env, messageId: string): Promise<void> {
     `
     UPDATE mail_message SET status = 'sending', updated_at = ?
     WHERE id = ? AND direction = 'outbound' AND status = 'queued'
-  `
+  `,
   )
     .bind(Date.now(), messageId)
     .run();
@@ -412,7 +400,7 @@ export async function sendOutbound(env: Env, messageId: string): Promise<void> {
            bcc_json AS bccJson, subject, text_body AS textBody,
            html_body AS htmlBody, created_at AS createdAt
     FROM mail_message WHERE id = ?
-  `
+  `,
   )
     .bind(messageId)
     .first<MessageRow>();
@@ -423,7 +411,7 @@ export async function sendOutbound(env: Env, messageId: string): Promise<void> {
     SELECT filename, content_type AS contentType, object_key AS objectKey,
            content_id AS contentId, disposition
     FROM mail_attachment WHERE message_id = ? ORDER BY created_at
-  `
+  `,
   )
     .bind(messageId)
     .all<{
@@ -452,7 +440,7 @@ export async function sendOutbound(env: Env, messageId: string): Promise<void> {
             filename: row.filename,
             type: row.contentType,
             content,
-          }
+          },
     );
   }
 
@@ -479,7 +467,7 @@ export async function sendOutbound(env: Env, messageId: string): Promise<void> {
       `
       UPDATE mail_message SET folder = 'sent', status = 'sent', message_id = ?,
         sent_at = ?, updated_at = ? WHERE id = ? AND status = 'sending'
-    `
+    `,
     )
       .bind(result.messageId, Date.now(), Date.now(), messageId)
       .run();
@@ -489,39 +477,28 @@ export async function sendOutbound(env: Env, messageId: string): Promise<void> {
       `
       UPDATE mail_message SET status = 'queued', error = ?, updated_at = ?
       WHERE id = ? AND status = 'sending'
-    `
+    `,
     )
-      .bind(
-        error instanceof Error ? error.message : "Email sending failed.",
-        Date.now(),
-        messageId
-      )
+      .bind(error instanceof Error ? error.message : "Email sending failed.", Date.now(), messageId)
       .run();
     throw error;
   }
 }
 
-export async function failOutbound(
-  env: Env,
-  messageId: string,
-  reason: string
-): Promise<void> {
+export async function failOutbound(env: Env, messageId: string, reason: string): Promise<void> {
   const row = await env.MAIL_DB.prepare(
     `
     UPDATE mail_message SET status = 'failed', error = ?, updated_at = ?
     WHERE id = ? AND status IN ('queued','sending')
     RETURNING mailbox_id AS mailboxId
-  `
+  `,
   )
     .bind(reason, Date.now(), messageId)
     .first<{ mailboxId: string }>();
   if (row) await broadcast(env, row.mailboxId, messageId, "delivery");
 }
 
-export async function processDeliveryEvent(
-  env: Env,
-  event: unknown
-): Promise<boolean> {
+export async function processDeliveryEvent(env: Env, event: unknown): Promise<boolean> {
   if (!event || typeof event !== "object") return false;
   const root = event as Record<string, unknown>;
   const type = typeof root.type === "string" ? root.type : "";
@@ -530,34 +507,25 @@ export async function processDeliveryEvent(
     root.payload && typeof root.payload === "object"
       ? (root.payload as Record<string, unknown>)
       : {};
-  const rfcMessageId =
-    typeof payload.messageId === "string" ? payload.messageId : undefined;
+  const rfcMessageId = typeof payload.messageId === "string" ? payload.messageId : undefined;
   if (!rfcMessageId) return true;
   const suffix = type.split(".").at(-1);
   const status =
     suffix === "delivered"
       ? "delivered"
       : suffix === "deferred"
-      ? "deferred"
-      : suffix === "bounced"
-      ? "bounced"
-      : "failed";
+        ? "deferred"
+        : suffix === "bounced"
+          ? "bounced"
+          : "failed";
   const row = await env.MAIL_DB.prepare(
     `
     UPDATE mail_message SET status = ?, delivered_at = CASE WHEN ? = 'delivered' THEN ? ELSE delivered_at END,
       error = CASE WHEN ? = 'delivered' THEN NULL ELSE ? END, updated_at = ?
     WHERE message_id = ? RETURNING id, mailbox_id AS mailboxId
-  `
+  `,
   )
-    .bind(
-      status,
-      status,
-      Date.now(),
-      status,
-      suffix ?? "failed",
-      Date.now(),
-      rfcMessageId
-    )
+    .bind(status, status, Date.now(), status, suffix ?? "failed", Date.now(), rfcMessageId)
     .first<{ id: string; mailboxId: string }>();
   if (row) await broadcast(env, row.mailboxId, row.id, "delivery");
   return true;
@@ -567,11 +535,9 @@ export async function broadcast(
   env: Env,
   mailboxId: string,
   messageId: string,
-  change: MailRealtimeEvent["change"]
+  change: MailRealtimeEvent["change"],
 ): Promise<void> {
-  const room = env.MAIL_ROOM.getByName(
-    mailboxId
-  ) as DurableObjectStub<MailRoom>;
+  const room = env.MAIL_ROOM.getByName(mailboxId) as DurableObjectStub<MailRoom>;
   await room.broadcast({
     type: "mail.changed",
     mailboxId,
@@ -591,13 +557,11 @@ async function ensureMailbox(env: Env, address: string): Promise<MailboxRow> {
     .split("@")[0]!
     .replace(/[._-]+/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
-  await env.MAIL_DB.prepare(
-    "INSERT OR IGNORE INTO mailbox (id, address, name) VALUES (?, ?, ?)"
-  )
+  await env.MAIL_DB.prepare("INSERT OR IGNORE INTO mailbox (id, address, name) VALUES (?, ?, ?)")
     .bind(id, address, name)
     .run();
   const mailbox = await env.MAIL_DB.prepare(
-    "SELECT id, address, name FROM mailbox WHERE address = ?"
+    "SELECT id, address, name FROM mailbox WHERE address = ?",
   )
     .bind(address)
     .first<MailboxRow>();
@@ -605,20 +569,14 @@ async function ensureMailbox(env: Env, address: string): Promise<MailboxRow> {
   return mailbox;
 }
 
-export async function provisionConfiguredMailboxes(
-  env: Env
-): Promise<MailboxRow[]> {
+export async function provisionConfiguredMailboxes(env: Env): Promise<MailboxRow[]> {
   const rows: MailboxRow[] = [];
-  for (const address of configuredAddresses(env))
-    rows.push(await ensureMailbox(env, address));
+  for (const address of configuredAddresses(env)) rows.push(await ensureMailbox(env, address));
   return rows;
 }
 
 async function stableId(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value)
-  );
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("")
@@ -628,15 +586,11 @@ async function stableId(value: string): Promise<string> {
 function parseAddressJson(value: string): string[] {
   const parsed: unknown = JSON.parse(value);
   if (!Array.isArray(parsed)) return [];
-  return parsed.flatMap((item) =>
-    typeof item === "string" ? [normalizeMailAddress(item)] : []
-  );
+  return parsed.flatMap((item) => (typeof item === "string" ? [normalizeMailAddress(item)] : []));
 }
 
 function decodeBase64(value: string): ArrayBuffer {
-  const bytes = Uint8Array.from(atob(value), (character) =>
-    character.charCodeAt(0)
-  );
+  const bytes = Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
   return bytes.buffer;
 }
 
@@ -646,7 +600,5 @@ function base64ByteLength(value: string): number {
 }
 
 function contentByteLength(value: string | ArrayBuffer | Uint8Array): number {
-  return typeof value === "string"
-    ? new TextEncoder().encode(value).byteLength
-    : value.byteLength;
+  return typeof value === "string" ? new TextEncoder().encode(value).byteLength : value.byteLength;
 }

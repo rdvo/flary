@@ -21,10 +21,7 @@ interface NormalizedModel {
   readonly inputIndex: number;
 }
 
-function normalizeModel(
-  input: ModelDescriptorInput,
-  inputIndex: number
-): NormalizedModel {
+function normalizeModel(input: ModelDescriptorInput, inputIndex: number): NormalizedModel {
   const descriptor =
     typeof input === "string"
       ? modelDescriptorSchema.parse({
@@ -44,8 +41,7 @@ function normalizeModel(
 }
 
 function compareModels(left: NormalizedModel, right: NormalizedModel): number {
-  const priorityDifference =
-    right.descriptor.priority - left.descriptor.priority;
+  const priorityDifference = right.descriptor.priority - left.descriptor.priority;
   if (priorityDifference !== 0) {
     return priorityDifference;
   }
@@ -60,13 +56,8 @@ function compareModels(left: NormalizedModel, right: NormalizedModel): number {
   return idDifference === 0 ? left.inputIndex - right.inputIndex : idDifference;
 }
 
-function hasCapabilities(
-  model: ModelDescriptor,
-  requiredCapabilities: readonly string[]
-): boolean {
-  return requiredCapabilities.every((capability) =>
-    model.capabilities.includes(capability)
-  );
+function hasCapabilities(model: ModelDescriptor, requiredCapabilities: readonly string[]): boolean {
+  return requiredCapabilities.every((capability) => model.capabilities.includes(capability));
 }
 
 function isExcluded(model: ModelDescriptor, excluded: readonly string[]): boolean {
@@ -77,7 +68,7 @@ function findByName(
   models: readonly NormalizedModel[],
   requested: string,
   requiredCapabilities: readonly string[],
-  excluded: readonly string[]
+  excluded: readonly string[],
 ): { model: NormalizedModel; matchedBy: "id" | "alias" } | undefined {
   const eligible = models
     .filter(({ descriptor }) => !isExcluded(descriptor, excluded))
@@ -110,7 +101,7 @@ function normalizeRequest(
         models?: readonly ModelDescriptorInput[];
       })
     | undefined,
-  candidates?: readonly ModelDescriptorInput[]
+  candidates?: readonly ModelDescriptorInput[],
 ): ModelResolutionRequest {
   if (Array.isArray(requestOrName)) {
     return modelResolutionRequestSchema.parse({
@@ -150,7 +141,7 @@ export function resolveModel(
         models?: readonly ModelDescriptorInput[];
       })
     | undefined,
-  candidates?: readonly ModelDescriptorInput[]
+  candidates?: readonly ModelDescriptorInput[],
 ): ResolvedModel {
   const request = normalizeRequest(requestOrName, candidates);
   const models = request.candidates.map(normalizeModel);
@@ -174,12 +165,7 @@ export function resolveModel(
     }
 
     if (request.fallback) {
-      const fallback = findByName(
-        models,
-        request.fallback,
-        requiredCapabilities,
-        excluded
-      );
+      const fallback = findByName(models, request.fallback, requiredCapabilities, excluded);
       if (fallback) {
         return {
           ...fallback.model.descriptor,
@@ -189,9 +175,7 @@ export function resolveModel(
       }
     }
 
-    throw new ModelResolutionError(
-      `No eligible model matches '${requested}'`
-    );
+    throw new ModelResolutionError(`No eligible model matches '${requested}'`);
   }
 
   const best = models
@@ -227,7 +211,7 @@ export class DeterministicModelResolver {
       | Omit<ModelResolutionRequest, "candidates">
       | (Omit<ModelResolutionRequest, "candidates"> & {
           models?: readonly ModelDescriptorInput[];
-        })
+        }),
   ): ResolvedModel {
     return resolveModel(request, this.models);
   }
@@ -236,7 +220,7 @@ export class DeterministicModelResolver {
 export const ModelResolver = DeterministicModelResolver;
 
 export function createModelResolver(
-  models: readonly ModelDescriptorInput[]
+  models: readonly ModelDescriptorInput[],
 ): DeterministicModelResolver {
   return new DeterministicModelResolver(models);
 }

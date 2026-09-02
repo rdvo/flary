@@ -33,22 +33,14 @@ export interface ScheduleClaim extends ScheduledInvocation {
 
 export interface ScheduleStore {
   listDue(now: number, limit: number): Promise<readonly ScheduledInvocation[]>;
-  claim(
-    scheduleId: string,
-    scheduledFor: number,
-    nextRunAt: number,
-  ): Promise<boolean>;
+  claim(scheduleId: string, scheduledFor: number, nextRunAt: number): Promise<boolean>;
 }
 
 export interface ScheduleDispatcher {
   dispatch(claim: ScheduleClaim): Promise<void>;
 }
 
-export type NextOccurrence = (
-  expression: string,
-  timeZone: string,
-  after: number,
-) => number;
+export type NextOccurrence = (expression: string, timeZone: string, after: number) => number;
 
 export interface DispatchDueOptions {
   now?: number;
@@ -81,11 +73,7 @@ export async function dispatchDueSchedules(
     if (!schedule.enabled || schedule.nextRunAt > now) continue;
 
     const scheduledFor = schedule.nextRunAt;
-    const nextRunAt = nextOccurrence(
-      schedule.expression,
-      schedule.timeZone,
-      scheduledFor,
-    );
+    const nextRunAt = nextOccurrence(schedule.expression, schedule.timeZone, scheduledFor);
     const claimed = await store.claim(schedule.id, scheduledFor, nextRunAt);
     if (!claimed) continue;
 
@@ -96,9 +84,7 @@ export async function dispatchDueSchedules(
     });
   }
 
-  const results = await Promise.allSettled(
-    claims.map((claim) => dispatcher.dispatch(claim)),
-  );
+  const results = await Promise.allSettled(claims.map((claim) => dispatcher.dispatch(claim)));
   const failed: DispatchDueResult["failed"] = [];
 
   results.forEach((result, index) => {

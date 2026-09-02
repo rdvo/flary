@@ -5,13 +5,12 @@ section: Run
 order: 2
 ---
 
-Approvals protect a known action. User input supplies information that the
-agent cannot safely infer. Both are durable thread records.
+Approvals protect a known action. User input supplies information that the agent cannot safely
+infer. Both are durable thread records.
 
-A write that requires approval pauses before the trusted host executes it. The
-client can list pending approvals and approve or reject one request. After
-approval, completed earlier calls replay from the journal and the approved
-write receives a stable idempotency key.
+A write that requires approval pauses before the trusted host executes it. The client can list
+pending approvals and approve or reject one request. After approval, completed earlier calls replay
+from the journal and the approved write receives a stable idempotency key.
 
 ```ts
 for await (const event of thread.stream()) {
@@ -21,11 +20,11 @@ for await (const event of thread.stream()) {
 }
 ```
 
-A write that started but has no terminal record becomes `outcome_unknown`.
-Flary does not run it again automatically.
+A write that started but has no terminal record becomes `outcome_unknown`. Flary does not run it
+again automatically.
 
-Durable agents include `request_user_input` by default. It is a small built-in
-tool beside Code Mode and lazy tool search. Application tools stay lazy.
+Durable agents include `request_user_input` by default. It is a small built-in tool beside Code Mode
+and lazy tool search. Application tools stay lazy.
 
 ```ts
 export const agent = app.agent({
@@ -36,10 +35,10 @@ export const agent = app.agent({
 });
 ```
 
-The agent can ask a multiple-choice question or omit the choices for a typed
-answer. Flary stores the request, pauses the active turn, and returns the
-answer to the same model tool call. The model can then continue the task or ask
-one new follow-up question. Questions do not have to be planned in advance.
+The agent can ask a multiple-choice question or omit the choices for a typed answer. Flary stores
+the request, pauses the active turn, and returns the answer to the same model tool call. The model
+can then continue the task or ask one new follow-up question. Questions do not have to be planned in
+advance.
 
 Requested input uses the same restart-safe client pattern:
 
@@ -49,9 +48,7 @@ await thread.sendInput(requestId, {
 });
 ```
 
-The `flary/react` package includes `FlaryUserInput` for choice controls and
-free-form answers. A custom UI can use the same thread methods and WebSocket
-events.
+The `flary/react` package includes `FlaryUserInput` for choice controls and free-form answers. A
+custom UI can use the same thread methods and WebSocket events.
 
-Every approval and input request is tenant-scoped, audited, and available after
-reconnect.
+Every approval and input request is tenant-scoped, audited, and available after reconnect.

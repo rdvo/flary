@@ -86,9 +86,7 @@ export const modelResolutionRequestSchema = z
     }
   });
 
-export type ModelResolutionRequest = z.output<
-  typeof modelResolutionRequestSchema
->;
+export type ModelResolutionRequest = z.output<typeof modelResolutionRequestSchema>;
 
 export const toolTaskInputSchema = z
   .object({
@@ -110,7 +108,7 @@ export const toolTaskInputSchema = z
   .passthrough()
   .superRefine((value, context) => {
     const operations = [value.operation, value.kind, value.type].filter(
-      (operation): operation is "read" | "write" => operation !== undefined
+      (operation): operation is "read" | "write" => operation !== undefined,
     );
 
     if (new Set(operations).size > 1) {
@@ -163,12 +161,10 @@ export interface ToolExecutionContext {
 
 export type ToolHandler = (
   input: unknown,
-  context: ToolExecutionContext
+  context: ToolExecutionContext,
 ) => unknown | Promise<unknown>;
 
-export type ResourceKeyResolver =
-  | string
-  | ((task: ToolTask) => string | undefined);
+export type ResourceKeyResolver = string | ((task: ToolTask) => string | undefined);
 
 export interface ToolDefinition {
   readonly execute: ToolHandler;
@@ -247,7 +243,7 @@ export type ApprovalDecisionInput = z.input<typeof approvalDecisionSchema>;
 export type ApprovalDecision = z.output<typeof approvalDecisionSchema>;
 
 export type ApprovalHandler = (
-  request: ApprovalRequest
+  request: ApprovalRequest,
 ) => ApprovalDecisionInput | Promise<ApprovalDecisionInput>;
 
 export interface ApprovalGateLike {
@@ -269,9 +265,7 @@ export const executionProfileInputSchema = z
   })
   .strict();
 
-export type ExecutionProfileInput = z.input<
-  typeof executionProfileInputSchema
->;
+export type ExecutionProfileInput = z.input<typeof executionProfileInputSchema>;
 
 export interface ExecutionProfile {
   readonly name: string;
@@ -303,9 +297,7 @@ export interface SchedulerOptions {
   readonly requireWriteIdempotency?: boolean;
   readonly runId?: string;
   readonly toolJournal?: ToolExecutionJournal;
-  readonly onToolEvent?: (
-    event: ToolLifecycleEvent,
-  ) => void | Promise<void>;
+  readonly onToolEvent?: (event: ToolLifecycleEvent) => void | Promise<void>;
   readonly isUnknownToolOutcome?: (error: unknown, task: ToolTask) => boolean;
   readonly onBatch?: (batch: readonly ToolExecutionResult[]) => void | Promise<void>;
   readonly model?: string;

@@ -40,16 +40,8 @@ function document(
 
 test("recall search returns exact and related records only in the requested scope", async () => {
   const index = new InMemoryRecallIndex([
-    document(
-      "decision-a",
-      "We chose Durable Objects for resumable agent sessions.",
-      "project-a",
-    ),
-    document(
-      "decision-b",
-      "We chose Durable Objects for a different tenant.",
-      "project-b",
-    ),
+    document("decision-a", "We chose Durable Objects for resumable agent sessions.", "project-a"),
+    document("decision-b", "We chose Durable Objects for a different tenant.", "project-b"),
   ]);
 
   const response = await index.search({

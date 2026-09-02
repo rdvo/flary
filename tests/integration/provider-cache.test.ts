@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  createModels,
-  type AssistantMessage,
-  type MutableModels,
-} from "@earendil-works/pi-ai";
+import { createModels, type AssistantMessage, type MutableModels } from "@earendil-works/pi-ai";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
@@ -22,13 +18,16 @@ test("OpenAI Codex omits prompt cache affinity when caching is disabled", async 
   const originalFetch = globalThis.fetch;
   let payload: Record<string, unknown> | undefined;
   globalThis.fetch = async () =>
-    Response.json({ error: { message: "stop after payload capture" } }, {
-      status: 400,
-    });
-  try {
-    const model = openaiCodexProvider().getModels().find(
-      (candidate) => candidate.id === "gpt-5.4-mini",
+    Response.json(
+      { error: { message: "stop after payload capture" } },
+      {
+        status: 400,
+      },
     );
+  try {
+    const model = openaiCodexProvider()
+      .getModels()
+      .find((candidate) => candidate.id === "gpt-5.4-mini");
     assert.ok(model);
     const stream = streamOpenAICodex(
       model,
@@ -69,12 +68,7 @@ test(
   async () => {
     const sessionId = `flary-cache-test-openai-${crypto.randomUUID()}`;
     await complete(createOpenAIModels(), "openai", OPENAI_MODEL!, sessionId);
-    const second = await complete(
-      createOpenAIModels(),
-      "openai",
-      OPENAI_MODEL!,
-      sessionId,
-    );
+    const second = await complete(createOpenAIModels(), "openai", OPENAI_MODEL!, sessionId);
     assert.ok(second.usage.cacheRead > 0);
   },
 );
@@ -84,12 +78,7 @@ test(
   { skip: !ANTHROPIC_MODEL || !process.env.ANTHROPIC_API_KEY },
   async () => {
     const sessionId = `flary-cache-test-anthropic-${crypto.randomUUID()}`;
-    await complete(
-      createAnthropicModels(),
-      "anthropic",
-      ANTHROPIC_MODEL!,
-      sessionId,
-    );
+    await complete(createAnthropicModels(), "anthropic", ANTHROPIC_MODEL!, sessionId);
     const second = await complete(
       createAnthropicModels(),
       "anthropic",
@@ -154,8 +143,7 @@ async function complete(
 }
 
 function testCodexAccessToken(): string {
-  const encode = (value: unknown) =>
-    Buffer.from(JSON.stringify(value)).toString("base64url");
+  const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
   return [
     encode({ alg: "none", typ: "JWT" }),
     encode({

@@ -1,33 +1,25 @@
 import { z } from "zod";
 
-import { IdentifierSchema, TimestampSchema } from "./common";
-import {
-  ProjectFilePathSchema,
-  Sha256HexSchema,
-} from "./filesystem";
+import { IdentifierSchema, TimestampSchema } from "./common.js";
+import { ProjectFilePathSchema, Sha256HexSchema } from "./filesystem.js";
 
-const TransferExpirySchema = z
-  .number()
-  .int()
-  .min(30)
-  .max(900)
-  .default(300);
+const TransferExpirySchema = z.number().int().min(30).max(900).default(300);
 
 export const WorkspaceUploadTicketRequestSchema = z
   .object({
     path: ProjectFilePathSchema,
-    size: z.number().int().positive().max(512 * 1024 * 1024),
+    size: z
+      .number()
+      .int()
+      .positive()
+      .max(512 * 1024 * 1024),
     sha256: Sha256HexSchema,
     mediaType: z.string().trim().min(1).max(255),
     expiresInSeconds: TransferExpirySchema,
   })
   .strict();
-export type WorkspaceUploadTicketRequest = z.output<
-  typeof WorkspaceUploadTicketRequestSchema
->;
-export type WorkspaceUploadTicketRequestInput = z.input<
-  typeof WorkspaceUploadTicketRequestSchema
->;
+export type WorkspaceUploadTicketRequest = z.output<typeof WorkspaceUploadTicketRequestSchema>;
+export type WorkspaceUploadTicketRequestInput = z.input<typeof WorkspaceUploadTicketRequestSchema>;
 
 export const WorkspaceDownloadTicketRequestSchema = z
   .object({
@@ -35,9 +27,7 @@ export const WorkspaceDownloadTicketRequestSchema = z
     expiresInSeconds: TransferExpirySchema,
   })
   .strict();
-export type WorkspaceDownloadTicketRequest = z.output<
-  typeof WorkspaceDownloadTicketRequestSchema
->;
+export type WorkspaceDownloadTicketRequest = z.output<typeof WorkspaceDownloadTicketRequestSchema>;
 export type WorkspaceDownloadTicketRequestInput = z.input<
   typeof WorkspaceDownloadTicketRequestSchema
 >;
@@ -53,15 +43,10 @@ export const WorkspaceTransferTicketSchema = z
     mediaType: z.string().trim().min(1).max(255).optional(),
   })
   .strict();
-export type WorkspaceTransferTicket = z.infer<
-  typeof WorkspaceTransferTicketSchema
->;
+export type WorkspaceTransferTicket = z.infer<typeof WorkspaceTransferTicketSchema>;
 
-export const WorkspaceTransferTicketResponseSchema =
-  WorkspaceTransferTicketSchema.extend({
-    uploadUrl: z.string().url().optional(),
-    downloadUrl: z.string().url().optional(),
-  }).strict();
-export type WorkspaceTransferTicketResponse = z.infer<
-  typeof WorkspaceTransferTicketResponseSchema
->;
+export const WorkspaceTransferTicketResponseSchema = WorkspaceTransferTicketSchema.extend({
+  uploadUrl: z.string().url().optional(),
+  downloadUrl: z.string().url().optional(),
+}).strict();
+export type WorkspaceTransferTicketResponse = z.infer<typeof WorkspaceTransferTicketResponseSchema>;

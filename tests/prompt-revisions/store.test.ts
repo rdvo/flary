@@ -25,7 +25,7 @@ test("prompt revisions are append-only, ordered, and idempotent by source hash",
   assert.equal(second.revision, 2);
   assert.deepEqual(
     (await store.list("support-answer")).map((revision) => revision.revision),
-    [2, 1]
+    [2, 1],
   );
   assert.equal((await store.current("support-answer"))?.id, second.id);
   assert.equal(await store.get("missing"), undefined);

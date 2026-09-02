@@ -1,11 +1,7 @@
 import { z } from "zod";
 
-import {
-  IdentifierSchema,
-  NonEmptyStringSchema,
-  TimestampSchema,
-} from "./common";
-import { SecretScopeSchema } from "./secrets";
+import { IdentifierSchema, NonEmptyStringSchema, TimestampSchema } from "./common.js";
+import { SecretScopeSchema } from "./secrets.js";
 
 // Describe the two connection families that Flary can expose to an agent.
 export const ConnectionTypeSchema = z.enum(["api", "mcp"]);
@@ -17,32 +13,14 @@ export type ConnectionProtocol = z.infer<typeof ConnectionProtocolSchema>;
 
 // These values describe how a connection obtains credentials. The credential
 // itself is never part of a connection contract.
-export const ConnectionAuthTypeSchema = z.enum([
-  "none",
-  "api_key",
-  "bearer",
-  "basic",
-  "oauth2",
-]);
+export const ConnectionAuthTypeSchema = z.enum(["none", "api_key", "bearer", "basic", "oauth2"]);
 export type ConnectionAuthType = z.infer<typeof ConnectionAuthTypeSchema>;
 
-export const ProviderBillingModeSchema = z.enum([
-  "subscription",
-  "byok",
-  "managed",
-]);
-export type ProviderBillingMode = z.infer<
-  typeof ProviderBillingModeSchema
->;
+export const ProviderBillingModeSchema = z.enum(["subscription", "byok", "managed"]);
+export type ProviderBillingMode = z.infer<typeof ProviderBillingModeSchema>;
 
-export const ProviderCredentialSourceSchema = z.enum([
-  "subscription",
-  "tenant_byok",
-  "managed",
-]);
-export type ProviderCredentialSource = z.infer<
-  typeof ProviderCredentialSourceSchema
->;
+export const ProviderCredentialSourceSchema = z.enum(["subscription", "tenant_byok", "managed"]);
+export type ProviderCredentialSource = z.infer<typeof ProviderCredentialSourceSchema>;
 
 /**
  * The safe credential identity admitted for one model turn.
@@ -61,9 +39,7 @@ export const AdmittedProviderCredentialSchema = z
     connectionRef: IdentifierSchema.max(200),
   })
   .strict();
-export type AdmittedProviderCredential = z.infer<
-  typeof AdmittedProviderCredentialSchema
->;
+export type AdmittedProviderCredential = z.infer<typeof AdmittedProviderCredentialSchema>;
 
 export const ProviderCredentialStatusSchema = z.enum([
   "active",
@@ -72,26 +48,17 @@ export const ProviderCredentialStatusSchema = z.enum([
   "revoked",
   "error",
 ]);
-export type ProviderCredentialStatus = z.infer<
-  typeof ProviderCredentialStatusSchema
->;
+export type ProviderCredentialStatus = z.infer<typeof ProviderCredentialStatusSchema>;
 
-export const SubscriptionProviderSchema = z.enum([
-  "anthropic",
-  "openai-codex",
-]);
-export type SubscriptionProvider = z.infer<
-  typeof SubscriptionProviderSchema
->;
+export const SubscriptionProviderSchema = z.enum(["anthropic", "openai-codex"]);
+export type SubscriptionProvider = z.infer<typeof SubscriptionProviderSchema>;
 
 export const ProviderOAuthLoginMethodSchema = z.enum([
   "device_code",
   "authorization_code",
   "browser_callback",
 ]);
-export type ProviderOAuthLoginMethod = z.infer<
-  typeof ProviderOAuthLoginMethodSchema
->;
+export type ProviderOAuthLoginMethod = z.infer<typeof ProviderOAuthLoginMethodSchema>;
 
 export const ProviderOAuthStatusSchema = z.enum([
   "pending",
@@ -100,9 +67,7 @@ export const ProviderOAuthStatusSchema = z.enum([
   "cancelled",
   "error",
 ]);
-export type ProviderOAuthStatus = z.infer<
-  typeof ProviderOAuthStatusSchema
->;
+export type ProviderOAuthStatus = z.infer<typeof ProviderOAuthStatusSchema>;
 
 /**
  * Public state for one provider login.
@@ -131,9 +96,7 @@ export const ProviderOAuthSessionSchema = z
     updatedAt: TimestampSchema,
   })
   .strict();
-export type ProviderOAuthSession = z.infer<
-  typeof ProviderOAuthSessionSchema
->;
+export type ProviderOAuthSession = z.infer<typeof ProviderOAuthSessionSchema>;
 
 export const ProviderOAuthStartInputSchema = z
   .object({
@@ -142,18 +105,14 @@ export const ProviderOAuthStartInputSchema = z
     method: ProviderOAuthLoginMethodSchema.optional(),
   })
   .strict();
-export type ProviderOAuthStartInput = z.input<
-  typeof ProviderOAuthStartInputSchema
->;
+export type ProviderOAuthStartInput = z.input<typeof ProviderOAuthStartInputSchema>;
 
 export const ProviderOAuthCompleteInputSchema = z
   .object({
     authorizationResult: NonEmptyStringSchema.max(8_000),
   })
   .strict();
-export type ProviderOAuthCompleteInput = z.infer<
-  typeof ProviderOAuthCompleteInputSchema
->;
+export type ProviderOAuthCompleteInput = z.infer<typeof ProviderOAuthCompleteInputSchema>;
 
 export const ProviderEncryptedCredentialHandoffSchema = z
   .object({
@@ -202,9 +161,7 @@ export const ProviderCredentialLifecycleSchema = z
     version: z.number().int().positive(),
   })
   .strict();
-export type ProviderCredentialLifecycle = z.infer<
-  typeof ProviderCredentialLifecycleSchema
->;
+export type ProviderCredentialLifecycle = z.infer<typeof ProviderCredentialLifecycleSchema>;
 
 export const ConnectionStatusSchema = z.enum([
   "needs_auth",
@@ -257,10 +214,7 @@ export const ConnectionCreateInputSchema = z
         message: "stdio is only valid for MCP connections",
       });
     }
-    if (
-      value.billingMode === "subscription" &&
-      value.authType !== "oauth2"
-    ) {
+    if (value.billingMode === "subscription" && value.authType !== "oauth2") {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["billingMode"],
@@ -320,6 +274,4 @@ export const ConnectionSecretMetadataSchema = z
     updatedAt: TimestampSchema,
   })
   .strict();
-export type ConnectionSecretMetadata = z.infer<
-  typeof ConnectionSecretMetadataSchema
->;
+export type ConnectionSecretMetadata = z.infer<typeof ConnectionSecretMetadataSchema>;

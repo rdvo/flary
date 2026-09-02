@@ -1,7 +1,4 @@
-import {
-  ReasoningEffortSchema,
-  type ReasoningEffort,
-} from "flary/contracts";
+import { ReasoningEffortSchema, type ReasoningEffort } from "flary/contracts";
 
 /**
  * Flary keeps a wider provider-neutral reasoning vocabulary. Flue beta 9

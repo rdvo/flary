@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  InMemoryToolCatalog,
-  ToolCatalogError,
-} from "../../src/harness/tools/index.js";
+import { InMemoryToolCatalog, ToolCatalogError } from "../../src/harness/tools/index.js";
 
 test("searches catalog metadata and paginates deterministic results", async () => {
   const catalog = new InMemoryToolCatalog();
@@ -77,10 +74,9 @@ test("load returns a safe descriptor and a private executable handle", async () 
   assert.deepEqual(loaded.capability.secretRefs, ["github.token"]);
   assert.equal(JSON.stringify(loaded).includes(secretValue), false);
 
-  const handle = await catalog.loadHandle<
-    { body: string },
-    { authenticated: boolean }
-  >({ id: "github.comment" });
+  const handle = await catalog.loadHandle<{ body: string }, { authenticated: boolean }>({
+    id: "github.comment",
+  });
   assert.ok(handle);
   assert.deepEqual(handle.toJSON(), loaded.capability);
   assert.equal(JSON.stringify(handle).includes(secretValue), false);
@@ -99,16 +95,14 @@ test("secret access is declared, callback-scoped, and unavailable without a prov
       kind: "native",
       secretRefs: ["service.key"],
     },
-    execute: async (_input, context) =>
-      context.useSecret("undeclared.key", () => ({ ok: true })),
+    execute: async (_input, context) => context.useSecret("undeclared.key", () => ({ ok: true })),
   });
 
   const handle = await catalog.loadHandle({ id: "private.lookup" });
   assert.ok(handle);
   await assert.rejects(
     handle.invoke({}),
-    (error: unknown) =>
-      error instanceof ToolCatalogError && error.code === "secret_not_declared",
+    (error: unknown) => error instanceof ToolCatalogError && error.code === "secret_not_declared",
   );
 
   const providerlessCatalog = new InMemoryToolCatalog();
@@ -119,8 +113,7 @@ test("secret access is declared, callback-scoped, and unavailable without a prov
       kind: "native",
       secretRefs: ["service.key"],
     },
-    execute: async (_input, context) =>
-      context.useSecret("service.key", () => ({ ok: true })),
+    execute: async (_input, context) => context.useSecret("service.key", () => ({ ok: true })),
   });
   const providerlessHandle = await providerlessCatalog.loadHandle({
     id: "private.send",
@@ -128,8 +121,7 @@ test("secret access is declared, callback-scoped, and unavailable without a prov
   assert.ok(providerlessHandle);
   await assert.rejects(
     providerlessHandle.invoke({}),
-    (error: unknown) =>
-      error instanceof ToolCatalogError && error.code === "secret_unavailable",
+    (error: unknown) => error instanceof ToolCatalogError && error.code === "secret_unavailable",
   );
 });
 

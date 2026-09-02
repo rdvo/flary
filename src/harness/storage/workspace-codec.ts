@@ -1,8 +1,4 @@
-export function workspacePathMatches(
-  path: string,
-  prefix: string,
-  recursive: boolean,
-): boolean {
+export function workspacePathMatches(path: string, prefix: string, recursive: boolean): boolean {
   if (prefix && path !== prefix && !path.startsWith(`${prefix}/`)) return false;
   if (recursive) return true;
   const relative = prefix ? path.slice(prefix.length).replace(/^\//, "") : path;
@@ -13,19 +9,12 @@ export function decodeWorkspaceFileContent(
   content: string,
   encoding: "utf8" | "base64",
 ): Uint8Array {
-  return encoding === "utf8"
-    ? new TextEncoder().encode(content)
-    : base64ToWorkspaceBytes(content);
+  return encoding === "utf8" ? new TextEncoder().encode(content) : base64ToWorkspaceBytes(content);
 }
 
 export async function workspaceSha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    Uint8Array.from(bytes).buffer,
-  );
-  return Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
+  const digest = await crypto.subtle.digest("SHA-256", Uint8Array.from(bytes).buffer);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 export function workspaceBytesToBase64(bytes: Uint8Array): string {

@@ -178,7 +178,8 @@ for await (const event of thread.stream()) {
   {
     id: "tracked",
     label: "Tracked",
-    description: "A verified SaaS agent with analytics, R2 drafts, approvals, and realtime activity.",
+    description:
+      "A verified SaaS agent with analytics, R2 drafts, approvals, and realtime activity.",
     examples: [
       {
         id: "tracked-agent",
@@ -237,7 +238,8 @@ for await (const event of connection.events()) {
   {
     id: "florist",
     label: "Florist store",
-    description: "A verified Astro and Shopify concierge with durable chat and trusted commerce reads.",
+    description:
+      "A verified Astro and Shopify concierge with durable chat and trusted commerce reads.",
     examples: [
       {
         id: "florist-agent",
@@ -305,9 +307,7 @@ export function CodeExamples() {
     florist: "florist-agent",
   });
   const activeId = activeByGroup[group.id] ?? group.examples[0].id;
-  const active =
-    group.examples.find((example) => example.id === activeId) ??
-    group.examples[0];
+  const active = group.examples.find((example) => example.id === activeId) ?? group.examples[0];
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [monacoReady, setMonacoReady] = useState(false);
 
@@ -339,8 +339,7 @@ export function CodeExamples() {
   const editorOptions = useMemo(
     () => ({
       automaticLayout: true,
-      fontFamily:
-        "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
       fontSize: 13,
       lineHeight: 21,
       lineNumbersMinChars: 3,

@@ -16,7 +16,8 @@ function encode(value: Uint8Array): string {
 }
 
 function decode(value: string): Uint8Array {
-  const padded = value.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (value.length % 4)) % 4);
+  const padded =
+    value.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (value.length % 4)) % 4);
   const binary = atob(padded);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) {
@@ -34,7 +35,10 @@ async function keyFromConfig(value: string): Promise<CryptoKey> {
   if (raw.byteLength !== 32) {
     throw new Error("FLARY_TOKEN_ENCRYPTION_KEY_B64 must decode to 32 bytes");
   }
-  return crypto.subtle.importKey("raw", asArrayBuffer(raw), "AES-GCM", false, ["encrypt", "decrypt"]);
+  return crypto.subtle.importKey("raw", asArrayBuffer(raw), "AES-GCM", false, [
+    "encrypt",
+    "decrypt",
+  ]);
 }
 
 export async function encryptToken(
@@ -52,7 +56,10 @@ export async function encryptToken(
     await keyFromConfig(keyConfig),
     new TextEncoder().encode(token),
   );
-  return EncryptedTokenSchema.parse({ ciphertext: encode(new Uint8Array(ciphertext)), iv: encode(iv) });
+  return EncryptedTokenSchema.parse({
+    ciphertext: encode(new Uint8Array(ciphertext)),
+    iv: encode(iv),
+  });
 }
 
 export async function decryptToken(
@@ -105,23 +112,16 @@ export function providerOAuthStateAssociatedData(
   appId: string,
   sessionId: string,
 ): string {
-  return [
-    "flary:provider-oauth-state",
-    organizationId,
-    userId,
-    appId,
-    sessionId,
-  ].join(":");
+  return ["flary:provider-oauth-state", organizationId, userId, appId, sessionId].join(":");
 }
 
 export function hashOAuthState(value: string): Promise<string> {
-  return crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)).then((digest) => encode(new Uint8Array(digest)));
+  return crypto.subtle
+    .digest("SHA-256", new TextEncoder().encode(value))
+    .then((digest) => encode(new Uint8Array(digest)));
 }
 
 /** Create a Worker-internal capability bound to one Flue resource. */
-export function internalRequestToken(
-  secret: string,
-  resource: string,
-): Promise<string> {
+export function internalRequestToken(secret: string, resource: string): Promise<string> {
   return hashOAuthState(`flary:internal:${secret}:${resource}`);
 }

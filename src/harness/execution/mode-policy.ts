@@ -1,13 +1,7 @@
 import { z } from "zod";
 
-import {
-  AgentModeSchema,
-  type AgentMode,
-} from "../contracts/modes";
-import {
-  IdentifierSchema,
-  NonEmptyStringSchema,
-} from "../contracts/common";
+import { AgentModeSchema, type AgentMode } from "../contracts/modes.js";
+import { IdentifierSchema, NonEmptyStringSchema } from "../contracts/common.js";
 
 export const ModeAccessRequestSchema = z
   .object({
@@ -20,8 +14,7 @@ export const ModeAccessRequestSchema = z
 export type ModeAccessRequest = z.infer<typeof ModeAccessRequestSchema>;
 
 export type ModeAccessDecision =
-  | { allowed: true; requiresApproval: boolean }
-  | { allowed: false; reason: string };
+  { allowed: true; requiresApproval: boolean } | { allowed: false; reason: string };
 
 export class ModeAccessDeniedError extends Error {
   constructor(
@@ -44,19 +37,13 @@ function matchesAny(value: string, patterns: readonly string[]): boolean {
   return patterns.some((pattern) => matchesPattern(value, pattern));
 }
 
-export function modeAllowsCapability(
-  modeInput: AgentMode,
-  capability: string,
-): boolean {
+export function modeAllowsCapability(modeInput: AgentMode, capability: string): boolean {
   const mode = AgentModeSchema.parse(modeInput);
   if (matchesAny(capability, mode.deniedCapabilities)) return false;
   return matchesAny(capability, mode.allowedCapabilities);
 }
 
-export function modeAllowsWrite(
-  modeInput: AgentMode,
-  requestInput: ModeAccessRequest,
-): boolean {
+export function modeAllowsWrite(modeInput: AgentMode, requestInput: ModeAccessRequest): boolean {
   const mode = AgentModeSchema.parse(modeInput);
   const request = ModeAccessRequestSchema.parse(requestInput);
   if (request.operation !== "write") return true;
@@ -78,9 +65,7 @@ export function modeRequiresApproval(
       matchesPattern(request.capability, capability),
     ) ||
     (request.toolId !== undefined &&
-      mode.approvalPolicy.requiredTools.some((toolId) =>
-        matchesPattern(request.toolId!, toolId),
-      ))
+      mode.approvalPolicy.requiredTools.some((toolId) => matchesPattern(request.toolId!, toolId)))
   );
 }
 
@@ -108,10 +93,7 @@ export function checkModeAccess(
   };
 }
 
-export function assertModeAccess(
-  modeInput: AgentMode,
-  requestInput: ModeAccessRequest,
-): void {
+export function assertModeAccess(modeInput: AgentMode, requestInput: ModeAccessRequest): void {
   const mode = AgentModeSchema.parse(modeInput);
   const request = ModeAccessRequestSchema.parse(requestInput);
   const decision = checkModeAccess(mode, request);

@@ -67,11 +67,13 @@ test("Sandbox workspace execution restores, syncs, checkpoints, and backs up", a
     },
     async listFiles() {
       return {
-        files: [{
-          type: "file",
-          relativePath: "new.txt",
-          absolutePath: "/workspace/new.txt",
-        }],
+        files: [
+          {
+            type: "file",
+            relativePath: "new.txt",
+            absolutePath: "/workspace/new.txt",
+          },
+        ],
       };
     },
     async readFile() {
@@ -133,8 +135,8 @@ test("interrupted Sandbox operations stay outcome_unknown", async () => {
   });
   const result = await backend.uncertain("operation_2");
   assert.equal(result.state, "outcome_unknown");
-  const row = storage.database.prepare(
-    "SELECT state FROM flary_workspace_execution WHERE operation_id = ?",
-  ).get("operation_2") as { state: string };
+  const row = storage.database
+    .prepare("SELECT state FROM flary_workspace_execution WHERE operation_id = ?")
+    .get("operation_2") as { state: string };
   assert.equal(row.state, "outcome_unknown");
 });

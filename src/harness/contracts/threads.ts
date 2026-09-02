@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { AgentModeIdSchema, type AgentModeId } from "./modes";
+import { AgentModeIdSchema, type AgentModeId } from "./modes.js";
 import {
   ModelSelectionSchema,
   ModelInputSchema,
@@ -9,31 +9,24 @@ import {
   type ModelSelection,
   type PromptCacheRetention,
   type ReasoningEffort,
-} from "./provider";
+} from "./provider.js";
 import {
   IdentifierSchema,
   JsonObjectSchema,
   MetadataSchema,
   NonEmptyStringSchema,
   TimestampSchema,
-} from "./common";
-import { IdentityReferenceSchema, type IdentityReference } from "./identity";
+} from "./common.js";
+import { IdentityReferenceSchema, type IdentityReference } from "./identity.js";
 import {
   ThreadRefSchema,
   WorkspaceRefSchema,
   type ThreadRef,
   type WorkspaceRef,
-} from "./tenancy";
-import {
-  ArtifactCommitSummarySchema,
-  ArtifactDiffSchema,
-} from "../storage/artifacts";
+} from "./tenancy.js";
+import { ArtifactCommitSummarySchema, ArtifactDiffSchema } from "../storage/artifacts.js";
 
-export const ThreadLifecycleStatusSchema = z.enum([
-  "active",
-  "archived",
-  "forked",
-]);
+export const ThreadLifecycleStatusSchema = z.enum(["active", "archived", "forked"]);
 export type ThreadLifecycleStatus = z.infer<typeof ThreadLifecycleStatusSchema>;
 
 /**
@@ -69,10 +62,7 @@ export const ThreadBindingSchema = z
         message: "agentId must match thread.agentId",
       });
     }
-    if (
-      value.parentThread &&
-      value.parentThread.organizationId !== value.thread.organizationId
-    ) {
+    if (value.parentThread && value.parentThread.organizationId !== value.thread.organizationId) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["parentThread"],
@@ -126,13 +116,9 @@ export const ThreadConnectionsRequestSchema = z
     connectionIds: z.array(IdentifierSchema).max(256),
   })
   .strict();
-export type ThreadConnectionsRequest = z.infer<
-  typeof ThreadConnectionsRequestSchema
->;
+export type ThreadConnectionsRequest = z.infer<typeof ThreadConnectionsRequestSchema>;
 
-export const ThreadModelSetRequestSchema = z
-  .object({ model: ModelInputSchema })
-  .strict();
+export const ThreadModelSetRequestSchema = z.object({ model: ModelInputSchema }).strict();
 export type ThreadModelSetRequest = z.input<typeof ThreadModelSetRequestSchema>;
 
 export const ThreadModelHistoryRecordSchema = z
@@ -144,9 +130,7 @@ export const ThreadModelHistoryRecordSchema = z
     reason: z.string().max(4_096).optional(),
   })
   .strict();
-export type ThreadModelHistoryRecord = z.infer<
-  typeof ThreadModelHistoryRecordSchema
->;
+export type ThreadModelHistoryRecord = z.infer<typeof ThreadModelHistoryRecordSchema>;
 
 export const ThreadMessageImageSchema = z
   .object({
@@ -182,9 +166,7 @@ export const ThreadRenameRequestSchema = z
   .strict();
 export type ThreadRenameRequest = z.infer<typeof ThreadRenameRequestSchema>;
 
-export const ThreadPinRequestSchema = z
-  .object({ pinned: z.boolean().default(true) })
-  .strict();
+export const ThreadPinRequestSchema = z.object({ pinned: z.boolean().default(true) }).strict();
 export type ThreadPinRequest = z.input<typeof ThreadPinRequestSchema>;
 
 export const ThreadReadRequestSchema = z
@@ -259,9 +241,7 @@ export const ThreadRecordListRequestSchema = z
     types: z.array(NonEmptyStringSchema.max(200)).max(100).optional(),
   })
   .strict();
-export type ThreadRecordListRequest = z.input<
-  typeof ThreadRecordListRequestSchema
->;
+export type ThreadRecordListRequest = z.input<typeof ThreadRecordListRequestSchema>;
 
 export const ThreadApprovalRecordSchema = z
   .object({
@@ -309,18 +289,14 @@ export const ThreadHistoryListResponseSchema = z
     checkpoints: z.array(ArtifactCommitSummarySchema).max(100),
   })
   .strict();
-export type ThreadHistoryListResponse = z.infer<
-  typeof ThreadHistoryListResponseSchema
->;
+export type ThreadHistoryListResponse = z.infer<typeof ThreadHistoryListResponseSchema>;
 
 export const ThreadHistoryListRequestSchema = z
   .object({
     limit: z.coerce.number().int().positive().max(100).default(30),
   })
   .strict();
-export type ThreadHistoryListRequest = z.input<
-  typeof ThreadHistoryListRequestSchema
->;
+export type ThreadHistoryListRequest = z.input<typeof ThreadHistoryListRequestSchema>;
 
 export const ThreadHistoryDiffRequestSchema = z
   .object({
@@ -328,23 +304,13 @@ export const ThreadHistoryDiffRequestSchema = z
     headCommitId: IdentifierSchema,
   })
   .strict();
-export type ThreadHistoryDiffRequest = z.infer<
-  typeof ThreadHistoryDiffRequestSchema
->;
+export type ThreadHistoryDiffRequest = z.infer<typeof ThreadHistoryDiffRequestSchema>;
 
-export const ThreadHistoryDiffResponseSchema = z
-  .object({ diff: ArtifactDiffSchema })
-  .strict();
-export type ThreadHistoryDiffResponse = z.infer<
-  typeof ThreadHistoryDiffResponseSchema
->;
+export const ThreadHistoryDiffResponseSchema = z.object({ diff: ArtifactDiffSchema }).strict();
+export type ThreadHistoryDiffResponse = z.infer<typeof ThreadHistoryDiffResponseSchema>;
 
-export const ThreadHistoryRestoreRequestSchema = z
-  .object({ commitId: IdentifierSchema })
-  .strict();
-export type ThreadHistoryRestoreRequest = z.infer<
-  typeof ThreadHistoryRestoreRequestSchema
->;
+export const ThreadHistoryRestoreRequestSchema = z.object({ commitId: IdentifierSchema }).strict();
+export type ThreadHistoryRestoreRequest = z.infer<typeof ThreadHistoryRestoreRequestSchema>;
 
 export const ThreadMutationResponseSchema = z
   .object({
@@ -355,12 +321,7 @@ export const ThreadMutationResponseSchema = z
   .strict();
 
 /** A delete is accepted before its durable data is removed. */
-export const ThreadDeletionStatusSchema = z.enum([
-  "accepted",
-  "purging",
-  "complete",
-  "failed",
-]);
+export const ThreadDeletionStatusSchema = z.enum(["accepted", "purging", "complete", "failed"]);
 export type ThreadDeletionStatus = z.infer<typeof ThreadDeletionStatusSchema>;
 
 export const ThreadDeletionSchema = z

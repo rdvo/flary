@@ -14,11 +14,7 @@ export {
   promptSlugFromPath,
   renderPromptTemplate,
 } from "./prompts/index.js";
-export {
-  createHarnessContext,
-  createSecretsContext,
-  MissingSecretError,
-} from "./vault/index.js";
+export { createHarnessContext, createSecretsContext, MissingSecretError } from "./vault/index.js";
 
 export * as client from "./client/index.js";
 export * as cloudflare from "./cloudflare/index.js";
@@ -42,7 +38,6 @@ export * from "./session/index.js";
 export * from "./host/index.js";
 export * from "./flue/index.js";
 export * from "./cloudflare/thread-metadata.js";
-export * from "./execution/mode-policy.js";
 export {
   BUILT_IN_AGENT_MODES,
   AgentModeSchema,

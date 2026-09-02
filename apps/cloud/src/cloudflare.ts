@@ -1,6 +1,1 @@
-export {
-  ContainerProxy,
-  FlarySandbox,
-  OrgCoordinator,
-  WorkspaceFilesystem,
-} from "../worker/index";
+export { ContainerProxy, FlarySandbox, OrgCoordinator, WorkspaceFilesystem } from "../worker/index";

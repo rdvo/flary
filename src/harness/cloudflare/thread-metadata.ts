@@ -41,9 +41,7 @@ import {
 import { redactSecrets } from "../execution/redaction.js";
 
 type ThreadSql = {
-  exec<T = Record<string, unknown>>(
-    ...args: any[]
-  ): { toArray(): T[] };
+  exec<T = Record<string, unknown>>(...args: any[]): { toArray(): T[] };
 };
 
 type IdentityRow = { ref_json: string };
@@ -91,10 +89,7 @@ type UserInputRow = {
 export class FlaryThreadMetadataStore {
   readonly #sql: ThreadSql;
   readonly #ref: ThreadRef;
-  readonly #approvalWaiters = new Map<
-    string,
-    Set<(decision: ApprovalDecision) => void>
-  >();
+  readonly #approvalWaiters = new Map<string, Set<(decision: ApprovalDecision) => void>>();
 
   constructor(sql: unknown, refInput: ThreadRef) {
     this.#sql = sql as ThreadSql;
@@ -148,13 +143,9 @@ export class FlaryThreadMetadataStore {
 
   readBinding(): ThreadBinding | undefined {
     const row = this.#sql
-      .exec<BindingRow>(
-        `SELECT binding_json FROM flary_thread_binding WHERE singleton = 1`,
-      )
+      .exec<BindingRow>(`SELECT binding_json FROM flary_thread_binding WHERE singleton = 1`)
       .toArray()[0];
-    return row
-      ? ThreadBindingSchema.parse(JSON.parse(row.binding_json))
-      : undefined;
+    return row ? ThreadBindingSchema.parse(JSON.parse(row.binding_json)) : undefined;
   }
 
   setConnectionGrants(connectionIds: string[]): ThreadBinding {
@@ -234,9 +225,7 @@ export class FlaryThreadMetadataStore {
   }
 
   /** Read the private exact call bound to one approval request. */
-  getToolApproval(
-    toolCallInput: DurableToolCallSnapshot,
-  ): DurableApprovalRecord | undefined {
+  getToolApproval(toolCallInput: DurableToolCallSnapshot): DurableApprovalRecord | undefined {
     const toolCall = DurableToolCallSnapshotSchema.parse(toolCallInput);
     return this.findToolApproval({
       ...toolCall,
@@ -263,9 +252,7 @@ export class FlaryThreadMetadataStore {
       .toArray();
     for (const row of rows) {
       if (!row.tool_call_json) continue;
-      const stored = DurableToolCallSnapshotSchema.parse(
-        JSON.parse(row.tool_call_json),
-      );
+      const stored = DurableToolCallSnapshotSchema.parse(JSON.parse(row.tool_call_json));
       if (
         stored.runId !== input.runId ||
         stored.toolId !== input.toolId ||
@@ -274,7 +261,8 @@ export class FlaryThreadMetadataStore {
         (input.operation && stored.operation !== input.operation) ||
         (input.resourceKey && stored.resourceKey !== input.resourceKey) ||
         stableJson(stored.arguments) !== stableJson(input.arguments)
-      ) continue;
+      )
+        continue;
       return DurableApprovalRecordSchema.parse({
         request: JSON.parse(row.request_json),
         toolCall: stored,
@@ -423,9 +411,7 @@ export class FlaryThreadMetadataStore {
       throw new Error("User input request belongs to another thread");
     }
     if (row.response_json) {
-      const existing = UserInputResponseSchema.parse(
-        JSON.parse(row.response_json),
-      );
+      const existing = UserInputResponseSchema.parse(JSON.parse(row.response_json));
       if (JSON.stringify(existing) !== JSON.stringify(response)) {
         throw new Error("User input request has already been answered");
       }
@@ -572,11 +558,7 @@ export class FlaryThreadMetadataStore {
   }
 
   /** Issue a bounded capability after a matching approval was accepted. */
-  issueCapabilityLease(
-    approvalId: string,
-    toolId: string,
-    ttlMs = 15 * 60_000,
-  ): CapabilityLease {
+  issueCapabilityLease(approvalId: string, toolId: string, ttlMs = 15 * 60_000): CapabilityLease {
     const row = this.#sql
       .exec<ApprovalRow>(
         `SELECT approval_id, request_json, decision_json, updated_at
@@ -600,12 +582,8 @@ export class FlaryThreadMetadataStore {
       throw new Error("Approval does not grant the requested tool");
     }
     const issuedAt = new Date().toISOString();
-    const requestedExpiry = request.expiresAt
-      ? Date.parse(request.expiresAt)
-      : Date.now() + ttlMs;
-    const expiresAt = new Date(
-      Math.min(Date.now() + ttlMs, requestedExpiry),
-    ).toISOString();
+    const requestedExpiry = request.expiresAt ? Date.parse(request.expiresAt) : Date.now() + ttlMs;
+    const expiresAt = new Date(Math.min(Date.now() + ttlMs, requestedExpiry)).toISOString();
     if (Date.parse(expiresAt) <= Date.now()) {
       throw new Error("The approval request has expired");
     }
@@ -669,9 +647,7 @@ export class FlaryThreadMetadataStore {
       ...(provider
         ? { providerSession: ProviderSessionSchema.parse(JSON.parse(provider.session_json)) }
         : {}),
-      ...(state.metadata_json
-        ? { metadata: JSON.parse(state.metadata_json) }
-        : {}),
+      ...(state.metadata_json ? { metadata: JSON.parse(state.metadata_json) } : {}),
       updatedAt: state.updated_at,
     });
   }
@@ -683,9 +659,7 @@ export class FlaryThreadMetadataStore {
     const nextMode = patch.mode ?? current.mode;
     const nextStatus = patch.status ?? current.status;
     const nextRunId =
-      patch.activeRunId === undefined
-        ? current.activeRunId ?? null
-        : patch.activeRunId;
+      patch.activeRunId === undefined ? (current.activeRunId ?? null) : patch.activeRunId;
     const nextMetadata = patch.metadata ?? current.metadata;
     const nextOffset = patch.flueOffset ?? current.cursor.flueOffset;
     const nextSequence = patch.flarySequence ?? current.cursor.flarySequence;
@@ -709,9 +683,7 @@ export class FlaryThreadMetadataStore {
     );
     if (patch.providerSession !== undefined) {
       if (patch.providerSession === null) {
-        this.#sql.exec(
-          "DELETE FROM flary_thread_provider_session WHERE singleton = 1",
-        );
+        this.#sql.exec("DELETE FROM flary_thread_provider_session WHERE singleton = 1");
       } else {
         const providerSession = ProviderSessionSchema.parse(patch.providerSession);
         this.#sql.exec(
@@ -749,15 +721,11 @@ export class FlaryThreadMetadataStore {
     toolCallInput?: DurableToolCallSnapshot,
   ): void {
     const request = ApprovalRequestSchema.parse(requestInput);
-    const toolCall = toolCallInput
-      ? DurableToolCallSnapshotSchema.parse(toolCallInput)
-      : undefined;
+    const toolCall = toolCallInput ? DurableToolCallSnapshotSchema.parse(toolCallInput) : undefined;
     if (toolCall && toolCall.runId !== request.runId) {
       throw new Error("Approval tool call does not belong to the request run");
     }
-    const decision = decisionInput
-      ? ApprovalDecisionSchema.parse(decisionInput)
-      : undefined;
+    const decision = decisionInput ? ApprovalDecisionSchema.parse(decisionInput) : undefined;
     if (decision && decision.requestId !== request.id) {
       throw new Error("Approval decision does not match the request");
     }
@@ -831,10 +799,7 @@ export class FlaryThreadMetadataStore {
     this.appendThreadEvent(`approval.requested:${request.id}`, event);
   }
 
-  private appendApprovalResolvedEvent(
-    request: ApprovalRequest,
-    decision: ApprovalDecision,
-  ): void {
+  private appendApprovalResolvedEvent(request: ApprovalRequest, decision: ApprovalDecision): void {
     const event = ApprovalLifecycleEventSchema.parse({
       type: "approval.resolved",
       runId: request.runId,
@@ -942,9 +907,7 @@ export class FlaryThreadMetadataStore {
       );
     `);
     try {
-      this.#sql.exec(
-        "ALTER TABLE flary_thread_approvals ADD COLUMN tool_call_json TEXT",
-      );
+      this.#sql.exec("ALTER TABLE flary_thread_approvals ADD COLUMN tool_call_json TEXT");
     } catch {
       // Existing Durable Objects already have the column.
     }
@@ -952,9 +915,7 @@ export class FlaryThreadMetadataStore {
 
   private ensureIdentity(): void {
     const existing = this.#sql
-      .exec<IdentityRow>(
-        `SELECT ref_json FROM flary_thread_identity WHERE singleton = 1`,
-      )
+      .exec<IdentityRow>(`SELECT ref_json FROM flary_thread_identity WHERE singleton = 1`)
       .toArray()[0];
     if (existing) {
       const stored = ThreadRefSchema.parse(JSON.parse(existing.ref_json));
@@ -979,10 +940,7 @@ function runStatus(value: string): string {
   return value;
 }
 
-function sameToolCall(
-  left: DurableToolCallSnapshot,
-  right: DurableToolCallSnapshot,
-): boolean {
+function sameToolCall(left: DurableToolCallSnapshot, right: DurableToolCallSnapshot): boolean {
   return (
     left.runId === right.runId &&
     left.callId === right.callId &&

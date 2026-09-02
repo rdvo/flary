@@ -34,7 +34,10 @@ export class GeminiAdapter implements ModelAdapter {
     this.#fetch = options.fetch ?? fetch;
   }
 
-  async complete(requestValue: ModelRequest, options: ProviderRequestOptions = {}): Promise<ModelResponse> {
+  async complete(
+    requestValue: ModelRequest,
+    options: ProviderRequestOptions = {},
+  ): Promise<ModelResponse> {
     const request = ModelRequestSchema.parse(requestValue);
     const response = await this.#fetch(
       `${this.#baseUrl.replace(/\/$/, "")}/models/${encodeURIComponent(request.model)}:generateContent`,
@@ -46,17 +49,24 @@ export class GeminiAdapter implements ModelAdapter {
           ...headersRecord(options.headers),
         },
         body: JSON.stringify(geminiRequest(request)),
-        signal: options.signal ?? (options.timeoutMs ? AbortSignal.timeout(options.timeoutMs) : undefined),
+        signal:
+          options.signal ??
+          (options.timeoutMs ? AbortSignal.timeout(options.timeoutMs) : undefined),
       },
     );
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      throw new Error(`Gemini request failed with HTTP ${response.status}${detail ? `: ${detail.slice(0, 300)}` : "."}`);
+      throw new Error(
+        `Gemini request failed with HTTP ${response.status}${detail ? `: ${detail.slice(0, 300)}` : "."}`,
+      );
     }
     return geminiResponse(await response.json(), request.model, this.id);
   }
 
-  async *stream(requestValue: ModelRequest, options: ProviderRequestOptions = {}): AsyncIterable<ModelStreamEvent> {
+  async *stream(
+    requestValue: ModelRequest,
+    options: ProviderRequestOptions = {},
+  ): AsyncIterable<ModelStreamEvent> {
     const request = ModelRequestSchema.parse(requestValue);
     const url = new URL(
       `${this.#baseUrl.replace(/\/$/, "")}/models/${encodeURIComponent(request.model)}:streamGenerateContent`,
@@ -66,16 +76,19 @@ export class GeminiAdapter implements ModelAdapter {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "accept": "text/event-stream",
+        accept: "text/event-stream",
         ...(this.#apiKey ? { "x-goog-api-key": this.#apiKey } : {}),
         ...headersRecord(options.headers),
       },
       body: JSON.stringify(geminiRequest(request)),
-      signal: options.signal ?? (options.timeoutMs ? AbortSignal.timeout(options.timeoutMs) : undefined),
+      signal:
+        options.signal ?? (options.timeoutMs ? AbortSignal.timeout(options.timeoutMs) : undefined),
     });
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      throw new Error(`Gemini request failed with HTTP ${response.status}${detail ? `: ${detail.slice(0, 300)}` : "."}`);
+      throw new Error(
+        `Gemini request failed with HTTP ${response.status}${detail ? `: ${detail.slice(0, 300)}` : "."}`,
+      );
     }
     if (!response.body) throw new Error("Gemini returned no response stream.");
 
@@ -167,20 +180,33 @@ function geminiRequest(request: ModelRequest): Record<string, unknown> {
   return {
     contents,
     ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
-    ...(request.tools?.length ? {
-      tools: [{ functionDeclarations: request.tools.map((tool) => ({
-        name: tool.name,
-        ...(tool.description ? { description: tool.description } : {}),
-        parameters: tool.inputSchema,
-      })) }],
-    } : {}),
+    ...(request.tools?.length
+      ? {
+          tools: [
+            {
+              functionDeclarations: request.tools.map((tool) => ({
+                name: tool.name,
+                ...(tool.description ? { description: tool.description } : {}),
+                parameters: tool.inputSchema,
+              })),
+            },
+          ],
+        }
+      : {}),
     generationConfig: {
       ...(request.maxOutputTokens ? { maxOutputTokens: request.maxOutputTokens } : {}),
       ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
       ...(request.topP !== undefined ? { topP: request.topP } : {}),
-      ...(request.stop ? { stopSequences: Array.isArray(request.stop) ? request.stop : [request.stop] } : {}),
+      ...(request.stop
+        ? { stopSequences: Array.isArray(request.stop) ? request.stop : [request.stop] }
+        : {}),
       ...(request.responseFormat && request.responseFormat !== "text"
-        ? { responseMimeType: "application/json", ...(request.responseFormat.schema ? { responseSchema: request.responseFormat.schema } : {}) }
+        ? {
+            responseMimeType: "application/json",
+            ...(request.responseFormat.schema
+              ? { responseSchema: request.responseFormat.schema }
+              : {}),
+          }
         : {}),
       ...geminiThinkingConfig(request),
     },
@@ -192,13 +218,14 @@ export function geminiThinkingConfig(request: ModelRequest): Record<string, unkn
   const effort = request.reasoningEffort;
   if (!effort) return {};
   if (/gemini-(?:3|[4-9]|\d{2,})(?:\.|-|$)/i.test(request.model)) {
-    const thinkingLevel = effort === "none" || effort === "minimal"
-      ? "MINIMAL"
-      : effort === "low"
-        ? "LOW"
-        : effort === "medium"
-          ? "MEDIUM"
-          : "HIGH";
+    const thinkingLevel =
+      effort === "none" || effort === "minimal"
+        ? "MINIMAL"
+        : effort === "low"
+          ? "LOW"
+          : effort === "medium"
+            ? "MEDIUM"
+            : "HIGH";
     return { thinkingConfig: { thinkingLevel } };
   }
   if (effort === "none") return { thinkingConfig: { thinkingBudget: 0 } };
@@ -208,19 +235,42 @@ export function geminiThinkingConfig(request: ModelRequest): Record<string, unkn
 function messageText(message: ProviderMessage): string {
   return typeof message.content === "string"
     ? message.content
-    : message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+    : message.content
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("\n");
 }
 
-function messageParts(message: ProviderMessage, history: readonly ProviderMessage[]): Array<Record<string, unknown>> {
+function messageParts(
+  message: ProviderMessage,
+  history: readonly ProviderMessage[],
+): Array<Record<string, unknown>> {
   if (message.role === "tool") {
-    const call = history.flatMap((entry) => entry.toolCalls ?? []).find((entry) => entry.id === message.toolCallId);
-    return [{ functionResponse: { name: message.name ?? call?.name ?? "tool", response: { result: messageText(message) } } }];
+    const call = history
+      .flatMap((entry) => entry.toolCalls ?? [])
+      .find((entry) => entry.id === message.toolCallId);
+    return [
+      {
+        functionResponse: {
+          name: message.name ?? call?.name ?? "tool",
+          response: { result: messageText(message) },
+        },
+      },
+    ];
   }
-  const parts: Array<Record<string, unknown>> = typeof message.content === "string"
-    ? [{ text: message.content }]
-    : message.content.map((part) => part.type === "text"
-      ? { text: part.text }
-      : { fileData: { mimeType: part.mimeType ?? "application/octet-stream", fileUri: part.url } });
+  const parts: Array<Record<string, unknown>> =
+    typeof message.content === "string"
+      ? [{ text: message.content }]
+      : message.content.map((part) =>
+          part.type === "text"
+            ? { text: part.text }
+            : {
+                fileData: {
+                  mimeType: part.mimeType ?? "application/octet-stream",
+                  fileUri: part.url,
+                },
+              },
+        );
   for (const call of message.toolCalls ?? []) {
     parts.push({ functionCall: { name: call.name, args: call.arguments } });
   }
@@ -232,12 +282,19 @@ function geminiResponse(value: unknown, model: string, provider: string): ModelR
   const candidate = Array.isArray(root.candidates) ? record(root.candidates[0]) : {};
   const content = record(candidate.content);
   const parts = Array.isArray(content.parts) ? content.parts.map(record) : [];
-  const text = parts.map((part) => typeof part.text === "string" ? part.text : "").join("");
+  const text = parts.map((part) => (typeof part.text === "string" ? part.text : "")).join("");
   const toolCalls: ProviderToolCall[] = parts.flatMap((part, index) => {
     const call = record(part.functionCall);
     if (typeof call.name !== "string") return [];
     const args = record(call.args);
-    return [{ id: `gemini_tool_${index}`, name: call.name, arguments: args, rawArguments: JSON.stringify(args) }];
+    return [
+      {
+        id: `gemini_tool_${index}`,
+        name: call.name,
+        arguments: args,
+        rawArguments: JSON.stringify(args),
+      },
+    ];
   });
   const usage = record(root.usageMetadata);
   return ModelResponseSchema.parse({
@@ -258,18 +315,23 @@ function geminiResponse(value: unknown, model: string, provider: string): ModelR
 function finishReason(value: unknown): "stop" | "length" | "content_filter" | "unknown" {
   if (value === "STOP") return "stop";
   if (value === "MAX_TOKENS") return "length";
-  if (value === "SAFETY" || value === "BLOCKLIST" || value === "PROHIBITED_CONTENT") return "content_filter";
+  if (value === "SAFETY" || value === "BLOCKLIST" || value === "PROHIBITED_CONTENT")
+    return "content_filter";
   return "unknown";
 }
 
 function headersRecord(value: HeadersInit | undefined): Record<string, string> {
   const result: Record<string, string> = {};
-  new Headers(value).forEach((entry, key) => { result[key] = entry; });
+  new Headers(value).forEach((entry, key) => {
+    result[key] = entry;
+  });
   return result;
 }
 
 function record(value: unknown): Record<string, any> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, any>)
+    : {};
 }
 
 function numberValue(value: unknown): number | undefined {

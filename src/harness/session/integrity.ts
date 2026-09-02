@@ -35,13 +35,8 @@ export function canonicalSessionJson(value: unknown): string {
 }
 
 export async function sessionSha256(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 export async function sealSessionRecord(
@@ -61,12 +56,10 @@ export async function sealSessionRecord(
   });
 }
 
-export async function verifySessionRecord(
-  recordInput: SessionRecord,
-): Promise<boolean> {
+export async function verifySessionRecord(recordInput: SessionRecord): Promise<boolean> {
   const record = SessionRecordSchema.parse(recordInput);
   const { recordHash, ...unsigned } = record;
-  return recordHash === await sessionSha256(canonicalSessionJson(unsigned));
+  return recordHash === (await sessionSha256(canonicalSessionJson(unsigned)));
 }
 
 export interface SessionChainOptions {
@@ -110,7 +103,7 @@ export async function verifySessionChain(
         record.sequence,
       );
     }
-    if (!await verifySessionRecord(record)) {
+    if (!(await verifySessionRecord(record))) {
       throw new SessionIntegrityError(
         `The record hash does not match at sequence ${record.sequence}`,
         record.sequence,

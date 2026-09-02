@@ -1,8 +1,5 @@
 import { z } from "zod";
-import {
-  nonEmptyStringSchema,
-  type ToolTask,
-} from "./types.js";
+import { nonEmptyStringSchema, type ToolTask } from "./types.js";
 
 export const idempotencyKeySchema = nonEmptyStringSchema;
 
@@ -79,7 +76,7 @@ const idempotencyKeyInputSchema = z
 
 export function createIdempotencyKey(
   input: string | IdempotencyKeyInput,
-  toolInput?: unknown
+  toolInput?: unknown,
 ): string {
   if (typeof input === "string") {
     const toolName = nonEmptyStringSchema.parse(input);
@@ -94,7 +91,7 @@ export function createIdempotencyKey(
 
 export function idempotencyKeyForTask(
   task: Pick<ToolTask, "name" | "input" | "operation" | "resourceKey">,
-  automatic = true
+  automatic = true,
 ): string | undefined {
   const explicit = (task as ToolTask).idempotencyKey;
   if (explicit) {
@@ -150,14 +147,9 @@ export class IdempotencyStore<T> {
     return this.#completed.size;
   }
 
-  async execute(
-    key: string,
-    operation: () => T | Promise<T>
-  ): Promise<IdempotencyExecution<T>> {
+  async execute(key: string, operation: () => T | Promise<T>): Promise<IdempotencyExecution<T>> {
     idempotencyKeySchema.parse(key);
-    z.custom<() => T | Promise<T>>((value) => typeof value === "function").parse(
-      operation
-    );
+    z.custom<() => T | Promise<T>>((value) => typeof value === "function").parse(operation);
 
     if (this.#completed.has(key)) {
       return { value: this.#completed.get(key) as T, reused: true };
@@ -186,4 +178,3 @@ export const IdempotencyRegistry = IdempotencyStore;
 export function createIdempotencyStore<T>(): IdempotencyStore<T> {
   return new IdempotencyStore<T>();
 }
-

@@ -1,7 +1,4 @@
-import {
-  ModelSelectionSchema,
-  type ModelSelection,
-} from "../contracts/provider.js";
+import { ModelSelectionSchema, type ModelSelection } from "../contracts/provider.js";
 import type { SubagentThread } from "../contracts/subagents.js";
 
 // Direct thread controls are the easy API. They override values nested in the
@@ -9,7 +6,7 @@ import type { SubagentThread } from "../contracts/subagents.js";
 // not select a model.
 export function resolveSubagentModelSelection(
   thread: Pick<SubagentThread, "model" | "reasoningEffort" | "verbosity">,
-  fallback?: ModelSelection
+  fallback?: ModelSelection,
 ): ModelSelection | undefined {
   const selected = thread.model ?? fallback;
   if (!selected) return undefined;

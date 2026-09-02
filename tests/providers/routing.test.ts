@@ -18,9 +18,24 @@ test("routing selects a healthy eligible model and replays its decision", async 
       capabilities: ["tools" as const],
     },
     candidates: [
-      { selection: { provider: "openai", model: "gpt-5" }, quality: 10, latencyMs: 500, capabilities: ["tools" as const] },
-      { selection: { provider: "anthropic", model: "claude-sonnet" }, quality: 9, latencyMs: 100, capabilities: ["tools" as const] },
-      { selection: { provider: "google", model: "gemini" }, quality: 20, healthy: false, capabilities: ["tools" as const] },
+      {
+        selection: { provider: "openai", model: "gpt-5" },
+        quality: 10,
+        latencyMs: 500,
+        capabilities: ["tools" as const],
+      },
+      {
+        selection: { provider: "anthropic", model: "claude-sonnet" },
+        quality: 9,
+        latencyMs: 100,
+        capabilities: ["tools" as const],
+      },
+      {
+        selection: { provider: "google", model: "gemini" },
+        quality: 20,
+        healthy: false,
+        capabilities: ["tools" as const],
+      },
     ],
   };
   const first = await router.decide(input);
@@ -44,7 +59,9 @@ test("state-changing routes do not fall back automatically", async () => {
         { selection: { provider: "openai", model: "gpt-5" }, healthy: true },
         { selection: { provider: "anthropic", model: "claude-sonnet" }, healthy: true },
       ],
-      run: async () => { throw new Error("provider down"); },
+      run: async () => {
+        throw new Error("provider down");
+      },
       isRetryable: () => true,
     }),
     /provider down/,

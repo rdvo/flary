@@ -11,22 +11,19 @@ import {
   type ToolCatalogLoadResponse,
   type ToolCatalogSearchRequestInput,
   type ToolLifecycleEvent,
-} from "../contracts/index";
-import type { ExecutionLimitsInput } from "../execution/types";
+} from "../contracts/index.js";
+import type { ExecutionLimitsInput } from "../execution/types.js";
 import {
   modeAllowsCapability,
   modeAllowsWrite,
   modeRequiresApproval,
-} from "../execution/mode-policy";
-import { executeToolTasks } from "../execution/scheduler";
-import { idempotencyKeyForTask } from "../execution/idempotency";
-import { redactErrorMessage, redactSecrets } from "../execution/redaction";
-import type {
-  ExecutionReport,
-  ToolExecutionResult,
-} from "../execution/types";
-import type { ToolExecutionJournal } from "../execution/tool-journal";
-import type { CapabilityHandle, ToolCatalog } from "./catalog";
+} from "../execution/mode-policy.js";
+import { executeToolTasks } from "../execution/scheduler.js";
+import { idempotencyKeyForTask } from "../execution/idempotency.js";
+import { redactErrorMessage, redactSecrets } from "../execution/redaction.js";
+import type { ExecutionReport, ToolExecutionResult } from "../execution/types.js";
+import type { ToolExecutionJournal } from "../execution/tool-journal.js";
+import type { CapabilityHandle, ToolCatalog } from "./catalog.js";
 
 export interface LazyToolSearchResult {
   id: string;
@@ -47,9 +44,7 @@ export interface LazyToolRuntimeOptions {
   concurrencyCaps?: Readonly<Record<string, number>>;
   toolJournal?: ToolExecutionJournal;
   runId?: string;
-  onToolEvent?: (
-    event: ToolLifecycleEvent,
-  ) => void | Promise<void>;
+  onToolEvent?: (event: ToolLifecycleEvent) => void | Promise<void>;
   /** Redacted, queryable catalog and execution audit sink. */
   onAudit?: (event: LazyToolAuditEvent) => void | Promise<void>;
   approve?: (
@@ -97,9 +92,7 @@ export class LazyToolRuntime {
     this.#options = options;
   }
 
-  async search(
-    request: ToolCatalogSearchRequestInput = {},
-  ): Promise<LazyToolSearchResult[]> {
+  async search(request: ToolCatalogSearchRequestInput = {}): Promise<LazyToolSearchResult[]> {
     const started = Date.now();
     try {
       const response = await this.#options.catalog.search(request);
@@ -111,9 +104,7 @@ export class LazyToolRuntime {
           ...(tool.description ? { description: tool.description } : {}),
           capabilities: tool.capabilities,
           operation: tool.operation,
-          requiresApproval:
-            Boolean(tool.requiresApproval) ||
-            this.requiresApproval(tool, tool.id),
+          requiresApproval: Boolean(tool.requiresApproval) || this.requiresApproval(tool, tool.id),
           score,
         }));
       await this.audit("search", started, {
@@ -174,9 +165,7 @@ export class LazyToolRuntime {
     const started = Date.now();
     try {
       const batch = LazyToolBatchSchema.parse(input);
-      const prepared = await Promise.all(
-        batch.calls.map((call) => this.prepare(call)),
-      );
+      const prepared = await Promise.all(batch.calls.map((call) => this.prepare(call)));
       const report = await this.executePrepared(prepared);
       await this.audit("batch", started, {
         inputHash: await auditHash(batch),
@@ -218,19 +207,14 @@ export class LazyToolRuntime {
       occurredAt: new Date().toISOString(),
       durationMs: Math.max(0, Date.now() - started),
       state: "failed",
-      errorCode:
-        error instanceof Error && error.name
-          ? error.name
-          : "tool_runtime_error",
+      errorCode: error instanceof Error && error.name ? error.name : "tool_runtime_error",
       ...detail,
     });
   }
 
   private async prepare(call: LazyToolCall) {
     const taskId =
-      call.callId ??
-      call.idempotencyKey ??
-      `call_${crypto.randomUUID().replaceAll("-", "")}`;
+      call.callId ?? call.idempotencyKey ?? `call_${crypto.randomUUID().replaceAll("-", "")}`;
     const loaded = await this.#options.catalog.load({ id: call.id });
     const handle = await this.#options.catalog.loadHandle({
       id: call.id,
@@ -266,10 +250,7 @@ export class LazyToolRuntime {
       });
       throw new Error(`Tool cannot write this resource in ${this.#options.mode.id} mode`);
     }
-    if (
-      loaded.tool.requiresApproval ||
-      this.requiresApproval(loaded.tool, resourceKey)
-    ) {
+    if (loaded.tool.requiresApproval || this.requiresApproval(loaded.tool, resourceKey)) {
       const prior = await this.priorTerminalCall(taskId);
       if (!prior) {
         if (!this.#options.approve) {
@@ -365,10 +346,7 @@ export class LazyToolRuntime {
         );
   }
 
-  private requiresApproval(
-    tool: ToolCatalogDefinition,
-    resource: string,
-  ): boolean {
+  private requiresApproval(tool: ToolCatalogDefinition, resource: string): boolean {
     return modeRequiresApproval(this.#options.mode, {
       capability: tool.capabilities[0] ?? tool.id,
       operation: tool.operation,
@@ -377,10 +355,7 @@ export class LazyToolRuntime {
     });
   }
 
-  private async queueWrite<T>(
-    resourceKey: string,
-    operation: () => Promise<T>,
-  ): Promise<T> {
+  private async queueWrite<T>(resourceKey: string, operation: () => Promise<T>): Promise<T> {
     const prior = this.#writeTails.get(resourceKey) ?? Promise.resolve();
     let release!: () => void;
     const tail = new Promise<void>((resolve) => {
@@ -401,14 +376,8 @@ export class LazyToolRuntime {
 
   private async priorTerminalCall(callId: string): Promise<boolean> {
     if (!this.#options.toolJournal || !this.#options.runId) return false;
-    const record = await this.#options.toolJournal.get(
-      this.#options.runId,
-      callId,
-    );
-    return (
-      record?.state === "completed" ||
-      record?.state === "outcome_unknown"
-    );
+    const record = await this.#options.toolJournal.get(this.#options.runId, callId);
+    return record?.state === "completed" || record?.state === "outcome_unknown";
   }
 
   private async emitPreflightFailure(input: {
@@ -436,10 +405,7 @@ export class LazyToolRuntime {
         status: "denied",
         error: {
           code: input.code,
-          message: redactErrorMessage(
-            input.message,
-            "The tool request was denied.",
-          ),
+          message: redactErrorMessage(input.message, "The tool request was denied."),
           retryable: false,
         },
         ...(metadata ? { metadata } : {}),
@@ -467,9 +433,7 @@ export class LazyToolRuntime {
 async function auditHash(value: unknown): Promise<string> {
   const bytes = new TextEncoder().encode(stableAuditJson(value));
   const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return [...new Uint8Array(digest)]
-    .map((item) => item.toString(16).padStart(2, "0"))
-    .join("");
+  return [...new Uint8Array(digest)].map((item) => item.toString(16).padStart(2, "0")).join("");
 }
 
 function stableAuditJson(value: unknown): string {

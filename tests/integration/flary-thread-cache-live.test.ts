@@ -12,13 +12,7 @@ const agentId = process.env.FLARY_E2E_AGENT_ID;
 const threadId = process.env.FLARY_E2E_THREAD_ID;
 const modelJson = process.env.FLARY_E2E_MODEL_JSON;
 const enabled = Boolean(
-  baseUrl &&
-    token &&
-    appId &&
-    organizationId &&
-    agentId &&
-    threadId &&
-    modelJson,
+  baseUrl && token && appId && organizationId && agentId && threadId && modelJson,
 );
 
 test(
@@ -55,23 +49,19 @@ test(
       cacheRetention: "short",
       idempotencyKey: `live-cache-second-${crypto.randomUUID()}`,
     });
-    const snapshot = await waitForSettlement(
-      client,
-      ref,
-      second.submissionId,
-    );
+    const snapshot = await waitForSettlement(client, ref, second.submissionId);
     // Flue correlates a tracked submission with its canonical user message.
     // Assistant messages intentionally do not repeat submissionId, so find
     // the assistant response that follows the second user message.
     const secondUserIndex = snapshot.messages.findIndex(
-      (message) =>
-        message.role === "user" && message.submissionId === second.submissionId,
+      (message) => message.role === "user" && message.submissionId === second.submissionId,
     );
-    const response = secondUserIndex >= 0
-      ? snapshot.messages
-        .slice(secondUserIndex + 1)
-        .find((message) => message.role === "assistant")
-      : undefined;
+    const response =
+      secondUserIndex >= 0
+        ? snapshot.messages
+            .slice(secondUserIndex + 1)
+            .find((message) => message.role === "assistant")
+        : undefined;
     assert.ok(response, "The second Flary submission did not produce a response");
     assert.ok(
       (response.metadata?.usage?.cacheRead ?? 0) > 0,
@@ -105,14 +95,11 @@ async function waitForSettlement(
       // Durable settlement and the materialized assistant message can become
       // visible on adjacent stream records. Keep polling until both exist.
       const userIndex = snapshot.messages.findIndex(
-        (message) =>
-          message.role === "user" && message.submissionId === submissionId,
+        (message) => message.role === "user" && message.submissionId === submissionId,
       );
       if (
         userIndex >= 0 &&
-        snapshot.messages.slice(userIndex + 1).some(
-          (message) => message.role === "assistant",
-        )
+        snapshot.messages.slice(userIndex + 1).some((message) => message.role === "assistant")
       ) {
         return snapshot;
       }

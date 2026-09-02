@@ -32,9 +32,7 @@ const optionalTools = {
         }),
       }
     : {}),
-  ...(generated.features.browser
-    ? { browser: app.browser({ profile: "thread" }) }
-    : {}),
+  ...(generated.features.browser ? { browser: app.browser({ profile: "thread" }) } : {}),
   ...(generated.features.sandbox
     ? { shell: app.sandbox({ network: "restricted", sleepAfter: "10m" }) }
     : {}),

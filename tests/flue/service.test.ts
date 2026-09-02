@@ -125,11 +125,7 @@ test("Flue run service hides runs across tenant boundaries", async () => {
   });
 
   await assert.rejects(
-    () =>
-      service.get(
-        { ...trusted, tenantId: "tenant_2" },
-        "run_private",
-      ),
+    () => service.get({ ...trusted, tenantId: "tenant_2" }, "run_private"),
     /not found/i,
   );
 });

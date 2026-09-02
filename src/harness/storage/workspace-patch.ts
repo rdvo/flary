@@ -15,9 +15,7 @@ export function applyWorkspaceUnifiedPatch(
     lineIndex += 1;
   }
   while (lineIndex < lines.length) {
-    const header = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(
-      lines[lineIndex]!,
-    );
+    const header = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(lines[lineIndex]!);
     if (!header) {
       if (lines[lineIndex] === "") break;
       throw new Error(`Invalid unified patch hunk for ${path}`);

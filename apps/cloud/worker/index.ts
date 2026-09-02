@@ -49,11 +49,7 @@ import {
 } from "./db/schema";
 import type { Env } from "./env";
 import { createCloudExecutionRouter } from "./execution";
-import {
-  connectionSecretAssociatedData,
-  encryptToken,
-  hashOAuthState,
-} from "./security/tokens";
+import { connectionSecretAssociatedData, encryptToken, hashOAuthState } from "./security/tokens";
 import {
   buildCloudflareAuthorizationUrl,
   cloudflareOAuthRedirectUri,
@@ -72,9 +68,7 @@ import {
   selectPromptVariantWithTelemetry,
 } from "flary";
 import { parseFlueModelSpecifier } from "flary/providers";
-import {
-  prepareAdmittedFlueModel,
-} from "./provider-credentials";
+import { prepareAdmittedFlueModel } from "./provider-credentials";
 import { disconnectSubscriptionCredential } from "./provider-subscriptions";
 import {
   cancelCloudProviderOAuth,
@@ -112,9 +106,7 @@ type AppContext = {
 
 const app = new Hono<AppContext>();
 
-const organizationInputSchema = z
-  .object({ name: z.string().trim().min(2).max(80) })
-  .strict();
+const organizationInputSchema = z.object({ name: z.string().trim().min(2).max(80) }).strict();
 const appInputSchema = z
   .object({
     name: z.string().trim().min(2).max(80),
@@ -146,17 +138,14 @@ const promptVariantInputSchema = z
             allocationBasisPoints: z.number().int().min(0).max(10_000),
             enabled: z.boolean().default(true),
           })
-          .strict()
+          .strict(),
       )
       .min(1)
       .max(128),
   })
   .strict()
   .superRefine((value, context) => {
-    const total = value.variants.reduce(
-      (sum, variant) => sum + variant.allocationBasisPoints,
-      0
-    );
+    const total = value.variants.reduce((sum, variant) => sum + variant.allocationBasisPoints, 0);
     if (total !== 10_000) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -176,10 +165,7 @@ const promptVariantInputSchema = z
 const promptVariantSelectionInputSchema = z
   .object({
     rolloutId: z.string().trim().min(1).max(160),
-    assignment: z.union([
-      z.string().trim().min(1).max(512),
-      PromptAssignmentSchema,
-    ]),
+    assignment: z.union([z.string().trim().min(1).max(512), PromptAssignmentSchema]),
     override: PromptOverrideSchema.optional(),
     traceContext: TraceContextSchema.optional(),
     runId: z.string().trim().min(1).max(200).optional(),
@@ -207,13 +193,8 @@ function requestOrigin(request: Request): string {
 }
 
 async function sha256Hex(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value)
-  );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function requireUser(context: Context<AppContext>) {
@@ -227,21 +208,13 @@ async function requireUser(context: Context<AppContext>) {
   return { auth, session };
 }
 
-async function requireOrganizationMember(
-  context: Context<AppContext>,
-  organizationId: string
-) {
+async function requireOrganizationMember(context: Context<AppContext>, organizationId: string) {
   const { session } = await requireUser(context);
   const db = createDb(context.env.DB);
   const rows = await db
     .select({ role: member.role })
     .from(member)
-    .where(
-      and(
-        eq(member.organizationId, organizationId),
-        eq(member.userId, session.user.id)
-      )
-    )
+    .where(and(eq(member.organizationId, organizationId), eq(member.userId, session.user.id)))
     .limit(1);
   if (!rows[0]) {
     throw new HTTPException(403, {
@@ -261,13 +234,9 @@ async function readJson<T>(context: Context<AppContext>): Promise<T> {
   }
 }
 
-function cloudflareRedirect(
-  context: Context<AppContext>,
-  params: Record<string, string>
-) {
+function cloudflareRedirect(context: Context<AppContext>, params: Record<string, string>) {
   const target = new URL("/", context.env.APP_URL);
-  for (const [key, value] of Object.entries(params))
-    target.searchParams.set(key, value);
+  for (const [key, value] of Object.entries(params)) target.searchParams.set(key, value);
   return context.redirect(target.toString(), 303);
 }
 
@@ -284,7 +253,10 @@ function parseCloudflareAccountOptions(value: string): Array<{ id: string; name:
 
 function cloudflareErrorReason(cause: unknown): string {
   if (cause instanceof Error && cause.name === "CloudflareOAuthError") {
-    return cause.message.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 80);
+    return cause.message
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .slice(0, 80);
   }
   return "connection_failed";
 }
@@ -302,13 +274,11 @@ app.get("/health", (context) =>
     ok: true,
     service: "flary-cloud",
     environment: context.env.APP_ENV,
-  })
+  }),
 );
 
 app.all("/api/auth/*", (context) =>
-  createAuth(context.env, requestOrigin(context.req.raw)).handler(
-    context.req.raw
-  )
+  createAuth(context.env, requestOrigin(context.req.raw)).handler(context.req.raw),
 );
 
 app.get("/api/me", async (context) => {
@@ -358,10 +328,7 @@ app.post("/api/organizations", async (context) => {
     userId: session.user.id,
     role: "owner",
   });
-  return context.json(
-    { organization: { id, name: input.name, slug, role: "owner" } },
-    201
-  );
+  return context.json({ organization: { id, name: input.name, slug, role: "owner" } }, 201);
 });
 
 app.get("/api/organizations/:organizationId/apps", async (context) => {
@@ -399,10 +366,7 @@ app.post("/api/organizations/:organizationId/apps", async (context) => {
     slug,
     createdBy: session.user.id,
   });
-  return context.json(
-    { app: { id, organizationId, name: input.name, slug } },
-    201
-  );
+  return context.json({ app: { id, organizationId, name: input.name, slug } }, 201);
 });
 
 async function requireAppMember(context: Context<AppContext>, appId: string) {
@@ -487,11 +451,7 @@ function threadStub(env: Env, binding: ReturnType<typeof threadBindingFromRow>) 
   };
 }
 
-async function loadThreadRow(
-  context: Context<AppContext>,
-  appId: string,
-  threadId: string,
-) {
+async function loadThreadRow(context: Context<AppContext>, appId: string, threadId: string) {
   const { session, organizationId } = await requireAppMember(context, appId);
   const rows = await createDb(context.env.DB)
     .select()
@@ -526,16 +486,12 @@ async function insertThread(
     branch: binding.workspace.branch,
     persona: binding.persona,
     defaultMode: binding.defaultMode,
-    defaultModelJson: binding.defaultModel
-      ? JSON.stringify(binding.defaultModel)
-      : null,
+    defaultModelJson: binding.defaultModel ? JSON.stringify(binding.defaultModel) : null,
     defaultThinkingLevel: binding.defaultThinkingLevel,
     connectionIdsJson: JSON.stringify(binding.connectionIds),
     status: binding.status,
     createdBy: binding.createdBy.id,
-    parentThreadJson: binding.parentThread
-      ? JSON.stringify(binding.parentThread)
-      : null,
+    parentThreadJson: binding.parentThread ? JSON.stringify(binding.parentThread) : null,
     metadataJson: binding.metadata ? JSON.stringify(binding.metadata) : null,
     createdAt: new Date(binding.createdAt),
     updatedAt: new Date(binding.updatedAt),
@@ -591,12 +547,7 @@ app.get("/api/apps/:appId/threads", async (context) => {
   const rows = await createDb(context.env.DB)
     .select()
     .from(flaryThread)
-    .where(
-      and(
-        eq(flaryThread.organizationId, organizationId),
-        eq(flaryThread.appId, appId),
-      ),
-    )
+    .where(and(eq(flaryThread.organizationId, organizationId), eq(flaryThread.appId, appId)))
     .orderBy(desc(flaryThread.updatedAt));
   return context.json({ threads: rows.map(threadBindingFromRow) });
 });
@@ -605,10 +556,7 @@ app.post("/api/apps/:appId/threads", async (context) => {
   const appId = context.req.param("appId");
   const { session, organizationId } = await requireAppMember(context, appId);
   const input = ThreadCreateRequestSchema.parse(await readJson<unknown>(context));
-  if (
-    input.workspace.organizationId !== organizationId ||
-    input.workspace.appId !== appId
-  ) {
+  if (input.workspace.organizationId !== organizationId || input.workspace.appId !== appId) {
     throw new HTTPException(403, {
       message: "The workspace does not belong to this application",
     });
@@ -633,8 +581,9 @@ app.post("/api/apps/:appId/threads", async (context) => {
     agentId: input.agentId,
     ...(input.persona ? { persona: input.persona } : {}),
     defaultMode: input.mode,
-    ...(input.model ? { defaultModel: input.model } :
-      context.env.FLARY_DEFAULT_MODEL && parseFlueModelSpecifier(context.env.FLARY_DEFAULT_MODEL)
+    ...(input.model
+      ? { defaultModel: input.model }
+      : context.env.FLARY_DEFAULT_MODEL && parseFlueModelSpecifier(context.env.FLARY_DEFAULT_MODEL)
         ? { defaultModel: parseFlueModelSpecifier(context.env.FLARY_DEFAULT_MODEL) }
         : {}),
     defaultThinkingLevel: input.thinkingLevel,
@@ -741,7 +690,11 @@ app.post("/api/apps/:appId/threads/:threadId/connections", async (context) => {
     .update(flaryThread)
     .set({ connectionIdsJson: JSON.stringify(input.connectionIds), updatedAt: now })
     .where(eq(flaryThread.id, loaded.row.id));
-  const binding = { ...loaded.binding, connectionIds: input.connectionIds, updatedAt: now.toISOString() };
+  const binding = {
+    ...loaded.binding,
+    connectionIds: input.connectionIds,
+    updatedAt: now.toISOString(),
+  };
   if (context.env.FLUE_FLARY_THREAD_AGENT) {
     await threadStub(context.env, loaded.binding).initializeBinding(binding);
   }
@@ -771,7 +724,9 @@ app.post("/api/apps/:appId/threads/:threadId/approvals/:approvalId", async (cont
     requestId: context.req.param("approvalId"),
   });
   if (!context.env.FLUE_FLARY_THREAD_AGENT) {
-    throw new HTTPException(503, { message: "The Flue thread Durable Object binding is not configured" });
+    throw new HTTPException(503, {
+      message: "The Flue thread Durable Object binding is not configured",
+    });
   }
   await threadStub(context.env, loaded.binding).decideApproval(input);
   return context.json({ ok: true });
@@ -791,75 +746,65 @@ app.get("/api/apps/:appId/threads/:threadId/user-input", async (context) => {
   });
 });
 
-app.post(
-  "/api/apps/:appId/threads/:threadId/user-input/:requestId",
-  async (context) => {
-    const loaded = await loadThreadRow(
-      context,
-      context.req.param("appId"),
-      context.req.param("threadId"),
-    );
-    if (!context.env.FLUE_FLARY_THREAD_AGENT) {
-      throw new HTTPException(503, {
-        message: "The Flue thread Durable Object binding is not configured",
-      });
-    }
-    const input = UserInputAnswerRequestSchema.parse(
-      await readJson<unknown>(context),
-    );
-    const response = UserInputResponseSchema.parse({
-      requestId: context.req.param("requestId"),
-      answers: input.answers,
-      ...(input.response ? { response: input.response } : {}),
-      canceled: input.canceled,
-      answeredBy: {
-        id: loaded.session.user.id,
-        kind: "user",
-        version: "1",
-      },
-      answeredAt: new Date().toISOString(),
-      ...(input.metadata ? { metadata: input.metadata } : {}),
+app.post("/api/apps/:appId/threads/:threadId/user-input/:requestId", async (context) => {
+  const loaded = await loadThreadRow(
+    context,
+    context.req.param("appId"),
+    context.req.param("threadId"),
+  );
+  if (!context.env.FLUE_FLARY_THREAD_AGENT) {
+    throw new HTTPException(503, {
+      message: "The Flue thread Durable Object binding is not configured",
     });
-    const resolved = await threadStub(
-      context.env,
-      loaded.binding,
-    ).respondToUserInput(response);
-    if (resolved.live) {
-      return context.json({ live: true });
-    }
+  }
+  const input = UserInputAnswerRequestSchema.parse(await readJson<unknown>(context));
+  const response = UserInputResponseSchema.parse({
+    requestId: context.req.param("requestId"),
+    answers: input.answers,
+    ...(input.response ? { response: input.response } : {}),
+    canceled: input.canceled,
+    answeredBy: {
+      id: loaded.session.user.id,
+      kind: "user",
+      version: "1",
+    },
+    answeredAt: new Date().toISOString(),
+    ...(input.metadata ? { metadata: input.metadata } : {}),
+  });
+  const resolved = await threadStub(context.env, loaded.binding).respondToUserInput(response);
+  if (resolved.live) {
+    return context.json({ live: true });
+  }
 
-    const message = frameRestoredUserInputResponse(
-      UserInputRequestSchema.parse(resolved.record.request),
-      response,
-    );
-    const requestUrl = new URL(context.req.raw.url);
-    requestUrl.pathname = `/api/apps/${encodeURIComponent(
-      loaded.binding.thread.appId,
-    )}/threads/${encodeURIComponent(
-      loaded.binding.thread.threadId,
-    )}/messages`;
-    const headers = new Headers(context.req.raw.headers);
-    headers.set("content-type", "application/json");
-    headers.delete("content-length");
-    const admitted = await app.fetch(
-      new Request(requestUrl, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          message,
-          idempotencyKey: `input_${response.requestId}`,
-        }),
+  const message = frameRestoredUserInputResponse(
+    UserInputRequestSchema.parse(resolved.record.request),
+    response,
+  );
+  const requestUrl = new URL(context.req.raw.url);
+  requestUrl.pathname = `/api/apps/${encodeURIComponent(
+    loaded.binding.thread.appId,
+  )}/threads/${encodeURIComponent(loaded.binding.thread.threadId)}/messages`;
+  const headers = new Headers(context.req.raw.headers);
+  headers.set("content-type", "application/json");
+  headers.delete("content-length");
+  const admitted = await app.fetch(
+    new Request(requestUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        message,
+        idempotencyKey: `input_${response.requestId}`,
       }),
-      context.env,
-      context.executionCtx,
-    );
-    if (!admitted.ok) return admitted;
-    return context.json({
-      live: false,
-      admission: await admitted.json(),
-    });
-  },
-);
+    }),
+    context.env,
+    context.executionCtx,
+  );
+  if (!admitted.ok) return admitted;
+  return context.json({
+    live: false,
+    admission: await admitted.json(),
+  });
+});
 
 app.get("/api/apps/:appId/threads/:threadId/cursor", async (context) => {
   const loaded = await loadThreadRow(
@@ -1010,18 +955,16 @@ app.post("/api/apps/:appId/threads/:threadId/messages", async (context) => {
       message: "This submission is still being admitted",
     });
   }
-  const selectedModelInput =
-    input.model ??
+  const selectedModelInput = input.model ??
     loaded.binding.defaultModel ??
-    ((context.env.FLARY_DEFAULT_MODEL
+    (context.env.FLARY_DEFAULT_MODEL
       ? parseFlueModelSpecifier(context.env.FLARY_DEFAULT_MODEL)
       : undefined) ?? {
       provider: "cloudflare",
       model: "@cf/meta/llama-3.1-8b-instruct",
-    });
+    };
   const selectedModel = normalizeModelInput(selectedModelInput);
-  const selectedThinkingLevel =
-    input.thinkingLevel ?? loaded.binding.defaultThinkingLevel;
+  const selectedThinkingLevel = input.thinkingLevel ?? loaded.binding.defaultThinkingLevel;
   const provider = ProviderKindSchema.safeParse(selectedModel.provider);
   if (!provider.success) {
     return context.json(
@@ -1161,10 +1104,7 @@ async function loadAppConnection(
   if (!connection) {
     throw new HTTPException(404, { message: "Connection not found" });
   }
-  if (
-    connection.billingMode === "subscription" &&
-    connection.ownerUserId !== session.user.id
-  ) {
+  if (connection.billingMode === "subscription" && connection.ownerUserId !== session.user.id) {
     throw new HTTPException(404, { message: "Connection not found" });
   }
   return { db, session, organizationId, connection };
@@ -1172,10 +1112,7 @@ async function loadAppConnection(
 
 type FlaryConnectionRow = typeof flaryConnection.$inferSelect;
 
-function publicConnection(
-  row: FlaryConnectionRow,
-  ownerName?: string | null,
-) {
+function publicConnection(row: FlaryConnectionRow, ownerName?: string | null) {
   return ConnectionSchema.parse({
     id: row.id,
     appId: row.appId,
@@ -1230,9 +1167,7 @@ app.get("/api/apps/:appId/connections", async (context) => {
     connections: connections.map((connection) =>
       publicConnection(
         connection,
-        connection.ownerUserId === session.user.id
-          ? session.user.name
-          : null,
+        connection.ownerUserId === session.user.id ? session.user.name : null,
       ),
     ),
   });
@@ -1241,19 +1176,12 @@ app.get("/api/apps/:appId/connections", async (context) => {
 app.post("/api/apps/:appId/connections", async (context) => {
   const appId = context.req.param("appId");
   const { session, organizationId } = await requireAppMember(context, appId);
-  const input = ConnectionCreateInputSchema.parse(
-    await readJson<unknown>(context),
-  );
+  const input = ConnectionCreateInputSchema.parse(await readJson<unknown>(context));
   const db = createDb(context.env.DB);
   const existing = await db
     .select({ id: flaryConnection.id })
     .from(flaryConnection)
-    .where(
-      and(
-        eq(flaryConnection.appId, appId),
-        eq(flaryConnection.slug, input.slug),
-      ),
-    )
+    .where(and(eq(flaryConnection.appId, appId), eq(flaryConnection.slug, input.slug)))
     .limit(1);
   if (existing[0]) {
     throw new HTTPException(409, {
@@ -1274,16 +1202,13 @@ app.post("/api/apps/:appId/connections", async (context) => {
     baseUrl: input.baseUrl,
     docsUrl: input.docsUrl,
     authType: input.authType,
-    billingMode:
-      input.billingMode ??
-      (input.authType === "oauth2" ? "subscription" : "byok"),
+    billingMode: input.billingMode ?? (input.authType === "oauth2" ? "subscription" : "byok"),
     authHeader: input.authHeader,
     description: input.description,
     iconUrl: input.iconUrl,
     status: "needs_auth",
     ownerUserId:
-      (input.billingMode ??
-        (input.authType === "oauth2" ? "subscription" : "byok")) ===
+      (input.billingMode ?? (input.authType === "oauth2" ? "subscription" : "byok")) ===
       "subscription"
         ? session.user.id
         : null,
@@ -1294,102 +1219,88 @@ app.post("/api/apps/:appId/connections", async (context) => {
     {
       connection: publicConnection(
         connection.connection,
-        connection.connection.ownerUserId === session.user.id
-          ? session.user.name
-          : null,
+        connection.connection.ownerUserId === session.user.id ? session.user.name : null,
       ),
     },
     201,
   );
 });
 
-app.get(
-  "/api/apps/:appId/connections/:connectionId",
-  async (context) => {
-    const appId = context.req.param("appId");
-    const connectionId = context.req.param("connectionId");
-    const { db, session, connection } = await loadAppConnection(
-      context,
-      appId,
-      connectionId,
-    );
-    const secrets = await db
-      .select({
-        id: secretEnvelope.id,
-        connectionId: secretEnvelope.connectionId,
-        name: secretEnvelope.name,
-        scope: secretEnvelope.scope,
-        version: secretEnvelope.version,
-        keyId: secretEnvelope.keyId,
-        description: secretEnvelope.description,
-        expiresAt: secretEnvelope.expiresAt,
-        createdAt: secretEnvelope.createdAt,
-        updatedAt: secretEnvelope.updatedAt,
-      })
-      .from(secretEnvelope)
-      .where(eq(secretEnvelope.connectionId, connectionId))
-      .orderBy(asc(secretEnvelope.name));
-    return context.json({
-      connection: publicConnection(
-        connection,
-        connection.ownerUserId === session.user.id
-          ? session.user.name
-          : null,
-      ),
-      secrets,
+app.get("/api/apps/:appId/connections/:connectionId", async (context) => {
+  const appId = context.req.param("appId");
+  const connectionId = context.req.param("connectionId");
+  const { db, session, connection } = await loadAppConnection(context, appId, connectionId);
+  const secrets = await db
+    .select({
+      id: secretEnvelope.id,
+      connectionId: secretEnvelope.connectionId,
+      name: secretEnvelope.name,
+      scope: secretEnvelope.scope,
+      version: secretEnvelope.version,
+      keyId: secretEnvelope.keyId,
+      description: secretEnvelope.description,
+      expiresAt: secretEnvelope.expiresAt,
+      createdAt: secretEnvelope.createdAt,
+      updatedAt: secretEnvelope.updatedAt,
+    })
+    .from(secretEnvelope)
+    .where(eq(secretEnvelope.connectionId, connectionId))
+    .orderBy(asc(secretEnvelope.name));
+  return context.json({
+    connection: publicConnection(
+      connection,
+      connection.ownerUserId === session.user.id ? session.user.name : null,
+    ),
+    secrets,
+  });
+});
+
+app.post("/api/apps/:appId/connections/:connectionId/secrets", async (context) => {
+  const appId = context.req.param("appId");
+  const connectionId = context.req.param("connectionId");
+  const { db, organizationId, connection } = await loadAppConnection(context, appId, connectionId);
+  const input = ConnectionSecretInputSchema.parse(await readJson<unknown>(context));
+  const keyConfig = context.env.FLARY_TOKEN_ENCRYPTION_KEY_B64;
+  if (!keyConfig) {
+    throw new HTTPException(503, {
+      message: "Secret storage is not configured",
     });
-  },
-);
+  }
 
-app.post(
-  "/api/apps/:appId/connections/:connectionId/secrets",
-  async (context) => {
-    const appId = context.req.param("appId");
-    const connectionId = context.req.param("connectionId");
-    const { db, organizationId, connection } = await loadAppConnection(
-      context,
-      appId,
+  const associatedData = connectionSecretAssociatedData(organizationId, connectionId, input.name);
+  const encrypted = await encryptToken(input.value, keyConfig, associatedData);
+  const existing = await db
+    .select({ id: secretEnvelope.id, version: secretEnvelope.version })
+    .from(secretEnvelope)
+    .where(and(eq(secretEnvelope.connectionId, connectionId), eq(secretEnvelope.name, input.name)))
+    .limit(1);
+  const current = existing[0];
+  const secretId = current?.id ?? crypto.randomUUID();
+  const version = (current?.version ?? 0) + 1;
+  const now = new Date();
+  const expiresAt = input.expiresAt ? new Date(input.expiresAt) : null;
+
+  await db
+    .insert(secretEnvelope)
+    .values({
+      id: secretId,
       connectionId,
-    );
-    const input = ConnectionSecretInputSchema.parse(
-      await readJson<unknown>(context),
-    );
-    const keyConfig = context.env.FLARY_TOKEN_ENCRYPTION_KEY_B64;
-    if (!keyConfig) {
-      throw new HTTPException(503, {
-        message: "Secret storage is not configured",
-      });
-    }
-
-    const associatedData = connectionSecretAssociatedData(
       organizationId,
-      connectionId,
-      input.name,
-    );
-    const encrypted = await encryptToken(input.value, keyConfig, associatedData);
-    const existing = await db
-      .select({ id: secretEnvelope.id, version: secretEnvelope.version })
-      .from(secretEnvelope)
-      .where(
-        and(
-          eq(secretEnvelope.connectionId, connectionId),
-          eq(secretEnvelope.name, input.name),
-        ),
-      )
-      .limit(1);
-    const current = existing[0];
-    const secretId = current?.id ?? crypto.randomUUID();
-    const version = (current?.version ?? 0) + 1;
-    const now = new Date();
-    const expiresAt = input.expiresAt ? new Date(input.expiresAt) : null;
-
-    await db
-      .insert(secretEnvelope)
-      .values({
-        id: secretId,
-        connectionId,
+      name: input.name,
+      scope: input.scope,
+      version,
+      keyId: "flary-token-encryption-key",
+      ciphertext: encrypted.ciphertext,
+      iv: encrypted.iv,
+      description: input.description ?? null,
+      expiresAt,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [secretEnvelope.connectionId, secretEnvelope.name],
+      set: {
         organizationId,
-        name: input.name,
         scope: input.scope,
         version,
         keyId: "flary-token-encryption-key",
@@ -1397,139 +1308,91 @@ app.post(
         iv: encrypted.iv,
         description: input.description ?? null,
         expiresAt,
-        createdAt: now,
         updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: [secretEnvelope.connectionId, secretEnvelope.name],
-        set: {
-          organizationId,
-          scope: input.scope,
-          version,
-          keyId: "flary-token-encryption-key",
-          ciphertext: encrypted.ciphertext,
-          iv: encrypted.iv,
-          description: input.description ?? null,
-          expiresAt,
-          updatedAt: now,
-        },
-      });
-    await db
-      .update(flaryConnection)
-      .set({ status: "configured", updatedAt: now })
-      .where(eq(flaryConnection.id, connection.id));
-
-    const saved = await db
-      .select({
-        id: secretEnvelope.id,
-        connectionId: secretEnvelope.connectionId,
-        name: secretEnvelope.name,
-        scope: secretEnvelope.scope,
-        version: secretEnvelope.version,
-        keyId: secretEnvelope.keyId,
-        description: secretEnvelope.description,
-        expiresAt: secretEnvelope.expiresAt,
-        createdAt: secretEnvelope.createdAt,
-        updatedAt: secretEnvelope.updatedAt,
-      })
-      .from(secretEnvelope)
-      .where(eq(secretEnvelope.id, secretId))
-      .limit(1);
-    return context.json({ ok: true, secret: saved[0] });
-  },
-);
-
-app.delete(
-  "/api/apps/:appId/connections/:connectionId/secrets/:secretName",
-  async (context) => {
-    const appId = context.req.param("appId");
-    const connectionId = context.req.param("connectionId");
-    const secretName = z.string().min(1).max(200).parse(
-      context.req.param("secretName"),
-    );
-    const { db, connection } = await loadAppConnection(
-      context,
-      appId,
-      connectionId,
-    );
-    await db
-      .delete(secretEnvelope)
-      .where(
-        and(
-          eq(secretEnvelope.connectionId, connectionId),
-          eq(secretEnvelope.name, secretName),
-        ),
-      );
-    const remaining = await db
-      .select({ id: secretEnvelope.id })
-      .from(secretEnvelope)
-      .where(eq(secretEnvelope.connectionId, connectionId))
-      .limit(1);
-    await db
-      .update(flaryConnection)
-      .set({
-        status:
-          connection.authType === "none"
-            ? "configured"
-            : remaining[0]
-              ? "configured"
-              : "needs_auth",
-        updatedAt: new Date(),
-      })
-      .where(eq(flaryConnection.id, connectionId));
-    return context.json({ ok: true });
-  },
-);
-
-app.delete(
-  "/api/apps/:appId/connections/:connectionId",
-  async (context) => {
-    const appId = context.req.param("appId");
-    const connectionId = context.req.param("connectionId");
-    const { db, connection } = await loadAppConnection(
-      context,
-      appId,
-      connectionId,
-    );
-    await db.delete(flaryConnection).where(eq(flaryConnection.id, connection.id));
-    return context.json({ ok: true });
-  },
-);
-
-app.post(
-  "/api/apps/:appId/connections/:connectionId/disconnect",
-  async (context) => {
-    const appId = context.req.param("appId");
-    const connectionId = context.req.param("connectionId");
-    const { session, organizationId, connection } = await loadAppConnection(
-      context,
-      appId,
-      connectionId,
-    );
-    if (
-      connection.billingMode !== "subscription" ||
-      connection.authType !== "oauth2"
-    ) {
-      throw new HTTPException(409, {
-        message: "Only subscription OAuth connections can be disconnected",
-      });
-    }
-    await disconnectSubscriptionCredential(context.env, {
-      organizationId,
-      userId: session.user.id,
-      connectionId,
-      provider: SubscriptionProviderSchema.parse(connection.provider),
+      },
     });
-    return context.json({ ok: true });
-  },
-);
+  await db
+    .update(flaryConnection)
+    .set({ status: "configured", updatedAt: now })
+    .where(eq(flaryConnection.id, connection.id));
+
+  const saved = await db
+    .select({
+      id: secretEnvelope.id,
+      connectionId: secretEnvelope.connectionId,
+      name: secretEnvelope.name,
+      scope: secretEnvelope.scope,
+      version: secretEnvelope.version,
+      keyId: secretEnvelope.keyId,
+      description: secretEnvelope.description,
+      expiresAt: secretEnvelope.expiresAt,
+      createdAt: secretEnvelope.createdAt,
+      updatedAt: secretEnvelope.updatedAt,
+    })
+    .from(secretEnvelope)
+    .where(eq(secretEnvelope.id, secretId))
+    .limit(1);
+  return context.json({ ok: true, secret: saved[0] });
+});
+
+app.delete("/api/apps/:appId/connections/:connectionId/secrets/:secretName", async (context) => {
+  const appId = context.req.param("appId");
+  const connectionId = context.req.param("connectionId");
+  const secretName = z.string().min(1).max(200).parse(context.req.param("secretName"));
+  const { db, connection } = await loadAppConnection(context, appId, connectionId);
+  await db
+    .delete(secretEnvelope)
+    .where(and(eq(secretEnvelope.connectionId, connectionId), eq(secretEnvelope.name, secretName)));
+  const remaining = await db
+    .select({ id: secretEnvelope.id })
+    .from(secretEnvelope)
+    .where(eq(secretEnvelope.connectionId, connectionId))
+    .limit(1);
+  await db
+    .update(flaryConnection)
+    .set({
+      status:
+        connection.authType === "none" ? "configured" : remaining[0] ? "configured" : "needs_auth",
+      updatedAt: new Date(),
+    })
+    .where(eq(flaryConnection.id, connectionId));
+  return context.json({ ok: true });
+});
+
+app.delete("/api/apps/:appId/connections/:connectionId", async (context) => {
+  const appId = context.req.param("appId");
+  const connectionId = context.req.param("connectionId");
+  const { db, connection } = await loadAppConnection(context, appId, connectionId);
+  await db.delete(flaryConnection).where(eq(flaryConnection.id, connection.id));
+  return context.json({ ok: true });
+});
+
+app.post("/api/apps/:appId/connections/:connectionId/disconnect", async (context) => {
+  const appId = context.req.param("appId");
+  const connectionId = context.req.param("connectionId");
+  const { session, organizationId, connection } = await loadAppConnection(
+    context,
+    appId,
+    connectionId,
+  );
+  if (connection.billingMode !== "subscription" || connection.authType !== "oauth2") {
+    throw new HTTPException(409, {
+      message: "Only subscription OAuth connections can be disconnected",
+    });
+  }
+  await disconnectSubscriptionCredential(context.env, {
+    organizationId,
+    userId: session.user.id,
+    connectionId,
+    provider: SubscriptionProviderSchema.parse(connection.provider),
+  });
+  return context.json({ ok: true });
+});
 
 app.post("/api/apps/:appId/provider-oauth/start", async (context) => {
   const appId = context.req.param("appId");
   const { session, organizationId } = await requireAppMember(context, appId);
-  const input = ProviderOAuthStartInputSchema.parse(
-    await readJson<unknown>(context),
-  );
+  const input = ProviderOAuthStartInputSchema.parse(await readJson<unknown>(context));
   const oauth = await startCloudProviderOAuth(context.env, {
     appId,
     organizationId,
@@ -1541,55 +1404,44 @@ app.post("/api/apps/:appId/provider-oauth/start", async (context) => {
   return context.json({ oauth }, 201);
 });
 
-app.get(
-  "/api/apps/:appId/provider-oauth/:sessionId",
-  async (context) => {
-    const appId = context.req.param("appId");
-    const { session, organizationId } = await requireAppMember(context, appId);
-    const oauth = await getCloudProviderOAuth(context.env, {
-      appId,
-      organizationId,
-      userId: session.user.id,
-      sessionId: context.req.param("sessionId"),
-      poll: context.req.query("poll") === "true",
-    });
-    return context.json({ oauth });
-  },
-);
+app.get("/api/apps/:appId/provider-oauth/:sessionId", async (context) => {
+  const appId = context.req.param("appId");
+  const { session, organizationId } = await requireAppMember(context, appId);
+  const oauth = await getCloudProviderOAuth(context.env, {
+    appId,
+    organizationId,
+    userId: session.user.id,
+    sessionId: context.req.param("sessionId"),
+    poll: context.req.query("poll") === "true",
+  });
+  return context.json({ oauth });
+});
 
-app.post(
-  "/api/apps/:appId/provider-oauth/:sessionId/complete",
-  async (context) => {
-    const appId = context.req.param("appId");
-    const { session, organizationId } = await requireAppMember(context, appId);
-    const input = ProviderOAuthCompleteInputSchema.parse(
-      await readJson<unknown>(context),
-    );
-    const oauth = await completeCloudProviderOAuth(context.env, {
-      appId,
-      organizationId,
-      userId: session.user.id,
-      sessionId: context.req.param("sessionId"),
-      authorizationResult: input.authorizationResult,
-    });
-    return context.json({ oauth });
-  },
-);
+app.post("/api/apps/:appId/provider-oauth/:sessionId/complete", async (context) => {
+  const appId = context.req.param("appId");
+  const { session, organizationId } = await requireAppMember(context, appId);
+  const input = ProviderOAuthCompleteInputSchema.parse(await readJson<unknown>(context));
+  const oauth = await completeCloudProviderOAuth(context.env, {
+    appId,
+    organizationId,
+    userId: session.user.id,
+    sessionId: context.req.param("sessionId"),
+    authorizationResult: input.authorizationResult,
+  });
+  return context.json({ oauth });
+});
 
-app.post(
-  "/api/apps/:appId/provider-oauth/:sessionId/cancel",
-  async (context) => {
-    const appId = context.req.param("appId");
-    const { session, organizationId } = await requireAppMember(context, appId);
-    const oauth = await cancelCloudProviderOAuth(context.env, {
-      appId,
-      organizationId,
-      userId: session.user.id,
-      sessionId: context.req.param("sessionId"),
-    });
-    return context.json({ oauth });
-  },
-);
+app.post("/api/apps/:appId/provider-oauth/:sessionId/cancel", async (context) => {
+  const appId = context.req.param("appId");
+  const { session, organizationId } = await requireAppMember(context, appId);
+  const oauth = await cancelCloudProviderOAuth(context.env, {
+    appId,
+    organizationId,
+    userId: session.user.id,
+    sessionId: context.req.param("sessionId"),
+  });
+  return context.json({ oauth });
+});
 
 function workspaceFilesystemStub(
   env: Env,
@@ -1600,7 +1452,9 @@ function workspaceFilesystemStub(
   branch = "main",
 ): DurableObjectStub {
   const id = env.PROJECT_WORKSPACES.idFromName(
-    [organizationId, appId, projectId, workspaceId, ...(branch === "main" ? [] : [branch])].join(":"),
+    [organizationId, appId, projectId, workspaceId, ...(branch === "main" ? [] : [branch])].join(
+      ":",
+    ),
   );
   return env.PROJECT_WORKSPACES.get(id);
 }
@@ -1611,9 +1465,7 @@ async function workspaceFilesystemRequest(
 ): Promise<Response> {
   const appId = z.string().min(1).parse(context.req.param("appId"));
   const projectId = z.string().min(1).parse(context.req.param("projectId"));
-  const workspaceId = StorageIdentifierSchema.parse(
-    context.req.param("workspaceId"),
-  );
+  const workspaceId = StorageIdentifierSchema.parse(context.req.param("workspaceId"));
   const branch = z
     .string()
     .trim()
@@ -1647,10 +1499,7 @@ async function workspaceFilesystemRequest(
 }
 
 app.get("/api/apps/:appId/prompts", async (context) => {
-  const { organizationId } = await requireAppMember(
-    context,
-    context.req.param("appId")
-  );
+  const { organizationId } = await requireAppMember(context, context.req.param("appId"));
   const db = createDb(context.env.DB);
   const rows = await db
     .select({
@@ -1668,8 +1517,8 @@ app.get("/api/apps/:appId/prompts", async (context) => {
     .where(
       and(
         eq(prompt.appId, context.req.param("appId")),
-        eq(flaryApp.organizationId, organizationId)
-      )
+        eq(flaryApp.organizationId, organizationId),
+      ),
     )
     .orderBy(asc(prompt.slug));
   return context.json({ prompts: rows });
@@ -1802,57 +1651,52 @@ app.get("/api/apps/:appId/prompts/:slug/revisions", async (context) => {
     })
     .from(promptRevision)
     .innerJoin(prompt, eq(prompt.id, promptRevision.promptId))
-    .where(
-      and(eq(prompt.appId, appId), eq(prompt.slug, context.req.param("slug")))
-    )
+    .where(and(eq(prompt.appId, appId), eq(prompt.slug, context.req.param("slug"))))
     .orderBy(desc(promptRevision.revision));
   return context.json({ revisions: rows });
 });
 
-app.get(
-  "/api/apps/:appId/prompts/:slug/revisions/:revisionId/source",
-  async (context) => {
-    const appId = context.req.param("appId");
-    await requireAppMember(context, appId);
-    const db = createDb(context.env.DB);
-    const rows = await db
-      .select({
-        id: promptRevision.id,
-        revision: promptRevision.revision,
-        sourceHash: promptRevision.sourceHash,
-        sourceKey: promptRevision.sourceKey,
-        sourceCommit: promptRevision.sourceCommit,
-        model: promptRevision.model,
-        thinking: promptRevision.thinking,
-        createdBy: promptRevision.createdBy,
-        createdAt: promptRevision.createdAt,
-      })
-      .from(promptRevision)
-      .innerJoin(prompt, eq(prompt.id, promptRevision.promptId))
-      .where(
-        and(
-          eq(prompt.appId, appId),
-          eq(prompt.slug, context.req.param("slug")),
-          eq(promptRevision.id, context.req.param("revisionId"))
-        )
-      )
-      .limit(1);
-    const revision = rows[0];
-    if (!revision) {
-      throw new HTTPException(404, { message: "Prompt revision not found" });
-    }
-    const object = await context.env.WORKSPACE_BLOBS.get(revision.sourceKey);
-    if (!object) {
-      throw new HTTPException(410, {
-        message: "Prompt revision source is unavailable",
-      });
-    }
-    return context.json({
-      revision,
-      source: await object.text(),
+app.get("/api/apps/:appId/prompts/:slug/revisions/:revisionId/source", async (context) => {
+  const appId = context.req.param("appId");
+  await requireAppMember(context, appId);
+  const db = createDb(context.env.DB);
+  const rows = await db
+    .select({
+      id: promptRevision.id,
+      revision: promptRevision.revision,
+      sourceHash: promptRevision.sourceHash,
+      sourceKey: promptRevision.sourceKey,
+      sourceCommit: promptRevision.sourceCommit,
+      model: promptRevision.model,
+      thinking: promptRevision.thinking,
+      createdBy: promptRevision.createdBy,
+      createdAt: promptRevision.createdAt,
+    })
+    .from(promptRevision)
+    .innerJoin(prompt, eq(prompt.id, promptRevision.promptId))
+    .where(
+      and(
+        eq(prompt.appId, appId),
+        eq(prompt.slug, context.req.param("slug")),
+        eq(promptRevision.id, context.req.param("revisionId")),
+      ),
+    )
+    .limit(1);
+  const revision = rows[0];
+  if (!revision) {
+    throw new HTTPException(404, { message: "Prompt revision not found" });
+  }
+  const object = await context.env.WORKSPACE_BLOBS.get(revision.sourceKey);
+  if (!object) {
+    throw new HTTPException(410, {
+      message: "Prompt revision source is unavailable",
     });
   }
-);
+  return context.json({
+    revision,
+    source: await object.text(),
+  });
+});
 
 app.get("/api/apps/:appId/prompts/:slug/variants", async (context) => {
   const appId = context.req.param("appId");
@@ -1872,9 +1716,7 @@ app.get("/api/apps/:appId/prompts/:slug/variants", async (context) => {
     })
     .from(promptVariant)
     .innerJoin(prompt, eq(prompt.id, promptVariant.promptId))
-    .where(
-      and(eq(prompt.appId, appId), eq(prompt.slug, context.req.param("slug")))
-    )
+    .where(and(eq(prompt.appId, appId), eq(prompt.slug, context.req.param("slug"))))
     .orderBy(asc(promptVariant.rolloutId), asc(promptVariant.variantId));
   return context.json({ variants: rows });
 });
@@ -1882,9 +1724,7 @@ app.get("/api/apps/:appId/prompts/:slug/variants", async (context) => {
 app.post("/api/apps/:appId/prompts/:slug/variants/select", async (context) => {
   const appId = context.req.param("appId");
   await requireAppMember(context, appId);
-  const input = promptVariantSelectionInputSchema.parse(
-    await readJson<unknown>(context)
-  );
+  const input = promptVariantSelectionInputSchema.parse(await readJson<unknown>(context));
   const db = createDb(context.env.DB);
   const rows = await db
     .select({
@@ -1902,8 +1742,8 @@ app.post("/api/apps/:appId/prompts/:slug/variants/select", async (context) => {
       and(
         eq(prompt.appId, appId),
         eq(prompt.slug, context.req.param("slug")),
-        eq(promptVariant.rolloutId, input.rolloutId)
-      )
+        eq(promptVariant.rolloutId, input.rolloutId),
+      ),
     )
     .orderBy(asc(promptVariant.variantId));
   if (!rows[0]) {
@@ -1914,12 +1754,7 @@ app.post("/api/apps/:appId/prompts/:slug/variants/select", async (context) => {
       rolloutId: input.rolloutId,
       promptId: rows[0].promptId,
       scope: rows[0].scope as
-        | "global"
-        | "organization"
-        | "project"
-        | "user"
-        | "session"
-        | "request",
+        "global" | "organization" | "project" | "user" | "session" | "request",
       variants: rows.map((row) => ({
         id: row.variantId,
         revisionId: row.revisionId,
@@ -1932,7 +1767,7 @@ app.post("/api/apps/:appId/prompts/:slug/variants/select", async (context) => {
       traceContext: input.traceContext ?? createTraceContext(),
       runId: input.runId,
     },
-    input.override
+    input.override,
   );
   return context.json(result);
 });
@@ -1940,19 +1775,14 @@ app.post("/api/apps/:appId/prompts/:slug/variants/select", async (context) => {
 app.post("/api/apps/:appId/prompts/:slug/variants", async (context) => {
   const appId = context.req.param("appId");
   const { session } = await requireAppMember(context, appId);
-  const input = promptVariantInputSchema.parse(
-    await readJson<unknown>(context)
-  );
+  const input = promptVariantInputSchema.parse(await readJson<unknown>(context));
   const db = createDb(context.env.DB);
   const promptRow = await db
     .select({ id: prompt.id })
     .from(prompt)
-    .where(
-      and(eq(prompt.appId, appId), eq(prompt.slug, context.req.param("slug")))
-    )
+    .where(and(eq(prompt.appId, appId), eq(prompt.slug, context.req.param("slug"))))
     .limit(1);
-  if (!promptRow[0])
-    throw new HTTPException(404, { message: "Prompt not found" });
+  if (!promptRow[0]) throw new HTTPException(404, { message: "Prompt not found" });
 
   const revisionIds = new Set(
     (
@@ -1960,7 +1790,7 @@ app.post("/api/apps/:appId/prompts/:slug/variants", async (context) => {
         .select({ id: promptRevision.id })
         .from(promptRevision)
         .where(eq(promptRevision.promptId, promptRow[0].id))
-    ).map((row) => row.id)
+    ).map((row) => row.id),
   );
   if (input.variants.some((variant) => !revisionIds.has(variant.revisionId))) {
     throw new HTTPException(400, {
@@ -1974,8 +1804,8 @@ app.post("/api/apps/:appId/prompts/:slug/variants", async (context) => {
     .where(
       and(
         eq(promptVariant.promptId, promptRow[0].id),
-        eq(promptVariant.rolloutId, input.rolloutId)
-      )
+        eq(promptVariant.rolloutId, input.rolloutId),
+      ),
     )
     .limit(1);
   if (existing[0]) {
@@ -1995,7 +1825,7 @@ app.post("/api/apps/:appId/prompts/:slug/variants", async (context) => {
       allocationBasisPoints: variant.allocationBasisPoints,
       enabled: variant.enabled,
       createdBy: session.user.id,
-    }))
+    })),
   );
   return context.json({ ok: true, rolloutId: input.rolloutId }, 201);
 });
@@ -2003,9 +1833,7 @@ app.post("/api/apps/:appId/prompts/:slug/variants", async (context) => {
 app.post("/api/apps/:appId/executions", async (context) => {
   const appId = context.req.param("appId");
   const { organizationId } = await requireAppMember(context, appId);
-  const input = CodeExecutionRequestSchema.parse(
-    await readJson<unknown>(context)
-  );
+  const input = CodeExecutionRequestSchema.parse(await readJson<unknown>(context));
   const router = createCloudExecutionRouter(context.env, organizationId);
   const result = await router.execute(input);
   return context.json({ result }, result.status === "completed" ? 200 : 422);
@@ -2016,13 +1844,9 @@ app.post(
   async (context) => {
     const appId = context.req.param("appId");
     const projectId = context.req.param("projectId");
-    const workspaceId = StorageIdentifierSchema.parse(
-      context.req.param("workspaceId"),
-    );
+    const workspaceId = StorageIdentifierSchema.parse(context.req.param("workspaceId"));
     const { organizationId } = await requireAppMember(context, appId);
-    const input = WorkspaceUploadTicketRequestSchema.parse(
-      await readJson<unknown>(context),
-    );
+    const input = WorkspaceUploadTicketRequestSchema.parse(await readJson<unknown>(context));
     const response = await workspaceFilesystemStub(
       context.env,
       organizationId,
@@ -2061,13 +1885,9 @@ app.post(
   async (context) => {
     const appId = context.req.param("appId");
     const projectId = context.req.param("projectId");
-    const workspaceId = StorageIdentifierSchema.parse(
-      context.req.param("workspaceId"),
-    );
+    const workspaceId = StorageIdentifierSchema.parse(context.req.param("workspaceId"));
     const { organizationId } = await requireAppMember(context, appId);
-    const input = WorkspaceDownloadTicketRequestSchema.parse(
-      await readJson<unknown>(context),
-    );
+    const input = WorkspaceDownloadTicketRequestSchema.parse(await readJson<unknown>(context));
     const response = await workspaceFilesystemStub(
       context.env,
       organizationId,
@@ -2106,12 +1926,8 @@ app.put(
   async (context) => {
     const appId = context.req.param("appId");
     const projectId = context.req.param("projectId");
-    const workspaceId = StorageIdentifierSchema.parse(
-      context.req.param("workspaceId"),
-    );
-    const organizationId = StorageIdentifierSchema.parse(
-      context.req.query("organizationId"),
-    );
+    const workspaceId = StorageIdentifierSchema.parse(context.req.param("workspaceId"));
+    const organizationId = StorageIdentifierSchema.parse(context.req.query("organizationId"));
     const ticket = context.req.query("ticket");
     if (!ticket) throw new HTTPException(400, { message: "Transfer ticket is required" });
     return workspaceFilesystemStub(
@@ -2121,19 +1937,16 @@ app.put(
       projectId,
       workspaceId,
     ).fetch(
-      new Request(
-        `https://workspace-filesystem/upload?ticket=${encodeURIComponent(ticket)}`,
-        {
-          method: "PUT",
-          headers: {
-            "x-flary-organization-id": organizationId,
-            "x-flary-app-id": appId,
-            "x-flary-project-id": projectId,
-            "x-flary-workspace-id": workspaceId,
-          },
-          body: await context.req.raw.arrayBuffer(),
+      new Request(`https://workspace-filesystem/upload?ticket=${encodeURIComponent(ticket)}`, {
+        method: "PUT",
+        headers: {
+          "x-flary-organization-id": organizationId,
+          "x-flary-app-id": appId,
+          "x-flary-project-id": projectId,
+          "x-flary-workspace-id": workspaceId,
         },
-      ),
+        body: await context.req.raw.arrayBuffer(),
+      }),
     );
   },
 );
@@ -2143,12 +1956,8 @@ app.get(
   async (context) => {
     const appId = context.req.param("appId");
     const projectId = context.req.param("projectId");
-    const workspaceId = StorageIdentifierSchema.parse(
-      context.req.param("workspaceId"),
-    );
-    const organizationId = StorageIdentifierSchema.parse(
-      context.req.query("organizationId"),
-    );
+    const workspaceId = StorageIdentifierSchema.parse(context.req.param("workspaceId"));
+    const organizationId = StorageIdentifierSchema.parse(context.req.query("organizationId"));
     const ticket = context.req.query("ticket");
     if (!ticket) throw new HTTPException(400, { message: "Transfer ticket is required" });
     return workspaceFilesystemStub(
@@ -2158,17 +1967,14 @@ app.get(
       projectId,
       workspaceId,
     ).fetch(
-      new Request(
-        `https://workspace-filesystem/download?ticket=${encodeURIComponent(ticket)}`,
-        {
-          headers: {
-            "x-flary-organization-id": organizationId,
-            "x-flary-app-id": appId,
-            "x-flary-project-id": projectId,
-            "x-flary-workspace-id": workspaceId,
-          },
+      new Request(`https://workspace-filesystem/download?ticket=${encodeURIComponent(ticket)}`, {
+        headers: {
+          "x-flary-organization-id": organizationId,
+          "x-flary-app-id": appId,
+          "x-flary-project-id": projectId,
+          "x-flary-workspace-id": workspaceId,
         },
-      ),
+      }),
     );
   },
 );
@@ -2188,9 +1994,7 @@ app.get(
   async (context) => {
     const appId = context.req.param("appId");
     const projectId = context.req.param("projectId");
-    const workspaceId = StorageIdentifierSchema.parse(
-      context.req.param("workspaceId"),
-    );
+    const workspaceId = StorageIdentifierSchema.parse(context.req.param("workspaceId"));
     const { organizationId } = await requireAppMember(context, appId);
     return workspaceFilesystemStub(
       context.env,
@@ -2211,61 +2015,52 @@ app.get(
   },
 );
 
-app.get(
-  "/api/organizations/:organizationId/cloudflare/connection",
-  async (context) => {
-    const organizationId = context.req.param("organizationId");
-    const { session } = await requireOrganizationMember(
-      context,
-      organizationId
-    );
-    const db = createDb(context.env.DB);
-    const row = await db
-      .select({
-        accountId: cloudflareConnection.accountId,
-        accountName: cloudflareConnection.accountName,
-        gatewayId: cloudflareConnection.gatewayId,
-        accountOptionsJson: cloudflareConnection.accountOptionsJson,
-        scope: cloudflareConnection.scope,
-        updatedAt: cloudflareConnection.updatedAt,
-      })
-      .from(cloudflareConnection)
-      .where(
-        and(
-          eq(cloudflareConnection.organizationId, organizationId),
-          eq(cloudflareConnection.userId, session.user.id)
-        )
-      )
-        .limit(1);
-    if (!row[0]) {
-      return context.json({
-        connected: false,
-        pending: false,
-        oauthConfigured: isCloudflareOAuthConfigured(context.env),
-      });
-    }
-    const accounts = parseCloudflareAccountOptions(row[0].accountOptionsJson);
-    const connected = Boolean(
-      row[0].accountId && row[0].gatewayId && row[0].accountName,
-    );
+app.get("/api/organizations/:organizationId/cloudflare/connection", async (context) => {
+  const organizationId = context.req.param("organizationId");
+  const { session } = await requireOrganizationMember(context, organizationId);
+  const db = createDb(context.env.DB);
+  const row = await db
+    .select({
+      accountId: cloudflareConnection.accountId,
+      accountName: cloudflareConnection.accountName,
+      gatewayId: cloudflareConnection.gatewayId,
+      accountOptionsJson: cloudflareConnection.accountOptionsJson,
+      scope: cloudflareConnection.scope,
+      updatedAt: cloudflareConnection.updatedAt,
+    })
+    .from(cloudflareConnection)
+    .where(
+      and(
+        eq(cloudflareConnection.organizationId, organizationId),
+        eq(cloudflareConnection.userId, session.user.id),
+      ),
+    )
+    .limit(1);
+  if (!row[0]) {
     return context.json({
-      connected,
-      pending: !connected && accounts.length > 0,
+      connected: false,
+      pending: false,
       oauthConfigured: isCloudflareOAuthConfigured(context.env),
-      accountId: row[0].accountId,
-      accountName: row[0].accountName,
-      gatewayId: row[0].gatewayId,
-      accounts,
-      scope: row[0].scope,
-      updatedAt: row[0].updatedAt,
     });
   }
-);
+  const accounts = parseCloudflareAccountOptions(row[0].accountOptionsJson);
+  const connected = Boolean(row[0].accountId && row[0].gatewayId && row[0].accountName);
+  return context.json({
+    connected,
+    pending: !connected && accounts.length > 0,
+    oauthConfigured: isCloudflareOAuthConfigured(context.env),
+    accountId: row[0].accountId,
+    accountName: row[0].accountName,
+    gatewayId: row[0].gatewayId,
+    accounts,
+    scope: row[0].scope,
+    updatedAt: row[0].updatedAt,
+  });
+});
 
 app.get("/api/cloudflare/oauth/start", async (context) => {
   const organizationId = context.req.query("organizationId");
-  if (!organizationId)
-    throw new HTTPException(400, { message: "organizationId is required" });
+  if (!organizationId) throw new HTTPException(400, { message: "organizationId is required" });
   const { session } = await requireOrganizationMember(context, organizationId);
   if (!isCloudflareOAuthConfigured(context.env)) {
     throw new HTTPException(503, {
@@ -2273,14 +2068,9 @@ app.get("/api/cloudflare/oauth/start", async (context) => {
     });
   }
   const state = crypto.randomUUID();
-  const redirectUri = cloudflareOAuthRedirectUri(
-    context.env,
-    context.req.raw.url,
-  );
+  const redirectUri = cloudflareOAuthRedirectUri(context.env, context.req.raw.url);
   const db = createDb(context.env.DB);
-  await db
-    .delete(cloudflareOAuthState)
-    .where(eq(cloudflareOAuthState.userId, session.user.id));
+  await db.delete(cloudflareOAuthState).where(eq(cloudflareOAuthState.userId, session.user.id));
   await db.insert(cloudflareOAuthState).values({
     id: crypto.randomUUID(),
     userId: session.user.id,
@@ -2297,8 +2087,7 @@ app.get("/api/cloudflare/oauth/start", async (context) => {
 
 app.get("/api/cloudflare/oauth/callback", async (context) => {
   const error = context.req.query("error");
-  if (error)
-    return cloudflareRedirect(context, { cloudflare: "error", reason: error });
+  if (error) return cloudflareRedirect(context, { cloudflare: "error", reason: error });
   const code = context.req.query("code");
   const state = context.req.query("state");
   if (!code || !state)
@@ -2327,15 +2116,9 @@ app.get("/api/cloudflare/oauth/callback", async (context) => {
         reason: "invalid_state",
       });
     }
-    await db
-      .delete(cloudflareOAuthState)
-      .where(eq(cloudflareOAuthState.id, stateRow.id));
+    await db.delete(cloudflareOAuthState).where(eq(cloudflareOAuthState.id, stateRow.id));
 
-    const token = await exchangeCloudflareCode(
-      context.env,
-      code,
-      context.req.raw.url,
-    );
+    const token = await exchangeCloudflareCode(context.env, code, context.req.raw.url);
     const access = await encryptCloudflareToken(
       context.env,
       token.accessToken,
@@ -2362,11 +2145,7 @@ app.get("/api/cloudflare/oauth/callback", async (context) => {
 
     const selectedAccount = accountOptions.length === 1 ? accountOptions[0] : null;
     const gatewayId = selectedAccount
-      ? await ensureCloudflareGateway(
-          token.accessToken,
-          selectedAccount.id,
-          stateRow.userId,
-        )
+      ? await ensureCloudflareGateway(token.accessToken, selectedAccount.id, stateRow.userId)
       : null;
     const existing = await db
       .select({ id: cloudflareConnection.id })
@@ -2420,155 +2199,135 @@ app.get("/api/cloudflare/oauth/callback", async (context) => {
   }
 });
 
-app.post(
-  "/api/organizations/:organizationId/cloudflare/account",
-  async (context) => {
-    const organizationId = context.req.param("organizationId");
-    const { session } = await requireOrganizationMember(
-      context,
-      organizationId
+app.post("/api/organizations/:organizationId/cloudflare/account", async (context) => {
+  const organizationId = context.req.param("organizationId");
+  const { session } = await requireOrganizationMember(context, organizationId);
+  const input = cloudflareAccountSchema.parse(await readJson<unknown>(context));
+  const db = createDb(context.env.DB);
+  const rows = await db
+    .select({
+      id: cloudflareConnection.id,
+      accountId: cloudflareConnection.accountId,
+      gatewayId: cloudflareConnection.gatewayId,
+      accountOptionsJson: cloudflareConnection.accountOptionsJson,
+      accessTokenCiphertext: cloudflareConnection.accessTokenCiphertext,
+      accessTokenIv: cloudflareConnection.accessTokenIv,
+    })
+    .from(cloudflareConnection)
+    .where(
+      and(
+        eq(cloudflareConnection.organizationId, organizationId),
+        eq(cloudflareConnection.userId, session.user.id),
+      ),
+    )
+    .limit(1);
+  const connection = rows[0];
+  if (!connection) throw new HTTPException(404, { message: "Cloudflare is not connected" });
+  const accounts = parseCloudflareAccountOptions(connection.accountOptionsJson);
+  if (
+    !accounts.some(
+      (account) => account.id === input.accountId && account.name === input.accountName,
+    )
+  ) {
+    throw new HTTPException(400, {
+      message: "Cloudflare account is not available to this connection",
+    });
+  }
+  let gatewayId: string;
+  try {
+    const accessToken = await decryptCloudflareToken(
+      context.env,
+      {
+        ciphertext: connection.accessTokenCiphertext,
+        iv: connection.accessTokenIv,
+      },
+      organizationId,
+      session.user.id,
+      "access",
     );
-    const input = cloudflareAccountSchema.parse(
-      await readJson<unknown>(context)
+    gatewayId = await ensureCloudflareGateway(
+      accessToken,
+      input.accountId,
+      session.user.id,
+      connection.gatewayId,
     );
-    const db = createDb(context.env.DB);
-    const rows = await db
-      .select({
-        id: cloudflareConnection.id,
-        accountId: cloudflareConnection.accountId,
-        gatewayId: cloudflareConnection.gatewayId,
-        accountOptionsJson: cloudflareConnection.accountOptionsJson,
-        accessTokenCiphertext: cloudflareConnection.accessTokenCiphertext,
-        accessTokenIv: cloudflareConnection.accessTokenIv,
-      })
-      .from(cloudflareConnection)
-      .where(
-        and(
-          eq(cloudflareConnection.organizationId, organizationId),
-          eq(cloudflareConnection.userId, session.user.id)
-        )
-      )
-      .limit(1);
-    const connection = rows[0];
-    if (!connection)
-      throw new HTTPException(404, { message: "Cloudflare is not connected" });
-    const accounts = parseCloudflareAccountOptions(
-      connection.accountOptionsJson,
+  } catch (cause) {
+    console.error(
+      "Cloudflare Gateway setup failed",
+      cause instanceof Error ? cause.message : cause,
     );
-    if (
-      !accounts.some(
-        (account) =>
-          account.id === input.accountId && account.name === input.accountName
-      )
-    ) {
-      throw new HTTPException(400, {
-        message: "Cloudflare account is not available to this connection",
-      });
-    }
-    let gatewayId: string;
-    try {
-      const accessToken = await decryptCloudflareToken(
-        context.env,
-        {
-          ciphertext: connection.accessTokenCiphertext,
-          iv: connection.accessTokenIv,
-        },
-        organizationId,
-        session.user.id,
-        "access",
-      );
-      gatewayId = await ensureCloudflareGateway(
-        accessToken,
-        input.accountId,
-        session.user.id,
-        connection.gatewayId,
-      );
-    } catch (cause) {
-      console.error(
-        "Cloudflare Gateway setup failed",
-        cause instanceof Error ? cause.message : cause,
-      );
-      throw new HTTPException(502, {
-        message: "Cloudflare did not allow Flary to create the AI Gateway",
-      });
-    }
-    await db
-      .update(cloudflareConnection)
-      .set({
-        accountId: input.accountId,
-        accountName: input.accountName,
-        gatewayId,
-        accountOptionsJson: "[]",
-        updatedAt: new Date(),
-      })
-      .where(eq(cloudflareConnection.id, connection.id));
-    return context.json({
-      ok: true,
+    throw new HTTPException(502, {
+      message: "Cloudflare did not allow Flary to create the AI Gateway",
+    });
+  }
+  await db
+    .update(cloudflareConnection)
+    .set({
       accountId: input.accountId,
       accountName: input.accountName,
       gatewayId,
-    });
-  }
-);
+      accountOptionsJson: "[]",
+      updatedAt: new Date(),
+    })
+    .where(eq(cloudflareConnection.id, connection.id));
+  return context.json({
+    ok: true,
+    accountId: input.accountId,
+    accountName: input.accountName,
+    gatewayId,
+  });
+});
 
-app.delete(
-  "/api/organizations/:organizationId/cloudflare/connection",
-  async (context) => {
-    const organizationId = context.req.param("organizationId");
-    const { session } = await requireOrganizationMember(
-      context,
-      organizationId,
-    );
-    const db = createDb(context.env.DB);
-    const rows = await db
-      .select()
-      .from(cloudflareConnection)
-      .where(
-        and(
-          eq(cloudflareConnection.organizationId, organizationId),
-          eq(cloudflareConnection.userId, session.user.id),
-        ),
-      )
-      .limit(1);
-    const connection = rows[0];
-    if (connection) {
-      try {
-        const token =
-          connection.refreshTokenCiphertext && connection.refreshTokenIv
-            ? await decryptCloudflareToken(
-                context.env,
-                {
-                  ciphertext: connection.refreshTokenCiphertext,
-                  iv: connection.refreshTokenIv,
-                },
-                organizationId,
-                session.user.id,
-                "refresh",
-              )
-            : await decryptCloudflareToken(
-                context.env,
-                {
-                  ciphertext: connection.accessTokenCiphertext,
-                  iv: connection.accessTokenIv,
-                },
-                organizationId,
-                session.user.id,
-                "access",
-              );
-        await revokeCloudflareToken(context.env, token);
-      } catch (cause) {
-        console.warn(
-          "Cloudflare token revocation failed during disconnect",
-          cause instanceof Error ? cause.message : cause,
-        );
-      }
-      await db
-        .delete(cloudflareConnection)
-        .where(eq(cloudflareConnection.id, connection.id));
+app.delete("/api/organizations/:organizationId/cloudflare/connection", async (context) => {
+  const organizationId = context.req.param("organizationId");
+  const { session } = await requireOrganizationMember(context, organizationId);
+  const db = createDb(context.env.DB);
+  const rows = await db
+    .select()
+    .from(cloudflareConnection)
+    .where(
+      and(
+        eq(cloudflareConnection.organizationId, organizationId),
+        eq(cloudflareConnection.userId, session.user.id),
+      ),
+    )
+    .limit(1);
+  const connection = rows[0];
+  if (connection) {
+    try {
+      const token =
+        connection.refreshTokenCiphertext && connection.refreshTokenIv
+          ? await decryptCloudflareToken(
+              context.env,
+              {
+                ciphertext: connection.refreshTokenCiphertext,
+                iv: connection.refreshTokenIv,
+              },
+              organizationId,
+              session.user.id,
+              "refresh",
+            )
+          : await decryptCloudflareToken(
+              context.env,
+              {
+                ciphertext: connection.accessTokenCiphertext,
+                iv: connection.accessTokenIv,
+              },
+              organizationId,
+              session.user.id,
+              "access",
+            );
+      await revokeCloudflareToken(context.env, token);
+    } catch (cause) {
+      console.warn(
+        "Cloudflare token revocation failed during disconnect",
+        cause instanceof Error ? cause.message : cause,
+      );
     }
-    return context.json({ ok: true });
-  },
-);
+    await db.delete(cloudflareConnection).where(eq(cloudflareConnection.id, connection.id));
+  }
+  return context.json({ ok: true });
+});
 
 app.all("/api/organizations/:organizationId/events", async (context) => {
   const organizationId = context.req.param("organizationId");
@@ -2604,10 +2363,7 @@ app.onError((error, context) => {
             : error.code === "oauth_provider_failed"
               ? 502
               : 409;
-    return context.json(
-      { error: { type: error.code, message: error.message } },
-      status,
-    );
+    return context.json({ error: { type: error.code, message: error.message } }, status);
   }
   console.error("Flary Cloud request failed", error);
   return context.json({ error: "Internal server error" }, 500);

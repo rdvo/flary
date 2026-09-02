@@ -84,8 +84,7 @@ function resolveAssetRequest(request: Request): Request | Response {
   }
 
   const target = new URL(url);
-  target.pathname =
-    url.pathname === "/" ? "/docs/" : `/docs${url.pathname}`;
+  target.pathname = url.pathname === "/" ? "/docs/" : `/docs${url.pathname}`;
   return new Request(target, request);
 }
 
@@ -137,32 +136,36 @@ api.get("/docs-chat/sessions", async (context) => {
     `/apps/${DOCS_CHAT_AGENT}/threads`,
   );
   if (!upstream.ok) return withDocsCookies(safeUpstreamResponse(upstream), browser.cookies);
-  const payload = await upstream.json().catch(() => ({})) as {
+  const payload = (await upstream.json().catch(() => ({}))) as {
     threads?: Array<{
       thread?: { threadId?: unknown };
       updatedAt?: unknown;
       metadata?: { title?: unknown };
     }>;
   };
-  const sessions = await Promise.all((payload.threads ?? []).flatMap((binding) => {
-    const value = typeof binding.thread?.threadId === "string"
-      ? /^chat_([a-f0-9]{36})$/.exec(binding.thread.threadId)
-      : null;
-    if (!value) return [];
-    const id = value[1]!;
-    return [createSessionReference(id, browser.browserId, context.env.FLARY_DOCS_AGENT_TOKEN!).then(
-      (reference) => ({
-        id,
-        reference,
-        ...(typeof binding.metadata?.title === "string"
-          ? { title: binding.metadata.title }
-          : {}),
-        updatedAt: typeof binding.updatedAt === "string"
-          ? binding.updatedAt
-          : new Date(0).toISOString(),
-      }),
-    )];
-  }));
+  const sessions = await Promise.all(
+    (payload.threads ?? []).flatMap((binding) => {
+      const value =
+        typeof binding.thread?.threadId === "string"
+          ? /^chat_([a-f0-9]{36})$/.exec(binding.thread.threadId)
+          : null;
+      if (!value) return [];
+      const id = value[1]!;
+      return [
+        createSessionReference(id, browser.browserId, context.env.FLARY_DOCS_AGENT_TOKEN!).then(
+          (reference) => ({
+            id,
+            reference,
+            ...(typeof binding.metadata?.title === "string"
+              ? { title: binding.metadata.title }
+              : {}),
+            updatedAt:
+              typeof binding.updatedAt === "string" ? binding.updatedAt : new Date(0).toISOString(),
+          }),
+        ),
+      ];
+    }),
+  );
   return withDocsCookies(context.json({ sessions }), browser.cookies);
 });
 
@@ -192,15 +195,11 @@ api.delete("/docs-chat/session", async (context) => {
 api.post("/docs-chat/session/title", async (context) => {
   const session = await docsChatSession(context.req.raw, context.env, false);
   if (session instanceof Response) return session;
-  const input = await context.req.json().catch(() => null) as { title?: unknown } | null;
-  const title = typeof input?.title === "string"
-    ? input.title.trim().replace(/\s+/g, " ").slice(0, 64)
-    : "";
+  const input = (await context.req.json().catch(() => null)) as { title?: unknown } | null;
+  const title =
+    typeof input?.title === "string" ? input.title.trim().replace(/\s+/g, " ").slice(0, 64) : "";
   if (!title) {
-    return context.json(
-      { error: { type: "invalid_title", message: "Enter a chat name." } },
-      400,
-    );
+    return context.json({ error: { type: "invalid_title", message: "Enter a chat name." } }, 400);
   }
   const upstream = await fetchDocsAgent(
     context.env,
@@ -243,10 +242,11 @@ api.get("/docs-chat/events", async (context) => {
 api.post("/docs-chat/realtime-ticket", async (context) => {
   const session = await docsChatSession(context.req.raw, context.env, false);
   if (session instanceof Response) return session;
-  const input = await context.req.json().catch(() => ({})) as { after?: unknown };
-  const after = typeof input.after === "number" && Number.isSafeInteger(input.after) && input.after >= 0
-    ? input.after
-    : 0;
+  const input = (await context.req.json().catch(() => ({}))) as { after?: unknown };
+  const after =
+    typeof input.after === "number" && Number.isSafeInteger(input.after) && input.after >= 0
+      ? input.after
+      : 0;
   const upstream = await fetchDocsAgent(
     context.env,
     session,
@@ -257,10 +257,15 @@ api.post("/docs-chat/realtime-ticket", async (context) => {
     },
   );
   if (!upstream.ok) return safeUpstreamResponse(upstream);
-  const ticket = await upstream.json() as { url?: unknown; expiresAt?: unknown };
+  const ticket = (await upstream.json()) as { url?: unknown; expiresAt?: unknown };
   if (typeof ticket.url !== "string" || typeof ticket.expiresAt !== "string") {
     return context.json(
-      { error: { type: "invalid_realtime_ticket", message: "The realtime service returned an invalid ticket." } },
+      {
+        error: {
+          type: "invalid_realtime_ticket",
+          message: "The realtime service returned an invalid ticket.",
+        },
+      },
       502,
     );
   }
@@ -313,11 +318,13 @@ api.post("/docs-chat/messages", async (context) => {
       429,
     );
   }
-  const input = await context.req.json().catch(() => null) as { message?: unknown } | null;
+  const input = (await context.req.json().catch(() => null)) as { message?: unknown } | null;
   const message = typeof input?.message === "string" ? input.message.trim() : "";
   if (!message || message.length > 2_000) {
     return context.json(
-      { error: { type: "invalid_message", message: "Enter a message of 2,000 characters or less." } },
+      {
+        error: { type: "invalid_message", message: "Enter a message of 2,000 characters or less." },
+      },
       400,
     );
   }
@@ -353,12 +360,9 @@ api.all("/runtime/*", async (context) => {
   }
 
   const target = new URL(context.req.url);
-  target.pathname =
-    target.pathname.replace(/^\/api\/runtime/, "") || "/";
+  target.pathname = target.pathname.replace(/^\/api\/runtime/, "") || "/";
 
-  return context.env.FLARY_RUNTIME.fetch(
-    new Request(target, context.req.raw),
-  );
+  return context.env.FLARY_RUNTIME.fetch(new Request(target, context.req.raw));
 });
 
 api.notFound((context) =>
@@ -432,15 +436,18 @@ async function docsChatSession(
   const forceNew = request.headers.get("x-flary-docs-new-session") === "1";
   const reference = forceNew
     ? undefined
-    : request.headers.get("x-flary-docs-session-ref") ??
+    : (request.headers.get("x-flary-docs-session-ref") ??
       new URL(request.url).searchParams.get("session") ??
-      undefined;
-  const resolved = reference
-    ? await verifySessionReference(reference, ownerId, token)
-    : undefined;
+      undefined);
+  const resolved = reference ? await verifySessionReference(reference, ownerId, token) : undefined;
   if (reference && !resolved) {
     return Response.json(
-      { error: { type: "chat_session_invalid", message: "This chat does not belong to this browser." } },
+      {
+        error: {
+          type: "chat_session_invalid",
+          message: "This chat does not belong to this browser.",
+        },
+      },
       { status: 401 },
     );
   }
@@ -454,9 +461,7 @@ async function docsChatSession(
     };
   }
   const legacyCookie = forceNew ? undefined : readCookie(cookieHeader, DOCS_CHAT_COOKIE);
-  const legacyId = legacyCookie
-    ? await verifyLegacySessionCookie(legacyCookie, token)
-    : undefined;
+  const legacyId = legacyCookie ? await verifyLegacySessionCookie(legacyCookie, token) : undefined;
   if (legacyId) {
     return {
       id: legacyId,
@@ -580,7 +585,7 @@ async function docsChatHistory(env: SiteBindings, session: DocsChatSession): Pro
     return Response.json({ messages: [], settlements: [] });
   }
   if (!upstream.ok) return safeUpstreamResponse(upstream);
-  const payload = await upstream.json() as {
+  const payload = (await upstream.json()) as {
     conversation?: {
       messages?: Array<{
         id?: string;
@@ -628,10 +633,12 @@ function fetchDocsAgent(
   headers.set("x-flary-docs-browser", session.browserId);
   headers.set("x-flary-docs-tenant", session.tenantId);
   if (init.body) headers.set("content-type", "application/json");
-  return env.FLARY_DOCS_AGENT!.fetch(new Request(`https://docs-agent.internal${path}`, {
-    ...init,
-    headers,
-  }));
+  return env.FLARY_DOCS_AGENT!.fetch(
+    new Request(`https://docs-agent.internal${path}`, {
+      ...init,
+      headers,
+    }),
+  );
 }
 
 async function withDocsSession(response: Response, session: DocsChatSession): Promise<Response> {
@@ -641,9 +648,10 @@ async function withDocsSession(response: Response, session: DocsChatSession): Pr
     return new Response(response.body, { status: response.status, headers });
   }
   const value = await response.json().catch(() => ({}));
-  const body = value && typeof value === "object" && !Array.isArray(value)
-    ? { ...value, session: { id: session.id, reference: session.reference } }
-    : { value, session: { id: session.id, reference: session.reference } };
+  const body =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? { ...value, session: { id: session.id, reference: session.reference } }
+      : { value, session: { id: session.id, reference: session.reference } };
   headers.set("content-type", "application/json; charset=UTF-8");
   return new Response(JSON.stringify(body), { status: response.status, headers });
 }
@@ -668,10 +676,7 @@ function threadId(sessionId: string): string {
 function publicDocsParts(parts: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
   const result: Array<Record<string, unknown>> = [];
   for (const part of parts) {
-    if (
-      (part.type === "text" || part.type === "reasoning") &&
-      typeof part.text === "string"
-    ) {
+    if ((part.type === "text" || part.type === "reasoning") && typeof part.text === "string") {
       result.push({
         type: part.type,
         text: part.text,
@@ -706,7 +711,10 @@ function readCookie(header: string | null, name: string): string | undefined {
     .join("=");
 }
 
-async function verifyLegacySessionCookie(value: string, secret: string): Promise<string | undefined> {
+async function verifyLegacySessionCookie(
+  value: string,
+  secret: string,
+): Promise<string | undefined> {
   const separator = value.lastIndexOf(".");
   if (separator < 0) return undefined;
   const id = value.slice(0, separator);
@@ -753,11 +761,10 @@ async function verifySessionReference(
     !id ||
     !signature ||
     !/^[a-f0-9]{36}$/.test(id)
-  ) return undefined;
+  )
+    return undefined;
   const expected = await signValue(`session:${kind}:${browserId}:${id}`, secret);
-  return sameString(signature, expected)
-    ? { id, legacy: kind === "legacy" }
-    : undefined;
+  return sameString(signature, expected) ? { id, legacy: kind === "legacy" } : undefined;
 }
 
 async function signValue(value: string, secret: string): Promise<string> {

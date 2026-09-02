@@ -12,11 +12,7 @@ import { IdempotencyStore, idempotencyKeyForTask } from "./idempotency.js";
 import { reduceLimits } from "./limits.js";
 import { redactErrorMessage, redactSecrets } from "./redaction.js";
 import { resolveModel } from "./models.js";
-import {
-  normalizeToolDefinition,
-  normalizeToolTask,
-  parseToolTasks,
-} from "./normalize.js";
+import { normalizeToolDefinition, normalizeToolTask, parseToolTasks } from "./normalize.js";
 import { resolveExecutionProfile } from "./profiles.js";
 import { deliverBatchedResults } from "./results.js";
 import type {
@@ -38,14 +34,9 @@ export class ToolScheduler {
     this.#options = options;
   }
 
-  async execute(
-    taskInputs: readonly (ToolTaskInput | ToolTask)[],
-  ): Promise<ExecutionReport> {
+  async execute(taskInputs: readonly (ToolTaskInput | ToolTask)[]): Promise<ExecutionReport> {
     const tasks = this.prepareTasks(taskInputs);
-    const profile = resolveExecutionProfile(
-      this.#options.profile,
-      this.#options.profiles,
-    );
+    const profile = resolveExecutionProfile(this.#options.profile, this.#options.profiles);
     const directLimits = {
       ...this.#options.limits,
       maxConcurrency: this.#options.maxConcurrency,
@@ -85,10 +76,7 @@ export class ToolScheduler {
 
       if (wave.length === 0) {
         for (const task of pending.values()) {
-          results.set(
-            task.id,
-            blockedResult(task, "Task dependencies cannot be resolved."),
-          );
+          results.set(task.id, blockedResult(task, "Task dependencies cannot be resolved."));
         }
         break;
       }
@@ -102,9 +90,7 @@ export class ToolScheduler {
       }
 
       const settled = await Promise.allSettled(
-        executable.map((task) =>
-          this.executeOne(task, approval, idempotency, lifecycleStarts),
-        ),
+        executable.map((task) => this.executeOne(task, approval, idempotency, lifecycleStarts)),
       );
       toolCalls += executable.length;
 
@@ -120,15 +106,11 @@ export class ToolScheduler {
       });
     }
 
-    const ordered = tasks.map((task) =>
-      results.get(task.id) ?? blockedResult(task, "Task did not run."),
+    const ordered = tasks.map(
+      (task) => results.get(task.id) ?? blockedResult(task, "Task did not run."),
     );
     for (const [index, result] of ordered.entries()) {
-      await this.emitTerminalEvent(
-        tasks[index],
-        result,
-        lifecycleStarts.get(result.id),
-      );
+      await this.emitTerminalEvent(tasks[index], result, lifecycleStarts.get(result.id));
     }
     const batchSize = limits.batchSize ?? Math.max(1, ordered.length);
     const batches = this.#options.onBatch
@@ -138,10 +120,7 @@ export class ToolScheduler {
         : [ordered];
     const resolvedModel =
       this.#options.models && this.#options.models.length > 0
-        ? resolveModel(
-            this.#options.model ?? profile.model,
-            this.#options.models,
-          )
+        ? resolveModel(this.#options.model ?? profile.model, this.#options.models)
         : undefined;
 
     return {
@@ -153,9 +132,7 @@ export class ToolScheduler {
     };
   }
 
-  private prepareTasks(
-    inputs: readonly (ToolTaskInput | ToolTask)[],
-  ): ToolTask[] {
+  private prepareTasks(inputs: readonly (ToolTaskInput | ToolTask)[]): ToolTask[] {
     const parsed = parseToolTasks(inputs);
     const registry = this.#options.handlers ?? this.#options.tools ?? {};
 
@@ -170,20 +147,16 @@ export class ToolScheduler {
           : definition.resourceKey;
       return normalizeToolTask({
         ...task,
-        operation:
-          raw.operation ?? raw.kind ?? raw.type ?? definition.operation ?? task.operation,
+        operation: raw.operation ?? raw.kind ?? raw.type ?? definition.operation ?? task.operation,
         resourceKey: task.resourceKey ?? resourceKey,
-        requiresApproval:
-          task.requiresApproval || definition.requiresApproval || false,
+        requiresApproval: task.requiresApproval || definition.requiresApproval || false,
         concurrencyKey: task.concurrencyKey ?? definition.concurrencyKey,
         execute: task.execute ?? task.handler ?? definition.execute,
       });
     });
   }
 
-  private createApprovalGate(
-    profilePolicy: ApprovalPolicy,
-  ): ApprovalGate {
+  private createApprovalGate(profilePolicy: ApprovalPolicy): ApprovalGate {
     if (this.#options.approvalGate instanceof ApprovalGate) {
       return this.#options.approvalGate;
     }
@@ -220,18 +193,15 @@ export class ToolScheduler {
     if (!modeDecision.allowed) {
       return baseResult(task, "denied", { reason: modeDecision.reason });
     }
-    const approvalTask = modeDecision.requiresApproval
-      ? { ...task, requiresApproval: true }
-      : task;
+    const approvalTask = modeDecision.requiresApproval ? { ...task, requiresApproval: true } : task;
     const decision = await approval.request(approvalTask);
-    const approved =
-      typeof decision === "boolean" ? decision : decision.approved;
+    const approved = typeof decision === "boolean" ? decision : decision.approved;
     if (!approved) {
       return baseResult(task, "denied", {
         reason:
           typeof decision === "boolean"
             ? "Approval denied."
-            : decision.reason ?? "Approval denied.",
+            : (decision.reason ?? "Approval denied."),
       });
     }
 
@@ -245,13 +215,8 @@ export class ToolScheduler {
       });
     }
 
-    const requireWriteIdempotency =
-      this.#options.requireWriteIdempotency ?? true;
-    if (
-      task.operation === "write" &&
-      requireWriteIdempotency &&
-      !task.idempotencyKey
-    ) {
+    const requireWriteIdempotency = this.#options.requireWriteIdempotency ?? true;
+    if (task.operation === "write" && requireWriteIdempotency && !task.idempotencyKey) {
       return baseResult(task, "rejected", {
         error: {
           name: "MissingIdempotencyKeyError",
@@ -270,18 +235,15 @@ export class ToolScheduler {
     const previous = journal ? await journal.get(runId, task.id) : undefined;
     if (
       previous &&
-      (
-        previous.toolId !== task.name ||
+      (previous.toolId !== task.name ||
         previous.operation !== task.operation ||
         stableJson(previous.input ?? {}) !== stableJson(jsonObject(task.input)) ||
-        previous.idempotencyKey !== key
-      )
+        previous.idempotencyKey !== key)
     ) {
       return baseResult(task, "rejected", {
         error: {
           name: "ToolReplayMismatchError",
-          message:
-            "The recovered tool call does not match its admitted journal record.",
+          message: "The recovered tool call does not match its admitted journal record.",
           code: "tool_replay_mismatch",
         },
       });
@@ -291,8 +253,7 @@ export class ToolScheduler {
         error: {
           name: "UnknownToolOutcomeError",
           message:
-            previous.error?.message ??
-            "The prior tool result is unknown and cannot be repeated.",
+            previous.error?.message ?? "The prior tool result is unknown and cannot be repeated.",
           code: "tool_outcome_unknown",
         },
         idempotencyKey: previous.idempotencyKey,
@@ -360,11 +321,13 @@ export class ToolScheduler {
 
     try {
       const run = async () =>
-        redactSecrets(await handler(task.input, {
-          task,
-          signal: this.#options.signal ?? { aborted: false },
-          attempt: 1,
-        }));
+        redactSecrets(
+          await handler(task.input, {
+            task,
+            signal: this.#options.signal ?? { aborted: false },
+            attempt: 1,
+          }),
+        );
       const executed = key
         ? await idempotency.execute(key, run)
         : { value: await run(), reused: false };
@@ -395,8 +358,7 @@ export class ToolScheduler {
     } catch (error) {
       const unknown =
         task.operation === "write" &&
-        (this.#options.isUnknownToolOutcome?.(error, task) ??
-          !isExplicitlySafeToRetry(error));
+        (this.#options.isUnknownToolOutcome?.(error, task) ?? !isExplicitlySafeToRetry(error));
       if (journal) {
         await journal.put(
           ToolExecutionJournalRecordSchema.parse({
@@ -437,10 +399,7 @@ export class ToolScheduler {
   ): Promise<void> {
     if (!this.#options.onToolEvent) return;
     const occurredAt = new Date().toISOString();
-    const durationMs = Math.max(
-      0,
-      startedAt === undefined ? 0 : Date.now() - startedAt,
-    );
+    const durationMs = Math.max(0, startedAt === undefined ? 0 : Date.now() - startedAt);
     const metadata = lifecycleMetadata(task);
     if (result.status === "fulfilled") {
       await this.emitToolEvent({
@@ -467,10 +426,7 @@ export class ToolScheduler {
       status: result.status,
       error: {
         code: result.error?.code ?? `tool_${result.status}`,
-        message:
-          result.error?.message ??
-          result.reason ??
-          `Tool ${result.name} did not complete`,
+        message: result.error?.message ?? result.reason ?? `Tool ${result.name} did not complete`,
       },
       ...(metadata ? { metadata } : {}),
     });
@@ -531,9 +487,7 @@ function selectWave(
     if (task.operation === "read" && reads >= readParallelism) continue;
 
     const writeKey =
-      task.operation === "write"
-        ? task.resourceKey ?? `tool:${task.name}`
-        : undefined;
+      task.operation === "write" ? (task.resourceKey ?? `tool:${task.name}`) : undefined;
     if (writeKey && writes.has(writeKey)) continue;
 
     const concurrencyKey = task.concurrencyKey;
@@ -583,10 +537,7 @@ function rejectedResult(
 
 function normalizeError(error: unknown): ExecutionError {
   if (error instanceof Error) {
-    const code =
-      "code" in error && typeof error.code === "string"
-        ? error.code
-        : undefined;
+    const code = "code" in error && typeof error.code === "string" ? error.code : undefined;
     return {
       name: error.name || "Error",
       message: redactErrorMessage(error.message, "Tool execution failed."),
@@ -599,10 +550,7 @@ function normalizeError(error: unknown): ExecutionError {
   };
 }
 
-function enforceResultSize(
-  result: ToolExecutionResult,
-  maxResultBytes?: number,
-): void {
+function enforceResultSize(result: ToolExecutionResult, maxResultBytes?: number): void {
   if (maxResultBytes === undefined) return;
   const size = new TextEncoder().encode(JSON.stringify(result.value)).byteLength;
   if (size > maxResultBytes) {
@@ -637,9 +585,7 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value, (_key, item: unknown) =>
     typeof item === "object" && item !== null && !Array.isArray(item)
       ? Object.fromEntries(
-          Object.entries(item).sort(([left], [right]) =>
-            left.localeCompare(right),
-          ),
+          Object.entries(item).sort(([left], [right]) => left.localeCompare(right)),
         )
       : item,
   );

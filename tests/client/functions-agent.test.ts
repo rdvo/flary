@@ -90,7 +90,7 @@ test("the typed function client exposes persistent agent thread handles", async 
       "/api/flary/apps/coder/threads/thread_1/models",
       "/api/flary/apps/coder/threads/thread_1/model/history",
       "/api/flary/apps/coder/threads/thread_1/audit",
-    ]
+    ],
   );
   assert.ok(requests[1]);
   assert.equal((requests[1].body as { mode?: string }).mode, "steer");

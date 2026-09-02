@@ -15,20 +15,13 @@ async function json<T>(url: string, init?: RequestInit): Promise<T> {
     error?: string | { message?: string };
   };
   if (!response.ok) {
-    const message =
-      typeof value.error === "string" ? value.error : value.error?.message;
+    const message = typeof value.error === "string" ? value.error : value.error?.message;
     throw new Error(message || "The request failed.");
   }
   return value;
 }
 
-function AccessForm({
-  mode,
-  onReady,
-}: {
-  mode: "setup" | "login";
-  onReady(): void;
-}) {
+function AccessForm({ mode, onReady }: { mode: "setup" | "login"; onReady(): void }) {
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -36,9 +29,7 @@ function AccessForm({
     setBusy(true);
     setError(undefined);
     try {
-      const body = JSON.stringify(
-        Object.fromEntries(new FormData(event.currentTarget))
-      );
+      const body = JSON.stringify(Object.fromEntries(new FormData(event.currentTarget)));
       await json(mode === "setup" ? "/api/setup" : "/api/auth/sign-in/email", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -67,12 +58,7 @@ function AccessForm({
             <>
               <label>
                 Setup token
-                <input
-                  name="token"
-                  type="password"
-                  required
-                  autoComplete="off"
-                />
+                <input name="token" type="password" required autoComplete="off" />
               </label>
               <label>
                 Name
@@ -91,9 +77,7 @@ function AccessForm({
               type="password"
               minLength={mode === "setup" ? 10 : undefined}
               required
-              autoComplete={
-                mode === "setup" ? "new-password" : "current-password"
-              }
+              autoComplete={mode === "setup" ? "new-password" : "current-password"}
             />
           </label>
           {error ? <p className="access-error">{error}</p> : null}
@@ -114,7 +98,7 @@ function Dashboard() {
       const setup = await json<{ open: boolean }>("/api/setup/status");
       if (setup.open) return active && setGate("setup");
       const session = (await fetch("/api/auth/get-session").then((response) =>
-        response.json()
+        response.json(),
       )) as { user?: unknown } | null;
       if (active) setGate(session?.user ? "ready" : "login");
     })().catch(() => {
@@ -135,10 +119,7 @@ function Dashboard() {
         title="Flary"
         welcomeTitle="Start anywhere"
         welcomeMessage="Ask a question, assign work, or use a connected tool. The thread stays durable when this tab closes."
-        suggestions={[
-          "Summarize what needs attention",
-          "List the tools you can use",
-        ]}
+        suggestions={["Summarize what needs attention", "List the tools you can use"]}
         headerActions={
           <nav className="console-nav">
             <a href="/connections">Connections</a>
@@ -153,7 +134,7 @@ function Dashboard() {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <Dashboard />
-  </StrictMode>
+  </StrictMode>,
 );
 
 const style = document.createElement("style");

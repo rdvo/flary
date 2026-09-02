@@ -4,10 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { FlaryThreadMetadataStore } from "../../src/harness/cloudflare/thread-metadata.js";
 import { SqliteToolExecutionJournal } from "../../src/harness/cloudflare/tool-journal.js";
-import {
-  ApprovalDecisionSchema,
-  type ThreadRef,
-} from "../../src/harness/contracts/index.js";
+import { ApprovalDecisionSchema, type ThreadRef } from "../../src/harness/contracts/index.js";
 
 type SqlDatabase = {
   exec(query: string): void;
@@ -21,20 +18,14 @@ function sqlStore() {
   const database = new DatabaseSync(":memory:") as unknown as SqlDatabase;
   return {
     database,
-    exec<T = Record<string, unknown>>(
-      query: string,
-      ...bindings: unknown[]
-    ): { toArray(): T[] } {
+    exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): { toArray(): T[] } {
       const trimmed = query.trim().toLowerCase();
       if (bindings.length === 0 && !/^(select|with|pragma|explain)\b/.test(trimmed)) {
         database.exec(query);
         return { toArray: () => [] };
       }
       const statement = database.prepare(query);
-      if (
-        /^(select|with|pragma|explain)\b/.test(trimmed) ||
-        /\breturning\b/.test(trimmed)
-      ) {
+      if (/^(select|with|pragma|explain)\b/.test(trimmed) || /\breturning\b/.test(trimmed)) {
         return { toArray: () => statement.all(...bindings) as T[] };
       }
       statement.run(...bindings);
@@ -122,13 +113,7 @@ test("thread metadata persists an exact approval and safe lifecycle events", () 
   const events = store.listEvents("run_metadata_1");
   assert.deepEqual(
     events.map((event) => (event as { type: string }).type),
-    [
-      "approval.requested",
-      "run.waiting",
-      "tool.started",
-      "approval.resolved",
-      "tool.completed",
-    ],
+    ["approval.requested", "run.waiting", "tool.started", "approval.resolved", "tool.completed"],
   );
   assert.equal(JSON.stringify(events).includes("sk-do-not-persist-in-events"), false);
 });
@@ -157,12 +142,13 @@ test("approval records stay isolated to their thread Durable Object", () => {
   assert.equal(secondStore.listApprovals().length, 0);
   assert.equal(secondStore.listEvents().length, 0);
   assert.throws(
-    () => secondStore.decideApproval({
-      requestId: request.id,
-      status: "approved",
-      decidedBy: { id: "other_user", kind: "user", version: "1" },
-      decidedAt: new Date().toISOString(),
-    }),
+    () =>
+      secondStore.decideApproval({
+        requestId: request.id,
+        status: "approved",
+        decidedBy: { id: "other_user", kind: "user", version: "1" },
+        decidedAt: new Date().toISOString(),
+      }),
     /not found/i,
   );
 });
@@ -193,8 +179,5 @@ test("the SQLite tool journal claims a started write once", async () => {
     },
     completedAt: new Date().toISOString(),
   });
-  assert.equal(
-    (await journal.get(record.runId, record.callId))?.state,
-    "outcome_unknown",
-  );
+  assert.equal((await journal.get(record.runId, record.callId))?.state, "outcome_unknown");
 });

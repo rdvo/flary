@@ -8,10 +8,7 @@ import {
   type AgentRuntimeConfig,
   type WorkflowDefinition,
 } from "@flue/runtime";
-import {
-  buildPackagedSkill,
-  createSkillReference,
-} from "@flue/runtime/internal";
+import { buildPackagedSkill, createSkillReference } from "@flue/runtime/internal";
 import * as v from "valibot";
 import { z } from "zod";
 
@@ -22,10 +19,7 @@ import { parseThreadName } from "../storage/scopes.js";
 import { recordResolvedAgentPrompt } from "../cloudflare/prompt-trace.js";
 import { getAgentState, getFunctionState } from "./app.js";
 import type { FlaryAgent, FlaryFunction } from "./types.js";
-import {
-  ApprovalDecisionSchema,
-  type ApprovalDecision,
-} from "../contracts/index.js";
+import { ApprovalDecisionSchema, type ApprovalDecision } from "../contracts/index.js";
 import {
   UserInputQuestionSchema,
   UserInputRecordSchema,
@@ -40,10 +34,7 @@ import {
   type SecretRequestMetadata,
   type SecretRequestResult,
 } from "../contracts/secrets.js";
-import {
-  createFlueRequestSecretTool,
-  createFlueRequestUserInputTool,
-} from "../flue/tools.js";
+import { createFlueRequestSecretTool, createFlueRequestUserInputTool } from "../flue/tools.js";
 import { frameRestoredUserInputResponse } from "../tools/user-input.js";
 import type {
   ApprovalContinuation,
@@ -52,10 +43,7 @@ import type {
   ApprovalRecoveryState,
 } from "../execution/approval-continuation.js";
 import type { UserInputQuestion, UserInputRecord } from "../contracts/user-input.js";
-import {
-  coreToolGuidance,
-  executeToolDescription,
-} from "./tool-guidance.js";
+import { coreToolGuidance, executeToolDescription } from "./tool-guidance.js";
 
 const WorkflowEnvelopeSchema = v.object({
   __flary: v.object({
@@ -69,9 +57,7 @@ const WorkflowEnvelopeSchema = v.object({
  * Compile one function-first definition into the existing Flue workflow
  * runtime. The returned value is a normal discovered Flue workflow.
  */
-export function defineFlaryFunctionWorkflow(
-  fn: FlaryFunction<any, any, any>,
-): WorkflowDefinition {
+export function defineFlaryFunctionWorkflow(fn: FlaryFunction<any, any, any>): WorkflowDefinition {
   const state = getFunctionState(fn);
   if (!state) {
     throw new Error("The value is not a Flary function");
@@ -81,10 +67,7 @@ export function defineFlaryFunctionWorkflow(
     throw new Error("Only native Flary functions compile to Flue workflows");
   }
   const model = definition.model ?? state.app.options.model ?? "openai/gpt-5";
-  const timeoutMs = functionTimeoutMs(
-    definition.durable?.timeout,
-    definition.limits?.timeoutMs,
-  );
+  const timeoutMs = functionTimeoutMs(definition.durable?.timeout, definition.limits?.timeoutMs);
 
   const agent = defineAgent(async ({ env, id }): Promise<AgentRuntimeConfig> => {
     const codemodeContinuation = definition.tools
@@ -93,11 +76,7 @@ export function defineFlaryFunctionWorkflow(
           runId: id,
         })
       : undefined;
-    const userInputTool = createFlaryUserInputTool(
-      env,
-      id,
-      definition.askUser !== false,
-    );
+    const userInputTool = createFlaryUserInputTool(env, id, definition.askUser !== false);
     const secretRequestTool = createFlarySecretRequestTool(
       env,
       id,
@@ -105,56 +84,52 @@ export function defineFlaryFunctionWorkflow(
     );
     const approvalContinuation = combineContinuations(
       codemodeContinuation,
-      definition.askUser === false
-        ? undefined
-        : createFlaryUserInputContinuation(env, id),
+      definition.askUser === false ? undefined : createFlaryUserInputContinuation(env, id),
       definition.requestSecrets === true
         ? createFlarySecretRequestContinuation(env, id)
         : undefined,
     );
     const subagents = await functionSubagents(fn, env, id);
     return {
-    model,
-    instructions: functionInstructions(
-      fn,
-      Boolean(userInputTool),
-      Boolean(secretRequestTool),
-    ),
-    ...(definition.thinking
-      ? { thinkingLevel: toFlueThinkingLevel(definition.thinking as never) }
-      : {}),
-    durability: {
-      maxAttempts: definition.durable?.maxAttempts ?? 10,
-      timeoutMs,
-    },
-    ...(definition.tools || userInputTool || secretRequestTool
-      ? {
-          tools: [
-            ...(definition.tools
-                ? [defineTool({
-                  name: "execute",
-                  description: executeToolDescription(definition.tools, definition.eagerTools),
-                  input: v.object({ code: v.string() }),
-                  async run({ input, signal }) {
-                    return toJson(
-                      await state.app.executeCodeFromWorkflow(fn, {
-                        code: input.code,
-                        bindings: env,
-                        runId: id,
-                        signal,
-                      }),
-                    );
-                  },
-                })]
-              : []),
-            ...(userInputTool ? [userInputTool] : []),
-            ...(secretRequestTool ? [secretRequestTool] : []),
-          ],
-        }
-      : {}),
-    ...(subagents.length > 0 ? { subagents } : {}),
-    ...(approvalContinuation ? { approvalContinuation } : {}),
-  };
+      model,
+      instructions: functionInstructions(fn, Boolean(userInputTool), Boolean(secretRequestTool)),
+      ...(definition.thinking
+        ? { thinkingLevel: toFlueThinkingLevel(definition.thinking as never) }
+        : {}),
+      durability: {
+        maxAttempts: definition.durable?.maxAttempts ?? 10,
+        timeoutMs,
+      },
+      ...(definition.tools || userInputTool || secretRequestTool
+        ? {
+            tools: [
+              ...(definition.tools
+                ? [
+                    defineTool({
+                      name: "execute",
+                      description: executeToolDescription(definition.tools, definition.eagerTools),
+                      input: v.object({ code: v.string() }),
+                      async run({ input, signal }) {
+                        return toJson(
+                          await state.app.executeCodeFromWorkflow(fn, {
+                            code: input.code,
+                            bindings: env,
+                            runId: id,
+                            signal,
+                          }),
+                        );
+                      },
+                    }),
+                  ]
+                : []),
+              ...(userInputTool ? [userInputTool] : []),
+              ...(secretRequestTool ? [secretRequestTool] : []),
+            ],
+          }
+        : {}),
+      ...(subagents.length > 0 ? { subagents } : {}),
+      ...(approvalContinuation ? { approvalContinuation } : {}),
+    };
   });
 
   return defineWorkflow({
@@ -167,8 +142,7 @@ export function defineFlaryFunctionWorkflow(
       return toJson(
         await state.app.invokeFromWorkflow(fn, {
           input: input.input,
-          bindings:
-            runtimeHarness.env ?? state.app.options.defaultBindings,
+          bindings: runtimeHarness.env ?? state.app.options.defaultBindings,
           runId: input.__flary.runId,
         }),
       );
@@ -177,9 +151,7 @@ export function defineFlaryFunctionWorkflow(
 }
 
 /** Compile one prompt-backed function into a persistent Flue agent. */
-export function defineFlaryFunctionAgent(
-  fn: FlaryFunction<any, any, any>,
-): AgentDefinition {
+export function defineFlaryFunctionAgent(fn: FlaryFunction<any, any, any>): AgentDefinition {
   const state = getFunctionState(fn);
   if (!state) throw new Error("The value is not a Flary function");
   if (state.mode !== "prompt") {
@@ -194,11 +166,7 @@ export function defineFlaryFunctionAgent(
           runId: id,
         })
       : undefined;
-    const userInputTool = createFlaryUserInputTool(
-      env,
-      id,
-      definition.askUser !== false,
-    );
+    const userInputTool = createFlaryUserInputTool(env, id, definition.askUser !== false);
     const secretRequestTool = createFlarySecretRequestTool(
       env,
       id,
@@ -206,66 +174,57 @@ export function defineFlaryFunctionAgent(
     );
     const approvalContinuation = combineContinuations(
       codemodeContinuation,
-      definition.askUser === false
-        ? undefined
-        : createFlaryUserInputContinuation(env, id),
+      definition.askUser === false ? undefined : createFlaryUserInputContinuation(env, id),
       definition.requestSecrets === true
         ? createFlarySecretRequestContinuation(env, id)
         : undefined,
     );
     const subagents = await functionSubagents(fn, env, id);
     return {
-    model,
-    instructions: functionInstructions(
-      fn,
-      Boolean(userInputTool),
-      Boolean(secretRequestTool),
-    ),
-    ...(definition.thinking
-      ? { thinkingLevel: toFlueThinkingLevel(definition.thinking as never) }
-      : {}),
-    durability: {
-      maxAttempts: definition.durable?.maxAttempts ?? 10,
-      timeoutMs: functionTimeoutMs(
-        definition.durable?.timeout,
-        definition.limits?.timeoutMs,
-      ),
-    },
-    ...(definition.tools || userInputTool || secretRequestTool
-      ? {
-          tools: [
-            ...(definition.tools
-                ? [defineTool({
-                  name: "execute",
-                  description: executeToolDescription(definition.tools, definition.eagerTools),
-                  input: v.object({ code: v.string() }),
-                  async run({ input, signal }) {
-                    return toJson(
-                      await state.app.executeCodeFromWorkflow(fn, {
-                        code: input.code,
-                        bindings: env,
-                        runId: id,
-                        signal,
-                      }),
-                    );
-                  },
-                })]
-              : []),
-            ...(userInputTool ? [userInputTool] : []),
-            ...(secretRequestTool ? [secretRequestTool] : []),
-          ],
-        }
-      : {}),
-    ...(subagents.length > 0 ? { subagents } : {}),
-    ...(approvalContinuation ? { approvalContinuation } : {}),
-  };
+      model,
+      instructions: functionInstructions(fn, Boolean(userInputTool), Boolean(secretRequestTool)),
+      ...(definition.thinking
+        ? { thinkingLevel: toFlueThinkingLevel(definition.thinking as never) }
+        : {}),
+      durability: {
+        maxAttempts: definition.durable?.maxAttempts ?? 10,
+        timeoutMs: functionTimeoutMs(definition.durable?.timeout, definition.limits?.timeoutMs),
+      },
+      ...(definition.tools || userInputTool || secretRequestTool
+        ? {
+            tools: [
+              ...(definition.tools
+                ? [
+                    defineTool({
+                      name: "execute",
+                      description: executeToolDescription(definition.tools, definition.eagerTools),
+                      input: v.object({ code: v.string() }),
+                      async run({ input, signal }) {
+                        return toJson(
+                          await state.app.executeCodeFromWorkflow(fn, {
+                            code: input.code,
+                            bindings: env,
+                            runId: id,
+                            signal,
+                          }),
+                        );
+                      },
+                    }),
+                  ]
+                : []),
+              ...(userInputTool ? [userInputTool] : []),
+              ...(secretRequestTool ? [secretRequestTool] : []),
+            ],
+          }
+        : {}),
+      ...(subagents.length > 0 ? { subagents } : {}),
+      ...(approvalContinuation ? { approvalContinuation } : {}),
+    };
   });
 }
 
 /** Compile a persistent `app.agent()` definition into the canonical Flue agent. */
-export function defineFlaryInteractiveAgent(
-  value: FlaryAgent<any>,
-): AgentDefinition {
+export function defineFlaryInteractiveAgent(value: FlaryAgent<any>): AgentDefinition {
   const rootState = getAgentState(value);
   if (!rootState) throw new Error("The value is not a Flary interactive agent");
   return defineAgent(async ({ env, id }): Promise<AgentRuntimeConfig> => {
@@ -276,28 +235,26 @@ export function defineFlaryInteractiveAgent(
     const active = interactiveAgentForRun(value, id);
     const state = getAgentState(active)!;
     const definition = state.definition;
-    const authoredInstructions = typeof definition.instructions === "function"
-      ? await definition.instructions({
-          bindings: env,
-          runId: id,
-          agentId: definition.name,
-        })
-      : definition.instructions;
-    const model = definition.model ??
+    const authoredInstructions =
+      typeof definition.instructions === "function"
+        ? await definition.instructions({
+            bindings: env,
+            runId: id,
+            agentId: definition.name,
+          })
+        : definition.instructions;
+    const model =
+      definition.model ??
       (definition.models?.allow[0]
         ? toFlueModelSpecifier(normalizeModelInput(definition.models.allow[0]))
-        : state.app.options.model ?? "openai/gpt-5");
+        : (state.app.options.model ?? "openai/gpt-5"));
     const codemodeContinuation = definition.tools
       ? await state.app.agentApprovalContinuation(active, {
           bindings: env,
           runId: id,
         })
       : undefined;
-    const userInputTool = createFlaryUserInputTool(
-      env,
-      id,
-      definition.askUser !== false,
-    );
+    const userInputTool = createFlaryUserInputTool(env, id, definition.askUser !== false);
     const secretRequestTool = createFlarySecretRequestTool(
       env,
       id,
@@ -305,32 +262,35 @@ export function defineFlaryInteractiveAgent(
     );
     const approvalContinuation = combineContinuations(
       codemodeContinuation,
-      definition.askUser === false
-        ? undefined
-        : createFlaryUserInputContinuation(env, id),
+      definition.askUser === false ? undefined : createFlaryUserInputContinuation(env, id),
       definition.requestSecrets === false
         ? undefined
         : createFlarySecretRequestContinuation(env, id),
     );
-    const coordinationTools = definition.delegation?.mode === "disabled"
-      ? []
-      : interactiveCoordinationTools(value, active, env, id);
+    const coordinationTools =
+      definition.delegation?.mode === "disabled"
+        ? []
+        : interactiveCoordinationTools(value, active, env, id);
     const tools = [
       ...(definition.tools
-        ? [defineTool({
-            name: "execute",
-            description: executeToolDescription(definition.tools, definition.eagerTools),
-            input: v.object({ code: v.string() }),
-            async run({ input, signal }) {
-              return toJson(await state.app.executeAgentCode(active, {
-                code: input.code,
-                bindings: env,
-                runId: id,
-                executionId: crypto.randomUUID(),
-                signal,
-              }));
-            },
-          })]
+        ? [
+            defineTool({
+              name: "execute",
+              description: executeToolDescription(definition.tools, definition.eagerTools),
+              input: v.object({ code: v.string() }),
+              async run({ input, signal }) {
+                return toJson(
+                  await state.app.executeAgentCode(active, {
+                    code: input.code,
+                    bindings: env,
+                    runId: id,
+                    executionId: crypto.randomUUID(),
+                    signal,
+                  }),
+                );
+              },
+            }),
+          ]
         : []),
       ...(userInputTool ? [userInputTool] : []),
       ...(secretRequestTool ? [secretRequestTool] : []),
@@ -355,16 +315,13 @@ export function defineFlaryInteractiveAgent(
     return {
       model,
       instructions,
-      ...(definition.skills?.length
-        ? { skills: definition.skills.map(toFlueSkillReference) }
-        : {}),
+      ...(definition.skills?.length ? { skills: definition.skills.map(toFlueSkillReference) } : {}),
       ...(definition.description ? { description: definition.description } : {}),
       ...(definition.thinking
         ? { thinkingLevel: toFlueThinkingLevel(definition.thinking as never) }
         : {}),
       compaction:
-        definition.compaction?.mode === "auto" ||
-        definition.compaction?.mode === undefined
+        definition.compaction?.mode === "auto" || definition.compaction?.mode === undefined
           ? {
               ...(definition.models?.compactionModel
                 ? {
@@ -388,10 +345,7 @@ export function defineFlaryInteractiveAgent(
   });
 }
 
-function interactiveAgentForRun(
-  root: FlaryAgent<any>,
-  runId: string,
-): FlaryAgent<any> {
+function interactiveAgentForRun(root: FlaryAgent<any>, runId: string): FlaryAgent<any> {
   let agentId: string;
   try {
     agentId = parseThreadName(runId).agentId;
@@ -420,21 +374,20 @@ function interactiveCoordinationTools(
   runId: string,
 ) {
   const state = getAgentState(active)!;
-  const call = (
-    action: string,
-    value: Readonly<Record<string, unknown>> = {},
-  ) => state.app.agentSubagentAction(root, active, {
-    bindings: env,
-    runId,
-    action,
-    value,
-  });
+  const call = (action: string, value: Readonly<Record<string, unknown>> = {}) =>
+    state.app.agentSubagentAction(root, active, {
+      bindings: env,
+      runId,
+      action,
+      value,
+    });
   const children = Object.entries(active.definition.subagents ?? {});
-  const childHelp = children.length > 0
-    ? children.map(([name, child]) =>
-        `${name}: ${child.definition.description ?? child.name}`
-      ).join("; ")
-    : "No child agents are declared.";
+  const childHelp =
+    children.length > 0
+      ? children
+          .map(([name, child]) => `${name}: ${child.definition.description ?? child.name}`)
+          .join("; ")
+      : "No child agents are declared.";
   return [
     defineTool({
       name: "spawn_agent",
@@ -468,10 +421,12 @@ function interactiveCoordinationTools(
         kind: v.optional(v.picklist(["instruction", "progress", "question", "result", "control"])),
       }),
       async run({ input }) {
-        return toJson(await call("send", {
-          ...input,
-          toThreadId: input.threadId,
-        }));
+        return toJson(
+          await call("send", {
+            ...input,
+            toThreadId: input.threadId,
+          }),
+        );
       },
     }),
     defineTool({
@@ -514,9 +469,7 @@ function interactiveAgentInstructions(
   const state = getAgentState(value)!;
   const definition = state.definition;
   return [
-    authoredInstructions ??
-      definition.description ??
-      `Act as the ${definition.name} agent.`,
+    authoredInstructions ?? definition.description ?? `Act as the ${definition.name} agent.`,
     definition.mode ? `Operating mode: ${definition.mode}.` : "",
     definition.tools
       ? `You have one execute tool. ${coreToolGuidance(definition.tools, definition.eagerTools)}`
@@ -535,7 +488,9 @@ function interactiveAgentInstructions(
       : Object.keys(definition.subagents ?? {}).length > 0
         ? "You can start durable child agents, send messages to related agents, and wait for their results. Each child can use its own provider and model."
         : "",
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function toFlueSkillReference(skill: {
@@ -544,8 +499,7 @@ function toFlueSkillReference(skill: {
   readonly revision: string;
   readonly instructions: string;
 }) {
-  const description =
-    skill.description ?? `Instructions for ${skill.name}`;
+  const description = skill.description ?? `Instructions for ${skill.name}`;
   const markdown = [
     "---",
     `name: ${JSON.stringify(skill.name)}`,
@@ -561,10 +515,12 @@ function toFlueSkillReference(skill: {
     buildPackagedSkill({
       name: skill.name,
       description,
-      files: [{
-        path: "SKILL.md",
-        content: new TextEncoder().encode(markdown),
-      }],
+      files: [
+        {
+          path: "SKILL.md",
+          content: new TextEncoder().encode(markdown),
+        },
+      ],
     }),
   );
 }
@@ -575,10 +531,7 @@ function toFlueSkillReference(skill: {
  * The public function API performs tenant checks before it uses these routes.
  */
 export function flaryInternalRoute(
-  valueOrBinding:
-    | FlaryFunction<any, any, any>
-    | FlaryAgent<any>
-    | string = "FLARY_INTERNAL_TOKEN",
+  valueOrBinding: FlaryFunction<any, any, any> | FlaryAgent<any> | string = "FLARY_INTERNAL_TOKEN",
 ): (
   context: {
     readonly env: Record<string, unknown>;
@@ -591,19 +544,12 @@ export function flaryInternalRoute(
   },
   next: () => Promise<void>,
 ) => Promise<Response | void> {
-  const authoredValue =
-    typeof valueOrBinding === "string" ? undefined : valueOrBinding;
-  const binding = typeof valueOrBinding === "string"
-    ? valueOrBinding
-    : "FLARY_INTERNAL_TOKEN";
+  const authoredValue = typeof valueOrBinding === "string" ? undefined : valueOrBinding;
+  const binding = typeof valueOrBinding === "string" ? valueOrBinding : "FLARY_INTERNAL_TOKEN";
   return async (context, next) => {
     const expected = context.env[binding];
     const supplied = context.req.header("authorization");
-    if (
-      typeof expected !== "string" ||
-      expected.length < 32 ||
-      supplied !== `Bearer ${expected}`
-    ) {
+    if (typeof expected !== "string" || expected.length < 32 || supplied !== `Bearer ${expected}`) {
       return context.notFound();
     }
     const request = context.req.raw;
@@ -621,9 +567,7 @@ export function flaryInternalRoute(
     const functionState = getFunctionState(authoredValue);
     const agentState = getAgentState(authoredValue);
     if (!functionState && !agentState) return context.notFound();
-    const pathParts = request
-      ? new URL(request.url).pathname.split("/").filter(Boolean)
-      : [];
+    const pathParts = request ? new URL(request.url).pathname.split("/").filter(Boolean) : [];
     const runId = pathParts.at(-1) ?? "flary";
     const bridge = functionState
       ? await functionState.app.approvalBridgeFor(authoredValue, {
@@ -709,9 +653,12 @@ function jsonResponse(
   },
   value: unknown,
 ): Response {
-  return context.json?.(value) ?? new Response(JSON.stringify(value), {
-    headers: { "content-type": "application/json" },
-  });
+  return (
+    context.json?.(value) ??
+    new Response(JSON.stringify(value), {
+      headers: { "content-type": "application/json" },
+    })
+  );
 }
 
 function functionInstructions(
@@ -741,15 +688,13 @@ function functionInstructions(
         : definition.delegation?.mode === "auto"
           ? "Delegate independent work when it improves speed or correctness."
           : "",
-    definition.limits?.steps
-      ? `Stay within ${definition.limits.steps} model steps.`
-      : "",
-    definition.limits?.toolCalls
-      ? `Stay within ${definition.limits.toolCalls} tool calls.`
-      : "",
+    definition.limits?.steps ? `Stay within ${definition.limits.steps} model steps.` : "",
+    definition.limits?.toolCalls ? `Stay within ${definition.limits.toolCalls} tool calls.` : "",
     "Return only a value that matches this JSON Schema:",
     JSON.stringify(outputSchema),
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 /** Convert authored prompt functions into Flue's durable delegation profiles. */
@@ -769,36 +714,38 @@ async function functionSubagents(
     }
     const definition = child.definition;
     const tools = definition.tools
-      ? [defineTool({
-          name: "execute",
-          description: executeToolDescription(definition.tools, definition.eagerTools),
-          input: v.object({ code: v.string() }),
-          async run({ input, signal }) {
-            return toJson(await child.app.executeCodeFromWorkflow(candidate, {
-              code: input.code,
-              bindings: env,
-              runId: `${id}:task:${name}`,
-              signal,
-            }));
-          },
-        })]
+      ? [
+          defineTool({
+            name: "execute",
+            description: executeToolDescription(definition.tools, definition.eagerTools),
+            input: v.object({ code: v.string() }),
+            async run({ input, signal }) {
+              return toJson(
+                await child.app.executeCodeFromWorkflow(candidate, {
+                  code: input.code,
+                  bindings: env,
+                  runId: `${id}:task:${name}`,
+                  signal,
+                }),
+              );
+            },
+          }),
+        ]
       : undefined;
-    profiles.push(defineAgentProfile({
-      name,
-      ...(definition.description ? { description: definition.description } : {}),
-      ...(definition.model ?? child.app.options.model
-        ? { model: definition.model ?? child.app.options.model }
-        : {}),
-      instructions: functionInstructions(
-        candidate as FlaryFunction<any, any, any>,
-        false,
-        false,
-      ),
-      ...(definition.thinking
-        ? { thinkingLevel: toFlueThinkingLevel(definition.thinking as never) }
-        : {}),
-      ...(tools ? { tools } : {}),
-    }));
+    profiles.push(
+      defineAgentProfile({
+        name,
+        ...(definition.description ? { description: definition.description } : {}),
+        ...((definition.model ?? child.app.options.model)
+          ? { model: definition.model ?? child.app.options.model }
+          : {}),
+        instructions: functionInstructions(candidate as FlaryFunction<any, any, any>, false, false),
+        ...(definition.thinking
+          ? { thinkingLevel: toFlueThinkingLevel(definition.thinking as never) }
+          : {}),
+        ...(tools ? { tools } : {}),
+      }),
+    );
   }
   return profiles;
 }
@@ -807,11 +754,12 @@ function functionTimeoutMs(
   durable: number | string | undefined,
   limit: number | undefined,
 ): number {
-  const parsed = typeof durable === "number"
-    ? durable
-    : typeof durable === "string"
-      ? parseDuration(durable)
-      : 3_600_000;
+  const parsed =
+    typeof durable === "number"
+      ? durable
+      : typeof durable === "string"
+        ? parseDuration(durable)
+        : 3_600_000;
   return limit === undefined ? parsed : Math.min(parsed, limit);
 }
 
@@ -821,11 +769,15 @@ function parseDuration(value: string): number {
   const amount = Number(match[1]);
   const unit = match[2];
   const multiplier =
-    unit === "ms" ? 1 :
-    unit === "s" ? 1_000 :
-    unit === "m" ? 60_000 :
-    unit === "h" ? 3_600_000 :
-    86_400_000;
+    unit === "ms"
+      ? 1
+      : unit === "s"
+        ? 1_000
+        : unit === "m"
+          ? 60_000
+          : unit === "h"
+            ? 3_600_000
+            : 86_400_000;
   return amount * multiplier;
 }
 
@@ -871,12 +823,7 @@ function createFlaryUserInputTool(
         requestedAt: new Date().toISOString(),
         metadata: { flaryInputHash: inputHash },
       });
-      const stored = await flaryRuntimeRpc(
-        runtime,
-        token,
-        "createUserInput",
-        { runId, request },
-      );
+      const stored = await flaryRuntimeRpc(runtime, token, "createUserInput", { runId, request });
       const storedRequest = UserInputRequestSchema.parse(stored);
       await projectFlaryUserInput(env, runId, {
         sourceCursor: `user-input:${storedRequest.id}:requested`,
@@ -892,12 +839,10 @@ function createFlaryUserInputTool(
     async waitForResponse(request, signal) {
       while (true) {
         if (signal?.aborted) throw signal.reason ?? new Error("User-input wait was cancelled");
-        const value = await flaryRuntimeRpc(
-          runtime,
-          token,
-          "getUserInput",
-          { runId, requestId: request.id },
-        );
+        const value = await flaryRuntimeRpc(runtime, token, "getUserInput", {
+          runId,
+          requestId: request.id,
+        });
         if (value !== undefined && value !== null) {
           const record = UserInputRecordSchema.parse(value);
           if (record.response) return UserInputResponseSchema.parse(record.response);
@@ -935,22 +880,19 @@ function createFlarySecretRequestTool(
       const request = UserInputRequestSchema.parse({
         id: `secret_${shortHash(`${runId}:${inputHash}`)}`,
         threadId: runId,
-        questions: [{
-          header: "Secure credential",
-          question: `Enter ${input.label} in the protected credential form. Do not paste it into chat.`,
-          options: [],
-          multiSelect: false,
-        }],
+        questions: [
+          {
+            header: "Secure credential",
+            question: `Enter ${input.label} in the protected credential form. Do not paste it into chat.`,
+            options: [],
+            multiSelect: false,
+          },
+        ],
         requestedBy: { id: "flary", kind: "agent", version: "1" },
         requestedAt: new Date().toISOString(),
         metadata: { flarySecretRequest: secretMetadata },
       });
-      const stored = await flaryRuntimeRpc(
-        runtime,
-        token,
-        "createUserInput",
-        { runId, request },
-      );
+      const stored = await flaryRuntimeRpc(runtime, token, "createUserInput", { runId, request });
       const storedRequest = UserInputRequestSchema.parse(stored);
       await projectFlaryUserInput(env, runId, {
         sourceCursor: `secret:${storedRequest.id}:requested`,
@@ -968,12 +910,10 @@ function createFlarySecretRequestTool(
         if (signal?.aborted) {
           throw signal.reason ?? new Error("Secret request was cancelled");
         }
-        const value = await flaryRuntimeRpc(
-          runtime,
-          token,
-          "getUserInput",
-          { runId, requestId: request.id },
-        );
+        const value = await flaryRuntimeRpc(runtime, token, "getUserInput", {
+          runId,
+          requestId: request.id,
+        });
         if (value !== undefined && value !== null) {
           const record = UserInputRecordSchema.parse(value);
           if (record.response) return secretResultFromRecord(record);
@@ -993,19 +933,12 @@ function createFlaryUserInputContinuation(
   const token = flaryInternalToken(env);
   if (!runtime || !token) return undefined;
 
-  const find = async (
-    input: ApprovalRecoveryCall,
-  ): Promise<UserInputRecord | undefined> => {
+  const find = async (input: ApprovalRecoveryCall): Promise<UserInputRecord | undefined> => {
     if (input.toolName !== "request_user_input") return undefined;
     const questions = normalizeUserInputQuestions(input.arguments.questions);
     if (!questions) return undefined;
     const inputHash = shortHash(stableJson(questions));
-    const value = await flaryRuntimeRpc(
-      runtime,
-      token,
-      "listUserInput",
-      { runId },
-    );
+    const value = await flaryRuntimeRpc(runtime, token, "listUserInput", { runId });
     if (!Array.isArray(value)) return undefined;
     const records = value
       .map((item) => {
@@ -1051,9 +984,7 @@ function createFlarySecretRequestContinuation(
   const token = flaryInternalToken(env);
   if (!runtime || !token) return undefined;
 
-  const find = async (
-    input: ApprovalRecoveryCall,
-  ): Promise<UserInputRecord | undefined> => {
+  const find = async (input: ApprovalRecoveryCall): Promise<UserInputRecord | undefined> => {
     if (input.toolName !== "request_secret") return undefined;
     let requested: CollectApiKeyRequest;
     try {
@@ -1132,9 +1063,7 @@ function combineContinuations(
   };
 }
 
-function secretRequestMetadata(
-  record: UserInputRecord,
-): SecretRequestMetadata | undefined {
+function secretRequestMetadata(record: UserInputRecord): SecretRequestMetadata | undefined {
   const value = record.request.metadata?.flarySecretRequest;
   const parsed = SecretRequestMetadataSchema.safeParse(value);
   return parsed.success ? parsed.data : undefined;
@@ -1158,10 +1087,12 @@ function secretResultFromRecord(record: UserInputRecord): SecretRequestResult {
 function normalizeUserInputQuestions(value: unknown): UserInputQuestion[] | undefined {
   if (!Array.isArray(value)) return undefined;
   try {
-    return UserInputQuestionSchema.array().parse(value.map((question) => {
-      if (!isRecord(question)) return question;
-      return { ...question, multiSelect: question.multiSelect ?? false };
-    }));
+    return UserInputQuestionSchema.array().parse(
+      value.map((question) => {
+        if (!isRecord(question)) return question;
+        return { ...question, multiSelect: question.multiSelect ?? false };
+      }),
+    );
   } catch {
     return undefined;
   }
@@ -1174,20 +1105,22 @@ async function flaryRuntimeRpc(
   body: Record<string, unknown>,
 ): Promise<unknown> {
   const stub = runtime.get(runtime.idFromName("default"));
-  const response = await stub.fetch(new Request(`https://flary.internal/rpc/${method}`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(body),
-  }));
+  const response = await stub.fetch(
+    new Request(`https://flary.internal/rpc/${method}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    }),
+  );
   const value = await response.json().catch(() => undefined);
   if (!response.ok) {
-    const message = isRecord(value) && isRecord(value.error) &&
-        typeof value.error.message === "string"
-      ? value.error.message
-      : `Flary Runtime Durable Object request failed (${response.status})`;
+    const message =
+      isRecord(value) && isRecord(value.error) && typeof value.error.message === "string"
+        ? value.error.message
+        : `Flary Runtime Durable Object request failed (${response.status})`;
     throw new Error(message);
   }
   return value;
@@ -1196,9 +1129,8 @@ async function flaryRuntimeRpc(
 function flaryRuntime(env: unknown): FlaryRuntimeNamespace | undefined {
   if (!isRecord(env)) return undefined;
   const value = env.FLARY_RUN_SERVICE;
-  if (!isRecord(value) ||
-      typeof value.idFromName !== "function" ||
-      typeof value.get !== "function") return undefined;
+  if (!isRecord(value) || typeof value.idFromName !== "function" || typeof value.get !== "function")
+    return undefined;
   return value as unknown as FlaryRuntimeNamespace;
 }
 
@@ -1215,22 +1147,25 @@ async function projectFlaryUserInput(
   const thread = parseThreadName(runId);
   const name = `thread:${thread.organizationId}:${thread.appId}:${thread.threadId}`;
   const stub = namespace.get(namespace.idFromName(name));
-  const response = await stub.fetch(new Request("https://flary.internal/project", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      method: "project",
-      tenantId: thread.organizationId,
-      applicationId: thread.appId,
-      sourceCursor: input.sourceCursor,
-      event: input.event,
+  const response = await stub.fetch(
+    new Request("https://flary.internal/project", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "project",
+        tenantId: thread.organizationId,
+        applicationId: thread.appId,
+        sourceCursor: input.sourceCursor,
+        event: input.event,
+      }),
     }),
-  }));
+  );
   if (!response.ok) {
     const value = await response.json().catch(() => undefined);
-    const message = isRecord(value) && typeof value.error === "string"
-      ? value.error
-      : `Thread Control rejected user input (${response.status})`;
+    const message =
+      isRecord(value) && typeof value.error === "string"
+        ? value.error
+        : `Thread Control rejected user input (${response.status})`;
     throw new Error(message);
   }
 }
@@ -1238,9 +1173,8 @@ async function projectFlaryUserInput(
 function flaryThreadControl(env: unknown): FlaryRuntimeNamespace | undefined {
   if (!isRecord(env)) return undefined;
   const value = env.FLARY_THREAD_CONTROL;
-  if (!isRecord(value) ||
-      typeof value.idFromName !== "function" ||
-      typeof value.get !== "function") return undefined;
+  if (!isRecord(value) || typeof value.idFromName !== "function" || typeof value.get !== "function")
+    return undefined;
   return value as unknown as FlaryRuntimeNamespace;
 }
 
@@ -1252,7 +1186,10 @@ function flaryInternalToken(env: unknown): string | undefined {
 function stableJson(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`).join(",")}}`;
+  return `{${Object.keys(value)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`)
+    .join(",")}}`;
 }
 
 function shortHash(value: string): string {
@@ -1268,10 +1205,14 @@ function delayWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.resolve();
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);
-    signal?.addEventListener("abort", () => {
-      clearTimeout(timer);
-      resolve();
-    }, { once: true });
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
   });
 }
 

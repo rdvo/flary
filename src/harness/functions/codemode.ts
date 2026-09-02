@@ -27,11 +27,7 @@ import type {
 } from "./types.js";
 import { ApprovalRequestSchema } from "../contracts/index.js";
 import { JsonObjectSchema } from "../contracts/common.js";
-import {
-  redactErrorMessage,
-  redactSecrets,
-  redactText,
-} from "../execution/redaction.js";
+import { redactErrorMessage, redactSecrets, redactText } from "../execution/redaction.js";
 import { createMcpConnection, mcpSessionUuid } from "./mcp.js";
 import { createOpenApiRuntime } from "./openapi.js";
 import { getFunctionState } from "./app.js";
@@ -82,28 +78,28 @@ export interface FlaryCodemodeExecutorOptions<TBindings = unknown> {
     input: {
       readonly bindings: TBindings;
       readonly context: FlaryStepContext<TBindings>;
-    }
+    },
   ) => FlaryMcpConnection | Promise<FlaryMcpConnection>;
   readonly resolveOpenApi?: (
     source: FlaryOpenApiSource,
     input: {
       readonly bindings: TBindings;
       readonly context: FlaryStepContext<TBindings>;
-    }
+    },
   ) => FlaryOpenApiRuntime | Promise<FlaryOpenApiRuntime>;
   readonly resolveWorkspace?: (
     source: FlaryWorkspaceSource,
     input: {
       readonly bindings: TBindings;
       readonly context: FlaryStepContext<TBindings>;
-    }
+    },
   ) => FlaryToolConnection | Promise<FlaryToolConnection>;
   readonly resolveR2?: (
     source: FlaryR2Source,
     input: {
       readonly bindings: TBindings;
       readonly context: FlaryStepContext<TBindings>;
-    }
+    },
   ) => FlaryToolConnection | Promise<FlaryToolConnection>;
   readonly resolveSandbox?: (
     source: FlarySandboxSource,
@@ -111,7 +107,7 @@ export interface FlaryCodemodeExecutorOptions<TBindings = unknown> {
       readonly bindings: TBindings;
       readonly context: FlaryStepContext<TBindings>;
       readonly storage?: unknown;
-    }
+    },
   ) => FlaryToolConnection | Promise<FlaryToolConnection>;
   readonly resolveBrowser?: (
     source: FlaryBrowserSource,
@@ -119,15 +115,12 @@ export interface FlaryCodemodeExecutorOptions<TBindings = unknown> {
       readonly bindings: TBindings;
       readonly context: FlaryStepContext<TBindings>;
       readonly storage?: unknown;
-    }
+    },
   ) => FlaryToolConnection | Promise<FlaryToolConnection>;
 }
 
 export class FlaryCodeExecutionError extends Error {
-  readonly code:
-    | "flary_code_execution_failed"
-    | "flary_code_execution_paused"
-    | "approval_pending";
+  readonly code: "flary_code_execution_failed" | "flary_code_execution_paused" | "approval_pending";
   readonly executionId?: string;
   readonly pending?: readonly unknown[];
 
@@ -136,11 +129,8 @@ export class FlaryCodeExecutionError extends Error {
     details: {
       executionId?: string;
       pending?: readonly unknown[];
-      code?:
-        | "flary_code_execution_failed"
-        | "flary_code_execution_paused"
-        | "approval_pending";
-    } = {}
+      code?: "flary_code_execution_failed" | "flary_code_execution_paused" | "approval_pending";
+    } = {},
   ) {
     super(message);
     this.name = "FlaryCodeExecutionError";
@@ -160,7 +150,7 @@ export class FlaryCodeExecutionError extends Error {
  * isolated Worker is used with a process-local execution.
  */
 export function createFlaryCodemodeExecutor<TBindings = unknown>(
-  options: FlaryCodemodeExecutorOptions<TBindings>
+  options: FlaryCodemodeExecutorOptions<TBindings>,
 ): CodeExecutor<TBindings> & {
   readonly options: FlaryCodemodeExecutorOptions<TBindings>;
 } {
@@ -181,7 +171,7 @@ class FlaryCodemodeExecutor<TBindings> implements CodeExecutor<TBindings> {
           globalOutbound: options.globalOutbound ?? null,
           modules: options.modules,
           bindings: options.bindings,
-        })
+        }),
     );
   }
 
@@ -194,17 +184,12 @@ class FlaryCodemodeExecutor<TBindings> implements CodeExecutor<TBindings> {
   }): Promise<unknown> {
     const codeBytes = new TextEncoder().encode(input.code).byteLength;
     if (codeBytes > (this.options.maxCodeBytes ?? 256 * 1024)) {
-      throw new FlaryCodeExecutionError(
-        "The generated code exceeds the Flary code size limit."
-      );
+      throw new FlaryCodeExecutionError("The generated code exceeds the Flary code size limit.");
     }
     const codemode = await import("@cloudflare/codemode");
     const executor = await this.#executor;
     const extra = [...((await this.options.connectors?.(input)) ?? [])];
-    const ctx =
-      typeof this.options.ctx === "function"
-        ? this.options.ctx()
-        : this.options.ctx;
+    const ctx = typeof this.options.ctx === "function" ? this.options.ctx() : this.options.ctx;
 
     const maxToolCalls = input.limits?.toolCalls ?? this.options.maxToolCalls;
     const callCounter = { count: 0, max: maxToolCalls };
@@ -213,47 +198,33 @@ class FlaryCodemodeExecutor<TBindings> implements CodeExecutor<TBindings> {
         const source = input.tools.entries[name]!;
         return (
           typeof source !== "function" &&
-          (source.kind === "mcp" ||
-            source.kind === "openapi" ||
-            source.kind === "r2")
+          (source.kind === "mcp" || source.kind === "openapi" || source.kind === "r2")
         );
       });
       if (extra.length > 0 || hasExternal) {
         throw new FlaryCodeExecutionError(
-          "External Flary connectors need a Durable Object state for host execution."
+          "External Flary connectors need a Durable Object state for host execution.",
         );
       }
-      const result = await executor.execute(
-        normalizeFlaryCatalogCalls(input.code),
-        [
-          {
-            name: "tools",
-            fns: localProviders(input.tools, callCounter, false),
-          },
-        ]
-      );
+      const result = await executor.execute(normalizeFlaryCatalogCalls(input.code), [
+        {
+          name: "tools",
+          fns: localProviders(input.tools, callCounter, false),
+        },
+      ]);
       if (result.error) {
         throw new FlaryCodeExecutionError(result.error);
       }
       return this.boundResult(result.result);
     }
-    const activity = createInteractiveCodeModeActivity(
-      input.context,
-      input.code,
-      maxToolCalls
-    );
+    const activity = createInteractiveCodeModeActivity(input.context, input.code, maxToolCalls);
     const startedAt = Date.now();
     await activity?.record("codemode.started", 0, {
       codeBytes,
       ...(maxToolCalls !== undefined ? { maxToolCalls } : {}),
     });
     try {
-      const sourceConnectors = await createSourceConnectors(
-        codemode,
-        input,
-        this.options,
-        ctx
-      );
+      const sourceConnectors = await createSourceConnectors(codemode, input, this.options, ctx);
       const local = await createLocalConnector(
         codemode,
         input,
@@ -261,7 +232,7 @@ class FlaryCodemodeExecutor<TBindings> implements CodeExecutor<TBindings> {
         ctx,
         callCounter,
         sourceConnectors,
-        activity
+        activity,
       );
       const runtime = codemode.createCodemodeRuntime({
         ctx: ctx as never,
@@ -271,9 +242,7 @@ class FlaryCodemodeExecutor<TBindings> implements CodeExecutor<TBindings> {
         connectors: [local, ...extra],
         name: this.options.name ?? "flary",
         maxExecutions: this.options.maxExecutions,
-        ...(this.options.redactResult
-          ? { transformResult: this.options.redactResult }
-          : {}),
+        ...(this.options.redactResult ? { transformResult: this.options.redactResult } : {}),
       });
       const result = await runtime.execute({
         code: normalizeFlaryCatalogCalls(input.code),
@@ -299,19 +268,12 @@ class FlaryCodemodeExecutor<TBindings> implements CodeExecutor<TBindings> {
             // Flue treats this code as a durable waiting state. The previous
             // code-only error made the parent agent fail instead of waiting.
             code: "approval_pending",
-          }
+          },
         );
       }
-      throw new FlaryCodeExecutionError(
-        result.error ?? "The Dynamic Worker execution failed."
-      );
+      throw new FlaryCodeExecutionError(result.error ?? "The Dynamic Worker execution failed.");
     } catch (error) {
-      if (
-        !(
-          error instanceof FlaryCodeExecutionError &&
-          error.code === "approval_pending"
-        )
-      ) {
+      if (!(error instanceof FlaryCodeExecutionError && error.code === "approval_pending")) {
         await activity
           ?.record("codemode.failed", 0, {
             durationMs: Date.now() - startedAt,
@@ -329,10 +291,7 @@ class FlaryCodemodeExecutor<TBindings> implements CodeExecutor<TBindings> {
     readonly tools: FlaryToolRegistry;
     readonly context: FlaryStepContext<TBindings>;
   }): ApprovalContinuation | undefined {
-    const ctx =
-      typeof this.options.ctx === "function"
-        ? this.options.ctx()
-        : this.options.ctx;
+    const ctx = typeof this.options.ctx === "function" ? this.options.ctx() : this.options.ctx;
     if (!ctx) return undefined;
     return this.createApprovalBridge(input, ctx)?.continuation;
   }
@@ -342,10 +301,7 @@ class FlaryCodemodeExecutor<TBindings> implements CodeExecutor<TBindings> {
     readonly tools: FlaryToolRegistry;
     readonly context: FlaryStepContext<TBindings>;
   }): Promise<FlaryCodemodeApprovalBridge | undefined> {
-    const ctx =
-      typeof this.options.ctx === "function"
-        ? this.options.ctx()
-        : this.options.ctx;
+    const ctx = typeof this.options.ctx === "function" ? this.options.ctx() : this.options.ctx;
     if (!ctx) return Promise.resolve(undefined);
     return Promise.resolve(this.createApprovalBridge(input, ctx));
   }
@@ -356,25 +312,20 @@ class FlaryCodemodeExecutor<TBindings> implements CodeExecutor<TBindings> {
       readonly tools: FlaryToolRegistry;
       readonly context: FlaryStepContext<TBindings>;
     },
-    ctx: FlaryDurableObjectState
+    ctx: FlaryDurableObjectState,
   ): FlaryCodemodeApprovalBridge | undefined {
     const runtime = async (): Promise<FlaryCodemodeApprovalRuntime> => {
       const codemode = await import("@cloudflare/codemode");
       const executor = await this.#executor;
       const extra = [...((await this.options.connectors?.(input)) ?? [])];
-      const sourceConnectors = await createSourceConnectors(
-        codemode,
-        input,
-        this.options,
-        ctx
-      );
+      const sourceConnectors = await createSourceConnectors(codemode, input, this.options, ctx);
       const local = await createLocalConnector(
         codemode,
         input,
         this.options,
         ctx,
         { count: 0, max: this.options.maxToolCalls },
-        sourceConnectors
+        sourceConnectors,
       );
       return codemode.createCodemodeRuntime({
         ctx: ctx as never,
@@ -401,12 +352,9 @@ class FlaryCodemodeExecutor<TBindings> implements CodeExecutor<TBindings> {
       throw new FlaryCodeExecutionError("The code result is not serializable.");
     }
     if (
-      new TextEncoder().encode(serialized).byteLength >
-      (this.options.maxOutputBytes ?? 512 * 1024)
+      new TextEncoder().encode(serialized).byteLength > (this.options.maxOutputBytes ?? 512 * 1024)
     ) {
-      throw new FlaryCodeExecutionError(
-        "The code result exceeds the Flary output size limit."
-      );
+      throw new FlaryCodeExecutionError("The code result exceeds the Flary output size limit.");
     }
     return redacted;
   }
@@ -424,10 +372,7 @@ export interface FlaryCodemodeApprovalRuntime {
     }[]
   >;
   approve(input: { readonly executionId: string }): Promise<unknown>;
-  reject(input: {
-    readonly executionId: string;
-    readonly seq: number;
-  }): Promise<boolean>;
+  reject(input: { readonly executionId: string; readonly seq: number }): Promise<boolean>;
   executions(limit?: number): Promise<
     readonly {
       readonly id: string;
@@ -443,9 +388,7 @@ export interface FlaryCodemodeApprovalRuntime {
 export interface FlaryCodemodeApprovalBridgeOptions {
   readonly runtime:
     | FlaryCodemodeApprovalRuntime
-    | (() =>
-        | FlaryCodemodeApprovalRuntime
-        | Promise<FlaryCodemodeApprovalRuntime>);
+    | (() => FlaryCodemodeApprovalRuntime | Promise<FlaryCodemodeApprovalRuntime>);
   readonly runId: string;
   readonly requestedBy?: ApprovalRequest["requestedBy"];
 }
@@ -462,13 +405,10 @@ export interface FlaryCodemodeApprovalBridge {
  * Durable Object facet, so the bridge does not keep approval state in memory.
  */
 export function createFlaryCodemodeApprovalBridge(
-  options: FlaryCodemodeApprovalBridgeOptions
+  options: FlaryCodemodeApprovalBridgeOptions,
 ): FlaryCodemodeApprovalBridge {
-  const pendingId = (executionId: string, seq: number) =>
-    `codemode_${executionId}_${seq}`;
-  const parsePendingId = (
-    value: string
-  ): { executionId: string; seq: number } => {
+  const pendingId = (executionId: string, seq: number) => `codemode_${executionId}_${seq}`;
+  const parsePendingId = (value: string): { executionId: string; seq: number } => {
     const match = /^codemode_(.+)_([0-9]+)$/.exec(value);
     if (!match) throw new Error("Invalid Codemode approval id");
     return { executionId: match[1]!, seq: Number(match[2]) };
@@ -488,10 +428,7 @@ export function createFlaryCodemodeApprovalBridge(
     const createdAtByExecution = new Map(
       executions
         .filter((execution) => typeof execution.createdAt === "number")
-        .map((execution) => [
-          execution.id,
-          new Date(execution.createdAt!).toISOString(),
-        ])
+        .map((execution) => [execution.id, new Date(execution.createdAt!).toISOString()]),
     );
     return values.map((action) =>
       ApprovalRequestSchema.parse({
@@ -510,10 +447,7 @@ export function createFlaryCodemodeApprovalBridge(
           createdAtByExecution.get(action.executionId) ??
           (() => {
             const value = new Date().toISOString();
-            requestedAtByAction.set(
-              pendingId(action.executionId, action.seq),
-              value
-            );
+            requestedAtByAction.set(pendingId(action.executionId, action.seq), value);
             return value;
           })(),
         context: JsonObjectSchema.parse({
@@ -521,7 +455,7 @@ export function createFlaryCodemodeApprovalBridge(
           method: action.method,
           arguments: jsonObject(action.args),
         }),
-      })
+      }),
     );
   };
 
@@ -557,9 +491,7 @@ export function createFlaryCodemodeApprovalBridge(
     async inspect(_input: ApprovalRecoveryCall) {
       return (await findExecution())?.pending ? "waiting" : "ready";
     },
-    async resume(
-      _input: ApprovalRecoveryCall
-    ): Promise<ApprovalRecoveryResult> {
+    async resume(_input: ApprovalRecoveryCall): Promise<ApprovalRecoveryResult> {
       const execution = await findExecution();
       if (!execution) {
         return {
@@ -598,7 +530,7 @@ async function createLocalConnector<TBindings>(
   ctx: FlaryDurableObjectState,
   callCounter: { count: number; max?: number },
   sourceConnectors: readonly import("@cloudflare/codemode").CodemodeConnector[],
-  activity?: InteractiveCodeModeActivity
+  activity?: InteractiveCodeModeActivity,
 ): Promise<import("@cloudflare/codemode").CodemodeConnector> {
   const { CodemodeConnector } = codemode;
   class LocalConnector extends CodemodeConnector<unknown, unknown> {
@@ -613,7 +545,7 @@ async function createLocalConnector<TBindings>(
     protected async tools(): Promise<ConnectorTools> {
       const descriptors = [
         ...describeRegistry(input.tools).filter(
-          (item) => typeof input.tools.entries[item.id] === "function"
+          (item) => typeof input.tools.entries[item.id] === "function",
         ),
         ...(await sourceDescriptors(sourceConnectors)),
       ];
@@ -622,8 +554,8 @@ async function createLocalConnector<TBindings>(
         const calls = Array.isArray(args)
           ? args
           : Array.isArray((args as { calls?: unknown } | null)?.calls)
-          ? (args as { calls: unknown[] }).calls
-          : [args];
+            ? (args as { calls: unknown[] }).calls
+            : [args];
         return calls.some((call) => {
           const normalized = normalizeCatalogCall(call);
           const id =
@@ -638,8 +570,7 @@ async function createLocalConnector<TBindings>(
       };
       return {
         search: {
-          description:
-            "Find tools by intent. Schemas are not loaded until describe is called.",
+          description: "Find tools by intent. Schemas are not loaded until describe is called.",
           inputSchema: {
             type: "object",
             properties: { query: { type: "string" } },
@@ -656,21 +587,15 @@ async function createLocalConnector<TBindings>(
             const ordinal = activity?.claim("search") ?? 0;
             const startedAt = Date.now();
             const queryValue =
-              typeof args === "string"
-                ? args
-                : (args as { query?: unknown })?.query;
-            const query =
-              typeof queryValue === "string" ? queryValue.toLowerCase() : "";
+              typeof args === "string" ? args : (args as { query?: unknown })?.query;
+            const query = typeof queryValue === "string" ? queryValue.toLowerCase() : "";
             const items = descriptors
               .map((item) => ({
                 ...item,
                 score: scoreDescriptor(item, query),
               }))
               .filter((item) => !query || item.score > 0)
-              .sort(
-                (left, right) =>
-                  right.score - left.score || left.id.localeCompare(right.id)
-              )
+              .sort((left, right) => right.score - left.score || left.id.localeCompare(right.id))
               .map(({ score: _score, ...item }) => summarizeDescriptor(item));
             await activity?.record("tool.search", ordinal, {
               query,
@@ -692,8 +617,7 @@ async function createLocalConnector<TBindings>(
           execute: async (args) => {
             const ordinal = activity?.claim("describe") ?? 0;
             const startedAt = Date.now();
-            const id =
-              typeof args === "string" ? args : (args as { id?: unknown })?.id;
+            const id = typeof args === "string" ? args : (args as { id?: unknown })?.id;
             const descriptor = descriptors.find((item) => item.id === id);
             await activity?.record("tool.describe", ordinal, {
               toolId: String(id),
@@ -710,8 +634,7 @@ async function createLocalConnector<TBindings>(
                 : {}),
               durationMs: Date.now() - startedAt,
             });
-            if (!descriptor)
-              throw new Error(`Tool is not available: ${String(id)}`);
+            if (!descriptor) throw new Error(`Tool is not available: ${String(id)}`);
             return descriptor;
           },
         },
@@ -724,13 +647,7 @@ async function createLocalConnector<TBindings>(
           requiresApproval,
           execute: async (args) => {
             const ordinal = claimToolCallOrdinal(callCounter);
-            return invokeCatalogTool(
-              input.tools,
-              args,
-              input.context,
-              ordinal,
-              sourceTargets
-            );
+            return invokeCatalogTool(input.tools, args, input.context, ordinal, sourceTargets);
           },
         },
         batch: {
@@ -741,9 +658,7 @@ async function createLocalConnector<TBindings>(
             const batchOrdinal = activity?.claim("batch") ?? 0;
             const startedAt = Date.now();
             try {
-              const calls = Array.isArray(args)
-                ? args
-                : (args as { calls?: unknown })?.calls;
+              const calls = Array.isArray(args) ? args : (args as { calls?: unknown })?.calls;
               if (!Array.isArray(calls)) {
                 throw new Error("tools.batch needs { calls: [{ id, input }] }");
               }
@@ -752,61 +667,37 @@ async function createLocalConnector<TBindings>(
               }
               if (calls.length > (options.maxBatchCalls ?? 16)) {
                 throw new Error(
-                  `A tools.batch request can contain at most ${
-                    options.maxBatchCalls ?? 16
-                  } calls.`
+                  `A tools.batch request can contain at most ${options.maxBatchCalls ?? 16} calls.`,
                 );
               }
 
               const normalizedCalls = calls.map((call, index) => {
                 const normalized = normalizeCatalogCall(call);
-                if (
-                  !normalized ||
-                  typeof normalized !== "object" ||
-                  Array.isArray(normalized)
-                ) {
-                  throw new Error(
-                    `tools.batch calls[${index}] must be { id, input }`
-                  );
+                if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) {
+                  throw new Error(`tools.batch calls[${index}] must be { id, input }`);
                 }
                 const suppliedId = (normalized as { id?: unknown }).id;
                 if (typeof suppliedId !== "string" || !suppliedId.trim()) {
-                  throw new Error(
-                    `tools.batch calls[${index}] needs a string id from item.id`
-                  );
+                  throw new Error(`tools.batch calls[${index}] needs a string id from item.id`);
                 }
-                const exact = descriptors.find(
-                  (item) => item.id === suppliedId
-                );
-                const named = exact
-                  ? []
-                  : descriptors.filter((item) => item.name === suppliedId);
-                const descriptor =
-                  exact ?? (named.length === 1 ? named[0] : undefined);
+                const exact = descriptors.find((item) => item.id === suppliedId);
+                const named = exact ? [] : descriptors.filter((item) => item.name === suppliedId);
+                const descriptor = exact ?? (named.length === 1 ? named[0] : undefined);
                 if (!descriptor) {
                   throw new Error(
                     named.length > 1
                       ? `Tool name '${suppliedId}' is ambiguous. Use the exact catalog item.id.`
-                      : `Tool is not available: ${suppliedId}`
+                      : `Tool is not available: ${suppliedId}`,
                   );
                 }
-                if (
-                  descriptor.operation !== "read" ||
-                  descriptor.requiresApproval
-                ) {
+                if (descriptor.operation !== "read" || descriptor.requiresApproval) {
                   throw new Error(
-                    `tools.batch only accepts read tools. Call '${descriptor.id}' sequentially.`
+                    `tools.batch only accepts read tools. Call '${descriptor.id}' sequentially.`,
                   );
                 }
                 const toolInput = (normalized as { input?: unknown }).input;
-                if (
-                  !toolInput ||
-                  typeof toolInput !== "object" ||
-                  Array.isArray(toolInput)
-                ) {
-                  throw new Error(
-                    `tools.batch calls[${index}].input must be an object`
-                  );
+                if (!toolInput || typeof toolInput !== "object" || Array.isArray(toolInput)) {
+                  throw new Error(`tools.batch calls[${index}].input must be an object`);
                 }
                 return { id: descriptor.id, input: toolInput };
               });
@@ -818,13 +709,7 @@ async function createLocalConnector<TBindings>(
                 admitted,
                 options.maxParallelToolCalls ?? 6,
                 ({ call, ordinal }) =>
-                  invokeCatalogTool(
-                    input.tools,
-                    call,
-                    input.context,
-                    ordinal,
-                    sourceTargets
-                  )
+                  invokeCatalogTool(input.tools, call, input.context, ordinal, sourceTargets),
               );
               await activity?.record("tool.batch", batchOrdinal, {
                 callCount: normalizedCalls.length,
@@ -839,8 +724,8 @@ async function createLocalConnector<TBindings>(
                   callCount: Array.isArray((args as { calls?: unknown })?.calls)
                     ? (args as { calls: unknown[] }).calls.length
                     : Array.isArray(args)
-                    ? args.length
-                    : 0,
+                      ? args.length
+                      : 0,
                   maxParallel: options.maxParallelToolCalls ?? 6,
                   durationMs: Date.now() - startedAt,
                   state: "failed",
@@ -866,13 +751,11 @@ async function createSourceConnectors<TBindings>(
     readonly tools: FlaryToolRegistry;
   },
   options: FlaryCodemodeExecutorOptions<TBindings>,
-  ctx: FlaryDurableObjectState
+  ctx: FlaryDurableObjectState,
 ): Promise<import("@cloudflare/codemode").CodemodeConnector[]> {
   const connectors: import("@cloudflare/codemode").CodemodeConnector[] = [];
   const { McpConnector, OpenApiConnector } = codemode;
-  const sessionId = await mcpSessionUuid(
-    input.context.runId ?? input.context.idempotencyKey
-  );
+  const sessionId = await mcpSessionUuid(input.context.runId ?? input.context.idempotencyKey);
 
   for (const name of input.tools.names) {
     const source = input.tools.entries[name]!;
@@ -894,22 +777,20 @@ async function createSourceConnectors<TBindings>(
                   context: input.context,
                 })
               : mcpSource.url
-              ? createMcpConnection(mcpSource, { sessionId })
-              : options.resolveMcp
-              ? await options.resolveMcp(mcpSource, {
-                  bindings: input.bindings,
-                  context: input.context,
-                })
-              : createMcpConnection(mcpSource, { sessionId });
+                ? createMcpConnection(mcpSource, { sessionId })
+                : options.resolveMcp
+                  ? await options.resolveMcp(mcpSource, {
+                      bindings: input.bindings,
+                      context: input.context,
+                    })
+                  : createMcpConnection(mcpSource, { sessionId });
           return connection as unknown as import("@cloudflare/codemode").McpConnectionLike;
         }
 
         protected async tools(): Promise<ConnectorTools> {
           const discovered = await this.fetchTools();
           const generated = await super.tools();
-          const byName = new Map(
-            discovered.map((tool) => [this.toolName(tool), tool])
-          );
+          const byName = new Map(discovered.map((tool) => [this.toolName(tool), tool]));
           return Object.fromEntries(
             Object.entries(generated).map(([name, tool]) => {
               const metadata = byName.get(name) as
@@ -924,11 +805,8 @@ async function createSourceConnectors<TBindings>(
                 mcpSource.readOnly !== true &&
                 (metadata?.annotations?.destructiveHint === true ||
                   metadata?.annotations?.readOnlyHint !== true);
-              return [
-                name,
-                requiresApproval ? { ...tool, requiresApproval: true } : tool,
-              ];
-            })
+              return [name, requiresApproval ? { ...tool, requiresApproval: true } : tool];
+            }),
           );
         }
       }
@@ -936,9 +814,7 @@ async function createSourceConnectors<TBindings>(
     }
     if (
       source.kind === "openapi" &&
-      (options.resolveOpenApi ||
-        typeof source.spec === "object" ||
-        typeof source.spec === "string")
+      (options.resolveOpenApi || typeof source.spec === "object" || typeof source.spec === "string")
     ) {
       const openApiSource = source;
       class RuntimeOpenApiConnector extends OpenApiConnector<unknown, unknown> {
@@ -955,8 +831,7 @@ async function createSourceConnectors<TBindings>(
                 context: input.context,
               })
             : await createOpenApiRuntime(openApiSource);
-          for (const name of openApiWriteMethods(runtime.spec))
-            this.#writeMethods.add(name);
+          for (const name of openApiWriteMethods(runtime.spec)) this.#writeMethods.add(name);
           return runtime.spec;
         }
 
@@ -989,14 +864,9 @@ async function createSourceConnectors<TBindings>(
         bindings: input.bindings,
         context: input.context,
       });
-      connectors.push(
-        createHostToolConnector(codemode, ctx, options.env, name, workspace)
-      );
+      connectors.push(createHostToolConnector(codemode, ctx, options.env, name, workspace));
     }
-    if (
-      source.kind === "r2" &&
-      (options.resolveR2 || source.binding || source.connection)
-    ) {
+    if (source.kind === "r2" && (options.resolveR2 || source.binding || source.connection)) {
       const r2Source = source;
       const connection = options.resolveR2
         ? await options.resolveR2(r2Source, {
@@ -1004,9 +874,7 @@ async function createSourceConnectors<TBindings>(
             context: input.context,
           })
         : await createR2FileConnection(r2Source, input.bindings, input.context);
-      connectors.push(
-        createHostToolConnector(codemode, ctx, options.env, name, connection)
-      );
+      connectors.push(createHostToolConnector(codemode, ctx, options.env, name, connection));
     }
     if (source.kind === "sandbox" && options.resolveSandbox) {
       const sandbox = await options.resolveSandbox(source, {
@@ -1014,9 +882,7 @@ async function createSourceConnectors<TBindings>(
         context: input.context,
         storage: (ctx.storage as { readonly sql?: unknown }).sql,
       });
-      connectors.push(
-        createHostToolConnector(codemode, ctx, options.env, name, sandbox)
-      );
+      connectors.push(createHostToolConnector(codemode, ctx, options.env, name, sandbox));
     }
     if (source.kind === "browser" && options.resolveBrowser) {
       const browser = await options.resolveBrowser(source, {
@@ -1024,9 +890,7 @@ async function createSourceConnectors<TBindings>(
         context: input.context,
         storage: (ctx.storage as { readonly sql?: unknown }).sql,
       });
-      connectors.push(
-        createHostToolConnector(codemode, ctx, options.env, name, browser)
-      );
+      connectors.push(createHostToolConnector(codemode, ctx, options.env, name, browser));
     }
   }
   return connectors;
@@ -1038,7 +902,7 @@ function createHostToolConnector(
   ctx: FlaryDurableObjectState,
   env: unknown,
   namespace: string,
-  connection: FlaryToolConnection
+  connection: FlaryToolConnection,
 ): import("@cloudflare/codemode").CodemodeConnector {
   const { CodemodeConnector } = codemode;
   class HostConnector extends CodemodeConnector<unknown, unknown> {
@@ -1053,26 +917,20 @@ function createHostToolConnector(
     protected async tools(): Promise<ConnectorTools> {
       return Object.fromEntries(
         connection.descriptors.map((descriptor) => {
-          const requiresApproval =
-            descriptor.requiresApproval ?? descriptor.operation === "write";
+          const requiresApproval = descriptor.requiresApproval ?? descriptor.operation === "write";
           return [
             descriptor.name,
             {
-              ...(descriptor.description
-                ? { description: descriptor.description }
-                : {}),
-              ...(descriptor.inputSchema
-                ? { inputSchema: descriptor.inputSchema as never }
-                : {}),
+              ...(descriptor.description ? { description: descriptor.description } : {}),
+              ...(descriptor.inputSchema ? { inputSchema: descriptor.inputSchema as never } : {}),
               ...(descriptor.outputSchema
                 ? { outputSchema: descriptor.outputSchema as never }
                 : {}),
               ...(requiresApproval ? { requiresApproval: true } : {}),
-              execute: (args: unknown) =>
-                connection.call(descriptor.name, args),
+              execute: (args: unknown) => connection.call(descriptor.name, args),
             } satisfies ConnectorTool,
           ];
-        })
+        }),
       );
     }
   }
@@ -1080,19 +938,13 @@ function createHostToolConnector(
   hostConnectorOperations.set(
     connector,
     new Map(
-      connection.descriptors.map((descriptor) => [
-        descriptor.name,
-        descriptor.operation ?? "read",
-      ])
-    )
+      connection.descriptors.map((descriptor) => [descriptor.name, descriptor.operation ?? "read"]),
+    ),
   );
   return connector;
 }
 
-const hostConnectorOperations = new WeakMap<
-  object,
-  ReadonlyMap<string, "read" | "write">
->();
+const hostConnectorOperations = new WeakMap<object, ReadonlyMap<string, "read" | "write">>();
 
 interface SourceTarget {
   readonly id: string;
@@ -1105,24 +957,18 @@ interface SourceTarget {
 }
 
 async function sourceDescriptors(
-  connectors: readonly import("@cloudflare/codemode").CodemodeConnector[]
+  connectors: readonly import("@cloudflare/codemode").CodemodeConnector[],
 ): Promise<RegistryDescriptor[]> {
   const values: RegistryDescriptor[] = [];
   for (const connector of connectors) {
     const description = await connector.describe();
-    for (const [method, descriptor] of Object.entries(
-      description.descriptors
-    )) {
+    for (const [method, descriptor] of Object.entries(description.descriptors)) {
       const id = `${description.name}.${method}`;
-      const requiresApproval = Boolean(
-        description.annotations?.[method]?.requiresApproval
-      );
+      const requiresApproval = Boolean(description.annotations?.[method]?.requiresApproval);
       values.push({
         id,
         name: id,
-        ...(descriptor.description
-          ? { description: descriptor.description }
-          : {}),
+        ...(descriptor.description ? { description: descriptor.description } : {}),
         operation: requiresApproval ? "write" : "read",
         requiresApproval,
         inputSchema: descriptor.inputSchema as Record<string, unknown>,
@@ -1139,7 +985,7 @@ async function sourceDescriptors(
 }
 
 async function sourceTargetMap(
-  connectors: readonly import("@cloudflare/codemode").CodemodeConnector[]
+  connectors: readonly import("@cloudflare/codemode").CodemodeConnector[],
 ): Promise<ReadonlyMap<string, SourceTarget>> {
   const targets = new Map<string, SourceTarget>();
   for (const connector of connectors) {
@@ -1152,9 +998,7 @@ async function sourceTargetMap(
         method,
         operation:
           operations?.get(method) ??
-          (description.annotations?.[method]?.requiresApproval
-            ? "write"
-            : "read"),
+          (description.annotations?.[method]?.requiresApproval ? "write" : "read"),
         connector,
       });
     }
@@ -1165,14 +1009,12 @@ async function sourceTargetMap(
 function localProviders(
   registry: FlaryToolRegistry,
   callCounter: { count: number; max?: number },
-  allowWrites: boolean
+  allowWrites: boolean,
 ): Record<string, (...args: unknown[]) => Promise<unknown>> {
   return {
     search: async (value: unknown) => {
       const queryValue =
-        typeof value === "string"
-          ? value
-          : (value as { query?: unknown } | null)?.query;
+        typeof value === "string" ? value : (value as { query?: unknown } | null)?.query;
       const query = typeof queryValue === "string" ? queryValue : "";
       return {
         items: describeRegistry(registry)
@@ -1180,19 +1022,14 @@ function localProviders(
             (item) =>
               !query ||
               item.id.toLowerCase().includes(query.toLowerCase()) ||
-              item.description?.toLowerCase().includes(query.toLowerCase())
+              item.description?.toLowerCase().includes(query.toLowerCase()),
           )
           .map(summarizeDescriptor),
       };
     },
     describe: async (value: unknown) => {
-      const id =
-        typeof value === "string"
-          ? value
-          : (value as { id?: unknown } | null)?.id;
-      const descriptor = describeRegistry(registry).find(
-        (item) => item.id === id
-      );
+      const id = typeof value === "string" ? value : (value as { id?: unknown } | null)?.id;
+      const descriptor = describeRegistry(registry).find((item) => item.id === id);
       if (!descriptor) throw new Error(`Tool is not available: ${String(id)}`);
       return descriptor;
     },
@@ -1202,13 +1039,11 @@ function localProviders(
         normalizeCatalogCall(args[0], args[1]),
         undefined,
         callCounter,
-        allowWrites
+        allowWrites,
       ),
     batch: async (...args: unknown[]) => {
       const value = args[0];
-      const calls = Array.isArray(value)
-        ? value
-        : (value as { calls?: unknown })?.calls;
+      const calls = Array.isArray(value) ? value : (value as { calls?: unknown })?.calls;
       if (!Array.isArray(calls)) throw new Error("calls must be an array");
       return Promise.all(
         calls.map((call) =>
@@ -1217,9 +1052,9 @@ function localProviders(
             normalizeCatalogCall(call),
             undefined,
             callCounter,
-            allowWrites
-          )
-        )
+            allowWrites,
+          ),
+        ),
       );
     },
   };
@@ -1247,22 +1082,17 @@ function describeRegistry(registry: FlaryToolRegistry): RegistryDescriptor[] {
       return {
         id: name,
         name: definition.name ?? name,
-        ...(definition.description
-          ? { description: definition.description }
-          : {}),
+        ...(definition.description ? { description: definition.description } : {}),
         operation: definition.policy?.operation ?? "read",
         requiresApproval:
-          definition.policy?.requiresApproval ??
-          definition.policy?.operation === "write",
+          definition.policy?.requiresApproval ?? definition.policy?.operation === "write",
         inputSchema: toSchema(definition.input),
         outputSchema: toSchema(definition.output),
         capabilities: definition.policy?.capabilities ?? [],
         ...(definition.policy?.concurrencyKey
           ? { concurrencyKey: definition.policy.concurrencyKey }
           : {}),
-        ...(definition.policy?.operation === "write"
-          ? { idempotency: "required" as const }
-          : {}),
+        ...(definition.policy?.operation === "write" ? { idempotency: "required" as const } : {}),
       };
     }
     const namespace = "namespace" in source ? source.namespace : name;
@@ -1295,10 +1125,9 @@ async function invokeRegistryTool(
   value: unknown,
   context: FlaryStepContext<unknown> | undefined,
   callCounter?: { count: number; max?: number },
-  allowWrites = true
+  allowWrites = true,
 ): Promise<unknown> {
-  if (!value || typeof value !== "object")
-    throw new Error("A tool call must be an object");
+  if (!value || typeof value !== "object") throw new Error("A tool call must be an object");
   const id = (value as { id?: unknown }).id;
   const input = (value as { input?: unknown }).input;
   if (typeof id !== "string") throw new Error("A tool call needs an id");
@@ -1311,7 +1140,7 @@ async function invokeRegistryTool(
   const source = registry.entries[id];
   if (source === undefined) {
     throw new Error(
-      `Tool is not available: '${id}'. Use tools.search and pass the selected item's id value.`
+      `Tool is not available: '${id}'. Use tools.search and pass the selected item's id value.`,
     );
   }
   if (typeof source === "function") {
@@ -1320,9 +1149,7 @@ async function invokeRegistryTool(
       (source.definition.policy?.operation === "write" ||
         source.definition.policy?.requiresApproval)
     ) {
-      throw new Error(
-        `Approval is required before calling write tool '${id}'.`
-      );
+      throw new Error(`Approval is required before calling write tool '${id}'.`);
     }
     // Preserve the authenticated invocation context when a local function is
     // called from an isolated Worker. The public callable remains available
@@ -1335,7 +1162,7 @@ async function invokeRegistryTool(
         signal: context.signal,
         runId: context.runId,
         idempotencyKey:
-          context.idempotencyKey ?? context.runId
+          (context.idempotencyKey ?? context.runId)
             ? `flary_${
                 context.idempotencyKey ?? context.runId
               }_${id}_${shortHash(stableJson(input))}`
@@ -1345,7 +1172,7 @@ async function invokeRegistryTool(
     return source(input);
   }
   throw new Error(
-    `Tool source '${id}' needs a host connector. Configure connectors on the Flary code executor.`
+    `Tool source '${id}' needs a host connector. Configure connectors on the Flary code executor.`,
   );
 }
 
@@ -1354,7 +1181,7 @@ async function invokeCatalogTool(
   value: unknown,
   context: FlaryStepContext<unknown> | undefined,
   ordinal: number,
-  sourceTargets: ReadonlyMap<string, SourceTarget>
+  sourceTargets: ReadonlyMap<string, SourceTarget>,
 ): Promise<unknown> {
   const normalized = normalizeCatalogCall(value);
   if (!normalized || typeof normalized !== "object") {
@@ -1363,18 +1190,13 @@ async function invokeCatalogTool(
   const id = (normalized as { id?: unknown }).id;
   const input = (normalized as { input?: unknown }).input;
   if (typeof id !== "string") throw new Error("A tool call needs an id");
-  const reservation = await reserveInteractiveToolCall(
-    context,
-    id,
-    input,
-    ordinal
-  );
+  const reservation = await reserveInteractiveToolCall(context, id, input, ordinal);
   const source = sourceTargets.get(id);
   const registrySource = registry.entries[id];
   const operation =
     source?.operation ??
     (typeof registrySource === "function"
-      ? registrySource.definition.policy?.operation ?? "read"
+      ? (registrySource.definition.policy?.operation ?? "read")
       : undefined);
   let result: unknown;
   try {
@@ -1397,10 +1219,7 @@ async function invokeCatalogTool(
   return result;
 }
 
-function claimToolCallOrdinal(counter: {
-  count: number;
-  max?: number;
-}): number {
+function claimToolCallOrdinal(counter: { count: number; max?: number }): number {
   if (counter.max !== undefined && counter.count + 1 > counter.max) {
     throw new Error("The Flary tool-call limit was exceeded.");
   }
@@ -1423,7 +1242,7 @@ interface InteractiveCodeModeActivity {
   record(
     recordType: CodeModeActivityRecordType,
     ordinal: number,
-    payload: Record<string, unknown>
+    payload: Record<string, unknown>,
   ): Promise<void>;
   usage(toolCalls: number, resultBytes: number): Record<string, number>;
 }
@@ -1431,13 +1250,13 @@ interface InteractiveCodeModeActivity {
 function createInteractiveCodeModeActivity(
   context: FlaryStepContext<unknown> | undefined,
   code: string,
-  maxToolCalls: number | undefined
+  maxToolCalls: number | undefined,
 ): InteractiveCodeModeActivity | undefined {
   const client = interactiveThreadControlClient(context);
   if (!client) return undefined;
   const codeBytes = encodedSize(code);
   const executionId = `code_${shortHash(
-    `${context?.idempotencyKey ?? context?.runId}:${shortHash(code)}`
+    `${context?.idempotencyKey ?? context?.runId}:${shortHash(code)}`,
   )}`;
   const counters = { search: 0, describe: 0, batch: 0 };
   return {
@@ -1470,18 +1289,12 @@ function createInteractiveCodeModeActivity(
   };
 }
 
-function interactiveThreadControlClient(
-  context: FlaryStepContext<unknown> | undefined
-):
+function interactiveThreadControlClient(context: FlaryStepContext<unknown> | undefined):
   | {
       call(method: string, extra?: Record<string, unknown>): Promise<void>;
     }
   | undefined {
-  if (
-    !context?.runId ||
-    !context.bindings ||
-    typeof context.bindings !== "object"
-  ) {
+  if (!context?.runId || !context.bindings || typeof context.bindings !== "object") {
     return undefined;
   }
   let ref: ReturnType<typeof parseThreadName>;
@@ -1490,8 +1303,7 @@ function interactiveThreadControlClient(
   } catch {
     return undefined;
   }
-  const namespace = (context.bindings as Record<string, unknown>)
-    .FLARY_THREAD_CONTROL as
+  const namespace = (context.bindings as Record<string, unknown>).FLARY_THREAD_CONTROL as
     | {
         idFromName(name: string): unknown;
         get(id: unknown): { fetch(request: Request): Promise<Response> };
@@ -1511,14 +1323,14 @@ function interactiveThreadControlClient(
             applicationId: ref.appId,
             ...extra,
           }),
-        })
+        }),
       );
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         throw new Error(
           typeof (body as { error?: unknown }).error === "string"
             ? String((body as { error: string }).error)
-            : "The thread activity update failed"
+            : "The thread activity update failed",
         );
       }
     },
@@ -1527,8 +1339,7 @@ function interactiveThreadControlClient(
 
 function encodedSize(value: unknown): number {
   try {
-    const encoded =
-      typeof value === "string" ? value : JSON.stringify(value) ?? "null";
+    const encoded = typeof value === "string" ? value : (JSON.stringify(value) ?? "null");
     return new TextEncoder().encode(encoded).byteLength;
   } catch {
     return 0;
@@ -1538,12 +1349,9 @@ function encodedSize(value: unknown): number {
 async function concurrentMap<T, R>(
   values: readonly T[],
   concurrency: number,
-  run: (value: T, index: number) => Promise<R>
+  run: (value: T, index: number) => Promise<R>,
 ): Promise<R[]> {
-  const limit = Math.max(
-    1,
-    Math.min(values.length || 1, Math.floor(concurrency))
-  );
+  const limit = Math.max(1, Math.min(values.length || 1, Math.floor(concurrency)));
   const results = Array<R>(values.length);
   let cursor = 0;
   await Promise.all(
@@ -1553,13 +1361,13 @@ async function concurrentMap<T, R>(
         cursor += 1;
         results[index] = await run(values[index]!, index);
       }
-    })
+    }),
   );
   return results;
 }
 
 export function interactiveToolFailureState(
-  operation: "read" | "write" | undefined
+  operation: "read" | "write" | undefined,
 ): "failed" | "outcome_unknown" {
   return operation === "write" ? "outcome_unknown" : "failed";
 }
@@ -1568,7 +1376,7 @@ async function reserveInteractiveToolCall(
   context: FlaryStepContext<unknown> | undefined,
   toolId: string,
   input: unknown,
-  ordinal: number
+  ordinal: number,
 ): Promise<
   | {
       settle(result?: unknown): Promise<void>;
@@ -1580,17 +1388,11 @@ async function reserveInteractiveToolCall(
   const client = interactiveThreadControlClient(context);
   if (!client) return undefined;
   const reservationId = `tool_${shortHash(
-    `${
-      context?.idempotencyKey ?? context?.runId
-    }:${ordinal}:${toolId}:${stableJson(input)}`
+    `${context?.idempotencyKey ?? context?.runId}:${ordinal}:${toolId}:${stableJson(input)}`,
   )}`;
   const call = async (
-    method:
-      | "reserveUsage"
-      | "settleUsage"
-      | "unknownUsage"
-      | "recordToolActivity",
-    extra: Record<string, unknown> = {}
+    method: "reserveUsage" | "settleUsage" | "unknownUsage" | "recordToolActivity",
+    extra: Record<string, unknown> = {},
   ): Promise<void> => {
     await client.call(method, { reservationId, ...extra });
   };
@@ -1652,10 +1454,7 @@ async function reserveInteractiveToolCall(
         toolId,
         ordinal,
         durationMs: Date.now() - startedAt,
-        error: redactErrorMessage(error, "The tool call failed.").slice(
-          0,
-          1_000
-        ),
+        error: redactErrorMessage(error, "The tool call failed.").slice(0, 1_000),
       });
     },
     unknown: async (error) => {
@@ -1667,10 +1466,7 @@ async function reserveInteractiveToolCall(
         toolId,
         ordinal,
         durationMs: Date.now() - startedAt,
-        error: redactErrorMessage(error, "The write outcome is unknown.").slice(
-          0,
-          1_000
-        ),
+        error: redactErrorMessage(error, "The write outcome is unknown.").slice(0, 1_000),
       });
     },
   };
@@ -1678,23 +1474,14 @@ async function reserveInteractiveToolCall(
 
 export function projectPublicToolActivityInput(
   value: unknown,
-  toolId: string
+  toolId: string,
 ): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const source = value as Record<string, unknown>;
   const output: Record<string, unknown> = {};
-  for (const key of [
-    "path",
-    "file",
-    "target",
-    "range",
-    "campaign",
-    "site",
-    "dimension",
-  ]) {
+  for (const key of ["path", "file", "target", "range", "campaign", "site", "dimension"]) {
     const candidate = source[key];
-    if (typeof candidate === "string")
-      output[key] = redactText(candidate).slice(0, 200);
+    if (typeof candidate === "string") output[key] = redactText(candidate).slice(0, 200);
     else if (typeof candidate === "number" || typeof candidate === "boolean")
       output[key] = candidate;
   }
@@ -1733,12 +1520,10 @@ export function projectPublicToolActivityResult(value: unknown): unknown {
 }
 
 function publicCanvasArtifact(
-  source: Record<string, unknown>
+  source: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
   const text = (value: unknown, max: number) =>
-    typeof value === "string" && value.trim()
-      ? value.trim().slice(0, max)
-      : undefined;
+    typeof value === "string" && value.trim() ? value.trim().slice(0, max) : undefined;
   const title = text(source.title, 120);
   if (!title) return undefined;
   const artifact: Record<string, unknown> = { title };
@@ -1763,8 +1548,7 @@ function publicCanvasArtifact(
   }
   artifact.metrics = Array.isArray(source.metrics)
     ? source.metrics.slice(0, 8).flatMap((value) => {
-        if (!value || typeof value !== "object" || Array.isArray(value))
-          return [];
+        if (!value || typeof value !== "object" || Array.isArray(value)) return [];
         const metric = value as Record<string, unknown>;
         const label = text(metric.label, 80);
         const metricValue = text(metric.value, 80);
@@ -1773,46 +1557,30 @@ function publicCanvasArtifact(
           {
             label,
             value: metricValue,
-            ...(text(metric.detail, 120)
-              ? { detail: text(metric.detail, 120) }
-              : {}),
-            ...(typeof metric.change === "number" &&
-            Number.isFinite(metric.change)
+            ...(text(metric.detail, 120) ? { detail: text(metric.detail, 120) } : {}),
+            ...(typeof metric.change === "number" && Number.isFinite(metric.change)
               ? { change: metric.change }
               : {}),
-            ...(["neutral", "blue", "green", "amber", "red", "violet"].includes(
-              String(metric.tone)
-            )
+            ...(["neutral", "blue", "green", "amber", "red", "violet"].includes(String(metric.tone))
               ? { tone: metric.tone }
               : {}),
           },
         ];
       })
     : [];
-  if (
-    source.chart &&
-    typeof source.chart === "object" &&
-    !Array.isArray(source.chart)
-  ) {
+  if (source.chart && typeof source.chart === "object" && !Array.isArray(source.chart)) {
     const chart = source.chart as Record<string, unknown>;
     const points = Array.isArray(chart.points)
       ? chart.points.slice(0, 120).flatMap((value) => {
-          if (!value || typeof value !== "object" || Array.isArray(value))
-            return [];
+          if (!value || typeof value !== "object" || Array.isArray(value)) return [];
           const point = value as Record<string, unknown>;
           const label = text(point.label, 80);
-          if (
-            !label ||
-            typeof point.value !== "number" ||
-            !Number.isFinite(point.value)
-          )
-            return [];
+          if (!label || typeof point.value !== "number" || !Number.isFinite(point.value)) return [];
           return [
             {
               label,
               value: point.value,
-              ...(typeof point.secondary === "number" &&
-              Number.isFinite(point.secondary)
+              ...(typeof point.secondary === "number" && Number.isFinite(point.secondary)
                 ? { secondary: point.secondary }
                 : {}),
             },
@@ -1821,32 +1589,23 @@ function publicCanvasArtifact(
       : [];
     if (points.length >= 2)
       artifact.chart = {
-        type: ["line", "area", "bar"].includes(String(chart.type))
-          ? chart.type
-          : "line",
+        type: ["line", "area", "bar"].includes(String(chart.type)) ? chart.type : "line",
         ...(text(chart.title, 120) ? { title: text(chart.title, 120) } : {}),
         primaryLabel: text(chart.primaryLabel, 60) ?? "Current",
         ...(text(chart.secondaryLabel, 60)
           ? { secondaryLabel: text(chart.secondaryLabel, 60) }
           : {}),
-        valueFormat: ["number", "currency", "percent"].includes(
-          String(chart.valueFormat)
-        )
+        valueFormat: ["number", "currency", "percent"].includes(String(chart.valueFormat))
           ? chart.valueFormat
           : "number",
         points,
       };
   }
-  if (
-    source.table &&
-    typeof source.table === "object" &&
-    !Array.isArray(source.table)
-  ) {
+  if (source.table && typeof source.table === "object" && !Array.isArray(source.table)) {
     const table = source.table as Record<string, unknown>;
     const columns = Array.isArray(table.columns)
       ? table.columns.slice(0, 8).flatMap((value) => {
-          if (!value || typeof value !== "object" || Array.isArray(value))
-            return [];
+          if (!value || typeof value !== "object" || Array.isArray(value)) return [];
           const column = value as Record<string, unknown>;
           const key = text(column.key, 40);
           const label = text(column.label, 60);
@@ -1859,8 +1618,7 @@ function publicCanvasArtifact(
         columns,
         rows: Array.isArray(table.rows)
           ? table.rows.slice(0, 30).flatMap((value) => {
-              if (!value || typeof value !== "object" || Array.isArray(value))
-                return [];
+              if (!value || typeof value !== "object" || Array.isArray(value)) return [];
               const row = value as Record<string, unknown>;
               return [
                 Object.fromEntries(
@@ -1870,13 +1628,11 @@ function publicCanvasArtifact(
                       key,
                       typeof cell === "string"
                         ? cell.slice(0, 160)
-                        : typeof cell === "number" ||
-                          typeof cell === "boolean" ||
-                          cell === null
-                        ? cell
-                        : "",
+                        : typeof cell === "number" || typeof cell === "boolean" || cell === null
+                          ? cell
+                          : "",
                     ];
-                  })
+                  }),
                 ),
               ];
             })
@@ -1888,9 +1644,7 @@ function publicCanvasArtifact(
 
 function toSchema(schema: unknown): Record<string, unknown> | undefined {
   try {
-    return schema
-      ? JsonObjectSchema.parse(z.toJSONSchema(schema as never))
-      : undefined;
+    return schema ? JsonObjectSchema.parse(z.toJSONSchema(schema as never)) : undefined;
   } catch {
     return undefined;
   }
@@ -1910,13 +1664,9 @@ function scoreDescriptor(item: RegistryDescriptor, query: string): number {
 }
 
 function summarizeDescriptor(
-  item: RegistryDescriptor
+  item: RegistryDescriptor,
 ): Omit<RegistryDescriptor, "inputSchema" | "outputSchema"> {
-  const {
-    inputSchema: _inputSchema,
-    outputSchema: _outputSchema,
-    ...summary
-  } = item;
+  const { inputSchema: _inputSchema, outputSchema: _outputSchema, ...summary } = item;
   return summary;
 }
 
@@ -1926,11 +1676,11 @@ function stableJson(value: unknown): string {
       JSON.stringify(value, (_key, item: unknown) =>
         item && typeof item === "object" && !Array.isArray(item)
           ? Object.fromEntries(
-              Object.entries(item as Record<string, unknown>).sort(
-                ([left], [right]) => left.localeCompare(right)
-              )
+              Object.entries(item as Record<string, unknown>).sort(([left], [right]) =>
+                left.localeCompare(right),
+              ),
             )
-          : item
+          : item,
       ) ?? ""
     );
   } catch {
@@ -1960,8 +1710,7 @@ function openApiWriteMethods(spec: Record<string, unknown>): string[] {
   const paths = spec.paths;
   if (!paths || typeof paths !== "object" || Array.isArray(paths)) return names;
   for (const [path, rawPath] of Object.entries(paths)) {
-    if (!rawPath || typeof rawPath !== "object" || Array.isArray(rawPath))
-      continue;
+    if (!rawPath || typeof rawPath !== "object" || Array.isArray(rawPath)) continue;
     for (const [method, rawOperation] of Object.entries(rawPath)) {
       if (!methods.has(method.toLowerCase())) continue;
       const operation = rawOperation as { operationId?: unknown };

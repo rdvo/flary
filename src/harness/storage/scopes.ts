@@ -35,17 +35,11 @@ export function tenantBlobKey(scopeInput: StorageScope, sha256: string): string 
   return `${tenantStoragePrefix(scopeInput)}/blobs/${sha256}`;
 }
 
-export function tenantHistoryKey(
-  scopeInput: StorageScope,
-  historyId: string,
-): string {
+export function tenantHistoryKey(scopeInput: StorageScope, historyId: string): string {
   return `${tenantStoragePrefix(scopeInput)}/history/${segment(historyId)}`;
 }
 
-export function tenantAssetKey(
-  scopeInput: StorageScope,
-  assetId: string,
-): string {
+export function tenantAssetKey(scopeInput: StorageScope, assetId: string): string {
   return `${tenantStoragePrefix(scopeInput)}/assets/${segment(assetId)}`;
 }
 

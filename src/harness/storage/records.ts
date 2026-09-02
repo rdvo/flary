@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { BlobRefSchema, type BlobRef } from "./blobs";
+import { BlobRefSchema, type BlobRef } from "./blobs.js";
 
 export const STORAGE_SCHEMA_VERSION = 1 as const;
 
@@ -8,8 +8,7 @@ export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
 /** JSON data that can be safely written as one JSONL value. */
-export const JsonValueSchema: z.ZodType<JsonValue> =
-  z.json() as z.ZodType<JsonValue>;
+export const JsonValueSchema: z.ZodType<JsonValue> = z.json() as z.ZodType<JsonValue>;
 
 export const JsonObjectSchema = z.record(z.string(), JsonValueSchema);
 export type JsonObject = z.infer<typeof JsonObjectSchema>;
@@ -18,7 +17,10 @@ export const RecordIdSchema = z
   .string()
   .min(1)
   .max(512)
-  .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/, "Record IDs must contain only safe identifier characters");
+  .regex(
+    /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/,
+    "Record IDs must contain only safe identifier characters",
+  );
 
 export const TimestampSchema = z.string().datetime({ offset: true });
 
@@ -64,13 +66,7 @@ export type ThreadRecord = z.infer<typeof ThreadRecordSchema>;
 export const TurnRoleSchema = z.enum(["system", "user", "assistant", "tool"]);
 export type TurnRole = z.infer<typeof TurnRoleSchema>;
 
-export const TurnStatusSchema = z.enum([
-  "started",
-  "completed",
-  "paused",
-  "failed",
-  "cancelled",
-]);
+export const TurnStatusSchema = z.enum(["started", "completed", "paused", "failed", "cancelled"]);
 export type TurnStatus = z.infer<typeof TurnStatusSchema>;
 
 export const TurnRecordSchema = z
@@ -212,9 +208,11 @@ let recordIdCounter = 0;
 
 /** Creates a non-secret identifier for a record or event. */
 export function createRecordId(prefix = "record"): string {
-  const cryptoApi = (globalThis as typeof globalThis & {
-    crypto?: { randomUUID?: () => string };
-  }).crypto;
+  const cryptoApi = (
+    globalThis as typeof globalThis & {
+      crypto?: { randomUUID?: () => string };
+    }
+  ).crypto;
 
   if (cryptoApi?.randomUUID) {
     return `${prefix}_${cryptoApi.randomUUID()}`;

@@ -1,25 +1,27 @@
 import { z } from "zod";
 
-export const SessionEnginePinSchema = z.object({
-  id: z.enum(["flue-legacy", "flue-2"]),
-  version: z.string().min(1).max(64),
-  revision: z.string().min(1).max(256),
-}).strict();
+export const SessionEnginePinSchema = z
+  .object({
+    id: z.enum(["flue-legacy", "flue-2"]),
+    version: z.string().min(1).max(64),
+    revision: z.string().min(1).max(256),
+  })
+  .strict();
 export type SessionEnginePin = z.infer<typeof SessionEnginePinSchema>;
 
-export const SessionEngineCapabilitiesSchema = z.object({
-  durableAdmission: z.boolean(),
-  durableObservation: z.boolean(),
-  manualCompaction: z.boolean(),
-  activePathRollback: z.boolean(),
-  exactCanonicalExport: z.boolean(),
-  exactCanonicalRestore: z.boolean(),
-  perSubmissionModelPin: z.boolean(),
-  approvalContinuation: z.boolean(),
-}).strict();
-export type SessionEngineCapabilities = z.infer<
-  typeof SessionEngineCapabilitiesSchema
->;
+export const SessionEngineCapabilitiesSchema = z
+  .object({
+    durableAdmission: z.boolean(),
+    durableObservation: z.boolean(),
+    manualCompaction: z.boolean(),
+    activePathRollback: z.boolean(),
+    exactCanonicalExport: z.boolean(),
+    exactCanonicalRestore: z.boolean(),
+    perSubmissionModelPin: z.boolean(),
+    approvalContinuation: z.boolean(),
+  })
+  .strict();
+export type SessionEngineCapabilities = z.infer<typeof SessionEngineCapabilitiesSchema>;
 
 /** Capabilities that a new interactive Flary thread must not lose. */
 export const REQUIRED_INTERACTIVE_ENGINE_CAPABILITIES = [
@@ -142,9 +144,7 @@ export function assertInteractiveSessionEngine(
   engine: Pick<SessionEngine, "pin" | "capabilities">,
 ): void {
   const capabilities = SessionEngineCapabilitiesSchema.parse(engine.capabilities);
-  const missing = REQUIRED_INTERACTIVE_ENGINE_CAPABILITIES.filter(
-    (name) => !capabilities[name],
-  );
+  const missing = REQUIRED_INTERACTIVE_ENGINE_CAPABILITIES.filter((name) => !capabilities[name]);
   if (missing.length === 0) return;
   throw new Error(
     `Session engine ${engine.pin.id}@${engine.pin.version} is missing required capabilities: ${missing.join(", ")}`,
@@ -158,17 +158,16 @@ export function assertInteractiveSessionEngine(
  * trusted Durable Object control surface owns compaction, canonical branch
  * rollback, exact archive transfer, and approval recovery.
  */
-export const FLUE_2_0_2_FLARY_CAPABILITIES =
-  SessionEngineCapabilitiesSchema.parse({
-    durableAdmission: true,
-    durableObservation: true,
-    manualCompaction: true,
-    activePathRollback: true,
-    exactCanonicalExport: true,
-    exactCanonicalRestore: true,
-    perSubmissionModelPin: true,
-    approvalContinuation: true,
-  });
+export const FLUE_2_0_2_FLARY_CAPABILITIES = SessionEngineCapabilitiesSchema.parse({
+  durableAdmission: true,
+  durableObservation: true,
+  manualCompaction: true,
+  activePathRollback: true,
+  exactCanonicalExport: true,
+  exactCanonicalRestore: true,
+  perSubmissionModelPin: true,
+  approvalContinuation: true,
+});
 
 /** Return true when a package version must pass the Flue 2 release gate. */
 export function requiresFlue2StableRelease(version: string): boolean {
@@ -183,10 +182,7 @@ export async function loadPinnedFlue2Runtime(): Promise<{
   readonly sdk: typeof import("@flue/sdk-v2");
   readonly capabilities: SessionEngineCapabilities;
 }> {
-  const [runtime, sdk] = await Promise.all([
-    import("@flue/runtime-v2"),
-    import("@flue/sdk-v2"),
-  ]);
+  const [runtime, sdk] = await Promise.all([import("@flue/runtime-v2"), import("@flue/sdk-v2")]);
   return {
     version: "2.0.2",
     runtime,
@@ -200,7 +196,5 @@ async function sha256Json(value: unknown): Promise<string> {
     "SHA-256",
     new TextEncoder().encode(JSON.stringify(value)),
   );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }

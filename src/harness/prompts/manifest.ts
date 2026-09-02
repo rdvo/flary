@@ -1,24 +1,16 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { compilePrompt } from "./compiler.js";
-import type {
-  PromptCompileOptions,
-  PromptManifest,
-  PromptSource,
-} from "./types.js";
+import type { PromptCompileOptions, PromptManifest, PromptSource } from "./types.js";
 
 export async function buildPromptManifest(
   sources: readonly PromptSource[],
   options: PromptCompileOptions = {},
 ): Promise<PromptManifest> {
-  const compiled = await Promise.all(
-    sources.map((source) => compilePrompt(source, options)),
-  );
+  const compiled = await Promise.all(sources.map((source) => compilePrompt(source, options)));
   const prompts: PromptManifest["prompts"] = {};
 
-  for (const prompt of compiled.sort((left, right) =>
-    left.slug.localeCompare(right.slug),
-  )) {
+  for (const prompt of compiled.sort((left, right) => left.slug.localeCompare(right.slug))) {
     if (prompts[prompt.slug]) {
       throw new Error(`Duplicate prompt slug '${prompt.slug}'.`);
     }

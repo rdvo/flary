@@ -76,8 +76,7 @@ test("subscription credentials take precedence over BYOK and managed keys", asyn
 });
 
 test("expired subscription credentials refresh once under the store lock", async () => {
-  let current: ProviderCredentialLifecycle =
-    ProviderCredentialLifecycleSchema.parse({
+  let current: ProviderCredentialLifecycle = ProviderCredentialLifecycleSchema.parse({
     connectionId: "connection_123",
     provider: "anthropic",
     billingMode: "subscription",
@@ -87,7 +86,7 @@ test("expired subscription credentials refresh once under the store lock", async
     scopes: [],
     expiresAt: "2026-07-29T12:00:00.000Z",
     version: 1,
-    });
+  });
   let refreshCalls = 0;
   let lock = Promise.resolve();
   const store: ProviderCredentialLifecycleStore = {

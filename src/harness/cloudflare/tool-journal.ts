@@ -9,10 +9,7 @@ interface SqlRows<T> {
 }
 
 interface SqlStorage {
-  exec<T = Record<string, unknown>>(
-    query: string,
-    ...bindings: unknown[]
-  ): SqlRows<T>;
+  exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): SqlRows<T>;
 }
 
 interface ToolJournalRow {
@@ -43,10 +40,7 @@ export class SqliteToolExecutionJournal implements ToolExecutionJournal {
     `);
   }
 
-  async get(
-    runId: string,
-    callId: string,
-  ): Promise<ToolExecutionJournalRecord | undefined> {
+  async get(runId: string, callId: string): Promise<ToolExecutionJournalRecord | undefined> {
     const row = this.#sql
       .exec<ToolJournalRow>(
         `SELECT record_json, state
@@ -56,9 +50,7 @@ export class SqliteToolExecutionJournal implements ToolExecutionJournal {
         callId,
       )
       .toArray()[0];
-    return row
-      ? ToolExecutionJournalRecordSchema.parse(JSON.parse(row.record_json))
-      : undefined;
+    return row ? ToolExecutionJournalRecordSchema.parse(JSON.parse(row.record_json)) : undefined;
   }
 
   async put(recordInput: ToolExecutionJournalRecord): Promise<void> {
@@ -88,14 +80,9 @@ export class SqliteToolExecutionJournal implements ToolExecutionJournal {
       return;
     }
     const current = await this.get(record.runId, record.callId);
-    if (
-      current &&
-      ["completed", "outcome_unknown"].includes(current.state)
-    ) {
+    if (current && ["completed", "outcome_unknown"].includes(current.state)) {
       if (JSON.stringify(current) === JSON.stringify(record)) return;
-      throw new Error(
-        `Tool call ${record.callId} already has terminal state ${current.state}`,
-      );
+      throw new Error(`Tool call ${record.callId} already has terminal state ${current.state}`);
     }
     this.#sql.exec(
       `INSERT INTO flary_tool_execution_journal

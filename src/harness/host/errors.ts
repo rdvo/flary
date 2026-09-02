@@ -3,12 +3,7 @@ export class FlaryHostError extends Error {
   readonly code: string;
   readonly details?: unknown;
 
-  constructor(
-    status: number,
-    code: string,
-    message: string,
-    details?: unknown,
-  ) {
+  constructor(status: number, code: string, message: string, details?: unknown) {
     super(message);
     this.name = "FlaryHostError";
     this.status = status;

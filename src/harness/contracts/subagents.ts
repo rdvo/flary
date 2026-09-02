@@ -9,14 +9,10 @@ import {
   NonNegativeIntegerSchema,
   PositiveIntegerSchema,
   TimestampSchema,
-} from "./common";
-import {
-  ModelSelectionSchema,
-  ReasoningEffortSchema,
-  TextVerbositySchema,
-} from "./provider";
-import { PromptMessageSchema } from "./prompts";
-import { AgentModeIdSchema } from "./modes";
+} from "./common.js";
+import { ModelSelectionSchema, ReasoningEffortSchema, TextVerbositySchema } from "./provider.js";
+import { PromptMessageSchema } from "./prompts.js";
+import { AgentModeIdSchema } from "./modes.js";
 
 export const MAX_SEEDED_TURNS = 64 as const;
 
@@ -58,12 +54,7 @@ export type SubagentMessageKind = z.infer<typeof SubagentMessageKindSchema>;
 
 // A value of zero gives the child only its task and agent instructions.
 // A positive value copies the most recent complete turns from the parent.
-export const SeedTurnsSchema = z
-  .number()
-  .int()
-  .min(0)
-  .max(MAX_SEEDED_TURNS)
-  .default(0);
+export const SeedTurnsSchema = z.number().int().min(0).max(MAX_SEEDED_TURNS).default(0);
 export type SeedTurns = z.infer<typeof SeedTurnsSchema>;
 
 export const SubagentContextSeedSchema = z
@@ -99,9 +90,7 @@ export const SubagentConversationTurnSchema = z
     metadata: MetadataSchema.optional(),
   })
   .strict();
-export type SubagentConversationTurn = z.infer<
-  typeof SubagentConversationTurnSchema
->;
+export type SubagentConversationTurn = z.infer<typeof SubagentConversationTurnSchema>;
 
 export const SpawnSubagentRequestSchema = z
   .object({
@@ -122,9 +111,7 @@ export const SpawnSubagentRequestSchema = z
   })
   .strict();
 export type SpawnSubagentRequest = z.infer<typeof SpawnSubagentRequestSchema>;
-export type SpawnSubagentRequestInput = z.input<
-  typeof SpawnSubagentRequestSchema
->;
+export type SpawnSubagentRequestInput = z.input<typeof SpawnSubagentRequestSchema>;
 
 export const SubagentThreadSchema = z
   .object({
@@ -156,25 +143,35 @@ export const SubagentThreadSchema = z
 export type SubagentThread = z.infer<typeof SubagentThreadSchema>;
 
 /** Durable result sent from a completed child to its parent thread. */
-export const SubagentResultSchema = z.object({
-  summary: NonEmptyStringSchema,
-  checkpoint: JsonValueSchema.optional(),
-  changedFiles: z.array(z.string().min(1).max(4_096)).max(10_000),
-  checks: z.array(z.object({
-    command: z.string().min(1).max(16_384),
-    status: z.enum(["passed", "failed", "skipped"]),
-  }).strict()).max(1_000),
-  usage: z.object({
-    steps: NonNegativeIntegerSchema,
-    toolCalls: NonNegativeIntegerSchema,
-    tokens: NonNegativeIntegerSchema,
-    costUsd: z.number().finite().nonnegative(),
-    sandboxSeconds: NonNegativeIntegerSchema,
-    browserSeconds: NonNegativeIntegerSchema,
-  }).strict(),
-  errors: z.array(z.string().min(1).max(16_384)).max(1_000),
-  output: JsonValueSchema.optional(),
-}).strict();
+export const SubagentResultSchema = z
+  .object({
+    summary: NonEmptyStringSchema,
+    checkpoint: JsonValueSchema.optional(),
+    changedFiles: z.array(z.string().min(1).max(4_096)).max(10_000),
+    checks: z
+      .array(
+        z
+          .object({
+            command: z.string().min(1).max(16_384),
+            status: z.enum(["passed", "failed", "skipped"]),
+          })
+          .strict(),
+      )
+      .max(1_000),
+    usage: z
+      .object({
+        steps: NonNegativeIntegerSchema,
+        toolCalls: NonNegativeIntegerSchema,
+        tokens: NonNegativeIntegerSchema,
+        costUsd: z.number().finite().nonnegative(),
+        sandboxSeconds: NonNegativeIntegerSchema,
+        browserSeconds: NonNegativeIntegerSchema,
+      })
+      .strict(),
+    errors: z.array(z.string().min(1).max(16_384)).max(1_000),
+    output: JsonValueSchema.optional(),
+  })
+  .strict();
 export type SubagentResult = z.infer<typeof SubagentResultSchema>;
 
 export const SpawnSubagentResponseSchema = z
@@ -200,9 +197,7 @@ export const SubagentMailboxMessageSchema = z
     metadata: MetadataSchema.optional(),
   })
   .strict();
-export type SubagentMailboxMessage = z.infer<
-  typeof SubagentMailboxMessageSchema
->;
+export type SubagentMailboxMessage = z.infer<typeof SubagentMailboxMessageSchema>;
 
 export const SendSubagentMessageRequestSchema = z
   .object({
@@ -217,12 +212,8 @@ export const SendSubagentMessageRequestSchema = z
     metadata: MetadataSchema.optional(),
   })
   .strict();
-export type SendSubagentMessageRequest = z.infer<
-  typeof SendSubagentMessageRequestSchema
->;
-export type SendSubagentMessageRequestInput = z.input<
-  typeof SendSubagentMessageRequestSchema
->;
+export type SendSubagentMessageRequest = z.infer<typeof SendSubagentMessageRequestSchema>;
+export type SendSubagentMessageRequestInput = z.input<typeof SendSubagentMessageRequestSchema>;
 
 export const WaitForSubagentsRequestSchema = z
   .object({
@@ -232,12 +223,8 @@ export const WaitForSubagentsRequestSchema = z
     timeoutMs: PositiveIntegerSchema.max(3_600_000).default(120_000),
   })
   .strict();
-export type WaitForSubagentsRequest = z.infer<
-  typeof WaitForSubagentsRequestSchema
->;
-export type WaitForSubagentsRequestInput = z.input<
-  typeof WaitForSubagentsRequestSchema
->;
+export type WaitForSubagentsRequest = z.infer<typeof WaitForSubagentsRequestSchema>;
+export type WaitForSubagentsRequestInput = z.input<typeof WaitForSubagentsRequestSchema>;
 
 export const WaitForSubagentsResponseSchema = z
   .object({
@@ -246,9 +233,7 @@ export const WaitForSubagentsResponseSchema = z
     timedOut: z.boolean(),
   })
   .strict();
-export type WaitForSubagentsResponse = z.infer<
-  typeof WaitForSubagentsResponseSchema
->;
+export type WaitForSubagentsResponse = z.infer<typeof WaitForSubagentsResponseSchema>;
 
 export const SubagentControlActionSchema = z.enum([
   "start",
@@ -299,9 +284,7 @@ export const SubagentControlRequestSchema = z
       });
     }
   });
-export type SubagentControlRequest = z.infer<
-  typeof SubagentControlRequestSchema
->;
+export type SubagentControlRequest = z.infer<typeof SubagentControlRequestSchema>;
 
 export const SubagentActivityKindSchema = z.enum([
   "spawned",

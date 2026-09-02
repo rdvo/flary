@@ -102,9 +102,7 @@ export class D1FlaryRunRepository implements FlaryRunRepository {
         idempotencyKey,
       )
       .first<{ record_json: string }>();
-    return row
-      ? FlaryRunRecordSchema.parse(JSON.parse(row.record_json))
-      : undefined;
+    return row ? FlaryRunRecordSchema.parse(JSON.parse(row.record_json)) : undefined;
   }
 
   async create(recordInput: FlaryRunRecord): Promise<FlaryRunRecord> {
@@ -136,9 +134,7 @@ export class D1FlaryRunRepository implements FlaryRunRepository {
       .prepare(`SELECT record_json FROM flary_runs WHERE run_id = ? LIMIT 1`)
       .bind(runId)
       .first<{ record_json: string }>();
-    return row
-      ? FlaryRunRecordSchema.parse(JSON.parse(row.record_json))
-      : undefined;
+    return row ? FlaryRunRecordSchema.parse(JSON.parse(row.record_json)) : undefined;
   }
 
   async findInputAdmission(
@@ -153,9 +149,7 @@ export class D1FlaryRunRepository implements FlaryRunRepository {
       )
       .bind(runId, idempotencyKey)
       .first<{ admission_json: string }>();
-    return row
-      ? FlueAdmissionSchema.parse(JSON.parse(row.admission_json))
-      : undefined;
+    return row ? FlueAdmissionSchema.parse(JSON.parse(row.admission_json)) : undefined;
   }
 
   async setAdmission(
@@ -170,12 +164,7 @@ export class D1FlaryRunRepository implements FlaryRunRepository {
            run_id, idempotency_key, admission_json, created_at
          ) VALUES (?, ?, ?, ?)`,
       )
-      .bind(
-        runId,
-        idempotencyKey,
-        JSON.stringify(admission),
-        new Date().toISOString(),
-      )
+      .bind(runId, idempotencyKey, JSON.stringify(admission), new Date().toISOString())
       .run();
     if (!insert.meta.changes) return false;
     const record = await this.required(runId);
@@ -187,10 +176,7 @@ export class D1FlaryRunRepository implements FlaryRunRepository {
     return true;
   }
 
-  async setResult(
-    runId: string,
-    resultInput: RunResult,
-  ): Promise<FlaryRunRecord> {
+  async setResult(runId: string, resultInput: RunResult): Promise<FlaryRunRecord> {
     const record = await this.required(runId);
     const next = FlaryRunRecordSchema.parse({
       ...record,
@@ -213,12 +199,7 @@ export class D1FlaryRunRepository implements FlaryRunRepository {
            run_id, dedupe_key, event_json, created_at
          ) VALUES (?, ?, ?, ?)`,
       )
-      .bind(
-        runId,
-        dedupeKey,
-        JSON.stringify(event),
-        new Date().toISOString(),
-      )
+      .bind(runId, dedupeKey, JSON.stringify(event), new Date().toISOString())
       .run();
     const row = await this.#db
       .prepare(

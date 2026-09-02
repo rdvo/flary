@@ -21,10 +21,7 @@ import type {
   UserInputAnswerRequest,
   UserInputRecord,
 } from "../contracts/index.js";
-import {
-  IdentityReferenceSchema,
-  UserInputRequestSchema,
-} from "../contracts/index.js";
+import { IdentityReferenceSchema, UserInputRequestSchema } from "../contracts/index.js";
 import type { FlaryRunService, TrustedRunContext } from "../host/runs.js";
 import {
   SqliteFlaryRunRepository,
@@ -63,36 +60,25 @@ export interface FlaryDurableRunServiceOptions {
  * stop a run after admission.
  */
 export function createFlaryDurableRunService(
-  options: FlaryDurableRunServiceOptions
+  options: FlaryDurableRunServiceOptions,
 ): FlaryRunService {
-  const stub = options.namespace.get(
-    options.namespace.idFromName(options.name ?? "default")
-  );
-  const call = async <T>(
-    method: string,
-    body: Record<string, unknown>
-  ): Promise<T> => {
+  const stub = options.namespace.get(options.namespace.idFromName(options.name ?? "default"));
+  const call = async <T>(method: string, body: Record<string, unknown>): Promise<T> => {
     const response = await stub.fetch(
       new Request(`https://flary.internal/rpc/${method}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-      })
+      }),
     );
     const value = await response.json().catch(() => undefined);
     if (!response.ok) {
       const message =
-        isRecord(value) &&
-        isRecord(value.error) &&
-        typeof value.error.message === "string"
+        isRecord(value) && isRecord(value.error) && typeof value.error.message === "string"
           ? value.error.message
           : `Flary Runtime Durable Object request failed (${response.status})`;
       const error = new Error(message);
-      if (
-        isRecord(value) &&
-        isRecord(value.error) &&
-        typeof value.error.code === "string"
-      ) {
+      if (isRecord(value) && isRecord(value.error) && typeof value.error.code === "string") {
         Object.defineProperty(error, "code", { value: value.error.code });
       }
       throw error;
@@ -101,8 +87,7 @@ export function createFlaryDurableRunService(
   };
 
   return {
-    create: (context, request) =>
-      call<RunHandle>("create", { context, request }),
+    create: (context, request) => call<RunHandle>("create", { context, request }),
     get: (context, runId) => call<RunResult>("get", { context, runId }),
     async *observe(context, runId, observeOptions) {
       let cursor = observeOptions.afterSequence;
@@ -119,10 +104,8 @@ export function createFlaryDurableRunService(
         await delay(100, observeOptions.signal);
       }
     },
-    input: (context, runId, input) =>
-      call<RunResult>("input", { context, runId, input }),
-    cancel: (context, runId, input) =>
-      call<RunResult>("cancel", { context, runId, input }),
+    input: (context, runId, input) => call<RunResult>("input", { context, runId, input }),
+    cancel: (context, runId, input) => call<RunResult>("cancel", { context, runId, input }),
     async listApprovals(context, runId) {
       return call<ApprovalRequest[]>("listApprovals", { context, runId });
     },
@@ -149,29 +132,26 @@ export interface FlaryDurableRunObjectOptions<TEnv = Record<string, unknown>> {
   /** Optional bridge for approvals owned by a generated agent facet. */
   readonly createApprovalHooks?: (
     env: TEnv,
-    repository?: FlaryUserInputRepository
+    repository?: FlaryUserInputRepository,
   ) => {
     readonly listApprovals?: (
-      record: FlaryRunRecord
+      record: FlaryRunRecord,
     ) => Promise<readonly ApprovalRequest[]> | readonly ApprovalRequest[];
     readonly decideApproval?: (
       record: FlaryRunRecord,
-      decision: ApprovalDecision
+      decision: ApprovalDecision,
     ) => Promise<void> | void;
     readonly listUserInput?: (
-      record: FlaryRunRecord
+      record: FlaryRunRecord,
     ) => Promise<readonly UserInputRecord[]> | readonly UserInputRecord[];
     readonly respondToUserInput?: (
       record: FlaryRunRecord,
       requestId: string,
-      input: UserInputAnswerRequest
+      input: UserInputAnswerRequest,
     ) => Promise<void> | void;
   };
   /** Schedule projection work outside the request when the host supports it. */
-  readonly schedule?: (
-    state: FlaryDurableObjectState,
-    work: Promise<void>
-  ) => void;
+  readonly schedule?: (state: FlaryDurableObjectState, work: Promise<void>) => void;
 }
 
 /**
@@ -198,7 +178,7 @@ export async function handleFlaryDurableRunObjectRequest<TEnv>(input: {
           message: "Missing RPC method",
         },
       },
-      400
+      400,
     );
 
   const repository = new SqliteFlaryRunRepository(input.state.storage.sql);
@@ -233,7 +213,7 @@ export async function handleFlaryDurableRunObjectRequest<TEnv>(input: {
           message: cause instanceof Error ? cause.message : String(cause),
         },
       },
-      errorStatus(cause)
+      errorStatus(cause),
     );
   }
 }
@@ -242,7 +222,7 @@ async function dispatchRuntimeRpc(
   service: FlaryRunService,
   repository: FlaryUserInputRepository,
   method: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
 ): Promise<unknown> {
   const context = body.context as TrustedRunContext;
   switch (method) {
@@ -253,11 +233,7 @@ async function dispatchRuntimeRpc(
     case "input":
       return service.input(context, string(body.runId), body.input as RunInput);
     case "cancel":
-      return service.cancel(
-        context,
-        string(body.runId),
-        body.input as CancelRunRequest
-      );
+      return service.cancel(context, string(body.runId), body.input as CancelRunRequest);
     case "observe": {
       const controller = new AbortController();
       const events: RunEvent[] = [];
@@ -272,9 +248,7 @@ async function dispatchRuntimeRpc(
       }));
       while (events.length < 100) {
         const next = await Promise.race([
-          iterator
-            .next()
-            .then((result) => ({ done: result.done, value: result.value })),
+          iterator.next().then((result) => ({ done: result.done, value: result.value })),
           deadline,
         ]);
         if (next.done) break;
@@ -288,11 +262,7 @@ async function dispatchRuntimeRpc(
       return service.listApprovals(context, string(body.runId));
     case "decideApproval":
       if (!service.decideApproval) throw featureMissing("Run approvals");
-      return service.decideApproval(
-        context,
-        string(body.runId),
-        body.decision as ApprovalDecision
-      );
+      return service.decideApproval(context, string(body.runId), body.decision as ApprovalDecision);
     case "listUserInput":
       if (!service.listUserInput) throw featureMissing("Run user input");
       return service.listUserInput(context, string(body.runId));
@@ -302,18 +272,15 @@ async function dispatchRuntimeRpc(
         context,
         string(body.runId),
         string(body.requestId),
-        body.input as UserInputAnswerRequest
+        body.input as UserInputAnswerRequest,
       );
     case "createUserInput":
       return repository.createUserInput(
         string(body.runId),
-        UserInputRequestSchema.parse(body.request)
+        UserInputRequestSchema.parse(body.request),
       );
     case "getUserInput":
-      return repository.getUserInput(
-        string(body.runId),
-        string(body.requestId)
-      );
+      return repository.getUserInput(string(body.runId), string(body.requestId));
     case "listStoredUserInput":
       return repository.listUserInput(string(body.runId));
     case "respondToStoredUserInput":
@@ -321,16 +288,13 @@ async function dispatchRuntimeRpc(
         string(body.runId),
         string(body.requestId),
         body.input as UserInputAnswerRequest,
-        IdentityReferenceSchema.parse(body.answeredBy)
+        IdentityReferenceSchema.parse(body.answeredBy),
       );
     default:
-      throw Object.assign(
-        new Error(`Unknown Flary Runtime method '${method}'`),
-        {
-          code: "invalid_runtime_request",
-          status: 400,
-        }
-      );
+      throw Object.assign(new Error(`Unknown Flary Runtime method '${method}'`), {
+        code: "invalid_runtime_request",
+        status: 400,
+      });
   }
 }
 
@@ -339,14 +303,12 @@ async function dispatchRuntimeRpc(
  * their Durable Object bindings. This is useful inside the Runtime DO, where
  * no public Worker URL or secret-bearing network request is needed.
  */
-export function createCloudflareFlueGateway<
-  TEnv extends Record<string, unknown>
->(
+export function createCloudflareFlueGateway<TEnv extends Record<string, unknown>>(
   env: TEnv,
   options: {
     readonly token?: string;
     readonly fetch?: typeof fetch;
-  } = {}
+  } = {},
 ): FlueAgentGateway {
   let workflowForRun: string | undefined;
   const client = createFlueClient({
@@ -371,11 +333,10 @@ export function createCloudflareFlueGateway<
     // the request to the Flue Durable Object without the lossy SDK helper.
     async send(agentName, instanceId, message, sendOptions = {}) {
       const headers = new Headers({ "content-type": "application/json" });
-      if (options.token)
-        headers.set("authorization", `Bearer ${options.token}`);
+      if (options.token) headers.set("authorization", `Bearer ${options.token}`);
       const response = await directFetch(
         `https://flue.internal/agents/${encodeURIComponent(
-          agentName
+          agentName,
         )}/${encodeURIComponent(instanceId)}`,
         {
           method: "POST",
@@ -383,51 +344,39 @@ export function createCloudflareFlueGateway<
           body: JSON.stringify({
             message,
             ...(sendOptions.images ? { images: sendOptions.images } : {}),
-            ...(sendOptions.idempotencyKey
-              ? { idempotencyKey: sendOptions.idempotencyKey }
-              : {}),
+            ...(sendOptions.idempotencyKey ? { idempotencyKey: sendOptions.idempotencyKey } : {}),
             ...(sendOptions.model ? { model: sendOptions.model } : {}),
-            ...(sendOptions.thinkingLevel
-              ? { thinkingLevel: sendOptions.thinkingLevel }
-              : {}),
-            ...(sendOptions.cacheRetention
-              ? { cacheRetention: sendOptions.cacheRetention }
-              : {}),
-            ...(sendOptions.turnContext
-              ? { turnContext: sendOptions.turnContext }
-              : {}),
+            ...(sendOptions.thinkingLevel ? { thinkingLevel: sendOptions.thinkingLevel } : {}),
+            ...(sendOptions.cacheRetention ? { cacheRetention: sendOptions.cacheRetention } : {}),
+            ...(sendOptions.turnContext ? { turnContext: sendOptions.turnContext } : {}),
           }),
-        }
+        },
       );
       const value = await response.json().catch(() => undefined);
       if (!response.ok) {
-        const detail =
-          isRecord(value) && isRecord(value.error)
-            ? value.error.message
-            : undefined;
+        const detail = isRecord(value) && isRecord(value.error) ? value.error.message : undefined;
         throw new Error(
           typeof detail === "string"
             ? detail
-            : `Flue direct submission failed (${response.status})`
+            : `Flue direct submission failed (${response.status})`,
         );
       }
       return FlueAdmissionSchema.parse(value);
     },
     async delete(agentName, instanceId) {
       const headers = new Headers({ "content-type": "application/json" });
-      if (options.token)
-        headers.set("authorization", `Bearer ${options.token}`);
+      if (options.token) headers.set("authorization", `Bearer ${options.token}`);
       let response: Response;
       try {
         response = await directFetch(
           `https://flue.internal/agents/${encodeURIComponent(
-            agentName
+            agentName,
           )}/${encodeURIComponent(instanceId)}?flary=delete`,
           {
             method: "POST",
             headers,
             body: "{}",
-          }
+          },
         );
       } catch (cause) {
         // Agent.destroy() erases durable state and then aborts its isolate. A
@@ -437,23 +386,18 @@ export function createCloudflareFlueGateway<
           cause instanceof Error
             ? cause.message
             : isRecord(cause) && typeof cause.message === "string"
-            ? cause.message
-            : typeof cause === "string"
-            ? cause
-            : "";
+              ? cause.message
+              : typeof cause === "string"
+                ? cause
+                : "";
         if (message === "destroyed" || message === "Error: destroyed") return;
         throw cause;
       }
       if (!response.ok) {
         const value = await response.json().catch(() => undefined);
-        const detail =
-          isRecord(value) && isRecord(value.error)
-            ? value.error.message
-            : undefined;
+        const detail = isRecord(value) && isRecord(value.error) ? value.error.message : undefined;
         throw new Error(
-          typeof detail === "string"
-            ? detail
-            : `Flue agent deletion failed (${response.status})`
+          typeof detail === "string" ? detail : `Flue agent deletion failed (${response.status})`,
         );
       }
     },
@@ -471,15 +415,12 @@ export function createCloudflareFlueGateway<
 /** Route a Flue SDK request to the generated agent/workflow DO binding. */
 export function createCloudflareFlueFetch<TEnv extends Record<string, unknown>>(
   env: TEnv,
-  options: { readonly resolveWorkflowName?: () => string | undefined } = {}
+  options: { readonly resolveWorkflowName?: () => string | undefined } = {},
 ): typeof fetch {
   return async (input, init) => {
     const request = new Request(input, init);
     const url = new URL(request.url);
-    const parts = url.pathname
-      .split("/")
-      .filter(Boolean)
-      .map(decodeURIComponent);
+    const parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
     if (parts[0] === "agents" && parts.length >= 3) {
       const binding = bindingFor(env, "agent", parts[1]!);
       return forwardToNamespace(binding, parts[2]!, request);
@@ -491,8 +432,7 @@ export function createCloudflareFlueFetch<TEnv extends Record<string, unknown>>(
     }
     if (parts[0] === "runs" && parts.length >= 2) {
       const workflowName = options.resolveWorkflowName?.();
-      if (!workflowName)
-        throw new Error("The workflow name is required to route a Flue run");
+      if (!workflowName) throw new Error("The workflow name is required to route a Flue run");
       const binding = bindingFor(env, "workflow", workflowName);
       return forwardToNamespace(binding, parts[1]!, request);
     }
@@ -505,38 +445,28 @@ export function createCloudflareFlueFetch<TEnv extends Record<string, unknown>>(
  * generated Flue agent Durable Object. The public run service calls these
  * hooks only after it validates tenant ownership in SQLite.
  */
-export function createFlaryCodemodeApprovalHooks<
-  TEnv extends Record<string, unknown>
->(
+export function createFlaryCodemodeApprovalHooks<TEnv extends Record<string, unknown>>(
   env: TEnv,
   options: {
     readonly token?: string;
     readonly repository?: FlaryUserInputRepository;
-  } = {}
-): Pick<
-  FlaryDurableRunObjectOptions<TEnv>,
-  "createApprovalHooks"
->["createApprovalHooks"] {
+  } = {},
+): Pick<FlaryDurableRunObjectOptions<TEnv>, "createApprovalHooks">["createApprovalHooks"] {
   const token = options.token ?? stringValue(env.FLARY_INTERNAL_TOKEN);
   const request = async (
     record: FlaryRunRecord,
     action: "approvals" | "approval" | "wake",
-    init: RequestInit = {}
+    init: RequestInit = {},
   ): Promise<unknown> => {
-    const kind =
-      record.request?.execution === "workflow" ? "workflow" : "agent";
-    const targetId =
-      kind === "workflow" ? record.admission.submissionId : record.instanceId;
+    const kind = record.request?.execution === "workflow" ? "workflow" : "agent";
+    const targetId = kind === "workflow" ? record.admission.submissionId : record.instanceId;
     const binding = bindingFor(env, kind, record.agentName);
     const path = `/${
       kind === "workflow" ? "workflows" : "agents"
-    }/${encodeURIComponent(record.agentName)}/${encodeURIComponent(
-      targetId
-    )}?flary=${action}`;
+    }/${encodeURIComponent(record.agentName)}/${encodeURIComponent(targetId)}?flary=${action}`;
     const headers = new Headers(init.headers);
     if (token) headers.set("authorization", `Bearer ${token}`);
-    if (!headers.has("content-type"))
-      headers.set("content-type", "application/json");
+    if (!headers.has("content-type")) headers.set("content-type", "application/json");
     const response = await binding
       .get(binding.idFromName(targetId))
       .fetch(new Request(`https://flue.internal${path}`, { ...init, headers }));
@@ -544,13 +474,11 @@ export function createFlaryCodemodeApprovalHooks<
     if (!response.ok) {
       throw Object.assign(
         new Error(
-          isRecord(value) &&
-          isRecord(value.error) &&
-          typeof value.error.message === "string"
+          isRecord(value) && isRecord(value.error) && typeof value.error.message === "string"
             ? value.error.message
-            : `The Flue approval route failed (${response.status})`
+            : `The Flue approval route failed (${response.status})`,
         ),
-        { code: "flary_approval_route_failed", status: response.status }
+        { code: "flary_approval_route_failed", status: response.status },
       );
     }
     return value;
@@ -558,12 +486,9 @@ export function createFlaryCodemodeApprovalHooks<
   return (_env, repositoryInput) => ({
     async listApprovals(record) {
       const value = await request(record, "approvals");
-      const approvals =
-        isRecord(value) && Array.isArray(value.approvals)
-          ? value.approvals
-          : [];
+      const approvals = isRecord(value) && Array.isArray(value.approvals) ? value.approvals : [];
       return approvals.map((approval) =>
-        isRecord(approval) ? { ...approval, runId: record.runId } : approval
+        isRecord(approval) ? { ...approval, runId: record.runId } : approval,
       ) as ApprovalRequest[];
     },
     async decideApproval(record, decision) {
@@ -573,19 +498,17 @@ export function createFlaryCodemodeApprovalHooks<
       });
       await request(record, "wake", { method: "GET" });
     },
-    ...(options.repository ?? repositoryInput
+    ...((options.repository ?? repositoryInput)
       ? {
           async listUserInput(record) {
-            return await (options.repository ?? repositoryInput)!.listUserInput(
-              record.runId
-            );
+            return await (options.repository ?? repositoryInput)!.listUserInput(record.runId);
           },
           async respondToUserInput(record, requestId, input) {
             await (options.repository ?? repositoryInput)!.respondToUserInput(
               record.runId,
               requestId,
               input,
-              record.trusted.identity
+              record.trusted.identity,
             );
             await request(record, "wake", { method: "GET" });
           },
@@ -595,9 +518,7 @@ export function createFlaryCodemodeApprovalHooks<
 }
 
 function assertInternalToken(request: Request, env: unknown): void {
-  const expected = isRecord(env)
-    ? stringValue(env.FLARY_INTERNAL_TOKEN)
-    : undefined;
+  const expected = isRecord(env) ? stringValue(env.FLARY_INTERNAL_TOKEN) : undefined;
   if (
     !expected ||
     expected.length < 32 ||
@@ -613,7 +534,7 @@ function assertInternalToken(request: Request, env: unknown): void {
 function bindingFor(
   env: Record<string, unknown>,
   kind: "agent" | "workflow",
-  name: string
+  name: string,
 ): FlaryDurableObjectNamespace {
   const bindingName = `FLUE_${name
     .replace(/[^a-zA-Z0-9]+/g, "_")
@@ -625,9 +546,7 @@ function bindingFor(
     typeof (binding as FlaryDurableObjectNamespace).idFromName !== "function" ||
     typeof (binding as FlaryDurableObjectNamespace).get !== "function"
   ) {
-    throw new Error(
-      `Flue Durable Object binding '${bindingName}' is not configured`
-    );
+    throw new Error(`Flue Durable Object binding '${bindingName}' is not configured`);
   }
   return binding as FlaryDurableObjectNamespace;
 }
@@ -639,16 +558,14 @@ function stringValue(value: unknown): string | undefined {
 async function forwardToNamespace(
   namespace: FlaryDurableObjectNamespace,
   name: string,
-  request: Request
+  request: Request,
 ): Promise<Response> {
   const stub = namespace.get(namespace.idFromName(name));
   return stub.fetch(
     new Request(
-      `https://flue.internal${new URL(request.url).pathname}${
-        new URL(request.url).search
-      }`,
-      request
-    )
+      `https://flue.internal${new URL(request.url).pathname}${new URL(request.url).search}`,
+      request,
+    ),
   );
 }
 
@@ -677,21 +594,15 @@ function featureMissing(name: string): Error {
 }
 
 function errorCode(cause: unknown): string {
-  return isRecord(cause) && typeof cause.code === "string"
-    ? cause.code
-    : "flary_runtime_failed";
+  return isRecord(cause) && typeof cause.code === "string" ? cause.code : "flary_runtime_failed";
 }
 
 function errorStatus(cause: unknown): number {
-  return isRecord(cause) && typeof cause.status === "number"
-    ? cause.status
-    : 500;
+  return isRecord(cause) && typeof cause.status === "number" ? cause.status : 500;
 }
 
 function isTerminal(status: RunResult["status"]): boolean {
-  return (
-    status === "completed" || status === "failed" || status === "cancelled"
-  );
+  return status === "completed" || status === "failed" || status === "cancelled";
 }
 
 function string(value: unknown): string {
@@ -716,7 +627,7 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
         clearTimeout(timer);
         resolve();
       },
-      { once: true }
+      { once: true },
     );
   });
 }

@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  exportJsonl,
-  importJsonl,
-} from "../../src/harness/storage/jsonl.js";
+import { exportJsonl, importJsonl } from "../../src/harness/storage/jsonl.js";
 import { ThreadRecordSchema } from "../../src/harness/storage/records.js";
 
 test("round-trips canonical records through JSONL", () => {

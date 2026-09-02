@@ -1,0 +1,16 @@
+**/.astro-dist/**
+**/.astro/**
+**/.flary/**
+**/.flue/**
+**/.flue-vite/**
+**/.wrangler/**
+**/dist/**
+**/node_modules/**
+**/worker-configuration.d.ts
+apps/cloud/src/**/*.astro
+flary-*.tgz
+npm-patches/**
+patches/**
+pnpm-lock.yaml
+tests/fixtures/function-runtime/**
+tools/oxlint/anti-slop/**

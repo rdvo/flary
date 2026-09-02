@@ -7,7 +7,7 @@ import {
   MetadataSchema,
   NonEmptyStringSchema,
   VersionSchema,
-} from "./common";
+} from "./common.js";
 
 const FlowNodeBaseFields = {
   id: IdentifierSchema,
@@ -16,13 +16,7 @@ const FlowNodeBaseFields = {
 };
 
 // Identify the kind of one flow node.
-export const FlowNodeKindSchema = z.enum([
-  "agent",
-  "tool",
-  "transform",
-  "branch",
-  "parallel",
-]);
+export const FlowNodeKindSchema = z.enum(["agent", "tool", "transform", "branch", "parallel"]);
 export type FlowNodeKind = z.infer<typeof FlowNodeKindSchema>;
 
 // Run an agent from a flow node.

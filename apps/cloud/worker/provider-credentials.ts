@@ -1,9 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { registerProvider } from "@flue/runtime";
-import {
-  type ProviderCredential,
-  type ProviderCredentialResolver,
-} from "flary/providers";
+import { type ProviderCredential, type ProviderCredentialResolver } from "flary/providers";
 import {
   AdmittedProviderCredentialSchema,
   type AdmittedProviderCredential,
@@ -14,10 +11,7 @@ import {
 import { createDb } from "./db";
 import { flaryConnection, secretEnvelope } from "./db/schema";
 import type { Env } from "./env";
-import {
-  connectionSecretAssociatedData,
-  decryptToken,
-} from "./security/tokens";
+import { connectionSecretAssociatedData, decryptToken } from "./security/tokens";
 import { resolveSubscriptionAccessToken } from "./provider-subscriptions";
 
 type ThreadBinding = {
@@ -54,9 +48,7 @@ export class CredentialRecoveryUnavailableError extends Error {
     readonly credentialConnectionRef: string,
     readonly provider: string,
   ) {
-    super(
-      `The admitted ${provider} credential is not available for durable recovery`,
-    );
+    super(`The admitted ${provider} credential is not available for durable recovery`);
     this.name = "CredentialRecoveryUnavailableError";
   }
 }
@@ -118,9 +110,7 @@ export class CloudProviderCredentialResolver implements ProviderCredentialResolv
     };
   }
 
-  async resolveManaged(input: {
-    provider: ProviderKind;
-  }): Promise<ProviderCredential | undefined> {
+  async resolveManaged(input: { provider: ProviderKind }): Promise<ProviderCredential | undefined> {
     const provider = ProviderKindSchema.parse(input.provider);
     const secret = managedSecret(this.env, provider);
     if (!secret) return undefined;
@@ -175,15 +165,7 @@ export async function prepareFlueModel(
   userId: string,
   admitted?: AdmittedProviderCredential,
 ): Promise<string | undefined> {
-  return (
-    await prepareAdmittedFlueModel(
-      env,
-      binding,
-      selection,
-      userId,
-      admitted,
-    )
-  )?.model;
+  return (await prepareAdmittedFlueModel(env, binding, selection, userId, admitted))?.model;
 }
 
 export async function requireRecoveredFlueModel(
@@ -193,18 +175,9 @@ export async function requireRecoveredFlueModel(
   userId: string,
   admitted: AdmittedProviderCredential,
 ): Promise<string> {
-  const model = await prepareFlueModel(
-    env,
-    binding,
-    selection,
-    userId,
-    admitted,
-  );
+  const model = await prepareFlueModel(env, binding, selection, userId, admitted);
   if (!model) {
-    throw new CredentialRecoveryUnavailableError(
-      admitted.connectionRef,
-      admitted.provider,
-    );
+    throw new CredentialRecoveryUnavailableError(admitted.connectionRef, admitted.provider);
   }
   return model;
 }
@@ -248,9 +221,7 @@ export async function prepareAdmittedFlueModel(
   }
 
   const exactConnectionId = admitted?.connectionId;
-  const candidateConnectionIds = exactConnectionId
-    ? [exactConnectionId]
-    : binding.connectionIds;
+  const candidateConnectionIds = exactConnectionId ? [exactConnectionId] : binding.connectionIds;
   const subscription =
     (!admitted || admitted.source === "subscription") &&
     (provider.data === "anthropic" || provider.data === "openai-codex")
@@ -265,7 +236,7 @@ export async function prepareAdmittedFlueModel(
       : undefined;
   const connection =
     subscription ??
-    ((!admitted || admitted.source === "tenant_byok")
+    (!admitted || admitted.source === "tenant_byok"
       ? await findTenantConnection(env, {
           tenantId: binding.workspace.organizationId,
           applicationId: binding.workspace.appId,
@@ -280,8 +251,7 @@ export async function prepareAdmittedFlueModel(
           organizationId: connection.organizationId,
           userId,
           connectionId: connection.connectionId,
-          provider:
-          provider.data === "anthropic" ? "anthropic" : "openai-codex",
+          provider: provider.data === "anthropic" ? "anthropic" : "openai-codex",
         })
       : await readConnectionSecret(env, connection)
     : !admitted || admitted.source === "managed"
@@ -297,8 +267,7 @@ export async function prepareAdmittedFlueModel(
         applicationId: binding.workspace.appId,
         connectionIds: [connection.connectionId],
         provider: provider.data,
-        billingMode:
-          connection.billingMode === "subscription" ? "subscription" : "byok",
+        billingMode: connection.billingMode === "subscription" ? "subscription" : "byok",
         ...(connection.billingMode === "subscription" ? { userId } : {}),
       })
     : undefined;
@@ -379,16 +348,12 @@ async function createAdmittedCredential(
   return { ...input, connectionRef };
 }
 
-export async function stableCredentialHash(
-  parts: readonly string[],
-): Promise<string> {
+export async function stableCredentialHash(parts: readonly string[]): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(JSON.stringify(parts)),
   );
-  return Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function findTenantConnection(
@@ -425,15 +390,11 @@ async function findTenantConnection(
     .where(
       and(
         eq(flaryConnection.organizationId, input.tenantId),
-        ...(input.applicationId
-          ? [eq(flaryConnection.appId, input.applicationId)]
-          : []),
+        ...(input.applicationId ? [eq(flaryConnection.appId, input.applicationId)] : []),
         inArray(flaryConnection.id, [...input.connectionIds]),
         eq(flaryConnection.type, "api"),
         eq(flaryConnection.provider, input.provider),
-        ...(input.billingMode
-          ? [eq(flaryConnection.billingMode, input.billingMode)]
-          : []),
+        ...(input.billingMode ? [eq(flaryConnection.billingMode, input.billingMode)] : []),
         ...(input.billingMode === "subscription" && input.userId
           ? [eq(flaryConnection.ownerUserId, input.userId)]
           : []),
@@ -460,11 +421,7 @@ async function findTenantConnection(
       candidate.expiresAt.getTime() > Date.now()
     );
   });
-  if (
-    !selected ||
-    (selected.billingMode !== "subscription" &&
-      selected.billingMode !== "byok")
-  ) {
+  if (!selected || (selected.billingMode !== "subscription" && selected.billingMode !== "byok")) {
     return undefined;
   }
   return {
@@ -510,27 +467,45 @@ function managedSecret(env: Env, provider: ProviderKind): string | undefined {
 
 function managedSecretValue(env: Env, provider: ProviderKind): string | undefined {
   switch (provider) {
-    case "openai": return env.OPENAI_API_KEY;
-    case "openai-codex": return undefined;
-    case "anthropic": return env.ANTHROPIC_API_KEY;
-    case "moonshot": return env.MOONSHOT_API_KEY;
-    case "google": return env.GOOGLE_API_KEY;
-    default: return undefined;
+    case "openai":
+      return env.OPENAI_API_KEY;
+    case "openai-codex":
+      return undefined;
+    case "anthropic":
+      return env.ANTHROPIC_API_KEY;
+    case "moonshot":
+      return env.MOONSHOT_API_KEY;
+    case "google":
+      return env.GOOGLE_API_KEY;
+    default:
+      return undefined;
   }
 }
 
 function providerRoute(provider: ProviderKind, configuredBaseUrl?: string | null) {
   switch (provider) {
     case "anthropic":
-      return { api: "anthropic-messages", baseUrl: configuredBaseUrl ?? "https://api.anthropic.com/v1" };
+      return {
+        api: "anthropic-messages",
+        baseUrl: configuredBaseUrl ?? "https://api.anthropic.com/v1",
+      };
     case "moonshot":
-      return { api: "openai-completions", baseUrl: configuredBaseUrl ?? "https://api.moonshot.ai/v1" };
+      return {
+        api: "openai-completions",
+        baseUrl: configuredBaseUrl ?? "https://api.moonshot.ai/v1",
+      };
     case "google":
-      return { api: "google-generative-ai", baseUrl: configuredBaseUrl ?? "https://generativelanguage.googleapis.com/v1beta" };
+      return {
+        api: "google-generative-ai",
+        baseUrl: configuredBaseUrl ?? "https://generativelanguage.googleapis.com/v1beta",
+      };
     case "openai":
       return { api: "openai-responses", baseUrl: configuredBaseUrl ?? "https://api.openai.com/v1" };
     case "openai-codex":
-      return { api: "openai-codex-responses", baseUrl: configuredBaseUrl ?? "https://chatgpt.com/backend-api" };
+      return {
+        api: "openai-codex-responses",
+        baseUrl: configuredBaseUrl ?? "https://chatgpt.com/backend-api",
+      };
     default:
       return { api: "openai-responses", baseUrl: configuredBaseUrl ?? "https://api.openai.com/v1" };
   }

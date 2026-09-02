@@ -32,17 +32,11 @@ run("npm", ["install", tarball, "--loglevel", "error"], consumer);
 run("npm", ["audit", "--audit-level=high"], consumer);
 
 const flue = fs.readFileSync(
-  path.join(
-    consumer,
-    "node_modules/@flue/runtime/dist/conversation-stream-store-Bitz7UoW.mjs",
-  ),
+  path.join(consumer, "node_modules/@flue/runtime/dist/conversation-stream-store-Bitz7UoW.mjs"),
   "utf8",
 );
 const pi = fs.readFileSync(
-  path.join(
-    consumer,
-    "node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js",
-  ),
+  path.join(consumer, "node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js"),
   "utf8",
 );
 if (!flue.includes("activeCacheRetention")) {
@@ -168,14 +162,8 @@ run(flaryBin, ["create", starter], consumer);
 const starterManifestPath = path.join(starter, "package.json");
 const starterManifest = JSON.parse(fs.readFileSync(starterManifestPath, "utf8"));
 starterManifest.dependencies.flary = tarball;
-fs.writeFileSync(
-  starterManifestPath,
-  `${JSON.stringify(starterManifest, null, 2)}\n`,
-);
-const starterAuth = fs.readFileSync(
-  path.join(starter, "src", "flary.ts"),
-  "utf8",
-);
+fs.writeFileSync(starterManifestPath, `${JSON.stringify(starterManifest, null, 2)}\n`);
+const starterAuth = fs.readFileSync(path.join(starter, "src", "flary.ts"), "utf8");
 if (starterAuth.includes("tenantId: bindings.APP_ENV")) {
   throw new Error("The generated starter still trusts APP_ENV as a tenant");
 }
@@ -196,11 +184,9 @@ for (const name of [".dev.vars", ".env"]) {
 }
 
 const dashboard = path.join(temporary, "dashboard");
-fs.cpSync(
-  path.join(consumer, "node_modules/flary/templates/dashboard"),
-  dashboard,
-  { recursive: true },
-);
+fs.cpSync(path.join(consumer, "node_modules/flary/templates/dashboard"), dashboard, {
+  recursive: true,
+});
 fs.renameSync(path.join(dashboard, "gitignore"), path.join(dashboard, ".gitignore"));
 const dashboardManifestPath = path.join(dashboard, "package.json");
 const dashboardManifest = JSON.parse(fs.readFileSync(dashboardManifestPath, "utf8"));

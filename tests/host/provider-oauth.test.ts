@@ -69,33 +69,30 @@ test("the OSS host router mounts provider OAuth without Flary Cloud auth", async
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ provider: "openai-codex" }),
   });
-  const body = await response.json() as { oauth: { userId: string } };
+  const body = (await response.json()) as { oauth: { userId: string } };
 
   assert.equal(response.status, 201);
   assert.equal(body.oauth.userId, "user-1");
   assert.equal(startedForUser, "user-1");
 
-  const handoff = await router.request(
-    "/apps/relayr/provider-oauth/handoff",
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        connectionId: "connection-1",
-        provider: "openai-codex",
-        ownerUserId: "user-1",
-        grant: "user",
-        envelope: {
-          algorithm: "A256GCM",
-          keyId: "relayr-vault-key",
-          ciphertext: "encrypted-value",
-          iv: "encrypted-iv",
-        },
-        scopes: [],
-        version: 1,
-      }),
-    },
-  );
+  const handoff = await router.request("/apps/relayr/provider-oauth/handoff", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      connectionId: "connection-1",
+      provider: "openai-codex",
+      ownerUserId: "user-1",
+      grant: "user",
+      envelope: {
+        algorithm: "A256GCM",
+        keyId: "relayr-vault-key",
+        ciphertext: "encrypted-value",
+        iv: "encrypted-iv",
+      },
+      scopes: [],
+      version: 1,
+    }),
+  });
   const handoffBody = await handoff.text();
   assert.equal(handoff.status, 201);
   assert.doesNotMatch(handoffBody, /access.?token|refresh.?token/i);
@@ -135,26 +132,23 @@ test("the OAuth handoff rejects another user's credential", async () => {
     },
   });
 
-  const response = await router.request(
-    "/apps/relayr/provider-oauth/handoff",
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        connectionId: "connection-1",
-        provider: "anthropic",
-        ownerUserId: "user-2",
-        grant: "user",
-        envelope: {
-          algorithm: "A256GCM",
-          keyId: "relayr-vault-key",
-          ciphertext: "encrypted-value",
-          iv: "encrypted-iv",
-        },
-        scopes: [],
-        version: 1,
-      }),
-    },
-  );
+  const response = await router.request("/apps/relayr/provider-oauth/handoff", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      connectionId: "connection-1",
+      provider: "anthropic",
+      ownerUserId: "user-2",
+      grant: "user",
+      envelope: {
+        algorithm: "A256GCM",
+        keyId: "relayr-vault-key",
+        ciphertext: "encrypted-value",
+        iv: "encrypted-iv",
+      },
+      scopes: [],
+      version: 1,
+    }),
+  });
   assert.equal(response.status, 403);
 });

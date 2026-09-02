@@ -10,13 +10,7 @@ import {
 } from "../contracts/provider.js";
 import type { ModelDescriptor } from "../execution/types.js";
 
-export const RoutingStrategySchema = z.enum([
-  "explicit",
-  "quality",
-  "balanced",
-  "cost",
-  "latency",
-]);
+export const RoutingStrategySchema = z.enum(["explicit", "quality", "balanced", "cost", "latency"]);
 export type RoutingStrategy = z.infer<typeof RoutingStrategySchema>;
 
 export const RoutingPolicySchema = z
@@ -45,9 +39,7 @@ export const ProviderRouteCandidateSchema = z
     credentialReference: z.string().max(256).optional(),
   })
   .strict();
-export type ProviderRouteCandidate = z.infer<
-  typeof ProviderRouteCandidateSchema
->;
+export type ProviderRouteCandidate = z.infer<typeof ProviderRouteCandidateSchema>;
 
 export const RouteDecisionSchema = z
   .object({
@@ -62,7 +54,7 @@ export const RouteDecisionSchema = z
           eligible: z.boolean(),
           reason: z.string().max(1_000),
         })
-        .strict()
+        .strict(),
     ),
     strategy: RoutingStrategySchema,
     fallbackIndex: z.number().int().nonnegative().default(0),
@@ -109,36 +101,29 @@ export class DeterministicModelRouter {
   async decide(input: RoutingRequest): Promise<RouteDecision> {
     const existing = await this.#store?.get(input.operationId);
     if (existing) return RouteDecisionSchema.parse(existing);
-    const policy: z.output<typeof RoutingPolicySchema> =
-      RoutingPolicySchema.parse(input.policy);
+    const policy: z.output<typeof RoutingPolicySchema> = RoutingPolicySchema.parse(input.policy);
     const candidates = input.candidates.map((candidate) =>
-      ProviderRouteCandidateSchema.parse(candidate)
+      ProviderRouteCandidateSchema.parse(candidate),
     );
     const allowed = uniqueModels(
-      policy.allow.map((candidate) =>
-        normalizeModelInput(candidate as ModelInput)
-      )
+      policy.allow.map((candidate) => normalizeModelInput(candidate as ModelInput)),
     );
     // Fallback models are an ordered retry chain. They must not participate in
     // the initial score: a high-scoring fallback is still a fallback.
     const fallback = uniqueModels(
       (policy.fallback ?? [])
         .map((candidate) => normalizeModelInput(candidate as ModelInput))
-        .filter(
-          (candidate) => !allowed.some((item) => sameModel(item, candidate))
-        )
+        .filter((candidate) => !allowed.some((item) => sameModel(item, candidate))),
     );
     const scored = [
       ...allowed.map((selection, index) =>
         scoreCandidate({
           selection,
-          candidate: candidates.find((item) =>
-            sameModel(item.selection, selection)
-          ),
+          candidate: candidates.find((item) => sameModel(item.selection, selection)),
           policy,
           index,
           count: allowed.length,
-        })
+        }),
       ),
       ...fallback.map((selection) => ({
         selection,
@@ -149,10 +134,7 @@ export class DeterministicModelRouter {
     ];
     const eligible = scored.filter((candidate) => candidate.eligible);
     if (eligible.length === 0) {
-      throw new ModelRoutingError(
-        "no_route",
-        "No healthy model satisfies the routing policy"
-      );
+      throw new ModelRoutingError("no_route", "No healthy model satisfies the routing policy");
     }
     eligible.sort((left, right) => {
       const difference = right.score - left.score;
@@ -163,7 +145,7 @@ export class DeterministicModelRouter {
     const selected = eligible[0]!;
     const decision = RouteDecisionSchema.parse({
       decisionId: `route_${hash(
-        `${input.operationId}:${selected.selection.provider}/${selected.selection.model}`
+        `${input.operationId}:${selected.selection.provider}/${selected.selection.model}`,
       )}`,
       operationId: input.operationId,
       selection: selected.selection,
@@ -187,7 +169,7 @@ export class DeterministicModelRouter {
       readonly run: (selection: ModelSelection) => Promise<T>;
       readonly isRetryable?: (error: unknown) => boolean;
       readonly outcomeUnknown?: boolean;
-    }
+    },
   ): Promise<{ readonly value: T; readonly decision: RouteDecision }> {
     const decision = await this.decide(input);
     try {
@@ -202,16 +184,14 @@ export class DeterministicModelRouter {
       }
       const fallbackCandidates = uniqueModels(
         (input.policy.fallback ?? []).map((candidate) =>
-          normalizeModelInput(candidate as ModelInput)
-        )
+          normalizeModelInput(candidate as ModelInput),
+        ),
       );
       let fallbackIndex = 0;
       for (const selection of fallbackCandidates) {
         fallbackIndex += 1;
         if (sameModel(selection, decision.selection)) continue;
-        const candidate = input.candidates.find((item) =>
-          sameModel(item.selection, selection)
-        );
+        const candidate = input.candidates.find((item) => sameModel(item.selection, selection));
         if (!candidate?.healthy) continue;
         try {
           const value = await input.run(selection);
@@ -224,7 +204,7 @@ export class DeterministicModelRouter {
             candidates: decision.candidates.map((item) =>
               sameModel(item.selection, selection)
                 ? { ...item, eligible: true, reason: "fallback_selected" }
-                : item
+                : item,
             ),
           });
           // Persist the effective producer. Recovery and telemetry must not
@@ -266,9 +246,7 @@ function scoreCandidate(input: {
   }
   if (
     candidate &&
-    policy.capabilities.some(
-      (capability) => !candidate.capabilities.includes(capability)
-    )
+    policy.capabilities.some((capability) => !candidate.capabilities.includes(capability))
   ) {
     eligible = false;
     reasons.push("missing_capability");
@@ -293,17 +271,14 @@ function scoreCandidate(input: {
     selection,
     eligible,
     score:
-      eligible && candidate
-        ? score(policy, candidate, index, count)
-        : -Number.MAX_SAFE_INTEGER,
+      eligible && candidate ? score(policy, candidate, index, count) : -Number.MAX_SAFE_INTEGER,
     reason: reasons.length > 0 ? reasons.join(",") : "eligible",
   };
 }
 
 function uniqueModels(models: readonly ModelSelection[]): ModelSelection[] {
   return models.filter(
-    (candidate, index) =>
-      models.findIndex((item) => sameModel(item, candidate)) === index
+    (candidate, index) => models.findIndex((item) => sameModel(item, candidate)) === index,
   );
 }
 
@@ -327,28 +302,22 @@ export function routeCandidatesFromDescriptors(
     readonly latencyMs?: number;
     readonly healthy?: boolean;
   })[],
-  provider = "custom"
+  provider = "custom",
 ): ProviderRouteCandidate[] {
   return descriptors.map((descriptor) =>
     ProviderRouteCandidateSchema.parse({
       selection: normalizeModelInput(
-        descriptor.id.includes("/")
-          ? descriptor.id
-          : `${provider}/${descriptor.id}`
+        descriptor.id.includes("/") ? descriptor.id : `${provider}/${descriptor.id}`,
       ),
       quality: descriptor.priority,
-      ...(descriptor.costUsd !== undefined
-        ? { costUsd: descriptor.costUsd }
-        : {}),
-      ...(descriptor.latencyMs !== undefined
-        ? { latencyMs: descriptor.latencyMs }
-        : {}),
+      ...(descriptor.costUsd !== undefined ? { costUsd: descriptor.costUsd } : {}),
+      ...(descriptor.latencyMs !== undefined ? { latencyMs: descriptor.latencyMs } : {}),
       healthy: descriptor.healthy ?? true,
       capabilities: descriptor.capabilities.flatMap((value) => {
         const parsed = ModelCapabilitySchema.safeParse(value);
         return parsed.success ? [parsed.data] : [];
       }),
-    })
+    }),
   );
 }
 
@@ -356,26 +325,19 @@ function score(
   policy: z.output<typeof RoutingPolicySchema>,
   candidate: ProviderRouteCandidate,
   index: number,
-  count: number
+  count: number,
 ): number {
   const strategy = policy.optimizeFor ?? policy.strategy;
   if (strategy === "explicit") return -index;
   if (strategy === "quality") return candidate.quality * 1_000 - index;
   if (strategy === "cost")
-    return candidate.costUsd === undefined
-      ? 0 - index
-      : -candidate.costUsd * 1_000 - index;
+    return candidate.costUsd === undefined ? 0 - index : -candidate.costUsd * 1_000 - index;
   if (strategy === "latency")
-    return candidate.latencyMs === undefined
-      ? 0 - index
-      : -candidate.latencyMs - index;
+    return candidate.latencyMs === undefined ? 0 - index : -candidate.latencyMs - index;
   const quality = candidate.quality;
   const cost = candidate.costUsd === undefined ? 0 : -candidate.costUsd;
-  const latency =
-    candidate.latencyMs === undefined ? 0 : -candidate.latencyMs / 1_000;
-  return (
-    quality + cost + latency + (count - index) / Math.max(1, count * 1_000)
-  );
+  const latency = candidate.latencyMs === undefined ? 0 : -candidate.latencyMs / 1_000;
+  return quality + cost + latency + (count - index) / Math.max(1, count * 1_000);
 }
 
 function sameModel(left: ModelSelection, right: ModelSelection): boolean {

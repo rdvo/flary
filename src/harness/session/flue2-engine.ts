@@ -11,9 +11,13 @@ export interface Flue2PinnedSubmission {
 
 /** Durable metadata needed to retry one admission with the exact same model. */
 export interface Flue2SessionEngineStateStore {
-  get(input: Pick<Flue2PinnedSubmission, "agentId" | "threadId" | "idempotencyKey">): Promise<Flue2PinnedSubmission | undefined>;
+  get(
+    input: Pick<Flue2PinnedSubmission, "agentId" | "threadId" | "idempotencyKey">,
+  ): Promise<Flue2PinnedSubmission | undefined>;
   reserve(input: Flue2PinnedSubmission): Promise<Flue2PinnedSubmission>;
-  admit(input: Flue2PinnedSubmission & { readonly admission: SessionEngineAdmission }): Promise<void>;
+  admit(
+    input: Flue2PinnedSubmission & { readonly admission: SessionEngineAdmission },
+  ): Promise<void>;
 }
 
 export interface Flue2SessionEngineTransport {
@@ -83,9 +87,7 @@ export interface CreateFlue2SessionEngineOptions {
 }
 
 /** Flue 2 session adapter with durable admission metadata and exact controls. */
-export function createFlue2SessionEngine(
-  options: CreateFlue2SessionEngineOptions,
-): SessionEngine {
+export function createFlue2SessionEngine(options: CreateFlue2SessionEngineOptions): SessionEngine {
   return {
     pin: {
       id: "flue-2",
@@ -114,21 +116,23 @@ export function createFlue2SessionEngine(
         images: input.images,
       });
       const stored = await options.state.get(input);
-      const pinned = stored ?? await (async () => {
-        const model = await options.resolveModel({
-          agentId: input.agentId,
-          threadId: input.threadId,
-          requested: input.model,
-        });
-        if (!model.trim()) throw new Error("The resolved model pin is empty");
-        return options.state.reserve({
-          agentId: input.agentId,
-          threadId: input.threadId,
-          idempotencyKey: input.idempotencyKey,
-          requestHash,
-          model,
-        });
-      })();
+      const pinned =
+        stored ??
+        (await (async () => {
+          const model = await options.resolveModel({
+            agentId: input.agentId,
+            threadId: input.threadId,
+            requested: input.model,
+          });
+          if (!model.trim()) throw new Error("The resolved model pin is empty");
+          return options.state.reserve({
+            agentId: input.agentId,
+            threadId: input.threadId,
+            idempotencyKey: input.idempotencyKey,
+            requestHash,
+            model,
+          });
+        })());
       if (pinned.requestHash !== requestHash) {
         throw new Error("The idempotency key belongs to a different submission");
       }
@@ -210,7 +214,9 @@ export class InMemoryFlue2SessionEngineStateStore implements Flue2SessionEngineS
     this.#records = new Map(records.map((record) => [submissionKey(record), clonePinned(record)]));
   }
 
-  async get(input: Pick<Flue2PinnedSubmission, "agentId" | "threadId" | "idempotencyKey">): Promise<Flue2PinnedSubmission | undefined> {
+  async get(
+    input: Pick<Flue2PinnedSubmission, "agentId" | "threadId" | "idempotencyKey">,
+  ): Promise<Flue2PinnedSubmission | undefined> {
     const current = this.#records.get(submissionKey(input));
     return current ? clonePinned(current) : undefined;
   }
@@ -224,7 +230,9 @@ export class InMemoryFlue2SessionEngineStateStore implements Flue2SessionEngineS
     return clonePinned(record);
   }
 
-  async admit(input: Flue2PinnedSubmission & { readonly admission: SessionEngineAdmission }): Promise<void> {
+  async admit(
+    input: Flue2PinnedSubmission & { readonly admission: SessionEngineAdmission },
+  ): Promise<void> {
     const key = submissionKey(input);
     const current = this.#records.get(key);
     if (!current || current.requestHash !== input.requestHash || current.model !== input.model) {
@@ -243,7 +251,10 @@ export class InMemoryFlue2SessionEngineStateStore implements Flue2SessionEngineS
 
 /** Structural subset of Durable Object SQLite used by the model-pin store. */
 export interface Flue2SqlStorage {
-  exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): {
+  exec<T = Record<string, unknown>>(
+    query: string,
+    ...bindings: unknown[]
+  ): {
     toArray(): T[];
   };
 }
@@ -263,7 +274,9 @@ export class SqliteFlue2SessionEngineStateStore implements Flue2SessionEngineSta
     )`);
   }
 
-  async get(input: Pick<Flue2PinnedSubmission, "agentId" | "threadId" | "idempotencyKey">): Promise<Flue2PinnedSubmission | undefined> {
+  async get(
+    input: Pick<Flue2PinnedSubmission, "agentId" | "threadId" | "idempotencyKey">,
+  ): Promise<Flue2PinnedSubmission | undefined> {
     return this.read(input);
   }
 
@@ -284,7 +297,9 @@ export class SqliteFlue2SessionEngineStateStore implements Flue2SessionEngineSta
     return record;
   }
 
-  async admit(input: Flue2PinnedSubmission & { readonly admission: SessionEngineAdmission }): Promise<void> {
+  async admit(
+    input: Flue2PinnedSubmission & { readonly admission: SessionEngineAdmission },
+  ): Promise<void> {
     this.sql.exec(
       `UPDATE flary_flue2_submission_pin
        SET admission_json = COALESCE(admission_json, ?), updated_at = ?
@@ -307,22 +322,26 @@ export class SqliteFlue2SessionEngineStateStore implements Flue2SessionEngineSta
     }
   }
 
-  private read(input: Pick<Flue2PinnedSubmission, "agentId" | "threadId" | "idempotencyKey">): Flue2PinnedSubmission | undefined {
-    const [row] = this.sql.exec<{
-      agent_id: string;
-      thread_id: string;
-      idempotency_key: string;
-      request_hash: string;
-      model: string;
-      admission_json: string | null;
-    }>(
-      `SELECT agent_id, thread_id, idempotency_key, request_hash, model, admission_json
+  private read(
+    input: Pick<Flue2PinnedSubmission, "agentId" | "threadId" | "idempotencyKey">,
+  ): Flue2PinnedSubmission | undefined {
+    const [row] = this.sql
+      .exec<{
+        agent_id: string;
+        thread_id: string;
+        idempotency_key: string;
+        request_hash: string;
+        model: string;
+        admission_json: string | null;
+      }>(
+        `SELECT agent_id, thread_id, idempotency_key, request_hash, model, admission_json
        FROM flary_flue2_submission_pin
        WHERE agent_id = ? AND thread_id = ? AND idempotency_key = ?`,
-      input.agentId,
-      input.threadId,
-      input.idempotencyKey,
-    ).toArray();
+        input.agentId,
+        input.threadId,
+        input.idempotencyKey,
+      )
+      .toArray();
     if (!row) return undefined;
     return {
       agentId: row.agent_id,
@@ -349,7 +368,9 @@ function admissionThread(admission: SessionEngineAdmission): string {
   return value.threadId;
 }
 
-function submissionKey(input: Pick<Flue2PinnedSubmission, "agentId" | "threadId" | "idempotencyKey">): string {
+function submissionKey(
+  input: Pick<Flue2PinnedSubmission, "agentId" | "threadId" | "idempotencyKey">,
+): string {
   return `${input.agentId}\0${input.threadId}\0${input.idempotencyKey}`;
 }
 
@@ -361,10 +382,12 @@ function clonePinned(input: Flue2PinnedSubmission): Flue2PinnedSubmission {
 }
 
 function sameAdmission(left: SessionEngineAdmission, right: SessionEngineAdmission): boolean {
-  return left.submissionId === right.submissionId
-    && left.cursor === right.cursor
-    && left.agentId === right.agentId
-    && left.threadId === right.threadId;
+  return (
+    left.submissionId === right.submissionId &&
+    left.cursor === right.cursor &&
+    left.agentId === right.agentId &&
+    left.threadId === right.threadId
+  );
 }
 
 async function sha256Json(value: unknown): Promise<string> {
@@ -372,7 +395,5 @@ async function sha256Json(value: unknown): Promise<string> {
     "SHA-256",
     new TextEncoder().encode(JSON.stringify(value)),
   );
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }

@@ -7,8 +7,8 @@ import {
   NonEmptyStringSchema,
   TimestampSchema,
   VersionSchema,
-} from "./common";
-import { RunTargetSchema } from "./runs";
+} from "./common.js";
+import { RunTargetSchema } from "./runs.js";
 
 // Define when a schedule starts a run.
 export const ScheduleTriggerSchema = z.discriminatedUnion("kind", [

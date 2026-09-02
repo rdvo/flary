@@ -17,10 +17,7 @@ import {
   type SubagentMailboxMessage,
   type SubagentThread,
 } from "../contracts/subagents.js";
-import {
-  SubagentPolicyError,
-  type SubagentCoordinatorOptions,
-} from "../subagents/coordinator.js";
+import { SubagentPolicyError, type SubagentCoordinatorOptions } from "../subagents/coordinator.js";
 import { selectSeededTurns } from "../subagents/context.js";
 
 interface SqlRows<T> {
@@ -34,15 +31,11 @@ interface SqlRows<T> {
  * must commit as one operation.
  */
 export interface SubagentCoordinatorSqlStorage {
-  exec<T = Record<string, unknown>>(
-    query: string,
-    ...bindings: unknown[]
-  ): SqlRows<T>;
+  exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): SqlRows<T>;
   transactionSync<T>(closure: () => T): T;
 }
 
-export interface SqliteSubagentCoordinatorOptions
-  extends SubagentCoordinatorOptions {
+export interface SqliteSubagentCoordinatorOptions extends SubagentCoordinatorOptions {
   sql: unknown;
 }
 
@@ -85,12 +78,9 @@ export class SqliteSubagentCoordinator {
       throw new Error("The root thread must belong to the coordinator session");
     }
     const sql = options.sql as Partial<SubagentCoordinatorSqlStorage>;
-    if (
-      typeof sql?.exec !== "function" ||
-      typeof sql.transactionSync !== "function"
-    ) {
+    if (typeof sql?.exec !== "function" || typeof sql.transactionSync !== "function") {
       throw new Error(
-        "The durable subagent coordinator needs Durable Object SQLite with transactionSync"
+        "The durable subagent coordinator needs Durable Object SQLite with transactionSync",
       );
     }
 
@@ -114,7 +104,7 @@ export class SqliteSubagentCoordinator {
       `SELECT record_json
        FROM flary_subagent_threads
        WHERE thread_id = ?`,
-      threadId
+      threadId,
     );
     return row
       ? structuredClone(SubagentThreadSchema.parse(JSON.parse(row.record_json)))
@@ -126,19 +116,15 @@ export class SqliteSubagentCoordinator {
       .exec<JsonRow>(
         `SELECT record_json
          FROM flary_subagent_threads
-         ORDER BY ordinal ASC`
+         ORDER BY ordinal ASC`,
       )
       .toArray()
-      .map((row) =>
-        structuredClone(SubagentThreadSchema.parse(JSON.parse(row.record_json)))
-      );
+      .map((row) => structuredClone(SubagentThreadSchema.parse(JSON.parse(row.record_json))));
   }
 
   appendTurn(turnInput: SubagentConversationTurn): SubagentConversationTurn {
     const turn = SubagentConversationTurnSchema.parse(
-      JSON.parse(
-        JSON.stringify(SubagentConversationTurnSchema.parse(turnInput))
-      )
+      JSON.parse(JSON.stringify(SubagentConversationTurnSchema.parse(turnInput))),
     );
     this.assertSession(turn.sessionId);
     return this.#sql.transactionSync(() => {
@@ -148,11 +134,11 @@ export class SqliteSubagentCoordinator {
          FROM flary_subagent_turns
          WHERE owner_thread_id = ? AND turn_id = ?`,
         turn.threadId,
-        turn.id
+        turn.id,
       );
       if (existing) {
         return structuredClone(
-          SubagentConversationTurnSchema.parse(JSON.parse(existing.record_json))
+          SubagentConversationTurnSchema.parse(JSON.parse(existing.record_json)),
         );
       }
       this.#sql.exec(
@@ -162,7 +148,7 @@ export class SqliteSubagentCoordinator {
         turn.threadId,
         turn.id,
         turn.ordinal,
-        JSON.stringify(turn)
+        JSON.stringify(turn),
       );
       return structuredClone(turn);
     });
@@ -175,7 +161,7 @@ export class SqliteSubagentCoordinator {
       const cached = this.readIdempotent<SubagentThread>(
         "spawn",
         request.idempotencyKey,
-        SubagentThreadSchema.parse
+        SubagentThreadSchema.parse,
       );
       if (cached) return cached;
       if (this.#policy.mode === "disabled") {
@@ -192,7 +178,7 @@ export class SqliteSubagentCoordinator {
         this.first<CountRow>(
           `SELECT COUNT(*) AS count
          FROM flary_subagent_threads
-         WHERE parent_thread_id IS NOT NULL`
+         WHERE parent_thread_id IS NOT NULL`,
         )?.count ?? 0;
       if (Number(descendants) >= this.#policy.maxTotalChildren) {
         throw new SubagentPolicyError("Subagent total limit reached");
@@ -204,17 +190,14 @@ export class SqliteSubagentCoordinator {
          FROM flary_subagent_threads
          WHERE parent_thread_id = ?
            AND status IN ('queued', 'running', 'waiting')`,
-          parent.threadId
+          parent.threadId,
         )?.count ?? 0;
       if (Number(activeChildren) >= this.#policy.maxConcurrentChildren) {
         throw new SubagentPolicyError("Subagent concurrency limit reached");
       }
 
       const now = this.#now().toISOString();
-      const seededTurns = selectSeededTurns(
-        this.listTurns(parent.threadId),
-        request.seedTurns
-      );
+      const seededTurns = selectSeededTurns(this.listTurns(parent.threadId), request.seedTurns);
       const thread = SubagentThreadSchema.parse({
         threadId: `thread_${this.#id()}`,
         sessionId: this.#sessionId,
@@ -232,9 +215,7 @@ export class SqliteSubagentCoordinator {
         }),
         seededTurnIds: seededTurns.map((turn) => turn.id),
         ...(request.model ? { model: request.model } : {}),
-        ...(request.reasoningEffort
-          ? { reasoningEffort: request.reasoningEffort }
-          : {}),
+        ...(request.reasoningEffort ? { reasoningEffort: request.reasoningEffort } : {}),
         ...(request.verbosity ? { verbosity: request.verbosity } : {}),
         ...(request.nickname ? { nickname: request.nickname } : {}),
         createdAt: now,
@@ -251,7 +232,7 @@ export class SqliteSubagentCoordinator {
           thread.threadId,
           turn.id,
           turn.ordinal,
-          JSON.stringify(turn)
+          JSON.stringify(turn),
         );
       }
       this.emit(thread, "spawned");
@@ -267,7 +248,7 @@ export class SqliteSubagentCoordinator {
       const cached = this.readIdempotent<SubagentMailboxMessage>(
         "message",
         request.idempotencyKey,
-        SubagentMailboxMessageSchema.parse
+        SubagentMailboxMessageSchema.parse,
       );
       if (cached) return cached;
 
@@ -295,7 +276,7 @@ export class SqliteSubagentCoordinator {
         message.id,
         message.toThreadId,
         message.sequence,
-        JSON.stringify(message)
+        JSON.stringify(message),
       );
       this.emit(to, "interacted", message.id);
       this.writeIdempotent("message", request.idempotencyKey, message);
@@ -311,7 +292,7 @@ export class SqliteSubagentCoordinator {
       const cached = this.readIdempotent<SubagentThread>(
         scope,
         request.idempotencyKey,
-        SubagentThreadSchema.parse
+        SubagentThreadSchema.parse,
       );
       if (cached) return cached;
 
@@ -323,19 +304,19 @@ export class SqliteSubagentCoordinator {
         ...(request.output !== undefined
           ? { output: request.output }
           : thread.output !== undefined
-          ? { output: thread.output }
-          : {}),
+            ? { output: thread.output }
+            : {}),
         ...(request.error !== undefined
           ? { error: request.error }
           : thread.error !== undefined
-          ? { error: thread.error }
-          : {}),
+            ? { error: thread.error }
+            : {}),
         updatedAt: now,
         ...(["complete", "fail", "cancel", "close"].includes(request.action)
           ? { completedAt: now }
           : thread.completedAt
-          ? { completedAt: thread.completedAt }
-          : {}),
+            ? { completedAt: thread.completedAt }
+            : {}),
       });
       this.#sql.exec(
         `UPDATE flary_subagent_threads
@@ -344,15 +325,13 @@ export class SqliteSubagentCoordinator {
         next.status,
         JSON.stringify(next),
         next.updatedAt,
-        next.threadId
+        next.threadId,
       );
       this.emit(
         next,
         activityForAction(request.action),
         undefined,
-        request.targetThreadId
-          ? { targetThreadId: request.targetThreadId }
-          : undefined
+        request.targetThreadId ? { targetThreadId: request.targetThreadId } : undefined,
       );
       this.writeIdempotent(scope, request.idempotencyKey, next);
       return structuredClone(next);
@@ -368,13 +347,11 @@ export class SqliteSubagentCoordinator {
          WHERE to_thread_id = ? AND sequence > ?
          ORDER BY sequence ASC`,
         threadId,
-        afterSequence
+        afterSequence,
       )
       .toArray()
       .map((row) =>
-        structuredClone(
-          SubagentMailboxMessageSchema.parse(JSON.parse(row.record_json))
-        )
+        structuredClone(SubagentMailboxMessageSchema.parse(JSON.parse(row.record_json))),
       );
   }
 
@@ -385,13 +362,11 @@ export class SqliteSubagentCoordinator {
          FROM flary_subagent_activity
          WHERE sequence > ?
          ORDER BY sequence ASC`,
-        afterSequence
+        afterSequence,
       )
       .toArray()
       .map((row) =>
-        structuredClone(
-          SubagentActivityEventSchema.parse(JSON.parse(row.record_json))
-        )
+        structuredClone(SubagentActivityEventSchema.parse(JSON.parse(row.record_json))),
       );
   }
 
@@ -400,29 +375,18 @@ export class SqliteSubagentCoordinator {
       const stored = this.first<ConfigRow>(
         `SELECT session_id, root_thread_id, policy_json
          FROM flary_subagent_config
-         WHERE singleton = 1`
+         WHERE singleton = 1`,
       );
       if (stored) {
-        if (
-          stored.session_id !== this.#sessionId ||
-          stored.root_thread_id !== this.#rootThreadId
-        ) {
-          throw new Error(
-            "The durable subagent coordinator identity does not match this session"
-          );
+        if (stored.session_id !== this.#sessionId || stored.root_thread_id !== this.#rootThreadId) {
+          throw new Error("The durable subagent coordinator identity does not match this session");
         }
-        const storedPolicy = DelegationPolicySchema.parse(
-          JSON.parse(stored.policy_json)
-        );
+        const storedPolicy = DelegationPolicySchema.parse(JSON.parse(stored.policy_json));
         if (JSON.stringify(storedPolicy) !== JSON.stringify(this.#policy)) {
-          throw new Error(
-            "The durable subagent coordinator policy is immutable"
-          );
+          throw new Error("The durable subagent coordinator policy is immutable");
         }
         if (!this.getThread(this.#rootThreadId)) {
-          throw new Error(
-            "The durable subagent coordinator root thread is missing"
-          );
+          throw new Error("The durable subagent coordinator root thread is missing");
         }
         return;
       }
@@ -434,7 +398,7 @@ export class SqliteSubagentCoordinator {
         this.#sessionId,
         this.#rootThreadId,
         JSON.stringify(this.#policy),
-        this.#now().toISOString()
+        this.#now().toISOString(),
       );
       this.insertThread(root);
     });
@@ -512,7 +476,7 @@ export class SqliteSubagentCoordinator {
       thread.depth,
       JSON.stringify(thread),
       thread.createdAt,
-      thread.updatedAt
+      thread.updatedAt,
     );
   }
 
@@ -523,19 +487,17 @@ export class SqliteSubagentCoordinator {
          FROM flary_subagent_turns
          WHERE owner_thread_id = ?
          ORDER BY ordinal ASC, rowid ASC`,
-        threadId
+        threadId,
       )
       .toArray()
-      .map((row) =>
-        SubagentConversationTurnSchema.parse(JSON.parse(row.record_json))
-      );
+      .map((row) => SubagentConversationTurnSchema.parse(JSON.parse(row.record_json)));
   }
 
   private emit(
     thread: SubagentThread,
     kind: SubagentActivityEvent["kind"],
     triggerMessageId?: string,
-    payload?: Record<string, string>
+    payload?: Record<string, string>,
   ): void {
     const event = SubagentActivityEventSchema.parse({
       id: `event_${this.#id()}`,
@@ -555,7 +517,7 @@ export class SqliteSubagentCoordinator {
        VALUES (?, ?, ?)`,
       event.id,
       event.sequence,
-      JSON.stringify(event)
+      JSON.stringify(event),
     );
   }
 
@@ -584,7 +546,7 @@ export class SqliteSubagentCoordinator {
       `UPDATE flary_subagent_sequence
        SET value = value + 1
        WHERE singleton = 1
-       RETURNING value`
+       RETURNING value`,
     );
     if (!row) throw new Error("The subagent sequence could not be advanced");
     return Number(row.value);
@@ -593,7 +555,7 @@ export class SqliteSubagentCoordinator {
   private readIdempotent<T>(
     scope: string,
     key: string | undefined,
-    parse: (value: unknown) => T
+    parse: (value: unknown) => T,
   ): T | undefined {
     if (!key) return undefined;
     const row = this.first<JsonRow>(
@@ -601,18 +563,12 @@ export class SqliteSubagentCoordinator {
        FROM flary_subagent_idempotency
        WHERE scope = ? AND idempotency_key = ?`,
       scope,
-      key
+      key,
     );
-    return row
-      ? structuredClone(parse(JSON.parse(row.record_json)))
-      : undefined;
+    return row ? structuredClone(parse(JSON.parse(row.record_json))) : undefined;
   }
 
-  private writeIdempotent(
-    scope: string,
-    key: string | undefined,
-    value: unknown
-  ): void {
+  private writeIdempotent(scope: string, key: string | undefined, value: unknown): void {
     if (!key) return;
     this.#sql.exec(
       `INSERT INTO flary_subagent_idempotency
@@ -621,7 +577,7 @@ export class SqliteSubagentCoordinator {
       scope,
       key,
       JSON.stringify(value),
-      this.#now().toISOString()
+      this.#now().toISOString(),
     );
   }
 
@@ -632,7 +588,7 @@ export class SqliteSubagentCoordinator {
 
 function statusForAction(
   action: SubagentControlRequest["action"],
-  current: SubagentThread["status"]
+  current: SubagentThread["status"],
 ): SubagentThread["status"] {
   switch (action) {
     case "start":
@@ -654,7 +610,7 @@ function statusForAction(
 }
 
 function activityForAction(
-  action: SubagentControlRequest["action"]
+  action: SubagentControlRequest["action"],
 ): SubagentActivityEvent["kind"] {
   switch (action) {
     case "start":

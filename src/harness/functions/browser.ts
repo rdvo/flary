@@ -1,18 +1,11 @@
 import type { Browser, BrowserContext, Page } from "@cloudflare/playwright";
 
-import type {
-  FlaryBrowserSource,
-  FlaryStepContext,
-  FlaryToolConnection,
-} from "./types.js";
+import type { FlaryBrowserSource, FlaryStepContext, FlaryToolConnection } from "./types.js";
 import { parseThreadName } from "../storage/scopes.js";
 import { createCloudflareWorkspaceConnection } from "../cloudflare/workspace.js";
 
 interface BrowserSql {
-  exec<T = Record<string, unknown>>(
-    query: string,
-    ...bindings: unknown[]
-  ): { toArray(): T[] };
+  exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): { toArray(): T[] };
 }
 
 interface BrowserStateBucket {
@@ -45,29 +38,31 @@ export async function createCloudflareBrowserConnection<TBindings>(
       updated_at TEXT NOT NULL
     );
   `);
-  const profileKey = source.options.profile === "ephemeral"
-    ? `ephemeral:${crypto.randomUUID()}`
-    : `thread:${input.context.runId ?? "default"}`;
+  const profileKey =
+    source.options.profile === "ephemeral"
+      ? `ephemeral:${crypto.randomUUID()}`
+      : `thread:${input.context.runId ?? "default"}`;
   let browser: Browser | undefined;
   let context: BrowserContext | undefined;
   let page: Page | undefined;
   const consoleEntries: Array<Record<string, unknown>> = [];
   const networkEntries: Array<Record<string, unknown>> = [];
-  const stateStore = source.options.profile === "ephemeral"
-    ? undefined
-    : browserStateStore(bindings, input.context.runId);
+  const stateStore =
+    source.options.profile === "ephemeral"
+      ? undefined
+      : browserStateStore(bindings, input.context.runId);
 
   const activePage = async (): Promise<Page> => {
     if (page && !page.isClosed()) return page;
     const playwright = await import("@cloudflare/playwright");
-    const saved = sql?.exec<{ session_id: string }>(
-      "SELECT session_id FROM flary_browser_sessions WHERE profile_key = ?",
-      profileKey,
-    ).toArray()[0];
+    const saved = sql
+      ?.exec<{ session_id: string }>(
+        "SELECT session_id FROM flary_browser_sessions WHERE profile_key = ?",
+        profileKey,
+      )
+      .toArray()[0];
     try {
-      browser = saved
-        ? await playwright.connect(endpoint as never, saved.session_id)
-        : undefined;
+      browser = saved ? await playwright.connect(endpoint as never, saved.session_id) : undefined;
     } catch {
       browser = undefined;
     }
@@ -89,13 +84,11 @@ export async function createCloudflareBrowserConnection<TBindings>(
       );
       await registerBrowserSession(bindings, input.context.runId, acquired.sessionId);
     }
-    const restoredState = browser.contexts().length === 0
-      ? await stateStore?.load()
-      : undefined;
-    context = browser.contexts()[0] ?? await browser.newContext(
-      restoredState ? { storageState: restoredState } : undefined,
-    );
-    page = context.pages()[0] ?? await context.newPage();
+    const restoredState = browser.contexts().length === 0 ? await stateStore?.load() : undefined;
+    context =
+      browser.contexts()[0] ??
+      (await browser.newContext(restoredState ? { storageState: restoredState } : undefined));
+    page = context.pages()[0] ?? (await context.newPage());
     page.on("console", (message) => {
       consoleEntries.push({
         type: message.type(),
@@ -164,19 +157,21 @@ export async function createCloudflareBrowserConnection<TBindings>(
         return { url: current.url(), status: response?.status(), title: await current.title() };
       }
       if (name === "back" || name === "forward" || name === "reload") {
-        const response = name === "back"
-          ? await current.goBack()
-          : name === "forward"
-            ? await current.goForward()
-            : await current.reload();
+        const response =
+          name === "back"
+            ? await current.goBack()
+            : name === "forward"
+              ? await current.goForward()
+              : await current.reload();
         await saveState();
         return { url: current.url(), status: response?.status(), title: await current.title() };
       }
       if (name === "snapshot") {
         const body = current.locator("body");
-        const snapshot = "ariaSnapshot" in body && typeof body.ariaSnapshot === "function"
-          ? await body.ariaSnapshot({ timeout: boundedTimeout(args.timeoutMs) })
-          : (await body.innerText()).slice(0, 200_000);
+        const snapshot =
+          "ariaSnapshot" in body && typeof body.ariaSnapshot === "function"
+            ? await body.ariaSnapshot({ timeout: boundedTimeout(args.timeoutMs) })
+            : (await body.innerText()).slice(0, 200_000);
         return { url: current.url(), title: await current.title(), snapshot };
       }
       if (name === "click") {
@@ -187,10 +182,11 @@ export async function createCloudflareBrowserConnection<TBindings>(
         return { url: current.url(), title: await current.title() };
       }
       if (name === "type") {
-        await current.locator(requiredString(args.selector, "selector")).fill(
-          requiredString(args.text, "text").slice(0, 100_000),
-          { timeout: boundedTimeout(args.timeoutMs) },
-        );
+        await current
+          .locator(requiredString(args.selector, "selector"))
+          .fill(requiredString(args.text, "text").slice(0, 100_000), {
+            timeout: boundedTimeout(args.timeoutMs),
+          });
         await saveState();
         return { typed: true };
       }
@@ -211,7 +207,9 @@ export async function createCloudflareBrowserConnection<TBindings>(
         if (typeof args.selector === "string") {
           await current.locator(args.selector).waitFor({ timeout: boundedTimeout(args.timeoutMs) });
         } else {
-          await current.waitForTimeout(Math.min(boundedNumber(args.timeoutMs, 500, 1, 30_000), 30_000));
+          await current.waitForTimeout(
+            Math.min(boundedNumber(args.timeoutMs, 500, 1, 30_000), 30_000),
+          );
         }
         return { waited: true };
       }
@@ -264,8 +262,10 @@ export async function createCloudflareBrowserConnection<TBindings>(
         await download.delete().catch(() => undefined);
         return { artifactPath, size: bytes.byteLength };
       }
-      if (name === "console") return { entries: consoleEntries.slice(-boundedLimit(args.limit, 100)) };
-      if (name === "network") return { entries: networkEntries.slice(-boundedLimit(args.limit, 100)) };
+      if (name === "console")
+        return { entries: consoleEntries.slice(-boundedLimit(args.limit, 100)) };
+      if (name === "network")
+        return { entries: networkEntries.slice(-boundedLimit(args.limit, 100)) };
       if (name === "evaluate") {
         const expression = requiredString(args.expression, "expression");
         if (expression.length > 16_384) throw new Error("Browser evaluation is too large");
@@ -274,7 +274,12 @@ export async function createCloudflareBrowserConnection<TBindings>(
         return { value: evaluated };
       }
       if (name === "status") {
-        return { sessionId: browser?.sessionId(), url: current.url(), title: await current.title(), control: "agent" };
+        return {
+          sessionId: browser?.sessionId(),
+          url: current.url(),
+          title: await current.title(),
+          control: "agent",
+        };
       }
       if (name === "close") {
         await saveState();
@@ -311,10 +316,12 @@ export function browserStateObjectKey(input: {
 function browserStateStore(
   bindings: Record<string, unknown>,
   runId: string | undefined,
-): {
-  load(): Promise<Awaited<ReturnType<BrowserContext["storageState"]>> | undefined>;
-  save(value: Awaited<ReturnType<BrowserContext["storageState"]>>): Promise<void>;
-} | undefined {
+):
+  | {
+      load(): Promise<Awaited<ReturnType<BrowserContext["storageState"]>> | undefined>;
+      save(value: Awaited<ReturnType<BrowserContext["storageState"]>>): Promise<void>;
+    }
+  | undefined {
   if (!runId) return undefined;
   let ref: ReturnType<typeof parseThreadName>;
   try {
@@ -331,9 +338,7 @@ function browserStateStore(
     async load() {
       const object = await bucket.get(key);
       if (!object) return undefined;
-      const envelope = record(JSON.parse(
-        new TextDecoder().decode(await object.arrayBuffer()),
-      ));
+      const envelope = record(JSON.parse(new TextDecoder().decode(await object.arrayBuffer())));
       if (envelope.version !== 1) throw new Error("The browser state version is not supported");
       const clear = await crypto.subtle.decrypt(
         {
@@ -348,18 +353,22 @@ function browserStateStore(
     },
     async save(value) {
       const iv = crypto.getRandomValues(new Uint8Array(12));
-      const ciphertext = new Uint8Array(await crypto.subtle.encrypt(
-        { name: "AES-GCM", iv, additionalData: aad },
-        await browserStateKey(secret),
-        new TextEncoder().encode(JSON.stringify(value)),
-      ));
+      const ciphertext = new Uint8Array(
+        await crypto.subtle.encrypt(
+          { name: "AES-GCM", iv, additionalData: aad },
+          await browserStateKey(secret),
+          new TextEncoder().encode(JSON.stringify(value)),
+        ),
+      );
       await bucket.put(
         key,
-        new TextEncoder().encode(JSON.stringify({
-          version: 1,
-          iv: bytesToBase64(iv),
-          ciphertext: bytesToBase64(ciphertext),
-        })),
+        new TextEncoder().encode(
+          JSON.stringify({
+            version: 1,
+            iv: bytesToBase64(iv),
+            ciphertext: bytesToBase64(ciphertext),
+          }),
+        ),
         { httpMetadata: { contentType: "application/octet-stream" } },
       );
     },
@@ -383,22 +392,22 @@ async function writeBrowserArtifact<TBindings>(
   content: string,
   mediaType: string,
 ): Promise<string | undefined> {
-  const namespace = bindings.FLARY_WORKSPACE as Parameters<
-    typeof createCloudflareWorkspaceConnection
-  >[0] | undefined;
+  const namespace = bindings.FLARY_WORKSPACE as
+    Parameters<typeof createCloudflareWorkspaceConnection>[0] | undefined;
   const identity = context.identity;
   if (!namespace || !identity?.tenantId || !identity.projectId) return undefined;
-  const workspaceId = typeof identity.workspaceId === "string"
-    ? identity.workspaceId
-    : context.runId;
+  const workspaceId =
+    typeof identity.workspaceId === "string" ? identity.workspaceId : context.runId;
   if (!workspaceId) return undefined;
-  const ref = context.runId ? (() => {
-    try {
-      return parseThreadName(context.runId!);
-    } catch {
-      return undefined;
-    }
-  })() : undefined;
+  const ref = context.runId
+    ? (() => {
+        try {
+          return parseThreadName(context.runId!);
+        } catch {
+          return undefined;
+        }
+      })()
+    : undefined;
   const workspace = await createCloudflareWorkspaceConnection(namespace, {
     organizationId: identity.tenantId,
     appId: identity.applicationId ?? ref?.appId ?? "flary",
@@ -420,11 +429,12 @@ async function readDownload(stream: unknown): Promise<Uint8Array> {
   let size = 0;
   const iterable = stream as AsyncIterable<Uint8Array | ArrayBuffer | string>;
   for await (const chunk of iterable) {
-    const bytes = typeof chunk === "string"
-      ? new TextEncoder().encode(chunk)
-      : chunk instanceof Uint8Array
-        ? chunk
-        : new Uint8Array(chunk);
+    const bytes =
+      typeof chunk === "string"
+        ? new TextEncoder().encode(chunk)
+        : chunk instanceof Uint8Array
+          ? chunk
+          : new Uint8Array(chunk);
     size += bytes.byteLength;
     if (size > 32 * 1024 * 1024) {
       throw new Error("Browser downloads are limited to 32 MiB");
@@ -465,17 +475,19 @@ async function registerBrowserSession(
 ): Promise<void> {
   const target = browserControlTarget(bindings, runId);
   if (!target) return;
-  await target.stub.fetch(new Request("https://flary.internal/browser", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      method: "browser",
-      tenantId: target.ref.organizationId,
-      applicationId: target.ref.appId,
-      action: "register",
-      input: { sessionId },
+  await target.stub.fetch(
+    new Request("https://flary.internal/browser", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "browser",
+        tenantId: target.ref.organizationId,
+        applicationId: target.ref.appId,
+        action: "register",
+        input: { sessionId },
+      }),
     }),
-  }));
+  );
 }
 
 async function assertAgentBrowserControl(
@@ -484,17 +496,19 @@ async function assertAgentBrowserControl(
 ): Promise<void> {
   const target = browserControlTarget(bindings, runId);
   if (!target) return;
-  const response = await target.stub.fetch(new Request("https://flary.internal/browser", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      method: "browser",
-      tenantId: target.ref.organizationId,
-      applicationId: target.ref.appId,
-      action: "status",
-      input: {},
+  const response = await target.stub.fetch(
+    new Request("https://flary.internal/browser", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "browser",
+        tenantId: target.ref.organizationId,
+        applicationId: target.ref.appId,
+        action: "status",
+        input: {},
+      }),
     }),
-  }));
+  );
   const value = record(await response.json().catch(() => ({})));
   if (record(value.browser).control === "human") {
     throw new Error("Browser actions are paused while a human controls the session");
@@ -504,12 +518,19 @@ async function assertAgentBrowserControl(
 function browserControlTarget(
   bindings: Record<string, unknown>,
   runId: string | undefined,
-): { ref: ReturnType<typeof parseThreadName>; stub: { fetch(request: Request): Promise<Response> } } | undefined {
+):
+  | {
+      ref: ReturnType<typeof parseThreadName>;
+      stub: { fetch(request: Request): Promise<Response> };
+    }
+  | undefined {
   if (!runId) return undefined;
-  const namespace = bindings.FLARY_THREAD_CONTROL as {
-    idFromName(name: string): unknown;
-    get(id: unknown): { fetch(request: Request): Promise<Response> };
-  } | undefined;
+  const namespace = bindings.FLARY_THREAD_CONTROL as
+    | {
+        idFromName(name: string): unknown;
+        get(id: unknown): { fetch(request: Request): Promise<Response> };
+      }
+    | undefined;
   if (!namespace) return undefined;
   let ref: ReturnType<typeof parseThreadName>;
   try {
@@ -545,7 +566,7 @@ function browserSql(value: unknown): BrowserSql | undefined {
   if (!value || typeof value !== "object") return undefined;
   const sql = "sql" in value ? (value as { sql?: unknown }).sql : value;
   return sql && typeof sql === "object" && "exec" in sql && typeof sql.exec === "function"
-    ? sql as BrowserSql
+    ? (sql as BrowserSql)
     : undefined;
 }
 
@@ -564,8 +585,8 @@ export function assertPublicBrowserUrl(value: string): URL {
     host.endsWith(".local") ||
     host.endsWith(".internal") ||
     host === "169.254.169.254" ||
-    isPrivateIp(host)
-    || /^(?:\[)?(?:fc|fd|fe8|fe9|fea|feb)/i.test(host)
+    isPrivateIp(host) ||
+    /^(?:\[)?(?:fc|fd|fe8|fe9|fea|feb)/i.test(host)
   ) {
     throw new Error("Browser navigation to private networks is blocked");
   }
@@ -576,15 +597,21 @@ export function assertPublicBrowserUrl(value: string): URL {
 
 function isPrivateIp(host: string): boolean {
   const parts = host.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
-  return parts[0] === 10 || parts[0] === 127 || parts[0] === 0 ||
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255))
+    return false;
+  return (
+    parts[0] === 10 ||
+    parts[0] === 127 ||
+    parts[0] === 0 ||
     (parts[0] === 169 && parts[1] === 254) ||
     (parts[0] === 172 && parts[1]! >= 16 && parts[1]! <= 31) ||
-    (parts[0] === 192 && parts[1] === 168);
+    (parts[0] === 192 && parts[1] === 168)
+  );
 }
 
 function requiredString(value: unknown, name: string): string {
-  if (typeof value !== "string" || value.length === 0) throw new Error(`Browser ${name} is required`);
+  if (typeof value !== "string" || value.length === 0)
+    throw new Error(`Browser ${name} is required`);
   return value;
 }
 
@@ -614,6 +641,6 @@ function bytesToBase64(bytes: Uint8Array): string {
 
 function record(value: unknown): Record<string, any> {
   return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, any>
+    ? (value as Record<string, any>)
     : {};
 }

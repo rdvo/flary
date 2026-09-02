@@ -13,9 +13,14 @@
     ".pi/**",
     ".roo/**",
     ".windsurf/**",
+    "**/.astro/**",
+    "**/.flue/**",
+    "**/.flue-vite/**",
+    "**/.wrangler/**",
     "**/dist/**",
     "**/node_modules/**",
     "**/worker-configuration.d.ts",
+    "tests/fixtures/**",
     "tools/oxlint/anti-slop/**"
   ],
   "jsPlugins": [

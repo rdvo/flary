@@ -6,16 +6,11 @@ import {
   MetadataSchema,
   NonEmptyStringSchema,
   TimestampSchema,
-} from "./common";
-import { IdentityReferenceSchema } from "./identity";
+} from "./common.js";
+import { IdentityReferenceSchema } from "./identity.js";
 
 // Identify the action that needs approval.
-export const ApprovalActionSchema = z.enum([
-  "tool-call",
-  "run",
-  "secret-access",
-  "channel-send",
-]);
+export const ApprovalActionSchema = z.enum(["tool-call", "run", "secret-access", "channel-send"]);
 export type ApprovalAction = z.infer<typeof ApprovalActionSchema>;
 
 // Identify the final state of an approval.

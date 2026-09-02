@@ -75,10 +75,7 @@ export async function startProviderOAuth(input: {
 }): Promise<ProviderOAuthStartResult> {
   const provider = SubscriptionProviderSchema.parse(input.provider);
   const method = ProviderOAuthLoginMethodSchema.parse(
-    input.method ??
-      (provider === "openai-codex"
-        ? "device_code"
-        : "authorization_code"),
+    input.method ?? (provider === "openai-codex" ? "device_code" : "authorization_code"),
   );
 
   if (provider === "openai-codex") {
@@ -158,10 +155,7 @@ export async function pollProviderOAuth(input: {
     !state.userCode ||
     !state.intervalSeconds
   ) {
-    throw new ProviderOAuthError(
-      "oauth_state_invalid",
-      "The provider login cannot be polled",
-    );
+    throw new ProviderOAuthError("oauth_state_invalid", "The provider login cannot be polled");
   }
   const result = await pollOpenAICodexDeviceAuthorization(
     {
@@ -169,9 +163,7 @@ export async function pollProviderOAuth(input: {
       userCode: state.userCode,
       intervalSeconds: state.intervalSeconds,
       verificationUri: "https://auth.openai.com/codex/device",
-      redirectUri:
-        state.redirectUri ??
-        "https://auth.openai.com/deviceauth/callback",
+      redirectUri: state.redirectUri ?? "https://auth.openai.com/deviceauth/callback",
       expiresInSeconds: 15 * 60,
     },
     input.signal,
@@ -201,8 +193,7 @@ export async function completeProviderOAuth(input: {
   }
   if (
     state.provider === "anthropic" &&
-    (state.method === "authorization_code" ||
-      state.method === "browser_callback")
+    (state.method === "authorization_code" || state.method === "browser_callback")
   ) {
     return completeAnthropicManualOAuth(
       input.authorizationResult,
@@ -211,10 +202,7 @@ export async function completeProviderOAuth(input: {
       state.redirectUri,
     );
   }
-  if (
-    state.provider === "openai-codex" &&
-    state.method === "browser_callback"
-  ) {
+  if (state.provider === "openai-codex" && state.method === "browser_callback") {
     return completeOpenAICodexManualOAuth(
       input.authorizationResult,
       state.state,
@@ -228,11 +216,7 @@ export async function completeProviderOAuth(input: {
   );
 }
 
-export function providerOAuthSubject(
-  credential: OAuthCredentials,
-): string | undefined {
+export function providerOAuthSubject(credential: OAuthCredentials): string | undefined {
   const accountId = credential.accountId;
-  return typeof accountId === "string" && accountId.length > 0
-    ? accountId
-    : undefined;
+  return typeof accountId === "string" && accountId.length > 0 ? accountId : undefined;
 }

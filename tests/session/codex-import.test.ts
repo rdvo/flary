@@ -52,7 +52,7 @@ test("maps known Codex records and keeps unknown records as opaque data", async 
 
   assert.deepEqual(
     records.map(({ recordType }) => recordType),
-    ["session.manifest", "message.user", "usage", "codex.opaque"]
+    ["session.manifest", "message.user", "usage", "codex.opaque"],
   );
   assert.equal(records[0]?.sessionId, "session_codex");
   assert.equal(records[0]?.threadId, "thread_codex");
@@ -66,7 +66,7 @@ test("maps known Codex records and keeps unknown records as opaque data", async 
         payload?: { api_key?: string };
       }
     ).payload?.api_key,
-    "[REDACTED]"
+    "[REDACTED]",
   );
   assert.equal(
     (
@@ -74,7 +74,7 @@ test("maps known Codex records and keeps unknown records as opaque data", async 
         payload?: { nested?: { password?: string } };
       }
     ).payload?.nested?.password,
-    "[REDACTED]"
+    "[REDACTED]",
   );
   assert.equal(
     (
@@ -82,7 +82,7 @@ test("maps known Codex records and keeps unknown records as opaque data", async 
         payload?: { info?: { total_tokens?: number } };
       }
     ).payload?.info?.total_tokens,
-    12
+    12,
   );
   await verifySessionChain(records);
 });
@@ -102,7 +102,7 @@ test("produces the same hashes and can attach encrypted source references", asyn
 
   assert.deepEqual(
     first.map(({ recordHash }) => recordHash),
-    second.map(({ recordHash }) => recordHash)
+    second.map(({ recordHash }) => recordHash),
   );
   assert.equal(first[0]?.encryptedContentRef?.storageKey, "sessions/source-1");
 });

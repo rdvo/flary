@@ -14,7 +14,7 @@ test("direct subagent controls override inherited model controls", () => {
       model: "gpt-5.6-sol",
       verbosity: "high",
       reasoningEffort: "medium",
-    }
+    },
   );
 
   assert.equal(selection?.verbosity, "low");

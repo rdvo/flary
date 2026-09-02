@@ -32,9 +32,7 @@ function result(status: RunResult["status"]): RunResult {
     requestId: "request_123",
     status,
     ...(status === "completed" ? { output: { ok: true } } : {}),
-    ...(status === "failed"
-      ? { error: { code: "failed", message: "Failed" } }
-      : {}),
+    ...(status === "failed" ? { error: { code: "failed", message: "Failed" } } : {}),
   };
 }
 
@@ -69,18 +67,10 @@ test("run router keeps trusted context outside the public request", async () => 
         },
       };
     },
-    async input(
-      _context: TrustedRunContext,
-      _runId: string,
-      _input: RunInput,
-    ) {
+    async input(_context: TrustedRunContext, _runId: string, _input: RunInput) {
       return result("running");
     },
-    async cancel(
-      _context: TrustedRunContext,
-      _runId: string,
-      _input: CancelRunRequest,
-    ) {
+    async cancel(_context: TrustedRunContext, _runId: string, _input: CancelRunRequest) {
       return result("cancelled");
     },
   };

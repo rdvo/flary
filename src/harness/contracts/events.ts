@@ -8,19 +8,19 @@ import {
   NonEmptyStringSchema,
   NonNegativeIntegerSchema,
   TimestampSchema,
-} from "./common";
-import { ApprovalDecisionSchema, ApprovalRequestSchema } from "./approvals";
-import { PromptRoleSchema } from "./prompts";
-import { PromptCacheRetentionSchema } from "./provider";
-import { ProviderBillingModeSchema } from "./connections";
-import { RunTargetSchema } from "./runs";
-import { ToolCallSchema, ToolResultSchema } from "./tools";
+} from "./common.js";
+import { ApprovalDecisionSchema, ApprovalRequestSchema } from "./approvals.js";
+import { PromptRoleSchema } from "./prompts.js";
+import { PromptCacheRetentionSchema } from "./provider.js";
+import { ProviderBillingModeSchema } from "./connections.js";
+import { RunTargetSchema } from "./runs.js";
+import { ToolCallSchema, ToolResultSchema } from "./tools.js";
 import {
   NormalizedUsageSchema,
   SpanKindSchema,
   SpanStatusSchema,
   TraceContextSchema,
-} from "./telemetry";
+} from "./telemetry.js";
 
 const EventBaseFields = {
   id: IdentifierSchema,
@@ -103,9 +103,7 @@ export const RunInputAcceptedEventSchema = z
       .strict(),
   })
   .strict();
-export type RunInputAcceptedEvent = z.infer<
-  typeof RunInputAcceptedEventSchema
->;
+export type RunInputAcceptedEvent = z.infer<typeof RunInputAcceptedEventSchema>;
 
 // Record that a run waits for an external action.
 export const RunWaitingEventSchema = z
@@ -271,9 +269,7 @@ export const ModelCompletedEventSchema = z
       .strict(),
   })
   .strict();
-export type ModelCompletedEvent = z.infer<
-  typeof ModelCompletedEventSchema
->;
+export type ModelCompletedEvent = z.infer<typeof ModelCompletedEventSchema>;
 
 // Record a tool call.
 export const ToolCallEventSchema = z
@@ -315,9 +311,7 @@ export const ApprovalRequestedEventSchema = z
       .strict(),
   })
   .strict();
-export type ApprovalRequestedEvent = z.infer<
-  typeof ApprovalRequestedEventSchema
->;
+export type ApprovalRequestedEvent = z.infer<typeof ApprovalRequestedEventSchema>;
 
 // Record an approval decision.
 export const ApprovalResolvedEventSchema = z

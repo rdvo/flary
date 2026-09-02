@@ -9,17 +9,10 @@ import type {
 import type { FlaryRunService, TrustedRunContext } from "../host/runs.js";
 import type { FlaryThreadHostService } from "../host/types.js";
 import type { FlarySecretHostService } from "../host/types.js";
-import type {
-  ModelAdapter,
-  ProviderAdapterRegistry,
-} from "../providers/index.js";
+import type { ModelAdapter, ProviderAdapterRegistry } from "../providers/index.js";
 import type { ApprovalContinuation } from "../execution/approval-continuation.js";
 import type { FlaryCodemodeApprovalBridge } from "./codemode.js";
-import type {
-  ModelInput,
-  ModelSelection,
-  ResolvedModelPin,
-} from "../contracts/provider.js";
+import type { ModelInput, ModelSelection, ResolvedModelPin } from "../contracts/provider.js";
 import type { ModelOperationHandlers } from "../providers/operations.js";
 
 export type FlarySchema = z.ZodType;
@@ -57,10 +50,7 @@ export type FlaryModelGrantResolver = (input: {
   readonly threadId: string;
   readonly connectionIds: readonly string[];
   readonly selection: ModelSelection;
-}) =>
-  | Partial<ResolvedModelPin>
-  | void
-  | Promise<Partial<ResolvedModelPin> | void>;
+}) => Partial<ResolvedModelPin> | void | Promise<Partial<ResolvedModelPin> | void>;
 
 export interface FlaryStepContext<TBindings = unknown> {
   readonly bindings: TBindings;
@@ -108,9 +98,7 @@ export interface FlaryFunctionBaseOptions<
    */
   readonly requestSecrets?: boolean;
   readonly policy?: FlaryToolPolicy;
-  readonly subagents?: Readonly<
-    Record<string, FlaryCallableLike<unknown, unknown>>
-  >;
+  readonly subagents?: Readonly<Record<string, FlaryCallableLike<unknown, unknown>>>;
   readonly delegation?: FlaryDelegationPolicy;
   readonly durable?: FlaryDurability;
   readonly limits?: FlaryLimits;
@@ -236,27 +224,13 @@ export type FlaryEvent<Output = unknown> =
 
 export interface FlaryRun<Output = unknown> {
   readonly runId: string;
-  readonly status:
-    | "queued"
-    | "running"
-    | "paused"
-    | "completed"
-    | "failed"
-    | "cancelled";
+  readonly status: "queued" | "running" | "paused" | "completed" | "failed" | "cancelled";
   result(): Promise<Output>;
-  stream(options?: {
-    readonly signal?: AbortSignal;
-  }): AsyncIterable<FlaryEvent<Output>>;
+  stream(options?: { readonly signal?: AbortSignal }): AsyncIterable<FlaryEvent<Output>>;
   cancel(reason?: string): Promise<void>;
   approvals(): Promise<readonly ApprovalRequest[]>;
-  approve(
-    approvalId: string,
-    options?: FlaryApprovalDecisionOptions,
-  ): Promise<void>;
-  reject(
-    approvalId: string,
-    options?: FlaryApprovalDecisionOptions,
-  ): Promise<void>;
+  approve(approvalId: string, options?: FlaryApprovalDecisionOptions): Promise<void>;
+  reject(approvalId: string, options?: FlaryApprovalDecisionOptions): Promise<void>;
   userInput(): Promise<readonly UserInputRecord[]>;
   respond(requestId: string, input: UserInputAnswerRequest): Promise<void>;
   sendInput(input: unknown, options?: FlarySendInputOptions): Promise<void>;
@@ -264,10 +238,7 @@ export interface FlaryRun<Output = unknown> {
 
 export interface FlaryCallableLike<Input = unknown, Output = unknown> {
   (input: Input): Promise<Output>;
-  readonly start?: (
-    input: Input,
-    options?: FlaryRunOptions,
-  ) => Promise<FlaryRun<Output>>;
+  readonly start?: (input: Input, options?: FlaryRunOptions) => Promise<FlaryRun<Output>>;
 }
 
 export interface FlaryFunction<
@@ -325,10 +296,7 @@ export interface FlaryAgentInstructionContext<TBindings = unknown> {
 
 /** Static instructions or trusted instructions resolved inside the Worker. */
 export type FlaryAgentInstructions<TBindings = unknown> =
-  | string
-  | ((
-      context: FlaryAgentInstructionContext<TBindings>,
-    ) => string | Promise<string>);
+  string | ((context: FlaryAgentInstructionContext<TBindings>) => string | Promise<string>);
 
 export interface FlaryAgentOptions<TBindings = unknown> {
   readonly name: string;
@@ -385,9 +353,7 @@ export interface FlaryAgent<TBindings = unknown> {
 
 export type FlaryModelSelection = ModelSelection;
 
-export type FlaryApplicationExport =
-  | FlaryFunction<any, any, any>
-  | FlaryAgent<any>;
+export type FlaryApplicationExport = FlaryFunction<any, any, any> | FlaryAgent<any>;
 
 export interface FlaryMcpSource {
   readonly kind: "mcp";
@@ -441,10 +407,7 @@ export interface FlaryWorkspaceOptions {
   readonly hiddenPaths?: readonly string[];
 }
 
-export type FlaryAgentWorkspace =
-  | "thread"
-  | "project"
-  | FlaryAgentWorkspaceOptions;
+export type FlaryAgentWorkspace = "thread" | "project" | FlaryAgentWorkspaceOptions;
 
 /** Simple agent-level configuration for the built-in workspace source. */
 export interface FlaryAgentWorkspaceOptions extends FlaryWorkspaceOptions {
@@ -627,8 +590,7 @@ export interface FlaryRunServiceResolverInput<TBindings> {
 }
 
 export type FlaryRunServiceResolver<TBindings> =
-  | FlaryRunService
-  | ((input: FlaryRunServiceResolverInput<TBindings>) => FlaryRunService);
+  FlaryRunService | ((input: FlaryRunServiceResolverInput<TBindings>) => FlaryRunService);
 
 export interface FlaryPromptRequest {
   readonly model: string;
@@ -699,15 +661,11 @@ export interface FlaryAppOptions<TBindings = unknown> {
    */
   readonly threadService?:
     | FlaryThreadHostService
-    | ((
-        input: FlaryRunServiceResolverInput<TBindings>,
-      ) => FlaryThreadHostService);
+    | ((input: FlaryRunServiceResolverInput<TBindings>) => FlaryThreadHostService);
   /** Encrypted credential store for request_secret and connection routes. */
   readonly secretService?:
     | FlarySecretHostService
-    | ((
-        input: FlaryRunServiceResolverInput<TBindings>,
-      ) => FlarySecretHostService);
+    | ((input: FlaryRunServiceResolverInput<TBindings>) => FlarySecretHostService);
   /** Optional host override for the trusted context stored at admission. */
   readonly resolveRunContext?: ResolveFlaryFunctionRunContext<TBindings>;
   readonly provider?: ModelAdapter;
@@ -783,19 +741,13 @@ export interface FlaryCodeExecutor<TBindings = unknown> {
     readonly bindings: TBindings;
     readonly tools: FlaryToolRegistry;
     readonly context: FlaryStepContext<TBindings>;
-  }):
-    | ApprovalContinuation
-    | Promise<ApprovalContinuation | undefined>
-    | undefined;
+  }): ApprovalContinuation | Promise<ApprovalContinuation | undefined> | undefined;
   /** Host bridge used by a protected agent route to list and decide actions. */
   approvalBridge?(input: {
     readonly bindings: TBindings;
     readonly tools: FlaryToolRegistry;
     readonly context: FlaryStepContext<TBindings>;
-  }):
-    | FlaryCodemodeApprovalBridge
-    | Promise<FlaryCodemodeApprovalBridge | undefined>
-    | undefined;
+  }): FlaryCodemodeApprovalBridge | Promise<FlaryCodemodeApprovalBridge | undefined> | undefined;
 }
 
 export interface FlaryRunStore {
@@ -811,9 +763,7 @@ export interface FlaryStepStore {
   get(input: {
     readonly runId: string;
     readonly name: string;
-  }): Promise<
-    { readonly inputHash: string; readonly value: unknown } | undefined
-  >;
+  }): Promise<{ readonly inputHash: string; readonly value: unknown } | undefined>;
   put(input: {
     readonly runId: string;
     readonly name: string;

@@ -11,9 +11,12 @@ test("canonical session archive encrypts and verifies complete content", async (
   const objects = new Map<string, Uint8Array>();
   const bucket = {
     async put(key: string, value: ArrayBuffer | ArrayBufferView) {
-      const bytes = value instanceof ArrayBuffer
-        ? new Uint8Array(value)
-        : new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+      const bytes =
+        value instanceof ArrayBuffer
+          ? new Uint8Array(value)
+          : new Uint8Array(
+              value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength),
+            );
       objects.set(key, bytes);
     },
     async get(key: string) {
@@ -29,7 +32,10 @@ test("canonical session archive encrypts and verifies complete content", async (
     secret: "a".repeat(48),
   });
   const entry = await archive.put("thread_1", '{"nativeResponseId":"private"}\n');
-  assert.notDeepEqual(objects.get(entry.storageKey), new TextEncoder().encode('{"nativeResponseId":"private"}\n'));
+  assert.notDeepEqual(
+    objects.get(entry.storageKey),
+    new TextEncoder().encode('{"nativeResponseId":"private"}\n'),
+  );
   const restored = new TextDecoder().decode(await archive.read(entry));
   assert.equal(restored, '{"nativeResponseId":"private"}\n');
   await archive.delete(entry);
@@ -56,9 +62,12 @@ test("canonical archive keeps an SQLite manifest and deletes all session objects
   const objects = new Map<string, Uint8Array>();
   const bucket = {
     async put(key: string, value: ArrayBuffer | ArrayBufferView) {
-      const bytes = value instanceof ArrayBuffer
-        ? new Uint8Array(value)
-        : new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+      const bytes =
+        value instanceof ArrayBuffer
+          ? new Uint8Array(value)
+          : new Uint8Array(
+              value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength),
+            );
       objects.set(key, bytes);
     },
     async get(key: string) {

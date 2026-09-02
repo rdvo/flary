@@ -31,7 +31,9 @@ export function AppShell() {
     <main className="app-shell">
       <header>
         <a className="brand" href="/" aria-label="Flary home">
-          <span className="mark" aria-hidden="true">f</span>
+          <span className="mark" aria-hidden="true">
+            f
+          </span>
           <span>Flary</span>
         </a>
         <span className="app-route">/app</span>
@@ -41,8 +43,8 @@ export function AppShell() {
         <p className="eyebrow">React application surface</p>
         <h1>Your Flary app starts here.</h1>
         <p>
-          This route is a React SPA served by the Flary website Worker. The
-          Hono API stays on the same origin.
+          This route is a React SPA served by the Flary website Worker. The Hono API stays on the
+          same origin.
         </p>
         <div className="worker-status" aria-live="polite">
           <span className={health?.ok ? "status-dot ready" : "status-dot"} />

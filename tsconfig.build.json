@@ -18,10 +18,5 @@
     "jsx": "react-jsx"
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "exclude": [
-    "src/**/*.test.ts",
-    "src/mod.ts",
-    "src/middleware.ts",
-    "src/deno/**/*.ts"
-  ]
+  "exclude": ["src/**/*.test.ts", "src/mod.ts", "src/middleware.ts", "src/deno/**/*.ts"]
 }

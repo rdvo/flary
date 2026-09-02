@@ -24,14 +24,8 @@ import {
   type UserInputAnswerRequest,
   type UserInputRecord,
 } from "../contracts/index.js";
-import {
-  IdentityReferenceSchema,
-  type IdentityReference,
-} from "../contracts/identity.js";
-import {
-  IdentifierSchema,
-  MetadataSchema,
-} from "../contracts/common.js";
+import { IdentityReferenceSchema, type IdentityReference } from "../contracts/identity.js";
+import { IdentifierSchema, MetadataSchema } from "../contracts/common.js";
 import { FlaryHostError, featureUnavailable } from "./errors.js";
 
 const ApprovalAnswerRequestSchema = ApprovalDecisionSchema.pick({
@@ -77,31 +71,17 @@ export interface ObserveRunOptions {
  * must persist trusted context during `create` and verify it on later calls.
  */
 export interface FlaryRunService {
-  create(
-    context: TrustedRunContext,
-    request: CreateRunRequest,
-  ): Promise<RunHandle>;
+  create(context: TrustedRunContext, request: CreateRunRequest): Promise<RunHandle>;
   get(context: TrustedRunContext, runId: string): Promise<RunResult>;
   observe(
     context: TrustedRunContext,
     runId: string,
     options: ObserveRunOptions,
   ): AsyncIterable<RunEvent>;
-  input(
-    context: TrustedRunContext,
-    runId: string,
-    input: RunInput,
-  ): Promise<RunResult>;
-  cancel(
-    context: TrustedRunContext,
-    runId: string,
-    input: CancelRunRequest,
-  ): Promise<RunResult>;
+  input(context: TrustedRunContext, runId: string, input: RunInput): Promise<RunResult>;
+  cancel(context: TrustedRunContext, runId: string, input: CancelRunRequest): Promise<RunResult>;
   /** List approval requests after the service validates durable run ownership. */
-  listApprovals?(
-    context: TrustedRunContext,
-    runId: string,
-  ): Promise<ApprovalRequest[]>;
+  listApprovals?(context: TrustedRunContext, runId: string): Promise<ApprovalRequest[]>;
   /** Persist one approval decision and wake the owning durable execution. */
   decideApproval?(
     context: TrustedRunContext,
@@ -109,10 +89,7 @@ export interface FlaryRunService {
     decision: ApprovalDecision,
   ): Promise<RunResult>;
   /** List user-input requests after the service validates durable ownership. */
-  listUserInput?(
-    context: TrustedRunContext,
-    runId: string,
-  ): Promise<UserInputRecord[]>;
+  listUserInput?(context: TrustedRunContext, runId: string): Promise<UserInputRecord[]>;
   /** Persist user input and wake the owning durable execution. */
   respondToUserInput?(
     context: TrustedRunContext,
@@ -126,10 +103,7 @@ export interface CreateFlaryRunRouterOptions<TBindings extends object> {
   readonly resolveContext: ResolveTrustedRunContext<TBindings>;
   readonly service:
     | FlaryRunService
-    | ((
-        env: TBindings,
-        execution: { waitUntil(work: Promise<unknown>): void },
-      ) => FlaryRunService);
+    | ((env: TBindings, execution: { waitUntil(work: Promise<unknown>): void }) => FlaryRunService);
   readonly heartbeatMs?: number;
 }
 
@@ -149,9 +123,7 @@ export function createFlaryRunRouter<TBindings extends object>(
     env: TBindings,
     execution: { waitUntil(work: Promise<unknown>): void },
   ): FlaryRunService =>
-    typeof options.service === "function"
-      ? options.service(env, execution)
-      : options.service;
+    typeof options.service === "function" ? options.service(env, execution) : options.service;
   const executionFor = (context: {
     readonly executionCtx: {
       waitUntil(work: Promise<unknown>): void;
@@ -170,9 +142,7 @@ export function createFlaryRunRouter<TBindings extends object>(
     env: TBindings,
     runId?: string,
   ): Promise<TrustedRunContext> =>
-    TrustedRunContextSchema.parse(
-      await options.resolveContext({ request, env, runId }),
-    );
+    TrustedRunContextSchema.parse(await options.resolveContext({ request, env, runId }));
 
   router.onError((error, context) => {
     if (error instanceof FlaryHostError) {
@@ -181,9 +151,7 @@ export function createFlaryRunRouter<TBindings extends object>(
           error: {
             type: error.code,
             message: error.message,
-            ...(error.details === undefined
-              ? {}
-              : { details: error.details }),
+            ...(error.details === undefined ? {} : { details: error.details }),
           },
         },
         error.status as 400,
@@ -208,10 +176,7 @@ export function createFlaryRunRouter<TBindings extends object>(
     const trusted = await contextFor(context.req.raw, context.env);
     const request = CreateRunRequestSchema.parse(await context.req.json());
     const handle = RunHandleSchema.parse(
-      await serviceFor(context.env, executionFor(context)).create(
-        trusted,
-        request,
-      ),
+      await serviceFor(context.env, executionFor(context)).create(trusted, request),
     );
     return context.json(handle, 202);
   });
@@ -221,10 +186,7 @@ export function createFlaryRunRouter<TBindings extends object>(
     const trusted = await contextFor(context.req.raw, context.env, runId);
     return context.json(
       RunResultSchema.parse(
-        await serviceFor(context.env, executionFor(context)).get(
-          trusted,
-          runId,
-        ),
+        await serviceFor(context.env, executionFor(context)).get(trusted, runId),
       ),
     );
   });
@@ -235,14 +197,10 @@ export function createFlaryRunRouter<TBindings extends object>(
     const headerCursor = context.req.header("Last-Event-ID");
     const queryCursor = context.req.query("afterSequence");
     const afterSequence = parseSequence(queryCursor ?? headerCursor);
-    const events = serviceFor(context.env, executionFor(context)).observe(
-      trusted,
-      runId,
-      {
+    const events = serviceFor(context.env, executionFor(context)).observe(trusted, runId, {
       afterSequence,
       signal: context.req.raw.signal,
-      },
-    );
+    });
 
     return streamSSE(context, async (stream) => {
       const heartbeat = setInterval(() => {
@@ -269,11 +227,7 @@ export function createFlaryRunRouter<TBindings extends object>(
     const input = RunInputSchema.parse(await context.req.json());
     return context.json(
       RunResultSchema.parse(
-        await serviceFor(context.env, executionFor(context)).input(
-          trusted,
-          runId,
-          input,
-        ),
+        await serviceFor(context.env, executionFor(context)).input(trusted, runId, input),
       ),
       202,
     );
@@ -285,11 +239,7 @@ export function createFlaryRunRouter<TBindings extends object>(
     const input = CancelRunRequestSchema.parse(await context.req.json());
     return context.json(
       RunResultSchema.parse(
-        await serviceFor(context.env, executionFor(context)).cancel(
-          trusted,
-          runId,
-          input,
-        ),
+        await serviceFor(context.env, executionFor(context)).cancel(trusted, runId, input),
       ),
       202,
     );
@@ -307,35 +257,26 @@ export function createFlaryRunRouter<TBindings extends object>(
     });
   });
 
-  router.post(
-    "/runs/:runId/approvals/:approvalId",
-    async (context) => {
-      const runId = IdentifierSchema.parse(context.req.param("runId"));
-      const approvalId = IdentifierSchema.parse(
-        context.req.param("approvalId"),
-      );
-      const trusted = await contextFor(context.req.raw, context.env, runId);
-      const input = ApprovalAnswerRequestSchema.parse(
-        await context.req.json(),
-      );
-      const service = serviceFor(context.env, executionFor(context));
-      if (!service.decideApproval) throw featureUnavailable("Run approvals");
-      const decision = ApprovalDecisionSchema.parse({
-        requestId: approvalId,
-        status: input.status,
-        decidedBy: trusted.identity,
-        decidedAt: new Date().toISOString(),
-        ...(input.comment ? { comment: input.comment } : {}),
-        ...(input.metadata ? { metadata: input.metadata } : {}),
-      });
-      return context.json(
-        RunResultSchema.parse(
-          await service.decideApproval(trusted, runId, decision),
-        ),
-        202,
-      );
-    },
-  );
+  router.post("/runs/:runId/approvals/:approvalId", async (context) => {
+    const runId = IdentifierSchema.parse(context.req.param("runId"));
+    const approvalId = IdentifierSchema.parse(context.req.param("approvalId"));
+    const trusted = await contextFor(context.req.raw, context.env, runId);
+    const input = ApprovalAnswerRequestSchema.parse(await context.req.json());
+    const service = serviceFor(context.env, executionFor(context));
+    if (!service.decideApproval) throw featureUnavailable("Run approvals");
+    const decision = ApprovalDecisionSchema.parse({
+      requestId: approvalId,
+      status: input.status,
+      decidedBy: trusted.identity,
+      decidedAt: new Date().toISOString(),
+      ...(input.comment ? { comment: input.comment } : {}),
+      ...(input.metadata ? { metadata: input.metadata } : {}),
+    });
+    return context.json(
+      RunResultSchema.parse(await service.decideApproval(trusted, runId, decision)),
+      202,
+    );
+  });
 
   router.get("/runs/:runId/user-input", async (context) => {
     const runId = IdentifierSchema.parse(context.req.param("runId"));
@@ -349,32 +290,20 @@ export function createFlaryRunRouter<TBindings extends object>(
     });
   });
 
-  router.post(
-    "/runs/:runId/user-input/:requestId",
-    async (context) => {
-      const runId = IdentifierSchema.parse(context.req.param("runId"));
-      const requestId = IdentifierSchema.parse(context.req.param("requestId"));
-      const trusted = await contextFor(context.req.raw, context.env, runId);
-      const input = UserInputAnswerRequestSchema.parse(
-        await context.req.json(),
-      );
-      const service = serviceFor(context.env, executionFor(context));
-      if (!service.respondToUserInput) {
-        throw featureUnavailable("Run user input");
-      }
-      return context.json(
-        RunResultSchema.parse(
-          await service.respondToUserInput(
-            trusted,
-            runId,
-            requestId,
-            input,
-          ),
-        ),
-        202,
-      );
-    },
-  );
+  router.post("/runs/:runId/user-input/:requestId", async (context) => {
+    const runId = IdentifierSchema.parse(context.req.param("runId"));
+    const requestId = IdentifierSchema.parse(context.req.param("requestId"));
+    const trusted = await contextFor(context.req.raw, context.env, runId);
+    const input = UserInputAnswerRequestSchema.parse(await context.req.json());
+    const service = serviceFor(context.env, executionFor(context));
+    if (!service.respondToUserInput) {
+      throw featureUnavailable("Run user input");
+    }
+    return context.json(
+      RunResultSchema.parse(await service.respondToUserInput(trusted, runId, requestId, input)),
+      202,
+    );
+  });
 
   return router;
 }

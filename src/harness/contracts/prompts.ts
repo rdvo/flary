@@ -7,26 +7,14 @@ import {
   NonEmptyStringSchema,
   ReferenceSchema,
   VersionSchema,
-} from "./common";
+} from "./common.js";
 
 // Identify the role of one prompt message.
-export const PromptRoleSchema = z.enum([
-  "system",
-  "developer",
-  "user",
-  "assistant",
-  "tool",
-]);
+export const PromptRoleSchema = z.enum(["system", "developer", "user", "assistant", "tool"]);
 export type PromptRole = z.infer<typeof PromptRoleSchema>;
 
 // Identify the value type of one prompt variable.
-export const PromptVariableTypeSchema = z.enum([
-  "string",
-  "number",
-  "boolean",
-  "object",
-  "array",
-]);
+export const PromptVariableTypeSchema = z.enum(["string", "number", "boolean", "object", "array"]);
 export type PromptVariableType = z.infer<typeof PromptVariableTypeSchema>;
 
 // Define one message in a prompt.

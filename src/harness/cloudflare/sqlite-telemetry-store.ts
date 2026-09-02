@@ -18,10 +18,7 @@ interface SqlRows<T> {
 }
 
 interface SqlStorage {
-  exec<T = Record<string, unknown>>(
-    query: string,
-    ...bindings: unknown[]
-  ): SqlRows<T>;
+  exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): SqlRows<T>;
 }
 
 interface TelemetryRow {
@@ -71,11 +68,9 @@ export class SqliteTelemetryStore implements TelemetryStore {
   }
 
   async appendMany(
-    eventInputs: readonly TelemetryEvent[]
+    eventInputs: readonly TelemetryEvent[],
   ): Promise<readonly StoredTelemetryEvent[]> {
-    const events = eventInputs.map((event) =>
-      TelemetryEventSchema.parse(event)
-    );
+    const events = eventInputs.map((event) => TelemetryEventSchema.parse(event));
     const batchIds = new Set<string>();
     for (const event of events) {
       if (batchIds.has(event.id) || this.#hasId(event.id)) {
@@ -98,7 +93,7 @@ export class SqliteTelemetryStore implements TelemetryStore {
           event.traceContext.parentSpanId ?? null,
           event.type,
           event.occurredAt,
-          JSON.stringify(event)
+          JSON.stringify(event),
         )
         .toArray()[0];
       if (!row) {
@@ -117,22 +112,15 @@ export class SqliteTelemetryStore implements TelemetryStore {
     return entries.map(cloneEntry);
   }
 
-  async read(
-    options: TelemetryReadOptions = {}
-  ): Promise<readonly StoredTelemetryEvent[]> {
+  async read(options: TelemetryReadOptions = {}): Promise<readonly StoredTelemetryEvent[]> {
     const limit = validateLimit(options.limit);
     if (limit === 0) return [];
 
     const conditions: string[] = [];
     const bindings: unknown[] = [];
     if (options.afterSequence !== undefined) {
-      if (
-        !Number.isSafeInteger(options.afterSequence) ||
-        options.afterSequence < 0
-      ) {
-        throw new RangeError(
-          "Telemetry sequence must be a non-negative safe integer"
-        );
+      if (!Number.isSafeInteger(options.afterSequence) || options.afterSequence < 0) {
+        throw new RangeError("Telemetry sequence must be a non-negative safe integer");
       }
       conditions.push("sequence > ?");
       bindings.push(options.afterSequence);
@@ -150,16 +138,13 @@ export class SqliteTelemetryStore implements TelemetryStore {
       bindings.push(options.parentSpanId);
     }
     if (options.type !== undefined) {
-      const types = Array.isArray(options.type)
-        ? [...options.type]
-        : [options.type];
+      const types = Array.isArray(options.type) ? [...options.type] : [options.type];
       if (types.length === 0) return [];
       conditions.push(`event_type IN (${types.map(() => "?").join(", ")})`);
       bindings.push(...types);
     }
 
-    const where =
-      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const limitClause = limit === Number.POSITIVE_INFINITY ? "" : "LIMIT ?";
     if (limit !== Number.POSITIVE_INFINITY) bindings.push(limit);
     return this.#sql
@@ -169,7 +154,7 @@ export class SqliteTelemetryStore implements TelemetryStore {
          ${where}
          ORDER BY sequence ASC
          ${limitClause}`,
-        ...bindings
+        ...bindings,
       )
       .toArray()
       .map(parseRow);
@@ -183,9 +168,7 @@ export class SqliteTelemetryStore implements TelemetryStore {
     return this.read({ runId });
   }
 
-  async readChildren(
-    parentSpanId: SpanId
-  ): Promise<readonly StoredTelemetryEvent[]> {
+  async readChildren(parentSpanId: SpanId): Promise<readonly StoredTelemetryEvent[]> {
     return this.read({ parentSpanId });
   }
 
@@ -260,9 +243,7 @@ export class SqliteTelemetryStore implements TelemetryStore {
     };
   }
 
-  async *replay(
-    options: TelemetryReadOptions = {}
-  ): AsyncIterable<StoredTelemetryEvent> {
+  async *replay(options: TelemetryReadOptions = {}): AsyncIterable<StoredTelemetryEvent> {
     for (const entry of await this.read(options)) yield entry;
   }
 
@@ -279,7 +260,7 @@ export class SqliteTelemetryStore implements TelemetryStore {
            FROM flary_telemetry_events
            WHERE event_id = ?
            LIMIT 1`,
-          id
+          id,
         )
         .toArray().length > 0
     );

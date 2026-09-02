@@ -108,7 +108,9 @@ function d1Database() {
 
 test("provider failures become short safe public messages", () => {
   assert.equal(
-    publicAgentFailureMessage(new Error("direct failed: <html><body>Unable to load site</body></html> Ray ID: 123")),
+    publicAgentFailureMessage(
+      new Error("direct failed: <html><body>Unable to load site</body></html> Ray ID: 123"),
+    ),
     "The provider blocked the request before generation started. Try another connection or provider.",
   );
   assert.equal(
@@ -129,15 +131,18 @@ test("rendered prompts keep only safe metadata in the public ledger", async () =
   const objects = new Map<string, Uint8Array>();
   const background: Promise<unknown>[] = [];
   let releaseArchive!: () => void;
-  const archiveGate = new Promise<void>((resolve) => { releaseArchive = resolve; });
+  const archiveGate = new Promise<void>((resolve) => {
+    releaseArchive = resolve;
+  });
   const bucket = {
     async put(key: string, value: ArrayBuffer | ArrayBufferView) {
       await archiveGate;
-      const bytes = value instanceof ArrayBuffer
-        ? new Uint8Array(value)
-        : new Uint8Array(
-            value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength),
-          );
+      const bytes =
+        value instanceof ArrayBuffer
+          ? new Uint8Array(value)
+          : new Uint8Array(
+              value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength),
+            );
       objects.set(key, bytes);
     },
     async get(key: string) {
@@ -156,46 +161,52 @@ test("rendered prompts keep only safe metadata in the public ledger", async () =
     handleFlaryThreadControlObjectRequest({
       storage,
       env,
-      execution: { waitUntil: (work) => { background.push(work); } },
+      execution: {
+        waitUntil: (work) => {
+          background.push(work);
+        },
+      },
       request: new Request("https://flary.internal/test", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       }),
     });
-  assert.equal((await call({
-    method: "initialize",
-    tenantId: "tenant_prompt",
-    applicationId: "app",
-    binding: {
-      thread: {
-        organizationId: "tenant_prompt",
-        appId: "app",
-        agentId: "agent",
-        threadId: "thread_prompt",
-      },
-      workspace: {
-        organizationId: "tenant_prompt",
-        appId: "app",
-        projectId: "project",
-        workspaceId: "workspace",
-        branch: "main",
-      },
-      agentId: "agent",
-      defaultMode: "ask",
-      defaultThinkingLevel: "medium",
-      connectionIds: [],
-      createdBy: { id: "user", kind: "user" },
-      status: "active",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    },
-  })).ok, true);
-  const instructions = "Organization: Secret Acme\nAPI key: never-public";
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(instructions),
+  assert.equal(
+    (
+      await call({
+        method: "initialize",
+        tenantId: "tenant_prompt",
+        applicationId: "app",
+        binding: {
+          thread: {
+            organizationId: "tenant_prompt",
+            appId: "app",
+            agentId: "agent",
+            threadId: "thread_prompt",
+          },
+          workspace: {
+            organizationId: "tenant_prompt",
+            appId: "app",
+            projectId: "project",
+            workspaceId: "workspace",
+            branch: "main",
+          },
+          agentId: "agent",
+          defaultMode: "ask",
+          defaultThinkingLevel: "medium",
+          connectionIds: [],
+          createdBy: { id: "user", kind: "user" },
+          status: "active",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      })
+    ).ok,
+    true,
   );
+  const instructions = "Organization: Secret Acme\nAPI key: never-public";
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(instructions));
   const promptHash = [...new Uint8Array(digest)]
     .map((value) => value.toString(16).padStart(2, "0"))
     .join("");
@@ -233,7 +244,7 @@ test("rendered prompts keep only safe metadata in the public ledger", async () =
     after: 0,
     limit: 100,
   });
-  const records = (await recordsResponse.json() as { records: any[] }).records;
+  const records = ((await recordsResponse.json()) as { records: any[] }).records;
   const snapshot = records.find((record) => record.recordType === "prompt.snapshot");
   assert.equal(snapshot.publicPayload.promptHash, promptHash);
   assert.equal(snapshot.publicPayload.archived, true);
@@ -299,7 +310,10 @@ test("generated Thread Control keeps ownership and append-only controls", async 
   const target = { ...scope, threadId: binding.thread.threadId };
 
   assert.equal((await service.list(scope)).length, 1);
-  assert.equal((await service.rename!(target, { title: "Rate limits" })).metadata?.title, "Rate limits");
+  assert.equal(
+    (await service.rename!(target, { title: "Rate limits" })).metadata?.title,
+    "Rate limits",
+  );
   await service.rollback!(target, { turnId: "turn_1" });
   const subagents = await service.subagentAction!(target, "list", {});
   assert.equal((subagents as { threads: unknown[] }).threads.length, 1);
@@ -309,10 +323,7 @@ test("generated Thread Control keeps ownership and append-only controls", async 
     trigger: { kind: "interval", intervalMs: 60_000 },
   });
   const schedules = await service.scheduleAction!(target, "list", {});
-  assert.equal(
-    (schedules as { schedules: unknown[] }).schedules.length,
-    1,
-  );
+  assert.equal((schedules as { schedules: unknown[] }).schedules.length, 1);
   const records = await service.auditList!(target, { after: 0, limit: 100 });
   assert.ok(records.some((record: any) => record.recordType === "rollback"));
 
@@ -350,9 +361,7 @@ test("thread deletion is idempotent and blocks new work", async () => {
     },
     mode: "build",
   });
-  const storage = controls.stores.get(
-    "thread:tenant_delete:coder:thread_delete",
-  )!;
+  const storage = controls.stores.get("thread:tenant_delete:coder:thread_delete")!;
   const send = (body: Record<string, unknown>) =>
     handleFlaryThreadControlObjectRequest({
       storage,
@@ -369,7 +378,7 @@ test("thread deletion is idempotent and blocks new work", async () => {
     deletionId: "delete_1",
     acceptedAt: "2026-08-06T00:00:00.000Z",
   });
-  const firstValue = await first.json() as { deletion: { id: string; status: string } };
+  const firstValue = (await first.json()) as { deletion: { id: string; status: string } };
   assert.equal(firstValue.deletion.id, "delete_1");
   assert.equal(firstValue.deletion.status, "accepted");
 
@@ -380,7 +389,7 @@ test("thread deletion is idempotent and blocks new work", async () => {
     deletionId: "delete_2",
     acceptedAt: "2026-08-06T00:01:00.000Z",
   });
-  const replayValue = await replay.json() as { deletion: { id: string } };
+  const replayValue = (await replay.json()) as { deletion: { id: string } };
   assert.equal(replayValue.deletion.id, "delete_1");
 
   const blocked = await send({
@@ -410,14 +419,17 @@ test("purge recovery completes after Thread Control was already erased", async (
     namespace: namespace(),
   });
 
-  await service.purge!({
-    authorization: {
-      organizationId: "tenant_erased",
-      actor: { id: "system", kind: "system" },
+  await service.purge!(
+    {
+      authorization: {
+        organizationId: "tenant_erased",
+        actor: { id: "system", kind: "system" },
+      },
+      appId: "coder",
+      threadId: "thread_erased",
     },
-    appId: "coder",
-    threadId: "thread_erased",
-  }, deletionId);
+    deletionId,
+  );
 
   const deletion = await catalog.getDeletion({
     tenantId: "tenant_erased",
@@ -477,10 +489,7 @@ test("thread model selection is durable, exact, and auditable", async () => {
     provider: "anthropic",
     model: "claude-sonnet",
   });
-  await assert.rejects(
-    service.modelSet!(target, { model: "google/gemini" }),
-    /not allowed/,
-  );
+  await assert.rejects(service.modelSet!(target, { model: "google/gemini" }), /not allowed/);
   const history = await service.modelHistory!(target);
   assert.equal(history.length, 1);
   const records = await service.auditList!(target, { after: 0, limit: 100 });
@@ -504,7 +513,9 @@ test("trusted runtime model aliases and turn context are thread-unique and sent 
   const controls = namespace();
   const sent: Array<{ instance: string; model: string; turnContext?: string; body: string }> = [];
   const engine = {
-    idFromName(name: string) { return name; },
+    idFromName(name: string) {
+      return name;
+    },
     get(id: unknown) {
       return {
         async fetch(request: Request) {
@@ -516,11 +527,14 @@ test("trusted runtime model aliases and turn context are thread-unique and sent 
             turnContext: parsed.turnContext,
             body,
           });
-          return Response.json({
-            streamUrl: "https://flue.test/stream",
-            offset: "0",
-            submissionId: `submission_${sent.length}`,
-          }, { status: 202 });
+          return Response.json(
+            {
+              streamUrl: "https://flue.test/stream",
+              offset: "0",
+              submissionId: `submission_${sent.length}`,
+            },
+            { status: 202 },
+          );
         },
       };
     },
@@ -579,17 +593,19 @@ test("trusted runtime model aliases and turn context are thread-unique and sent 
     });
   }
 
-  await Promise.all(["thread_a", "thread_b"].map((threadId) =>
-    service.submit({ ...scope, threadId }, {
-      message: "Use my subscription.",
-      idempotencyKey: `request_${threadId}`,
-    })
-  ));
+  await Promise.all(
+    ["thread_a", "thread_b"].map((threadId) =>
+      service.submit(
+        { ...scope, threadId },
+        {
+          message: "Use my subscription.",
+          idempotencyKey: `request_${threadId}`,
+        },
+      ),
+    ),
+  );
 
-  assert.deepEqual(resolved.sort(), [
-    "tenant_alias:thread_a",
-    "tenant_alias:thread_b",
-  ]);
+  assert.deepEqual(resolved.sort(), ["tenant_alias:thread_a", "tenant_alias:thread_b"]);
   assert.equal(new Set(sent.map(({ model }) => model)).size, 2);
   assert.ok(sent.every(({ model }) => model.startsWith("flary_tenant_alias_thread_")));
   assert.deepEqual(sent.map(({ turnContext }) => turnContext).sort(), [
@@ -621,12 +637,17 @@ test("message admission starts projection directly and keeps the queue as fallba
   let queuedTracks = 0;
   const directNamespace = {
     stores: controls.stores,
-    idFromName(name: string) { return controls.idFromName(name); },
+    idFromName(name: string) {
+      return controls.idFromName(name);
+    },
     get(id: unknown) {
       const delegate = controls.get(id);
       return {
         async fetch(request: Request) {
-          const body = await request.clone().json().catch(() => ({})) as { method?: string };
+          const body = (await request
+            .clone()
+            .json()
+            .catch(() => ({}))) as { method?: string };
           if (body.method === "track") {
             directTracks += 1;
             return Response.json({ tracked: true });
@@ -637,15 +658,20 @@ test("message admission starts projection directly and keeps the queue as fallba
     },
   };
   const engine = {
-    idFromName(name: string) { return name; },
+    idFromName(name: string) {
+      return name;
+    },
     get() {
       return {
         async fetch() {
-          return Response.json({
-            streamUrl: "https://flue.test/stream",
-            offset: "0",
-            submissionId: "submission_direct_projection",
-          }, { status: 202 });
+          return Response.json(
+            {
+              streamUrl: "https://flue.test/stream",
+              offset: "0",
+              submissionId: "submission_direct_projection",
+            },
+            { status: 202 },
+          );
         },
       };
     },
@@ -655,7 +681,9 @@ test("message admission starts projection directly and keeps the queue as fallba
       FLARY_THREAD_CONTROL: directNamespace,
       FLUE_CODER_AGENT: engine,
       FLARY_SESSION_PROJECTION_QUEUE: {
-        async send() { queuedTracks += 1; },
+        async send() {
+          queuedTracks += 1;
+        },
       },
     },
     namespace: directNamespace,
@@ -738,27 +766,30 @@ test("an exact fork imports the canonical model transcript", async () => {
     },
     mode: "build",
   });
-  const control = controls.get(controls.idFromName(
-    "thread:tenant_fork:coder:thread_parent",
-  ));
-  const recorded = await control.fetch(new Request("https://flary.internal/thread", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      method: "record",
-      tenantId: "tenant_fork",
-      applicationId: "coder",
-      recordType: "turn.completed",
-      payload: { turnId: "turn_1" },
+  const control = controls.get(controls.idFromName("thread:tenant_fork:coder:thread_parent"));
+  const recorded = await control.fetch(
+    new Request("https://flary.internal/thread", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "record",
+        tenantId: "tenant_fork",
+        applicationId: "coder",
+        recordType: "turn.completed",
+        payload: { turnId: "turn_1" },
+      }),
     }),
-  }));
+  );
   assert.equal(recorded.ok, true);
   const child = await service.fork(
     { ...scope, threadId: parent.thread.threadId },
     { threadId: "thread_child", turnId: "turn_1" },
   );
   assert.equal(child.workspace.branch, "main-fork-thread_child");
-  assert.deepEqual(engineCalls.map(({ action }) => action), ["export", "import"]);
+  assert.deepEqual(
+    engineCalls.map(({ action }) => action),
+    ["export", "import"],
+  );
   assert.equal(engineCalls[0]?.body.turnId, "turn_1");
   assert.equal(engineCalls[1]?.body.turnId, "turn_1");
   assert.equal(engineCalls[1]?.body.archive.format, "flue-canonical");
@@ -794,21 +825,21 @@ test("durable child state accepts waits, resumes, and typed completion output", 
       },
     },
   });
-  const control = controls.get(controls.idFromName(
-    "thread:tenant_children:coder:thread_root",
-  ));
+  const control = controls.get(controls.idFromName("thread:tenant_children:coder:thread_root"));
   const call = async (action: string, input: Record<string, unknown>) => {
-    const response = await control.fetch(new Request("https://flary.internal/subagent", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        method: "subagent",
-        tenantId: "tenant_children",
-        applicationId: "coder",
-        action,
-        input,
+    const response = await control.fetch(
+      new Request("https://flary.internal/subagent", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          method: "subagent",
+          tenantId: "tenant_children",
+          applicationId: "coder",
+          action,
+          input,
+        }),
       }),
-    }));
+    );
     if (!response.ok) assert.fail(await response.text());
     return response.json() as Promise<any>;
   };
@@ -820,26 +851,46 @@ test("durable child state accepts waits, resumes, and typed completion output", 
     seedTurns: 0,
   });
   const childId = spawned.thread.threadId as string;
-  assert.equal((await call("wait", {
-    requestId: "wait_1",
-    threadId: childId,
-    threadIds: [childId],
-  })).threads[0].status, "queued");
-  assert.equal((await call("start", {
-    requestId: "start_1",
-    idempotencyKey: "start_1",
-    threadId: childId,
-  })).thread.status, "running");
-  assert.equal((await call("wait", {
-    requestId: "pause_1",
-    idempotencyKey: "pause_1",
-    threadId: childId,
-  })).thread.status, "waiting");
-  assert.equal((await call("resume", {
-    requestId: "resume_1",
-    idempotencyKey: "resume_1",
-    threadId: childId,
-  })).thread.status, "running");
+  assert.equal(
+    (
+      await call("wait", {
+        requestId: "wait_1",
+        threadId: childId,
+        threadIds: [childId],
+      })
+    ).threads[0].status,
+    "queued",
+  );
+  assert.equal(
+    (
+      await call("start", {
+        requestId: "start_1",
+        idempotencyKey: "start_1",
+        threadId: childId,
+      })
+    ).thread.status,
+    "running",
+  );
+  assert.equal(
+    (
+      await call("wait", {
+        requestId: "pause_1",
+        idempotencyKey: "pause_1",
+        threadId: childId,
+      })
+    ).thread.status,
+    "waiting",
+  );
+  assert.equal(
+    (
+      await call("resume", {
+        requestId: "resume_1",
+        idempotencyKey: "resume_1",
+        threadId: childId,
+      })
+    ).thread.status,
+    "running",
+  );
   const output = {
     summary: "The review is complete.",
     changedFiles: [],
@@ -873,7 +924,9 @@ test("portable export restores canonical and public history into a new thread", 
     batches: [[{ type: "message", turnId: "turn_1", text: "hello" }]],
   };
   const engine = {
-    idFromName(name: string) { return name; },
+    idFromName(name: string) {
+      return name;
+    },
     get(id: unknown) {
       return {
         async fetch(request: Request) {
@@ -898,34 +951,37 @@ test("portable export restores canonical and public history into a new thread", 
     },
     appId: "coder",
   };
-  const create = (threadId: string) => service.create(scope, {
-    threadId,
-    agentId: "coder",
-    workspace: {
-      organizationId: "tenant_restore",
-      appId: "coder",
-      projectId: "project",
-      workspaceId: threadId,
-      branch: "main",
-    },
-    mode: "build",
-  });
+  const create = (threadId: string) =>
+    service.create(scope, {
+      threadId,
+      agentId: "coder",
+      workspace: {
+        organizationId: "tenant_restore",
+        appId: "coder",
+        projectId: "project",
+        workspaceId: threadId,
+        branch: "main",
+      },
+      mode: "build",
+    });
   await create("thread_source");
   const source = { ...scope, threadId: "thread_source" };
-  const sourceControl = controls.get(controls.idFromName(
-    "thread:tenant_restore:coder:thread_source",
-  ));
-  await sourceControl.fetch(new Request("https://flary.internal/thread", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      method: "record",
-      tenantId: "tenant_restore",
-      applicationId: "coder",
-      recordType: "message.user",
-      payload: { text: "hello" },
+  const sourceControl = controls.get(
+    controls.idFromName("thread:tenant_restore:coder:thread_source"),
+  );
+  await sourceControl.fetch(
+    new Request("https://flary.internal/thread", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "record",
+        tenantId: "tenant_restore",
+        applicationId: "coder",
+        recordType: "message.user",
+        payload: { text: "hello" },
+      }),
     }),
-  }));
+  );
   const archive = await service.exportSession!(source);
   assert.equal(archive.format, "flary-thread-archive");
   assert.deepEqual(archive.canonical, canonical);
@@ -935,11 +991,17 @@ test("portable export restores canonical and public history into a new thread", 
   const result = await service.restore!(target, { archive, replace: true });
   assert.equal((result as { restored: boolean }).restored, true);
   const records = await service.auditList!(target, { after: 0, limit: 100 });
-  assert.ok(records.some((record: any) =>
-    record.recordType === "message.user" &&
-    record.publicPayload?._restoredFrom?.sessionId === "thread_source"
-  ));
-  assert.deepEqual(engineCalls.map(({ action }) => action), ["export", "import"]);
+  assert.ok(
+    records.some(
+      (record: any) =>
+        record.recordType === "message.user" &&
+        record.publicPayload?._restoredFrom?.sessionId === "thread_source",
+    ),
+  );
+  assert.deepEqual(
+    engineCalls.map(({ action }) => action),
+    ["export", "import"],
+  );
   assert.deepEqual(engineCalls[1]?.body.archive, canonical);
 });
 
@@ -966,31 +1028,32 @@ test("root usage reservations reject excess work before it starts", async () => 
     mode: "build",
     metadata: { flaryLimits: { toolCalls: 1 } },
   });
-  const control = controls.get(controls.idFromName(
-    "thread:tenant_limits:coder:thread_limits",
-  ));
+  const control = controls.get(controls.idFromName("thread:tenant_limits:coder:thread_limits"));
   const usage = async (
     method: "reserveUsage" | "settleUsage" | "unknownUsage",
     reservationId: string,
-  ) => control.fetch(new Request("https://flary.internal/usage-reservation", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      method,
-      tenantId: "tenant_limits",
-      applicationId: "coder",
-      reservationId,
-      kind: "tool-call",
-      delta: {
-        steps: 0,
-        toolCalls: 1,
-        tokens: 0,
-        costUsd: 0,
-        sandboxSeconds: 0,
-        browserSeconds: 0,
-      },
-    }),
-  }));
+  ) =>
+    control.fetch(
+      new Request("https://flary.internal/usage-reservation", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          method,
+          tenantId: "tenant_limits",
+          applicationId: "coder",
+          reservationId,
+          kind: "tool-call",
+          delta: {
+            steps: 0,
+            toolCalls: 1,
+            tokens: 0,
+            costUsd: 0,
+            sandboxSeconds: 0,
+            browserSeconds: 0,
+          },
+        }),
+      }),
+    );
   assert.equal((await usage("reserveUsage", "tool_1")).ok, true);
   const blocked = await usage("reserveUsage", "tool_2");
   assert.equal(blocked.ok, false);
@@ -1021,39 +1084,38 @@ test("nested Code Mode tool activity is projected once for realtime clients", as
     },
     mode: "build",
   });
-  const control = controls.get(controls.idFromName(
-    "thread:tenant_tools:coder:thread_tools",
-  ));
-  const record = (
-    state: "started" | "completed" | "failed",
-    extra: Record<string, unknown> = {},
-  ) => control.fetch(
-    new Request("https://flary.internal/usage-reservation", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        method: "recordToolActivity",
-        tenantId: "tenant_tools",
-        applicationId: "coder",
-        state,
-        toolCallId: "tool_call_1",
-        toolId: "stats",
-        ordinal: 1,
-        inputSummary: { range: "7d" },
-        ...extra,
+  const control = controls.get(controls.idFromName("thread:tenant_tools:coder:thread_tools"));
+  const record = (state: "started" | "completed" | "failed", extra: Record<string, unknown> = {}) =>
+    control.fetch(
+      new Request("https://flary.internal/usage-reservation", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          method: "recordToolActivity",
+          tenantId: "tenant_tools",
+          applicationId: "coder",
+          state,
+          toolCallId: "tool_call_1",
+          toolId: "stats",
+          ordinal: 1,
+          inputSummary: { range: "7d" },
+          ...extra,
+        }),
       }),
-    }),
-  );
+    );
 
   assert.equal((await record("started")).ok, true);
   assert.equal((await record("started")).ok, true);
   assert.equal((await record("completed", { outputSummary: { total: 42 } })).ok, true);
-  const records = await service.auditList!({ ...scope, threadId: "thread_tools" }, {
-    after: 0,
-    limit: 100,
-  });
-  const activities = records.filter((item: any) =>
-    item.recordType === "tool.call" || item.recordType === "tool.result"
+  const records = await service.auditList!(
+    { ...scope, threadId: "thread_tools" },
+    {
+      after: 0,
+      limit: 100,
+    },
+  );
+  const activities = records.filter(
+    (item: any) => item.recordType === "tool.call" || item.recordType === "tool.result",
   );
   assert.equal(activities.length, 2);
   assert.equal((activities[0] as any).publicPayload.call.toolId, "stats");
@@ -1061,31 +1123,38 @@ test("nested Code Mode tool activity is projected once for realtime clients", as
   assert.equal((activities[1] as any).publicPayload.result.status, "succeeded");
   assert.deepEqual((activities[1] as any).publicPayload.result.output, { total: 42 });
 
-  assert.equal((await record("failed", {
-    toolCallId: "tool_call_2",
-    outcome: "failed",
-    error: "The analytics date range is invalid",
-  })).ok, true);
-  const failures = await service.auditList!({ ...scope, threadId: "thread_tools" }, {
-    after: 0,
-    limit: 100,
-  });
-  const failure = failures.find((item: any) =>
-    item.recordType === "tool.result" &&
-    item.publicPayload.result.callId === "tool_call_2"
+  assert.equal(
+    (
+      await record("failed", {
+        toolCallId: "tool_call_2",
+        outcome: "failed",
+        error: "The analytics date range is invalid",
+      })
+    ).ok,
+    true,
+  );
+  const failures = await service.auditList!(
+    { ...scope, threadId: "thread_tools" },
+    {
+      after: 0,
+      limit: 100,
+    },
+  );
+  const failure = failures.find(
+    (item: any) =>
+      item.recordType === "tool.result" && item.publicPayload.result.callId === "tool_call_2",
   ) as any;
   assert.equal(failure.publicPayload.result.status, "failed");
-  assert.equal(
-    failure.publicPayload.result.error.message,
-    "The analytics date range is invalid",
-  );
+  assert.equal(failure.publicPayload.result.error.message, "The analytics date range is invalid");
 });
 
 test("the Cloudflare thread host bridges durable interactive user input", async () => {
   const controls = namespace();
   const calls: Array<{ method: string; body: Record<string, any> }> = [];
   const runtime = {
-    idFromName(name: string) { return name; },
+    idFromName(name: string) {
+      return name;
+    },
     get() {
       return {
         async fetch(request: Request) {
@@ -1093,32 +1162,38 @@ test("the Cloudflare thread host bridges durable interactive user input", async 
           const body = await request.json<Record<string, any>>();
           calls.push({ method, body });
           if (method === "listStoredUserInput") {
-            return Response.json([{
-              request: {
-                id: "input_1",
-                threadId: body.runId,
-                questions: [{
-                  header: "Delivery",
-                  question: "When should we deliver?",
-                  options: [{ label: "Tomorrow", description: "Recommended" }],
-                  multiSelect: false,
-                }],
-                requestedBy: { id: "agent", kind: "agent" },
-                requestedAt: new Date(0).toISOString(),
+            return Response.json([
+              {
+                request: {
+                  id: "input_1",
+                  threadId: body.runId,
+                  questions: [
+                    {
+                      header: "Delivery",
+                      question: "When should we deliver?",
+                      options: [{ label: "Tomorrow", description: "Recommended" }],
+                      multiSelect: false,
+                    },
+                  ],
+                  requestedBy: { id: "agent", kind: "agent" },
+                  requestedAt: new Date(0).toISOString(),
+                },
+                response: null,
               },
-              response: null,
-            }]);
+            ]);
           }
           return Response.json({
             request: {
               id: "input_1",
               threadId: body.runId,
-              questions: [{
-                header: "Delivery",
-                question: "When should we deliver?",
-                options: [{ label: "Tomorrow", description: "Recommended" }],
-                multiSelect: false,
-              }],
+              questions: [
+                {
+                  header: "Delivery",
+                  question: "When should we deliver?",
+                  options: [{ label: "Tomorrow", description: "Recommended" }],
+                  multiSelect: false,
+                },
+              ],
               requestedBy: { id: "agent", kind: "agent" },
               requestedAt: new Date(0).toISOString(),
             },
@@ -1178,7 +1253,8 @@ test("the Cloudflare thread host bridges durable interactive user input", async 
     answers: { Delivery: "Tomorrow" },
     canceled: false,
     answeredBy: { id: "user_1", kind: "user" },
-    answeredAt: resolved?.publicPayload.response &&
+    answeredAt:
+      resolved?.publicPayload.response &&
       (resolved.publicPayload.response as Record<string, unknown>).answeredAt,
   });
 });
@@ -1205,78 +1281,105 @@ test("lazy catalog and Code Mode lifecycle events are durable and safe", async (
     },
     mode: "build",
   });
-  const control = controls.get(controls.idFromName(
-    "thread:tenant_runtime:coder:thread_runtime",
-  ));
+  const control = controls.get(controls.idFromName("thread:tenant_runtime:coder:thread_runtime"));
   const record = (activityId: string, recordType: string, payload: unknown) =>
-    control.fetch(new Request("https://flary.internal/usage-reservation", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        method: "recordRuntimeActivity",
-        tenantId: "tenant_runtime",
-        applicationId: "coder",
-        activityId,
-        recordType,
-        payload,
+    control.fetch(
+      new Request("https://flary.internal/usage-reservation", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          method: "recordRuntimeActivity",
+          tenantId: "tenant_runtime",
+          applicationId: "coder",
+          activityId,
+          recordType,
+          payload,
+        }),
       }),
-    }));
+    );
 
-  assert.equal((await record("exec:start", "codemode.started", {
-    executionId: "exec_1",
-    code: "return process.env.SECRET",
-    codeBytes: 29,
-    maxToolCalls: 20,
-  })).ok, true);
-  assert.equal((await record("exec:search:1", "tool.search", {
-    executionId: "exec_1",
-    query: "find analytics token=secret",
-    resultIds: ["stats", "trend"],
-    resultCount: 2,
-    durationMs: 8.4,
-  })).ok, true);
-  assert.equal((await record("exec:describe:1", "tool.describe", {
-    executionId: "exec_1",
-    toolId: "stats",
-    found: true,
-    operation: "read",
-    requiresApproval: false,
-    schema: { secret: "must not persist" },
-    schemaBytes: 512,
-    durationMs: 2,
-  })).ok, true);
-  assert.equal((await record("exec:done", "codemode.completed", {
-    executionId: "exec_1",
-    durationMs: 15,
-    usage: {
-      toolCalls: 1,
-      searches: 1,
-      describes: 1,
-      batches: 0,
-      codeBytes: 29,
-      resultBytes: 32,
+  assert.equal(
+    (
+      await record("exec:start", "codemode.started", {
+        executionId: "exec_1",
+        code: "return process.env.SECRET",
+        codeBytes: 29,
+        maxToolCalls: 20,
+      })
+    ).ok,
+    true,
+  );
+  assert.equal(
+    (
+      await record("exec:search:1", "tool.search", {
+        executionId: "exec_1",
+        query: "find analytics token=secret",
+        resultIds: ["stats", "trend"],
+        resultCount: 2,
+        durationMs: 8.4,
+      })
+    ).ok,
+    true,
+  );
+  assert.equal(
+    (
+      await record("exec:describe:1", "tool.describe", {
+        executionId: "exec_1",
+        toolId: "stats",
+        found: true,
+        operation: "read",
+        requiresApproval: false,
+        schema: { secret: "must not persist" },
+        schemaBytes: 512,
+        durationMs: 2,
+      })
+    ).ok,
+    true,
+  );
+  assert.equal(
+    (
+      await record("exec:done", "codemode.completed", {
+        executionId: "exec_1",
+        durationMs: 15,
+        usage: {
+          toolCalls: 1,
+          searches: 1,
+          describes: 1,
+          batches: 0,
+          codeBytes: 29,
+          resultBytes: 32,
+        },
+      })
+    ).ok,
+    true,
+  );
+  assert.equal(
+    (
+      await record("exec:done", "codemode.completed", {
+        executionId: "exec_1",
+        durationMs: 999,
+      })
+    ).ok,
+    true,
+  );
+
+  const records = await service.auditList!(
+    { ...scope, threadId: "thread_runtime" },
+    {
+      after: 0,
+      limit: 100,
     },
-  })).ok, true);
-  assert.equal((await record("exec:done", "codemode.completed", {
-    executionId: "exec_1",
-    durationMs: 999,
-  })).ok, true);
-
-  const records = await service.auditList!({ ...scope, threadId: "thread_runtime" }, {
-    after: 0,
-    limit: 100,
-  });
-  const runtime = records.filter((item: any) =>
-    item.recordType.startsWith("codemode.") ||
-    item.recordType === "tool.search" ||
-    item.recordType === "tool.describe"
+  );
+  const runtime = records.filter(
+    (item: any) =>
+      item.recordType.startsWith("codemode.") ||
+      item.recordType === "tool.search" ||
+      item.recordType === "tool.describe",
   ) as any[];
-  assert.deepEqual(runtime.map((item) => item.recordType), [
-    "codemode.started",
-    "tool.search",
-    "tool.describe",
-    "codemode.completed",
-  ]);
+  assert.deepEqual(
+    runtime.map((item) => item.recordType),
+    ["codemode.started", "tool.search", "tool.describe", "codemode.completed"],
+  );
   assert.equal(runtime[0].publicPayload.code, undefined);
   assert.equal(runtime[1].publicPayload.query, "find analytics token=<redacted>");
   assert.equal(runtime[1].publicPayload.resultCount, 2);
@@ -1316,9 +1419,7 @@ test("hibernating realtime commands resume from socket attachments and deduplica
     },
     mode: "build",
   });
-  const storage = controls.stores.get(
-    "thread:tenant_realtime:coder:thread_realtime",
-  )!;
+  const storage = controls.stores.get("thread:tenant_realtime:coder:thread_realtime")!;
   const sent: any[] = [];
   let attachment: Record<string, unknown> = {
     tenantId: "tenant_realtime",
@@ -1330,12 +1431,16 @@ test("hibernating realtime commands resume from socket attachments and deduplica
     acknowledged: 4,
   };
   const socket = {
-    send(value: string) { sent.push(JSON.parse(value)); },
+    send(value: string) {
+      sent.push(JSON.parse(value));
+    },
     close() {},
     serializeAttachment(value: unknown) {
       attachment = value as Record<string, unknown>;
     },
-    deserializeAttachment() { return attachment; },
+    deserializeAttachment() {
+      return attachment;
+    },
   };
   const queued: unknown[] = [];
   const frame = JSON.stringify({
@@ -1349,13 +1454,25 @@ test("hibernating realtime commands resume from socket attachments and deduplica
 
   await handleFlaryThreadControlWebSocketMessage({
     storage,
-    env: { FLARY_SESSION_PROJECTION_QUEUE: { async send(value: unknown) { queued.push(value); } } },
+    env: {
+      FLARY_SESSION_PROJECTION_QUEUE: {
+        async send(value: unknown) {
+          queued.push(value);
+        },
+      },
+    },
     socket,
     message: frame,
   });
   await handleFlaryThreadControlWebSocketMessage({
     storage,
-    env: { FLARY_SESSION_PROJECTION_QUEUE: { async send(value: unknown) { queued.push(value); } } },
+    env: {
+      FLARY_SESSION_PROJECTION_QUEUE: {
+        async send(value: unknown) {
+          queued.push(value);
+        },
+      },
+    },
     socket,
     message: frame,
   });
@@ -1410,40 +1527,56 @@ test("plain realtime messages bypass the Queue when the generated host is availa
   };
   const sent: Array<Record<string, unknown>> = [];
   const socket = {
-    send(value: string) { sent.push(JSON.parse(value)); },
+    send(value: string) {
+      sent.push(JSON.parse(value));
+    },
     close() {},
-    serializeAttachment(value: unknown) { attachment = value as Record<string, unknown>; },
-    deserializeAttachment() { return attachment; },
+    serializeAttachment(value: unknown) {
+      attachment = value as Record<string, unknown>;
+    },
+    deserializeAttachment() {
+      return attachment;
+    },
   };
   let queued = 0;
   let providerAdmissions = 0;
   const engine = {
-    idFromName(value: string) { return value; },
+    idFromName(value: string) {
+      return value;
+    },
     get() {
       return {
         async fetch(request: Request) {
           providerAdmissions += 1;
           if (request.method !== "POST") {
-            return Response.json([{
-              type: "submission-settled",
-              position: { batch: 1, index: 0 },
-              conversationId: "thread_realtime_direct",
-              submissionId: "submission_realtime_direct",
-              outcome: "completed",
-              timestamp: new Date().toISOString(),
-            }], {
-              headers: {
-                "Stream-Next-Offset": "1",
-                "Stream-Up-To-Date": "true",
-                "Stream-Closed": "true",
+            return Response.json(
+              [
+                {
+                  type: "submission-settled",
+                  position: { batch: 1, index: 0 },
+                  conversationId: "thread_realtime_direct",
+                  submissionId: "submission_realtime_direct",
+                  outcome: "completed",
+                  timestamp: new Date().toISOString(),
+                },
+              ],
+              {
+                headers: {
+                  "Stream-Next-Offset": "1",
+                  "Stream-Up-To-Date": "true",
+                  "Stream-Closed": "true",
+                },
               },
-            });
+            );
           }
-          return Response.json({
-            streamUrl: "https://flue.internal/agents/coder/thread_realtime_direct",
-            offset: "0",
-            submissionId: "submission_realtime_direct",
-          }, { status: 202 });
+          return Response.json(
+            {
+              streamUrl: "https://flue.internal/agents/coder/thread_realtime_direct",
+              offset: "0",
+              submissionId: "submission_realtime_direct",
+            },
+            { status: 202 },
+          );
         },
       };
     },
@@ -1454,7 +1587,11 @@ test("plain realtime messages bypass the Queue when the generated host is availa
     env: {
       FLARY_THREAD_CONTROL: controls,
       FLUE_CODER_AGENT: engine,
-      FLARY_SESSION_PROJECTION_QUEUE: { async send() { queued += 1; } },
+      FLARY_SESSION_PROJECTION_QUEUE: {
+        async send() {
+          queued += 1;
+        },
+      },
     },
     socket,
     message: JSON.stringify({
@@ -1465,10 +1602,16 @@ test("plain realtime messages bypass the Queue when the generated host is availa
       command: "send",
       input: { message: "Hello" },
     }),
-    execution: { waitUntil(work) { background.push(work); } },
+    execution: {
+      waitUntil(work) {
+        background.push(work);
+      },
+    },
     webSockets: {
       acceptWebSocket() {},
-      getWebSockets() { return [socket]; },
+      getWebSockets() {
+        return [socket];
+      },
     },
   });
 
@@ -1483,17 +1626,22 @@ test("queued realtime commands keep the trusted model resolver", async () => {
   const controls = namespace();
   const sentModels: string[] = [];
   const engine = {
-    idFromName(name: string) { return name; },
+    idFromName(name: string) {
+      return name;
+    },
     get() {
       return {
         async fetch(request: Request) {
-          const body = await request.json() as { model: string };
+          const body = (await request.json()) as { model: string };
           sentModels.push(body.model);
-          return Response.json({
-            streamUrl: "https://flue.test/stream",
-            offset: "0",
-            submissionId: "submission_realtime",
-          }, { status: 202 });
+          return Response.json(
+            {
+              streamUrl: "https://flue.test/stream",
+              offset: "0",
+              submissionId: "submission_realtime",
+            },
+            { status: 202 },
+          );
         },
       };
     },
@@ -1538,23 +1686,29 @@ test("queued realtime commands keep the trusted model resolver", async () => {
         runtimeSelection: { provider: "trusted-thread-alias", model: input.selection.model },
       };
     },
-    messages: [{
-      body: {
-        kind: "realtime.command",
-        controlName: "thread:tenant_realtime_alias:coder:thread_realtime_alias",
-        target: { ...scope, threadId: "thread_realtime_alias" },
-        frame: {
-          version: 1,
-          type: "command",
-          requestId: "request_realtime_alias",
-          idempotencyKey: "request_realtime_alias",
-          command: "send",
-          input: { message: "Continue." },
+    messages: [
+      {
+        body: {
+          kind: "realtime.command",
+          controlName: "thread:tenant_realtime_alias:coder:thread_realtime_alias",
+          target: { ...scope, threadId: "thread_realtime_alias" },
+          frame: {
+            version: 1,
+            type: "command",
+            requestId: "request_realtime_alias",
+            idempotencyKey: "request_realtime_alias",
+            command: "send",
+            input: { message: "Continue." },
+          },
+        },
+        ack() {
+          acknowledged = true;
+        },
+        retry() {
+          throw new Error("The realtime command was retried");
         },
       },
-      ack() { acknowledged = true; },
-      retry() { throw new Error("The realtime command was retried"); },
-    }],
+    ],
   });
   assert.equal(acknowledged, true);
   assert.deepEqual(sentModels, ["trusted-thread-alias/gpt-5.6-luna"]);
@@ -1582,9 +1736,7 @@ test("root realtime replay includes child events only when requested", async () 
     },
     mode: "build",
   });
-  const storage = controls.stores.get(
-    "thread:tenant_child_stream:coder:thread_root",
-  )!;
+  const storage = controls.stores.get("thread:tenant_child_stream:coder:thread_root")!;
   const makeSocket = (includeChildren: boolean) => {
     const frames: any[] = [];
     let attachment: Record<string, unknown> = {
@@ -1599,12 +1751,16 @@ test("root realtime replay includes child events only when requested", async () 
     return {
       frames,
       socket: {
-        send(value: string) { frames.push(JSON.parse(value)); },
+        send(value: string) {
+          frames.push(JSON.parse(value));
+        },
         close() {},
         serializeAttachment(value: unknown) {
           attachment = value as Record<string, unknown>;
         },
-        deserializeAttachment() { return attachment; },
+        deserializeAttachment() {
+          return attachment;
+        },
       },
       attachment: () => attachment,
     };
@@ -1639,6 +1795,9 @@ test("root realtime replay includes child events only when requested", async () 
   assert.equal(response.ok, true);
   const events = withChildren.frames.find((frame) => frame.type === "events");
   assert.equal(events.records[0].publicPayload._child.threadId, "thread_reviewer");
-  assert.equal(withoutChildren.frames.some((frame) => frame.type === "events"), false);
+  assert.equal(
+    withoutChildren.frames.some((frame) => frame.type === "events"),
+    false,
+  );
   assert.equal(withoutChildren.attachment().sent, events.cursor);
 });

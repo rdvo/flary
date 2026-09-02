@@ -12,21 +12,12 @@ import { and, eq, inArray } from "drizzle-orm";
 import { createDb } from "./db";
 import { flaryConnection, secretEnvelope } from "./db/schema";
 import type { Env } from "./env";
-import {
-  decryptToken,
-  encryptToken,
-  providerCredentialAssociatedData,
-} from "./security/tokens";
+import { decryptToken, encryptToken, providerCredentialAssociatedData } from "./security/tokens";
 
 const LOCK_TTL_MS = 30_000;
 const LOCK_WAIT_MS = 10_000;
 const LOCK_POLL_MS = 100;
-const OAUTH_SECRET_NAMES = [
-  "access_token",
-  "refresh_token",
-  "id_token",
-  "account_id",
-] as const;
+const OAUTH_SECRET_NAMES = ["access_token", "refresh_token", "id_token", "account_id"] as const;
 
 type SupportedSubscriptionProvider = "anthropic" | "openai-codex";
 
@@ -87,9 +78,7 @@ export async function resolveSubscriptionAccessToken(
       },
     },
   });
-  models.setProvider(
-    provider === "anthropic" ? anthropicProvider() : openaiCodexProvider(),
-  );
+  models.setProvider(provider === "anthropic" ? anthropicProvider() : openaiCodexProvider());
   const result = await models.getAuth(provider);
   const token = result?.auth.apiKey;
   if (!token) {
@@ -181,35 +170,22 @@ class CloudOAuthCredentialStore implements CredentialStore {
   }
 
   async list(): Promise<readonly CredentialInfo[]> {
-    return (await this.readUnlocked())
-      ? [{ providerId: this.scope.provider, type: "oauth" }]
-      : [];
+    return (await this.readUnlocked()) ? [{ providerId: this.scope.provider, type: "oauth" }] : [];
   }
 
   async modify(
     providerId: string,
-    update: (
-      current: Credential | undefined,
-    ) => Promise<Credential | undefined>,
+    update: (current: Credential | undefined) => Promise<Credential | undefined>,
   ): Promise<Credential | undefined> {
     this.assertProvider(providerId);
     const ownerId = crypto.randomUUID();
-    await acquireCredentialLock(
-      this.env,
-      this.scope.connectionId,
-      ownerId,
-    );
-    const lease = startCredentialLockRenewal(
-      this.env,
-      this.scope.connectionId,
-      ownerId,
-    );
+    await acquireCredentialLock(this.env, this.scope.connectionId, ownerId);
+    const lease = startCredentialLockRenewal(this.env, this.scope.connectionId, ownerId);
     try {
       const current = await this.readUnlocked();
       const updated = await update(current);
-      const next = updated?.type === "oauth"
-        ? preserveCodexCredentialFields(current, updated)
-        : updated;
+      const next =
+        updated?.type === "oauth" ? preserveCodexCredentialFields(current, updated) : updated;
       if (next) {
         if (next.type !== "oauth") {
           throw new ProviderSubscriptionError(
@@ -224,11 +200,7 @@ class CloudOAuthCredentialStore implements CredentialStore {
       return this.readUnlocked();
     } finally {
       await lease.stop();
-      await releaseCredentialLock(
-        this.env,
-        this.scope.connectionId,
-        ownerId,
-      );
+      await releaseCredentialLock(this.env, this.scope.connectionId, ownerId);
     }
   }
 
@@ -291,9 +263,7 @@ class CloudOAuthCredentialStore implements CredentialStore {
     };
   }
 
-  private async writeUnlocked(
-    credential: Extract<Credential, { type: "oauth" }>,
-  ): Promise<void> {
+  private async writeUnlocked(credential: Extract<Credential, { type: "oauth" }>): Promise<void> {
     if (!this.env.FLARY_TOKEN_ENCRYPTION_KEY_B64) {
       throw new ProviderSubscriptionError(
         "credential_storage",
@@ -314,18 +284,22 @@ class CloudOAuthCredentialStore implements CredentialStore {
         expiresAt: null,
       }),
       ...(idToken
-        ? [saveSecret(this.env, this.scope, {
-            name: "id_token",
-            value: idToken,
-            expiresAt: new Date(credential.expires),
-          })]
+        ? [
+            saveSecret(this.env, this.scope, {
+              name: "id_token",
+              value: idToken,
+              expiresAt: new Date(credential.expires),
+            }),
+          ]
         : []),
       ...(accountId
-        ? [saveSecret(this.env, this.scope, {
-            name: "account_id",
-            value: accountId,
-            expiresAt: null,
-          })]
+        ? [
+            saveSecret(this.env, this.scope, {
+              name: "account_id",
+              value: accountId,
+              expiresAt: null,
+            }),
+          ]
         : []),
     ]);
     await createDb(this.env.DB)
@@ -352,10 +326,8 @@ export function preserveCodexCredentialFields(
   next: Extract<Credential, { type: "oauth" }>,
 ): Extract<Credential, { type: "oauth" }> {
   if (current?.type !== "oauth") return next;
-  const idToken = credentialString(next, "idToken") ??
-    credentialString(current, "idToken");
-  const accountId = credentialString(next, "accountId") ??
-    credentialString(current, "accountId");
+  const idToken = credentialString(next, "idToken") ?? credentialString(current, "idToken");
+  const accountId = credentialString(next, "accountId") ?? credentialString(current, "accountId");
   return {
     ...next,
     ...(idToken ? { idToken } : {}),
@@ -398,10 +370,7 @@ async function loadSecrets(
       expiresAt: secretEnvelope.expiresAt,
     })
     .from(secretEnvelope)
-    .innerJoin(
-      flaryConnection,
-      eq(flaryConnection.id, secretEnvelope.connectionId),
-    )
+    .innerJoin(flaryConnection, eq(flaryConnection.id, secretEnvelope.connectionId))
     .where(
       and(
         eq(secretEnvelope.organizationId, scope.organizationId),
@@ -456,10 +425,7 @@ async function saveSecret(
     .select({ id: secretEnvelope.id, version: secretEnvelope.version })
     .from(secretEnvelope)
     .where(
-      and(
-        eq(secretEnvelope.connectionId, scope.connectionId),
-        eq(secretEnvelope.name, input.name),
-      ),
+      and(eq(secretEnvelope.connectionId, scope.connectionId), eq(secretEnvelope.name, input.name)),
     )
     .limit(1);
   const encrypted = await encryptToken(
@@ -553,17 +519,16 @@ function startCredentialLockRenewal(
   let stopped = false;
   let lost: Error | undefined;
   let activeRenewal: Promise<void> = Promise.resolve();
-  const timer = setInterval(() => {
-    if (stopped || lost) return;
-    activeRenewal = renewCredentialLock(env, connectionId, ownerId).catch(
-      (error: unknown) => {
+  const timer = setInterval(
+    () => {
+      if (stopped || lost) return;
+      activeRenewal = renewCredentialLock(env, connectionId, ownerId).catch((error: unknown) => {
         lost =
-          error instanceof Error
-            ? error
-            : new Error("Provider credential refresh lock was lost");
-      },
-    );
-  }, Math.max(1_000, Math.floor(LOCK_TTL_MS / 3)));
+          error instanceof Error ? error : new Error("Provider credential refresh lock was lost");
+      });
+    },
+    Math.max(1_000, Math.floor(LOCK_TTL_MS / 3)),
+  );
 
   return {
     async assertHeld() {
@@ -574,11 +539,7 @@ function startCredentialLockRenewal(
       )
         .bind(connectionId)
         .first<{ ownerId: string; expiresAt: number }>();
-      if (
-        result?.ownerId !== ownerId ||
-        !result.expiresAt ||
-        result.expiresAt <= Date.now()
-      ) {
+      if (result?.ownerId !== ownerId || !result.expiresAt || result.expiresAt <= Date.now()) {
         throw new ProviderSubscriptionError(
           "credential_lock_lost",
           "The provider credential refresh lock was lost",
@@ -593,11 +554,7 @@ function startCredentialLockRenewal(
   };
 }
 
-async function renewCredentialLock(
-  env: Env,
-  connectionId: string,
-  ownerId: string,
-): Promise<void> {
+async function renewCredentialLock(env: Env, connectionId: string, ownerId: string): Promise<void> {
   const result = await env.DB.prepare(
     "UPDATE provider_credential_lock SET expires_at = ? WHERE connection_id = ? AND owner_id = ?",
   )

@@ -1,10 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { observe, type FlueObservation, type FlueEventContext } from "@flue/runtime";
-import {
-  ArtifactRecallIndexer,
-  FlaryHistoryProjector,
-  TurbopufferRecallIndex,
-} from "flary";
+import { ArtifactRecallIndexer, FlaryHistoryProjector, TurbopufferRecallIndex } from "flary";
 import { R2ArtifactHistoryStore } from "flary/storage";
 import { ThreadBindingSchema, type ThreadBinding } from "flary/contracts";
 import { parseThreadName, threadName } from "flary/storage";
@@ -14,10 +10,7 @@ import type { Env } from "./env";
 import { internalRequestToken } from "./security/tokens";
 import { CloudflareArtifactHistoryStore } from "./artifacts-history";
 
-type ProjectionObservation = Extract<
-  FlueObservation,
-  { type: "agent_end" | "submission_settled" }
->;
+type ProjectionObservation = Extract<FlueObservation, { type: "agent_end" | "submission_settled" }>;
 
 /**
  * Project completed Flue submissions into immutable history. This is an
@@ -29,15 +22,13 @@ export function registerHistoryProjection(flueFetch: {
 }): void {
   observe((observation, context) => {
     if (observation.type !== "agent_end" && observation.type !== "submission_settled") return;
-    void checkpointSubmission(
-      flueFetch,
-      observation,
-      context as FlueEventContext<Env>,
-    ).catch((error) => {
-      context.log.error("Flary history projection failed", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
+    void checkpointSubmission(flueFetch, observation, context as FlueEventContext<Env>).catch(
+      (error) => {
+        context.log.error("Flary history projection failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      },
+    );
   });
 }
 
@@ -112,23 +103,23 @@ async function checkpointSubmission(
         scope: { ...binding.workspace },
         repository,
       });
-  const indexer = env.TURBOPUFFER_API_KEY && env.TURBOPUFFER_BASE_URL && env.TURBOPUFFER_NAMESPACE
-    ? new ArtifactRecallIndexer(new TurbopufferRecallIndex({
-        apiKey: env.TURBOPUFFER_API_KEY,
-        baseUrl: env.TURBOPUFFER_BASE_URL,
-        namespace: env.TURBOPUFFER_NAMESPACE,
-      }))
-    : undefined;
+  const indexer =
+    env.TURBOPUFFER_API_KEY && env.TURBOPUFFER_BASE_URL && env.TURBOPUFFER_NAMESPACE
+      ? new ArtifactRecallIndexer(
+          new TurbopufferRecallIndex({
+            apiKey: env.TURBOPUFFER_API_KEY,
+            baseUrl: env.TURBOPUFFER_BASE_URL,
+            namespace: env.TURBOPUFFER_NAMESPACE,
+          }),
+        )
+      : undefined;
   const projector = new FlaryHistoryProjector(store, indexer);
   const historyResponse = await flueFetch.fetch(
     new Request(
       `https://flue.internal/agents/flary-thread/${encodeURIComponent(context.id)}/history`,
       {
         headers: {
-          "x-flary-internal-token": await internalRequestToken(
-            env.BETTER_AUTH_SECRET,
-            context.id,
-          ),
+          "x-flary-internal-token": await internalRequestToken(env.BETTER_AUTH_SECRET, context.id),
         },
       },
     ),
@@ -139,7 +130,9 @@ async function checkpointSubmission(
   }
   const snapshot = await historyResponse.json();
   const snapshotOffset =
-    typeof snapshot === "object" && snapshot !== null && "offset" in snapshot &&
+    typeof snapshot === "object" &&
+    snapshot !== null &&
+    "offset" in snapshot &&
     typeof (snapshot as { offset?: unknown }).offset === "string"
       ? (snapshot as { offset: string }).offset
       : undefined;
@@ -163,9 +156,7 @@ async function checkpointSubmission(
     ],
     metadata: {
       submissionId,
-      outcome: observation.type === "submission_settled"
-        ? observation.outcome
-        : "completed",
+      outcome: observation.type === "submission_settled" ? observation.outcome : "completed",
       flueOffset: String(observation.eventIndex),
     },
   });

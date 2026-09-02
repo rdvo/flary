@@ -22,16 +22,9 @@ test("artifact history commits are immutable and support exact scoped search", a
     ],
     createdAt: "2026-07-28T12:00:00.000Z",
   });
+  assert.equal((await store.latest("project-artifacts", commit.scope))?.id, "commit-1");
   assert.equal(
-    (await store.latest("project-artifacts", commit.scope))?.id,
-    "commit-1",
-  );
-  assert.equal(
-    (await store.searchExact(
-      "project-artifacts",
-      commit.scope,
-      "provider-neutral",
-    ))[0]?.path,
+    (await store.searchExact("project-artifacts", commit.scope, "provider-neutral"))[0]?.path,
     "decisions/provider.md",
   );
   await assert.rejects(

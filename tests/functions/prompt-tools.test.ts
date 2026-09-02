@@ -81,13 +81,10 @@ test("prompt functions expose one execute tool and validate the final output", a
   };
   assert.deepEqual(
     first.tools?.map((tool) => tool.name),
-    ["execute"]
+    ["execute"],
   );
   assert.match(first.tools?.[0]?.description ?? "", /tools\.search/);
-  assert.doesNotMatch(
-    first.tools?.[0]?.description ?? "",
-    /lookup\.inputSchema/
-  );
+  assert.doesNotMatch(first.tools?.[0]?.description ?? "", /lookup\.inputSchema/);
 });
 
 test("Codemode approvals map to Flue continuation and replay", async () => {
@@ -143,17 +140,14 @@ test("Codemode approvals map to Flue continuation and replay", async () => {
       toolName: "execute",
       arguments: {},
     }),
-    "ready"
+    "ready",
   );
   const result = await bridge.continuation.resume({
     toolCallId: "execute_1",
     toolName: "execute",
     arguments: {},
   });
-  assert.equal(
-    result.output && (result.output as { number: number }).number,
-    10
-  );
+  assert.equal(result.output && (result.output as { number: number }).number, 10);
 });
 
 test("the protected Flue agent route exposes Codemode approvals", async () => {
@@ -205,7 +199,7 @@ test("the protected Flue agent route exposes Codemode approvals", async () => {
   const route = flaryInternalRoute(fn);
   const request = new Request(
     "https://flue.internal/agents/support/agent-instance?flary=approvals",
-    { headers: { authorization: `Bearer ${token}` } }
+    { headers: { authorization: `Bearer ${token}` } },
   );
   const context = {
     env: { FLARY_INTERNAL_TOKEN: token },
@@ -241,7 +235,7 @@ test("the protected Flue agent route exposes Codemode approvals", async () => {
         decidedBy: { id: "operator", kind: "user", version: "1" },
         decidedAt: new Date().toISOString(),
       }),
-    }
+    },
   );
   const decisionContext = {
     ...context,

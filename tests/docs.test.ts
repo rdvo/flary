@@ -7,9 +7,19 @@ const root = path.resolve(import.meta.dirname, "..");
 const docsRoot = path.join(root, "docs");
 const sections = ["Start", "Build", "Connect", "Run", "Operate", "Examples", "Reference"];
 const redirects = new Set([
-  "getting-started", "self-hosting", "one-off-agent", "prompts", "durable-threads",
-  "sessions-and-workspaces", "workspaces-history", "tools-and-mcp", "host-neutral-toolsets",
-  "providers-and-cache", "modes-permissions", "cloudflare-resources", "production-checklist",
+  "getting-started",
+  "self-hosting",
+  "one-off-agent",
+  "prompts",
+  "durable-threads",
+  "sessions-and-workspaces",
+  "workspaces-history",
+  "tools-and-mcp",
+  "host-neutral-toolsets",
+  "providers-and-cache",
+  "modes-permissions",
+  "cloudflare-resources",
+  "production-checklist",
   "channels-and-webhooks",
 ]);
 
@@ -37,12 +47,22 @@ test("documentation frontmatter uses the normalized navigation", () => {
 });
 
 test("documentation links resolve to a page or a declared redirect", () => {
-  const slugs = new Set(files(docsRoot).map((file) => path.relative(docsRoot, file).replace(/\.mdx$/, "").replaceAll(path.sep, "/")));
+  const slugs = new Set(
+    files(docsRoot).map((file) =>
+      path
+        .relative(docsRoot, file)
+        .replace(/\.mdx$/, "")
+        .replaceAll(path.sep, "/"),
+    ),
+  );
   for (const file of files(docsRoot)) {
     const source = fs.readFileSync(file, "utf8");
     for (const match of source.matchAll(/\]\(\/docs\/([^/)]+(?:\/[^/)]+)*)\/?(?:#[^)]+)?\)/g)) {
       const slug = match[1]!;
-      assert.ok(slugs.has(slug) || redirects.has(slug), `${file} links to missing docs page ${slug}`);
+      assert.ok(
+        slugs.has(slug) || redirects.has(slug),
+        `${file} links to missing docs page ${slug}`,
+      );
     }
   }
   const astroConfig = fs.readFileSync(path.join(root, "apps/cloud/astro.config.ts"), "utf8");
@@ -54,24 +74,18 @@ test("beginner documentation has no hard-coded release or internal engine setup"
     const source = fs.readFileSync(path.join(docsRoot, name), "utf8");
     assert.doesNotMatch(source, /\b0\.[0-9]+\b|Flue|beta\.?9|unpublished/i, name);
   }
-  const layout = fs.readFileSync(path.join(root, "apps/cloud/src/layouts/DocsLayout.astro"), "utf8");
+  const layout = fs.readFileSync(
+    path.join(root, "apps/cloud/src/layouts/DocsLayout.astro"),
+    "utf8",
+  );
   assert.match(layout, /packageManifest\.version/);
   assert.doesNotMatch(layout, /docs-version">0\./);
 });
 
 test("the coding guide uses the built starter and names the built-in coding tools", () => {
-  const guide = fs.readFileSync(
-    path.join(docsRoot, "examples/coding-agent.mdx"),
-    "utf8",
-  );
-  const tools = fs.readFileSync(
-    path.join(root, "templates/starter/src/tools.ts"),
-    "utf8",
-  );
-  const coder = fs.readFileSync(
-    path.join(root, "templates/starter/src/coder.ts"),
-    "utf8",
-  );
+  const guide = fs.readFileSync(path.join(docsRoot, "examples/coding-agent.mdx"), "utf8");
+  const tools = fs.readFileSync(path.join(root, "templates/starter/src/tools.ts"), "utf8");
+  const coder = fs.readFileSync(path.join(root, "templates/starter/src/coder.ts"), "utf8");
   assert.match(guide, /templates\/starter\/src\/tools\.ts\?raw/);
   assert.match(guide, /workspace\.(?:grep|read)/);
   assert.match(guide, /shell\.exec/);
@@ -80,18 +94,12 @@ test("the coding guide uses the built starter and names the built-in coding tool
 });
 
 test("real product examples state their verified integration status", () => {
-  const tracked = fs.readFileSync(
-    path.join(docsRoot, "examples/tracked-agent.mdx"),
-    "utf8",
-  );
-  const florist = fs.readFileSync(
-    path.join(docsRoot, "examples/florist-agent.mdx"),
-    "utf8",
-  );
+  const tracked = fs.readFileSync(path.join(docsRoot, "examples/tracked-agent.mdx"), "utf8");
+  const florist = fs.readFileSync(path.join(docsRoot, "examples/florist-agent.mdx"), "utf8");
   assert.match(tracked, /verified Flary integration/i);
   assert.match(tracked, /eagerTools:\s*\["stats", "trend"\]/);
   assert.match(florist, /verified Flary integration/i);
-  assert.match(florist, /private Cloudflare service binding/i);
+  assert.match(florist, /private\s+Cloudflare service binding/i);
   assert.match(florist, /request_user_input/);
   assert.match(florist, /useFlaryThread/);
 });

@@ -6,4 +6,3 @@ import { flue } from "@flue/runtime/routing";
  * and Durable Object admission in one place.
  */
 export const flueApp = flue();
-

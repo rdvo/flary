@@ -63,27 +63,21 @@ export class AnthropicMessagesAdapter implements ModelAdapter {
 
   async complete(
     input: ModelRequest,
-    options: ProviderRequestOptions = {}
+    options: ProviderRequestOptions = {},
   ): Promise<ModelResponse> {
     const request = ModelRequestSchema.parse(input);
     const signalState = requestSignal(options);
     try {
-      const fetchResponse = await this.fetchImpl(
-        joinUrl(this.baseUrl, "/messages"),
-        {
-          method: "POST",
-          headers: this.headersFor(options.headers, "application/json"),
-          body: JSON.stringify(this.toRequestBody(request, false)),
-          signal: signalState.signal,
-        }
-      );
+      const fetchResponse = await this.fetchImpl(joinUrl(this.baseUrl, "/messages"), {
+        method: "POST",
+        headers: this.headersFor(options.headers, "application/json"),
+        body: JSON.stringify(this.toRequestBody(request, false)),
+        signal: signalState.signal,
+      });
       if (!fetchResponse.ok) {
         throw await providerErrorFromResponse(this.id, fetchResponse);
       }
-      return this.fromResponse(
-        (await fetchResponse.json()) as unknown,
-        request.model
-      );
+      return this.fromResponse((await fetchResponse.json()) as unknown, request.model);
     } catch (error) {
       throw this.normalizeError(error);
     } finally {
@@ -93,7 +87,7 @@ export class AnthropicMessagesAdapter implements ModelAdapter {
 
   async *stream(
     input: ModelRequest,
-    options: ProviderRequestOptions = {}
+    options: ProviderRequestOptions = {},
   ): AsyncGenerator<ModelStreamEvent> {
     const request = ModelRequestSchema.parse(input);
     const signalState = requestSignal(options);
@@ -104,22 +98,16 @@ export class AnthropicMessagesAdapter implements ModelAdapter {
     let finishReason: ModelResponse["finishReason"] = "unknown";
     let inputTokens: number | undefined;
     let outputTokens: number | undefined;
-    const toolCalls = new Map<
-      number,
-      { id: string; name: string; arguments: string }
-    >();
+    const toolCalls = new Map<number, { id: string; name: string; arguments: string }>();
     let started = false;
 
     try {
-      const fetchResponse = await this.fetchImpl(
-        joinUrl(this.baseUrl, "/messages"),
-        {
-          method: "POST",
-          headers: this.headersFor(options.headers, "text/event-stream"),
-          body: JSON.stringify(this.toRequestBody(request, true)),
-          signal: signalState.signal,
-        }
-      );
+      const fetchResponse = await this.fetchImpl(joinUrl(this.baseUrl, "/messages"), {
+        method: "POST",
+        headers: this.headersFor(options.headers, "text/event-stream"),
+        body: JSON.stringify(this.toRequestBody(request, true)),
+        signal: signalState.signal,
+      });
       if (!fetchResponse.ok) {
         throw await providerErrorFromResponse(this.id, fetchResponse);
       }
@@ -147,10 +135,7 @@ export class AnthropicMessagesAdapter implements ModelAdapter {
         }
 
         const message = asRecord(root.message);
-        responseId = asString(
-          message.id ?? root.id,
-          responseId ?? randomId("response")
-        );
+        responseId = asString(message.id ?? root.id, responseId ?? randomId("response"));
         model = asString(message.model ?? root.model, model);
         if (!started) {
           started = true;
@@ -176,9 +161,7 @@ export class AnthropicMessagesAdapter implements ModelAdapter {
         if (event.event === "content_block_start") {
           const block = asRecord(root.content_block);
           if (asString(block.type) === "tool_use") {
-            const index = Number.isInteger(root.index)
-              ? Number(root.index)
-              : toolCalls.size;
+            const index = Number.isInteger(root.index) ? Number(root.index) : toolCalls.size;
             toolCalls.set(index, {
               id: asString(block.id, `tool_${index}`),
               name: asString(block.name, "unknown"),
@@ -209,10 +192,7 @@ export class AnthropicMessagesAdapter implements ModelAdapter {
               });
             }
           }
-          if (
-            deltaType === "thinking_delta" ||
-            deltaType === "signature_delta"
-          ) {
+          if (deltaType === "thinking_delta" || deltaType === "signature_delta") {
             const text = asString(delta.thinking ?? delta.signature);
             reasoning += text;
             if (text) {
@@ -306,15 +286,11 @@ export class AnthropicMessagesAdapter implements ModelAdapter {
     } catch (error) {
       const normalized = this.normalizeError(error);
       const providerError =
-        normalized instanceof Error &&
-        normalized.name === "ProviderAdapterError"
+        normalized instanceof Error && normalized.name === "ProviderAdapterError"
           ? (normalized as typeof normalized & { error: ProviderError }).error
           : createProviderError(this.id, {
               code: "provider_request_failed",
-              message:
-                normalized instanceof Error
-                  ? normalized.message
-                  : String(normalized),
+              message: normalized instanceof Error ? normalized.message : String(normalized),
             }).error;
       yield ProviderStreamEventSchema.parse({
         type: "error",
@@ -337,17 +313,12 @@ export class AnthropicMessagesAdapter implements ModelAdapter {
     return headers;
   }
 
-  private toRequestBody(
-    request: ModelRequest,
-    stream: boolean
-  ): Record<string, unknown> {
+  private toRequestBody(request: ModelRequest, stream: boolean): Record<string, unknown> {
     const parameters = { ...request.parameters };
     delete parameters.max_tokens;
     delete parameters.stream;
     const system = request.messages
-      .filter(
-        (message) => message.role === "system" || message.role === "developer"
-      )
+      .filter((message) => message.role === "system" || message.role === "developer")
       .map((message) => contentToText(message.content))
       .filter(Boolean)
       .join("\n\n");
@@ -355,21 +326,16 @@ export class AnthropicMessagesAdapter implements ModelAdapter {
       ...parameters,
       model: request.model,
       messages: request.messages
-        .filter(
-          (message) => message.role !== "system" && message.role !== "developer"
-        )
+        .filter((message) => message.role !== "system" && message.role !== "developer")
         .map(toAnthropicMessage),
       max_tokens: request.maxOutputTokens ?? this.defaultMaxOutputTokens,
       stream,
     };
     if (system) body.system = system;
-    if (request.temperature !== undefined)
-      body.temperature = request.temperature;
+    if (request.temperature !== undefined) body.temperature = request.temperature;
     if (request.topP !== undefined) body.top_p = request.topP;
     if (request.stop !== undefined) {
-      body.stop_sequences = Array.isArray(request.stop)
-        ? request.stop
-        : [request.stop];
+      body.stop_sequences = Array.isArray(request.stop) ? request.stop : [request.stop];
     }
     if (request.tools) {
       body.tools = request.tools.map((tool) => ({
@@ -378,15 +344,11 @@ export class AnthropicMessagesAdapter implements ModelAdapter {
         input_schema: tool.inputSchema,
       }));
     }
-    if (request.toolChoice)
-      body.tool_choice = toAnthropicToolChoice(request.toolChoice);
+    if (request.toolChoice) body.tool_choice = toAnthropicToolChoice(request.toolChoice);
     return body;
   }
 
-  private fromResponse(
-    payload: unknown,
-    requestedModel: string
-  ): ModelResponse {
+  private fromResponse(payload: unknown, requestedModel: string): ModelResponse {
     const root = asRecord(payload);
     const blocks = Array.isArray(root.content) ? root.content : [];
     const text = blocks
@@ -398,9 +360,7 @@ export class AnthropicMessagesAdapter implements ModelAdapter {
     const reasoning = blocks
       .map((block) => {
         const record = asRecord(block);
-        return asString(record.type) === "thinking"
-          ? asString(record.thinking)
-          : "";
+        return asString(record.type) === "thinking" ? asString(record.thinking) : "";
       })
       .join("");
     const toolCalls = blocks
@@ -410,7 +370,7 @@ export class AnthropicMessagesAdapter implements ModelAdapter {
         return parseToolCall(
           asString(record.id, `tool_${index}`),
           asString(record.name, "unknown"),
-          JSON.stringify(asRecord(record.input))
+          JSON.stringify(asRecord(record.input)),
         );
       })
       .filter((call): call is ProviderToolCall => call !== undefined);
@@ -430,8 +390,7 @@ export class AnthropicMessagesAdapter implements ModelAdapter {
     const usage = asRecord(value);
     const inputTokens = asNonNegativeInteger(usage.input_tokens);
     const outputTokens = asNonNegativeInteger(usage.output_tokens);
-    if (inputTokens === undefined && outputTokens === undefined)
-      return undefined;
+    if (inputTokens === undefined && outputTokens === undefined) return undefined;
     return {
       inputTokens,
       outputTokens,
@@ -443,8 +402,7 @@ export class AnthropicMessagesAdapter implements ModelAdapter {
   }
 
   private normalizeError(error: unknown): unknown {
-    if (error instanceof Error && error.name === "ProviderAdapterError")
-      return error;
+    if (error instanceof Error && error.name === "ProviderAdapterError") return error;
     if (error instanceof TypeError) {
       return createProviderError(this.id, {
         code: "network_error",
@@ -492,30 +450,19 @@ function toAnthropicMessage(message: ProviderMessage): Record<string, unknown> {
   }
   return {
     role: message.role === "assistant" ? "assistant" : "user",
-    content:
-      blocks.length === 1 && blocks[0]?.type === "text"
-        ? blocks[0].text
-        : blocks,
+    content: blocks.length === 1 && blocks[0]?.type === "text" ? blocks[0].text : blocks,
   };
 }
 
-function toAnthropicToolChoice(
-  choice: NonNullable<ModelRequest["toolChoice"]>
-): unknown {
+function toAnthropicToolChoice(choice: NonNullable<ModelRequest["toolChoice"]>): unknown {
   if (choice === "auto") return { type: "auto" };
   if (choice === "required") return { type: "any" };
   if (choice === "none") return undefined;
   return { type: "tool", name: choice.name };
 }
 
-function parseToolCall(
-  id: string,
-  name: string,
-  rawArguments: string
-): ProviderToolCall {
-  const argumentsValue = JsonObjectSchema.safeParse(
-    parseJsonObject(rawArguments)
-  );
+function parseToolCall(id: string, name: string, rawArguments: string): ProviderToolCall {
+  const argumentsValue = JsonObjectSchema.safeParse(parseJsonObject(rawArguments));
   return {
     id,
     name,
@@ -525,8 +472,7 @@ function parseToolCall(
 }
 
 function mapFinishReason(value: string): ModelResponse["finishReason"] {
-  if (value === "end_turn" || value === "stop_sequence" || value === "stop")
-    return "stop";
+  if (value === "end_turn" || value === "stop_sequence" || value === "stop") return "stop";
   if (value === "max_tokens" || value === "length") return "length";
   if (value === "tool_use" || value === "tool_calls") return "tool_call";
   if (value === "error") return "error";

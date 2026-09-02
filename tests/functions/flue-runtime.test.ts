@@ -69,9 +69,7 @@ test("prompt functions use Flue admission and pin their immutable revision", asy
   assert.equal(stored?.trusted.tenantId, "tenant_1");
   assert.equal(stored?.trusted.agentId, "support");
   assert.equal(stored?.trusted.revisionId?.length, 64);
-  const revision = stored?.request.metadata?.flaryFunction as
-    | Record<string, unknown>
-    | undefined;
+  const revision = stored?.request.metadata?.flaryFunction as Record<string, unknown> | undefined;
   assert.equal(revision?.functionId, "support");
   assert.equal(typeof revision?.promptHash, "string");
   assert.equal(typeof revision?.inputSchemaHash, "string");
@@ -119,31 +117,26 @@ test("a new app instance enforces persisted tenant ownership", async () => {
   };
 
   const firstWorker = makeWorker();
-  const admitted = await firstWorker.request(
-    "http://local/functions/support/runs",
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-tenant": "tenant_1",
-      },
-      body: JSON.stringify({ question: "test" }),
+  const admitted = await firstWorker.request("http://local/functions/support/runs", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-tenant": "tenant_1",
     },
-  );
+    body: JSON.stringify({ question: "test" }),
+  });
   assert.equal(admitted.status, 202);
-  const { runId } = await admitted.json() as { runId: string };
+  const { runId } = (await admitted.json()) as { runId: string };
 
   const restartedWorker = makeWorker();
-  const hidden = await restartedWorker.request(
-    `http://local/functions/support/runs/${runId}`,
-    { headers: { "x-tenant": "tenant_2" } },
-  );
+  const hidden = await restartedWorker.request(`http://local/functions/support/runs/${runId}`, {
+    headers: { "x-tenant": "tenant_2" },
+  });
   assert.equal(hidden.status, 404);
 
-  const visible = await restartedWorker.request(
-    `http://local/functions/support/runs/${runId}`,
-    { headers: { "x-tenant": "tenant_1" } },
-  );
+  const visible = await restartedWorker.request(`http://local/functions/support/runs/${runId}`, {
+    headers: { "x-tenant": "tenant_1" },
+  });
   assert.equal(visible.status, 200);
 });
 
@@ -171,32 +164,38 @@ test("Flue-backed function handles continue approvals and user input", async () 
   const service = createFlueRunService({
     repository,
     gateway,
-    listApprovals: (record) => [{
-      id: "approval_1",
-      runId: record.runId,
-      action: "tool-call",
-      reason: "Create the pull request",
-      requestedBy: { id: "support", kind: "agent", version: "1" },
-      requestedAt: new Date().toISOString(),
-    }],
-    decideApproval: (_record, decision) => {
-      decisions.push(decision.status);
-    },
-    listUserInput: () => [{
-      request: {
-        id: "input_1",
-        threadId: "run_continuation",
-        questions: [{
-          header: "Branch",
-          question: "Which branch?",
-          options: [{ label: "main", description: "" }],
-          multiSelect: false,
-        }],
+    listApprovals: (record) => [
+      {
+        id: "approval_1",
+        runId: record.runId,
+        action: "tool-call",
+        reason: "Create the pull request",
         requestedBy: { id: "support", kind: "agent", version: "1" },
         requestedAt: new Date().toISOString(),
       },
-      response: null,
-    }],
+    ],
+    decideApproval: (_record, decision) => {
+      decisions.push(decision.status);
+    },
+    listUserInput: () => [
+      {
+        request: {
+          id: "input_1",
+          threadId: "run_continuation",
+          questions: [
+            {
+              header: "Branch",
+              question: "Which branch?",
+              options: [{ label: "main", description: "" }],
+              multiSelect: false,
+            },
+          ],
+          requestedBy: { id: "support", kind: "agent", version: "1" },
+          requestedAt: new Date().toISOString(),
+        },
+        response: null,
+      },
+    ],
     respondToUserInput: (_record, requestId) => {
       answers.push(requestId);
     },
@@ -286,13 +285,15 @@ test("native functions use durable workflow admission and keep the host run id",
 
   const run = await calculate.start({ value: 2 });
   assert.deepEqual(await run.result(), { value: 4 });
-  assert.deepEqual(admitted, [{
-    __flary: {
-      runId: "run_native_1",
-      revisionId: (await repository.get(run.runId))?.trusted.revisionId,
+  assert.deepEqual(admitted, [
+    {
+      __flary: {
+        runId: "run_native_1",
+        revisionId: (await repository.get(run.runId))?.trusted.revisionId,
+      },
+      input: { value: 2 },
     },
-    input: { value: 2 },
-  }]);
+  ]);
   assert.equal(agentAborts, 0);
 });
 
@@ -343,8 +344,7 @@ test("workflow cancellation fails closed when the host has no workflow abort", a
     run.cancel(),
     (error: unknown) =>
       error instanceof Error &&
-      (error as Error & { code?: string }).code ===
-        "workflow_cancel_unavailable",
+      (error as Error & { code?: string }).code === "workflow_cancel_unavailable",
   );
   assert.equal(agentAborts, 0);
 });
@@ -423,16 +423,18 @@ test("generated prompt agents use the durable request_user_input bridge", async 
             });
           }
           if (method === "listUserInput") {
-            return Response.json([...requests.values()].map((requestValue) => ({
-              request: requestValue,
-              response: {
-                requestId: requestValue.id,
-                answers: { Branch: "main" },
-                canceled: false,
-                answeredBy: { id: "user_1", kind: "user", version: "1" },
-                answeredAt: new Date().toISOString(),
-              },
-            })));
+            return Response.json(
+              [...requests.values()].map((requestValue) => ({
+                request: requestValue,
+                response: {
+                  requestId: requestValue.id,
+                  answers: { Branch: "main" },
+                  canceled: false,
+                  answeredBy: { id: "user_1", kind: "user", version: "1" },
+                  answeredAt: new Date().toISOString(),
+                },
+              })),
+            );
           }
           return Response.json({ error: { message: "unknown method" } }, { status: 404 });
         },
@@ -456,11 +458,13 @@ test("generated prompt agents use the durable request_user_input bridge", async 
   });
   const tool = config.tools?.find((item) => item.name === "request_user_input");
   assert.ok(tool);
-  const questions = [{
-    header: "Branch",
-    question: "Which branch?",
-    options: [{ label: "main", description: "Default" }],
-  }];
+  const questions = [
+    {
+      header: "Branch",
+      question: "Which branch?",
+      options: [{ label: "main", description: "Default" }],
+    },
+  ];
   const result = await tool.run({ input: { questions } } as never);
   assert.equal((result as { answers: Record<string, string> }).answers.Branch, "main");
   assert.ok(config.approvalContinuation);
@@ -478,7 +482,9 @@ test("interactive agents use the durable request_user_input bridge", async () =>
   const requests = new Map<string, Record<string, unknown>>();
   const projections: Array<Record<string, any>> = [];
   const namespace = {
-    idFromName(name: string) { return name; },
+    idFromName(name: string) {
+      return name;
+    },
     get() {
       return {
         async fetch(request: Request) {
@@ -507,7 +513,9 @@ test("interactive agents use the durable request_user_input bridge", async () =>
     },
   };
   const controls = {
-    idFromName(name: string) { return name; },
+    idFromName(name: string) {
+      return name;
+    },
     get() {
       return {
         async fetch(request: Request) {
@@ -531,19 +539,19 @@ test("interactive agents use the durable request_user_input bridge", async () =>
   assert.ok(tool);
   const result = await tool.run({
     input: {
-      questions: [{
-        header: "Delivery",
-        question: "When should we deliver?",
-        options: [{ label: "Tomorrow", description: "Recommended" }],
-      }],
+      questions: [
+        {
+          header: "Delivery",
+          question: "When should we deliver?",
+          options: [{ label: "Tomorrow", description: "Recommended" }],
+        },
+      ],
     },
   } as never);
   assert.deepEqual((result as { answers: Record<string, string> }).answers, {
     Delivery: "Tomorrow",
   });
-  const requested = projections.find((item) =>
-    item.event?.type === "user_input.requested"
-  );
+  const requested = projections.find((item) => item.event?.type === "user_input.requested");
   assert.equal(requested?.method, "project");
   assert.equal(requested?.sourceCursor.startsWith("user-input:input_"), true);
   assert.equal(requested?.event.request.questions[0].header, "Delivery");
@@ -562,7 +570,9 @@ test("interactive agents can disable the built-in user-input tool", async () => 
     id: "tenant:app:non_interactive:thread_1",
     env: {
       FLARY_RUN_SERVICE: {
-        idFromName(name: string) { return name; },
+        idFromName(name: string) {
+          return name;
+        },
         get() {
           return { fetch: async () => Response.json({}) };
         },
@@ -571,17 +581,16 @@ test("interactive agents can disable the built-in user-input tool", async () => 
     },
   });
 
-  assert.equal(
-    config.tools?.some((tool) => tool.name === "request_user_input") ?? false,
-    false,
-  );
+  assert.equal(config.tools?.some((tool) => tool.name === "request_user_input") ?? false, false);
   assert.doesNotMatch(config.instructions, /request_user_input/);
 });
 
 test("interactive agents request secrets without placing values in the transcript", async () => {
   const requests = new Map<string, Record<string, any>>();
   const namespace = {
-    idFromName(name: string) { return name; },
+    idFromName(name: string) {
+      return name;
+    },
     get() {
       return {
         async fetch(request: Request) {

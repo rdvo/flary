@@ -72,9 +72,6 @@ export const StorageCapabilitySchema = z
   .strict();
 export type StorageCapability = z.infer<typeof StorageCapabilitySchema>;
 
-export function workspaceRefFromStorageScope(
-  scope: StorageScope,
-  branch = "main",
-): WorkspaceRef {
+export function workspaceRefFromStorageScope(scope: StorageScope, branch = "main"): WorkspaceRef {
   return WorkspaceRefSchema.parse({ ...scope, branch });
 }

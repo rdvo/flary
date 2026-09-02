@@ -1,10 +1,7 @@
 import * as React from "react";
 import { useMemo, useState, type FormEvent } from "react";
 
-import type {
-  UserInputQuestion,
-  UserInputRecord,
-} from "../harness/contracts/user-input.js";
+import type { UserInputQuestion, UserInputRecord } from "../harness/contracts/user-input.js";
 import {
   SecretRequestMetadataSchema,
   type SecretRequestMetadata,
@@ -15,7 +12,7 @@ export interface FlaryUserInputProps {
   onSubmit(
     requestId: string,
     answers: Readonly<Record<string, string>>,
-    options?: { response?: string; canceled?: boolean }
+    options?: { response?: string; canceled?: boolean },
   ): Promise<void> | void;
   className?: string;
   disabled?: boolean;
@@ -33,15 +30,11 @@ export function FlaryUserInput(props: FlaryUserInputProps) {
   if (secureRequest) {
     return (
       <div
-        className={`flary-user-input flary-secret-input-required ${
-          props.className ?? ""
-        }`.trim()}
+        className={`flary-user-input flary-secret-input-required ${props.className ?? ""}`.trim()}
         data-state={props.record.response ? "answered" : "waiting"}
       >
         <strong>{secureRequest.label}</strong>
-        <p>
-          Use the secure credential form. Do not paste this value into chat.
-        </p>
+        <p>Use the secure credential form. Do not paste this value into chat.</p>
       </div>
     );
   }
@@ -70,7 +63,7 @@ function FlaryRegularUserInput({
       questions.map((question) => [
         question.header,
         other[question.header]?.trim() || answers[question.header] || "",
-      ])
+      ]),
     );
     if (Object.values(completed).some((answer) => !answer)) return;
     setSubmitting(true);
@@ -88,10 +81,7 @@ function FlaryRegularUserInput({
       onSubmit={submit}
     >
       {questions.map((question) => (
-        <fieldset
-          key={question.header}
-          disabled={disabled || resolved || submitting}
-        >
+        <fieldset key={question.header} disabled={disabled || resolved || submitting}>
           <legend>
             <span>{question.header}</span>
             {question.question}
@@ -105,11 +95,8 @@ function FlaryRegularUserInput({
                   value={option.label}
                   checked={
                     question.multiSelect
-                      ? (answers[question.header] ?? "")
-                          .split(", ")
-                          .includes(option.label)
-                      : answers[question.header] === option.label &&
-                        !other[question.header]
+                      ? (answers[question.header] ?? "").split(", ").includes(option.label)
+                      : answers[question.header] === option.label && !other[question.header]
                   }
                   onChange={(event) => {
                     setOther((current) => ({
@@ -120,9 +107,7 @@ function FlaryRegularUserInput({
                       if (!question.multiSelect)
                         return { ...current, [question.header]: option.label };
                       const selected = new Set(
-                        (current[question.header] ?? "")
-                          .split(", ")
-                          .filter(Boolean)
+                        (current[question.header] ?? "").split(", ").filter(Boolean),
                       );
                       if (event.target.checked) selected.add(option.label);
                       else selected.delete(option.label);
@@ -152,9 +137,7 @@ function FlaryRegularUserInput({
                     [question.header]: event.target.value,
                   }))
                 }
-                placeholder={
-                  question.options.length > 0 ? otherLabel : "Type your answer"
-                }
+                placeholder={question.options.length > 0 ? otherLabel : "Type your answer"}
               />
             </label>
           </div>
@@ -173,7 +156,7 @@ export interface FlarySecretInputProps {
   record: UserInputRecord;
   onSubmit(
     requestId: string,
-    input: { value: string; description?: string; expiresAt?: string }
+    input: { value: string; description?: string; expiresAt?: string },
   ): Promise<void> | void;
   className?: string;
   disabled?: boolean;
@@ -240,11 +223,7 @@ export function FlarySecretInput({
   );
 }
 
-export function getSecretRequest(
-  record: UserInputRecord
-): SecretRequestMetadata | undefined {
-  const parsed = SecretRequestMetadataSchema.safeParse(
-    record.request.metadata?.flarySecretRequest
-  );
+export function getSecretRequest(record: UserInputRecord): SecretRequestMetadata | undefined {
+  const parsed = SecretRequestMetadataSchema.safeParse(record.request.metadata?.flarySecretRequest);
   return parsed.success ? parsed.data : undefined;
 }

@@ -1,21 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  BUILT_IN_AGENT_MODES,
-  resolveAgentMode,
-} from "../../src/harness/contracts/modes.js";
-import {
-  checkModeAccess,
-  modeRequiresApproval,
-} from "../../src/harness/execution/mode-policy.js";
+import { BUILT_IN_AGENT_MODES, resolveAgentMode } from "../../src/harness/contracts/modes.js";
+import { checkModeAccess, modeRequiresApproval } from "../../src/harness/execution/mode-policy.js";
 import { executeToolTasks } from "../../src/harness/execution/scheduler.js";
 
 test("built-in modes are strict, named permission profiles", () => {
-  assert.deepEqual(
-    Object.keys(BUILT_IN_AGENT_MODES),
-    ["ask", "plan", "build", "review"],
-  );
+  assert.deepEqual(Object.keys(BUILT_IN_AGENT_MODES), ["ask", "plan", "build", "review"]);
   assert.equal(resolveAgentMode("ask").approvalPolicy.requireForWrites, false);
   assert.equal(resolveAgentMode("build").approvalPolicy.requireForWrites, true);
   assert.throws(() => resolveAgentMode("unknown"));

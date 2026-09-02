@@ -1,13 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  Aes256GcmEnvelopeEncryptor,
-  randomAes256Key,
-} from "../../src/harness/vault/crypto.js";
-import {
-  createSecretsContext,
-  MissingSecretError,
-} from "../../src/harness/vault/secrets.js";
+import { Aes256GcmEnvelopeEncryptor, randomAes256Key } from "../../src/harness/vault/crypto.js";
+import { createSecretsContext, MissingSecretError } from "../../src/harness/vault/secrets.js";
 
 test("encrypts an envelope and does not expose a missing secret", async () => {
   const rootKey = randomAes256Key();

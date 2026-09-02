@@ -17,9 +17,7 @@ export interface CreateFlaryRunClientOptions {
   /** Exact agent API base, for example `/v1/agents/research`. */
   readonly baseUrl: string;
   readonly token?: string;
-  readonly headers?:
-    | HeadersInit
-    | (() => HeadersInit | Promise<HeadersInit>);
+  readonly headers?: HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
   readonly fetch?: typeof fetch;
 }
 
@@ -51,9 +49,7 @@ export class FlaryRunClient {
   }
 
   async get(runId: string): Promise<RunResult> {
-    return RunResultSchema.parse(
-      await this.json(`/runs/${encodeURIComponent(runId)}`),
-    );
+    return RunResultSchema.parse(await this.json(`/runs/${encodeURIComponent(runId)}`));
   }
 
   async input(runId: string, input: RunInput): Promise<RunResult> {
@@ -65,10 +61,7 @@ export class FlaryRunClient {
     );
   }
 
-  async cancel(
-    runId: string,
-    input: CancelRunRequest,
-  ): Promise<RunResult> {
+  async cancel(runId: string, input: CancelRunRequest): Promise<RunResult> {
     return RunResultSchema.parse(
       await this.json(`/runs/${encodeURIComponent(runId)}/cancel`, {
         method: "POST",
@@ -77,22 +70,16 @@ export class FlaryRunClient {
     );
   }
 
-  async *observe(
-    runId: string,
-    options: ObserveFlaryRunOptions = {},
-  ): AsyncGenerator<RunEvent> {
+  async *observe(runId: string, options: ObserveFlaryRunOptions = {}): AsyncGenerator<RunEvent> {
     const query = new URLSearchParams();
     if (options.afterSequence !== undefined) {
       query.set("afterSequence", String(options.afterSequence));
     }
     const suffix = query.size > 0 ? `?${query}` : "";
-    const response = await this.request(
-      `/runs/${encodeURIComponent(runId)}/events${suffix}`,
-      {
-        headers: { accept: "text/event-stream" },
-        signal: options.signal,
-      },
-    );
+    const response = await this.request(`/runs/${encodeURIComponent(runId)}/events${suffix}`, {
+      headers: { accept: "text/event-stream" },
+      signal: options.signal,
+    });
     if (!response.body) {
       throw new Error("The Flary run stream returned no body");
     }
@@ -108,19 +95,13 @@ export class FlaryRunClient {
     return response.json();
   }
 
-  private async request(
-    path: string,
-    init: RequestInit = {},
-  ): Promise<Response> {
+  private async request(path: string, init: RequestInit = {}): Promise<Response> {
     const headers = new Headers(init.headers);
     if (init.body !== undefined && !headers.has("content-type")) {
       headers.set("content-type", "application/json");
     }
     if (this.#token) headers.set("authorization", `Bearer ${this.#token}`);
-    const configured =
-      typeof this.#headers === "function"
-        ? await this.#headers()
-        : this.#headers;
+    const configured = typeof this.#headers === "function" ? await this.#headers() : this.#headers;
     for (const [name, value] of new Headers(configured).entries()) {
       if (!headers.has(name)) headers.set(name, value);
     }
@@ -145,9 +126,7 @@ export class FlaryRunClient {
   }
 }
 
-export function createFlaryRunClient(
-  options: CreateFlaryRunClientOptions,
-): FlaryRunClient {
+export function createFlaryRunClient(options: CreateFlaryRunClientOptions): FlaryRunClient {
   return new FlaryRunClient(options);
 }
 
@@ -156,9 +135,7 @@ interface SseRecord {
   readonly data: string;
 }
 
-async function* parseSse(
-  body: ReadableStream<Uint8Array>,
-): AsyncGenerator<SseRecord> {
+async function* parseSse(body: ReadableStream<Uint8Array>): AsyncGenerator<SseRecord> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";

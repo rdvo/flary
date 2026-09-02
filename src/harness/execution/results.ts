@@ -5,23 +5,19 @@ import {
   type ToolExecutionResult,
 } from "./types.js";
 
-export type ResultBatchHandler = (
-  batch: readonly ToolExecutionResult[]
-) => void | Promise<void>;
+export type ResultBatchHandler = (batch: readonly ToolExecutionResult[]) => void | Promise<void>;
 
 function parseBatchSize(value: number): number {
   return resultBatchOptionsSchema.parse({ batchSize: value }).batchSize;
 }
 
-function parseResultList(
-  results: readonly ToolExecutionResult[]
-): ToolExecutionResult[] {
+function parseResultList(results: readonly ToolExecutionResult[]): ToolExecutionResult[] {
   return z.array(toolExecutionResultSchema).parse([...results]);
 }
 
 export function batchResults(
   results: readonly ToolExecutionResult[],
-  batchSize: number
+  batchSize: number,
 ): ToolExecutionResult[][] {
   const parsedResults = parseResultList(results);
   const size = parseBatchSize(batchSize);
@@ -37,15 +33,13 @@ export function batchResults(
 export async function deliverBatchedResults(
   results: readonly ToolExecutionResult[],
   batchSizeOrOptions: number | { readonly batchSize: number },
-  deliver: ResultBatchHandler
+  deliver: ResultBatchHandler,
 ): Promise<readonly (readonly ToolExecutionResult[])[]> {
   const batchSize =
     typeof batchSizeOrOptions === "number"
       ? parseBatchSize(batchSizeOrOptions)
       : resultBatchOptionsSchema.parse(batchSizeOrOptions).batchSize;
-  z.custom<ResultBatchHandler>((value) => typeof value === "function").parse(
-    deliver
-  );
+  z.custom<ResultBatchHandler>((value) => typeof value === "function").parse(deliver);
 
   const batches = batchResults(results, batchSize);
   for (const batch of batches) {
@@ -69,8 +63,7 @@ export class ResultBatcher {
     const parsed = z
       .object({
         batchSize: z.number().int().positive(),
-        deliver: z
-          .custom<ResultBatchHandler>((value) => typeof value === "function"),
+        deliver: z.custom<ResultBatchHandler>((value) => typeof value === "function"),
       })
       .strict()
       .parse(options);
@@ -92,24 +85,22 @@ export class ResultBatcher {
       return this.#delivery;
     }
     const batch = this.#pending.splice(0, this.#pending.length);
-    this.#delivery = this.#delivery.then(() =>
-      this.#deliver(Object.freeze([...batch]))
-    ).then(() => undefined);
+    this.#delivery = this.#delivery
+      .then(() => this.#deliver(Object.freeze([...batch])))
+      .then(() => undefined);
     return this.#delivery;
   }
 
   private flushFullBatches(): Promise<void> {
     while (this.#pending.length >= this.#batchSize) {
       const batch = this.#pending.splice(0, this.#batchSize);
-      this.#delivery = this.#delivery.then(() =>
-        this.#deliver(Object.freeze([...batch]))
-      ).then(() => undefined);
+      this.#delivery = this.#delivery
+        .then(() => this.#deliver(Object.freeze([...batch])))
+        .then(() => undefined);
     }
     return this.#delivery;
   }
 }
 
-export const createResultBatcher = (
-  options: ResultBatcherOptions
-): ResultBatcher => new ResultBatcher(options);
-
+export const createResultBatcher = (options: ResultBatcherOptions): ResultBatcher =>
+  new ResultBatcher(options);

@@ -20,9 +20,10 @@ function approvalKeyFor(task: ToolTask): string {
   return task.approvalKey ?? task.idempotencyKey ?? `task:${task.id}`;
 }
 
-function parseApprovalOptions(
-  options: ApprovalGateOptions | ApprovalHandler | undefined
-): { policy: ApprovalPolicy; handler?: ApprovalHandler } {
+function parseApprovalOptions(options: ApprovalGateOptions | ApprovalHandler | undefined): {
+  policy: ApprovalPolicy;
+  handler?: ApprovalHandler;
+} {
   if (typeof options === "function") {
     return {
       policy: approvalPolicySchema.parse({}),
@@ -45,9 +46,7 @@ function parseApprovalOptions(
   const handler =
     object.handler === undefined
       ? undefined
-      : z
-          .custom<ApprovalHandler>((value) => typeof value === "function")
-          .parse(object.handler);
+      : z.custom<ApprovalHandler>((value) => typeof value === "function").parse(object.handler);
 
   return {
     policy: approvalPolicySchema.parse(object.policy ?? {}),
@@ -55,10 +54,7 @@ function parseApprovalOptions(
   };
 }
 
-export function taskNeedsApproval(
-  task: ToolTask,
-  policy: ApprovalPolicyInput = {}
-): boolean {
+export function taskNeedsApproval(task: ToolTask, policy: ApprovalPolicyInput = {}): boolean {
   const normalizedTask = normalizeToolTask(task);
   const parsedPolicy = approvalPolicySchema.parse(policy);
   return (
@@ -152,7 +148,5 @@ export class ApprovalGate {
   }
 }
 
-export const createApprovalGate = (
-  options?: ApprovalGateOptions | ApprovalHandler
-): ApprovalGate => new ApprovalGate(options);
-
+export const createApprovalGate = (options?: ApprovalGateOptions | ApprovalHandler): ApprovalGate =>
+  new ApprovalGate(options);

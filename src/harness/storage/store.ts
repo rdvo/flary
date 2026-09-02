@@ -5,7 +5,7 @@ import {
   StorageRecordSchema,
   type RecordType,
   type StorageRecord,
-} from "./records";
+} from "./records.js";
 
 export interface StoredRecord<T extends StorageRecord = StorageRecord> {
   readonly sequence: number;
@@ -43,14 +43,24 @@ export interface AppendOnlyStore<T extends StorageRecord = StorageRecord> {
   iterate(options?: ReadOptions): AsyncIterable<StoredRecord<T>>;
 }
 
-export interface ThreadStore extends AppendOnlyStore<Extract<StorageRecord, { recordType: "thread" }>> {}
-export interface TurnStore extends AppendOnlyStore<Extract<StorageRecord, { recordType: "turn" }>> {}
-export interface OperationStore
-  extends AppendOnlyStore<Extract<StorageRecord, { recordType: "operation" }>> {}
-export interface EventStore extends AppendOnlyStore<Extract<StorageRecord, { recordType: "event" }>> {}
-export interface ToolStore extends AppendOnlyStore<Extract<StorageRecord, { recordType: "tool" }>> {}
-export interface ArtifactStore
-  extends AppendOnlyStore<Extract<StorageRecord, { recordType: "artifact" }>> {}
+export interface ThreadStore extends AppendOnlyStore<
+  Extract<StorageRecord, { recordType: "thread" }>
+> {}
+export interface TurnStore extends AppendOnlyStore<
+  Extract<StorageRecord, { recordType: "turn" }>
+> {}
+export interface OperationStore extends AppendOnlyStore<
+  Extract<StorageRecord, { recordType: "operation" }>
+> {}
+export interface EventStore extends AppendOnlyStore<
+  Extract<StorageRecord, { recordType: "event" }>
+> {}
+export interface ToolStore extends AppendOnlyStore<
+  Extract<StorageRecord, { recordType: "tool" }>
+> {}
+export interface ArtifactStore extends AppendOnlyStore<
+  Extract<StorageRecord, { recordType: "artifact" }>
+> {}
 
 /** The storage dependencies used by a harness. No platform binding is assumed. */
 export interface HarnessStores {
@@ -80,9 +90,7 @@ function matches<T extends StorageRecord>(entry: StoredRecord<T>, options: ReadO
     }
   }
   if (options.recordType !== undefined) {
-    const types = Array.isArray(options.recordType)
-      ? options.recordType
-      : [options.recordType];
+    const types = Array.isArray(options.recordType) ? options.recordType : [options.recordType];
     if (!types.includes(entry.record.recordType)) {
       return false;
     }
@@ -94,16 +102,14 @@ function matches<T extends StorageRecord>(entry: StoredRecord<T>, options: ReadO
  * A small reference implementation for tests and local adapters. It is not a
  * durable backend; production adapters should implement `AppendOnlyStore`.
  */
-export class InMemoryAppendOnlyStore<T extends StorageRecord = StorageRecord>
-  implements AppendOnlyStore<T>
-{
+export class InMemoryAppendOnlyStore<
+  T extends StorageRecord = StorageRecord,
+> implements AppendOnlyStore<T> {
   private readonly entries: Array<StoredRecord<T>> = [];
   private nextSequence = 1;
   private readonly schema: z.ZodType<T>;
 
-  constructor(
-    schema: z.ZodType<T> = StorageRecordSchema as unknown as z.ZodType<T>,
-  ) {
+  constructor(schema: z.ZodType<T> = StorageRecordSchema as unknown as z.ZodType<T>) {
     this.schema = schema;
   }
 
@@ -161,7 +167,9 @@ export function parseStoredRecord(value: unknown): StoredRecord {
 }
 
 export function recordTypeIs(value: unknown, recordType: RecordType): boolean {
-  return RecordTypeSchema.safeParse(recordType).success &&
+  return (
+    RecordTypeSchema.safeParse(recordType).success &&
     StorageRecordSchema.safeParse(value).success &&
-    (value as StorageRecord).recordType === recordType;
+    (value as StorageRecord).recordType === recordType
+  );
 }

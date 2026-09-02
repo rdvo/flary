@@ -36,9 +36,7 @@ export interface ProviderCredentialResolver {
     provider: ProviderKind;
     applicationId?: string;
   }): Promise<ProviderCredential | undefined>;
-  resolveManaged(input: {
-    provider: ProviderKind;
-  }): Promise<ProviderCredential | undefined>;
+  resolveManaged(input: { provider: ProviderKind }): Promise<ProviderCredential | undefined>;
 }
 
 /**
@@ -65,10 +63,7 @@ export interface ProviderCredentialRefreshAdapter {
     current: ProviderCredentialLifecycle,
     signal?: AbortSignal,
   ): Promise<ProviderCredentialLifecycle>;
-  revoke?(
-    current: ProviderCredentialLifecycle,
-    signal?: AbortSignal,
-  ): Promise<void>;
+  revoke?(current: ProviderCredentialLifecycle, signal?: AbortSignal): Promise<void>;
 }
 
 export class ProviderCredentialUnavailableError extends Error {
@@ -212,9 +207,7 @@ export function toFlueModelSpecifier(selection: ModelSelection): string {
 }
 
 /** Parse the provider/model form used by Flue into a Flary selection. */
-export function parseFlueModelSpecifier(
-  value: string,
-): ModelSelection | undefined {
+export function parseFlueModelSpecifier(value: string): ModelSelection | undefined {
   const separator = value.indexOf("/");
   if (separator <= 0 || separator === value.length - 1) return undefined;
   const parsed = ModelSelectionSchema.safeParse({

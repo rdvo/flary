@@ -17,17 +17,21 @@ test("realtime frames keep commands versioned and idempotent", () => {
     input: { message: "Continue." },
   });
   assert.equal(frame.command, "send");
-  assert.throws(() => RealtimeClientFrameSchema.parse({
-    ...frame,
-    version: 2,
-  }));
-  assert.throws(() => RealtimeClientFrameSchema.parse({
-    version: 1,
-    type: "command",
-    requestId: "request_1",
-    command: "send",
-    input: {},
-  }));
+  assert.throws(() =>
+    RealtimeClientFrameSchema.parse({
+      ...frame,
+      version: 2,
+    }),
+  );
+  assert.throws(() =>
+    RealtimeClientFrameSchema.parse({
+      version: 1,
+      type: "command",
+      requestId: "request_1",
+      command: "send",
+      input: {},
+    }),
+  );
 });
 
 test("realtime replay frames use durable numeric cursors", () => {

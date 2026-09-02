@@ -133,14 +133,7 @@ export class DurableSandboxProcessRuntime {
     readonly requestId: string;
     readonly processId: string;
     readonly signal:
-      | "SIGHUP"
-      | "SIGINT"
-      | "SIGTERM"
-      | "SIGKILL"
-      | "SIGUSR1"
-      | "SIGUSR2"
-      | "SIGSTOP"
-      | "SIGCONT";
+      "SIGHUP" | "SIGINT" | "SIGTERM" | "SIGKILL" | "SIGUSR1" | "SIGUSR2" | "SIGSTOP" | "SIGCONT";
   }): Promise<SandboxProcessControlRequest> {
     const request = await this.#registry.requestSignal({
       id: input.requestId,

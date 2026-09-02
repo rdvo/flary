@@ -5,9 +5,7 @@ import { runFlaryCli } from "flary/cli";
 const args = process.argv.slice(2);
 const target = args.find((value) => !value.startsWith("--"));
 
-console.warn(
-  '"create-flary" is now an alias. Use "npx flary create" for new projects.',
-);
+console.warn('"create-flary" is now an alias. Use "npx flary create" for new projects.');
 
 const run = args.includes("--provision")
   ? Promise.reject(
@@ -17,9 +15,7 @@ const run = args.includes("--provision")
     )
   : runFlaryCli(["create", ...(target ? [target] : [])]);
 
-void run.catch(
-  (error: unknown) => {
-    console.error(error instanceof Error ? error.message : error);
-    process.exitCode = 1;
-  },
-);
+void run.catch((error: unknown) => {
+  console.error(error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+});

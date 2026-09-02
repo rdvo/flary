@@ -1,7 +1,4 @@
-import type {
-  ConversationRecord,
-  ConversationStreamStore,
-} from "@flue/runtime-v2/adapter";
+import type { ConversationRecord, ConversationStreamStore } from "@flue/runtime-v2/adapter";
 import { agentStreamPath } from "@flue/runtime-v2/internal";
 
 import type { Flue2SessionEngineControl } from "./flue2-engine.js";
@@ -58,25 +55,27 @@ export function createFlue2CanonicalControl(
       const activeLeafId = findActiveLeaf(records);
       if (!activeLeafId) throw new Error("The canonical conversation has no active entry");
       const markerId = `entry_flary_rollback_${createId()}`;
-      await appendRecords(options.store, path, `flary-control:${input.threadId}`, [{
-        v: 1,
-        id: `record_flary_rollback_${createId()}`,
-        type: "signal",
-        conversationId: root.conversationId,
-        harness: root.harness,
-        session: root.session,
-        timestamp: now().toISOString(),
-        messageId: markerId,
-        parentId: activeLeafId,
-        signalType: "flary_rollback",
-        tagName: "rollback",
-        content: input.reason ?? `Rolled back through ${input.turnId}.`,
-        attributes: {
-          targetEntryId: target.entryId,
-          turnId: input.turnId,
-          excludeTarget: String(input.excludeTarget === true),
+      await appendRecords(options.store, path, `flary-control:${input.threadId}`, [
+        {
+          v: 1,
+          id: `record_flary_rollback_${createId()}`,
+          type: "signal",
+          conversationId: root.conversationId,
+          harness: root.harness,
+          session: root.session,
+          timestamp: now().toISOString(),
+          messageId: markerId,
+          parentId: activeLeafId,
+          signalType: "flary_rollback",
+          tagName: "rollback",
+          content: input.reason ?? `Rolled back through ${input.turnId}.`,
+          attributes: {
+            targetEntryId: target.entryId,
+            turnId: input.turnId,
+            excludeTarget: String(input.excludeTarget === true),
+          },
         },
-      }]);
+      ]);
       return { turnId: input.turnId, targetEntryId: target.entryId, markerId };
     },
     async exportCanonical(input) {
@@ -128,10 +127,12 @@ async function readAll(store: ConversationStreamStore, path: string) {
   let offset = "-1";
   for (;;) {
     const page = await store.read(path, { offset, limit: 1_000 });
-    batches.push(...page.batches.map((batch) => ({
-      offset: batch.offset,
-      records: [...batch.records],
-    })));
+    batches.push(
+      ...page.batches.map((batch) => ({
+        offset: batch.offset,
+        records: [...batch.records],
+      })),
+    );
     offset = page.nextOffset;
     if (page.upToDate) return batches;
   }
@@ -154,7 +155,9 @@ async function appendRecords(
   });
 }
 
-function isRootConversation(record: ConversationRecord): record is Extract<ConversationRecord, { type: "conversation_created" }> {
+function isRootConversation(
+  record: ConversationRecord,
+): record is Extract<ConversationRecord, { type: "conversation_created" }> {
   return record.type === "conversation_created" && record.kind === "root";
 }
 

@@ -1,17 +1,11 @@
-import type {
-  ConnectionSecretMetadata,
-} from "../contracts/connections.js";
+import type { ConnectionSecretMetadata } from "../contracts/connections.js";
 import {
   ConnectionSecretInputSchema,
   SecretScopeSchema,
   type ConnectionSecretInput,
   type SecretScope,
 } from "../contracts/secrets.js";
-import type {
-  FlarySecretHostService,
-  FlaryThreadScope,
-  FlaryThreadTarget,
-} from "../host/types.js";
+import type { FlarySecretHostService, FlaryThreadScope, FlaryThreadTarget } from "../host/types.js";
 import {
   decodeBase64Url,
   decryptStringAes256Gcm,
@@ -63,8 +57,7 @@ type SecretRow = {
  * Encrypted D1 credential storage for the open-source Cloudflare host.
  * Public methods return metadata. `resolve` is for trusted connector code.
  */
-export class CloudflareEncryptedSecretStore
-implements FlarySecretHostService {
+export class CloudflareEncryptedSecretStore implements FlarySecretHostService {
   private readonly key: Uint8Array;
   private readonly keyId: string;
   private readonly now: () => Date;
@@ -87,19 +80,14 @@ implements FlarySecretHostService {
     await this.ensureSchema();
     const tenantId = scope.authorization.organizationId;
     const scopeKey = this.resolveScopeKey(scope, input.scope);
-    const additionalData = aad(
-      tenantId,
-      scope.appId,
-      scopeKey,
-      connectionId,
-      input.name,
-    );
+    const additionalData = aad(tenantId, scope.appId, scopeKey, connectionId, input.name);
     const encrypted = await encryptStringAes256Gcm(input.value, this.key, {
       additionalData,
     });
     const timestamp = this.now().toISOString();
-    await this.options.database.prepare(
-      `INSERT INTO flary_connection_secret
+    await this.options.database
+      .prepare(
+        `INSERT INTO flary_connection_secret
        (tenant_id, app_id, scope_key, connection_id, name, scope, version,
         key_id, iv, ciphertext, description, expires_at, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
@@ -110,21 +98,23 @@ implements FlarySecretHostService {
          ciphertext = excluded.ciphertext,
          description = excluded.description, expires_at = excluded.expires_at,
          updated_at = excluded.updated_at`,
-    ).bind(
-      tenantId,
-      scope.appId,
-      scopeKey,
-      connectionId,
-      input.name,
-      input.scope,
-      this.keyId,
-      encodeBase64Url(encrypted.iv),
-      encodeBase64Url(encrypted.ciphertext),
-      input.description ?? null,
-      input.expiresAt ?? null,
-      timestamp,
-      timestamp,
-    ).run();
+      )
+      .bind(
+        tenantId,
+        scope.appId,
+        scopeKey,
+        connectionId,
+        input.name,
+        input.scope,
+        this.keyId,
+        encodeBase64Url(encrypted.iv),
+        encodeBase64Url(encrypted.ciphertext),
+        input.description ?? null,
+        input.expiresAt ?? null,
+        timestamp,
+        timestamp,
+      )
+      .run();
     return metadata(await this.load(scope, connectionId, input.name, input.scope));
   }
 
@@ -137,10 +127,13 @@ implements FlarySecretHostService {
     const tenantId = scope.authorization.organizationId;
     // Delete all scopes for this tenant/app/name. The caller has already
     // passed the host authorization boundary.
-    await this.options.database.prepare(
-      `DELETE FROM flary_connection_secret
+    await this.options.database
+      .prepare(
+        `DELETE FROM flary_connection_secret
        WHERE tenant_id = ? AND app_id = ? AND connection_id = ? AND name = ?`,
-    ).bind(tenantId, scope.appId, connectionId, secretName).run();
+      )
+      .bind(tenantId, scope.appId, connectionId, secretName)
+      .run();
   }
 
   /** Resolve plaintext only inside trusted connector code. Never return it publicly. */
@@ -161,13 +154,7 @@ implements FlarySecretHostService {
       this.key,
       decodeBase64Url(row.iv),
       {
-        additionalData: aad(
-          row.tenant_id,
-          row.app_id,
-          row.scope_key,
-          row.connection_id,
-          row.name,
-        ),
+        additionalData: aad(row.tenant_id, row.app_id, row.scope_key, row.connection_id, row.name),
       },
     );
   }
@@ -192,20 +179,17 @@ implements FlarySecretHostService {
     const secretScope = SecretScopeSchema.parse(requestedScope);
     const tenantId = scope.authorization.organizationId;
     const scopeKey = this.resolveScopeKey(scope, secretScope);
-    const row = await this.options.database.prepare(
-      `SELECT tenant_id, app_id, scope_key, connection_id, name, scope,
+    const row = await this.options.database
+      .prepare(
+        `SELECT tenant_id, app_id, scope_key, connection_id, name, scope,
               version, key_id, iv, ciphertext, description, expires_at,
               created_at, updated_at
        FROM flary_connection_secret
        WHERE tenant_id = ? AND app_id = ? AND scope_key = ?
          AND connection_id = ? AND name = ?`,
-    ).bind(
-      tenantId,
-      scope.appId,
-      scopeKey,
-      connectionId,
-      secretName,
-    ).first<SecretRow>();
+      )
+      .bind(tenantId, scope.appId, scopeKey, connectionId, secretName)
+      .first<SecretRow>();
     return row ?? undefined;
   }
 
@@ -227,8 +211,9 @@ implements FlarySecretHostService {
   }
 
   private async ensureSchema(): Promise<void> {
-    await this.options.database.prepare(
-      `CREATE TABLE IF NOT EXISTS flary_connection_secret (
+    await this.options.database
+      .prepare(
+        `CREATE TABLE IF NOT EXISTS flary_connection_secret (
         tenant_id TEXT NOT NULL,
         app_id TEXT NOT NULL,
         scope_key TEXT NOT NULL,
@@ -245,7 +230,8 @@ implements FlarySecretHostService {
         updated_at TEXT NOT NULL,
         PRIMARY KEY (tenant_id, app_id, scope_key, connection_id, name)
       )`,
-    ).run();
+      )
+      .run();
   }
 }
 
@@ -271,7 +257,5 @@ function aad(
   connectionId: string,
   name: string,
 ): Uint8Array {
-  return new TextEncoder().encode(
-    JSON.stringify([tenantId, appId, scopeKey, connectionId, name]),
-  );
+  return new TextEncoder().encode(JSON.stringify([tenantId, appId, scopeKey, connectionId, name]));
 }

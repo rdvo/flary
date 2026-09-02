@@ -11,11 +11,7 @@ import {
 export const ROLLOUT_BASIS_POINTS_TOTAL = 10_000 as const;
 
 /** A single non-negative allocation in basis points. */
-export const RolloutBasisPointSchema = z
-  .number()
-  .int()
-  .min(0)
-  .max(ROLLOUT_BASIS_POINTS_TOTAL);
+export const RolloutBasisPointSchema = z.number().int().min(0).max(ROLLOUT_BASIS_POINTS_TOTAL);
 export type RolloutBasisPoint = z.infer<typeof RolloutBasisPointSchema>;
 
 /** Keep the plural name available for callers that store one allocation. */
@@ -23,9 +19,7 @@ export const RolloutBasisPointsSchema = RolloutBasisPointSchema;
 export type RolloutBasisPoints = RolloutBasisPoint;
 
 /** The only valid total for a complete rollout allocation. */
-export const RolloutBasisPointTotalSchema = z.literal(
-  ROLLOUT_BASIS_POINTS_TOTAL
-);
+export const RolloutBasisPointTotalSchema = z.literal(ROLLOUT_BASIS_POINTS_TOTAL);
 
 /** A lowercase SHA-256 digest for an immutable prompt source snapshot. */
 export const PromptContentHashSchema = z
@@ -172,11 +166,8 @@ const AuthorizedTestOverrideObjectSchema = z
   })
   .strict();
 
-export const AuthorizedTestOverrideSchema =
-  AuthorizedTestOverrideObjectSchema.readonly();
-export type AuthorizedTestOverride = z.infer<
-  typeof AuthorizedTestOverrideSchema
->;
+export const AuthorizedTestOverrideSchema = AuthorizedTestOverrideObjectSchema.readonly();
+export type AuthorizedTestOverride = z.infer<typeof AuthorizedTestOverrideSchema>;
 
 /** An operator override must identify the operator and give a reason. */
 const AuthorizedOperatorOverrideObjectSchema = z
@@ -191,11 +182,8 @@ const AuthorizedOperatorOverrideObjectSchema = z
   })
   .strict();
 
-export const AuthorizedOperatorOverrideSchema =
-  AuthorizedOperatorOverrideObjectSchema.readonly();
-export type AuthorizedOperatorOverride = z.infer<
-  typeof AuthorizedOperatorOverrideSchema
->;
+export const AuthorizedOperatorOverrideSchema = AuthorizedOperatorOverrideObjectSchema.readonly();
+export type AuthorizedOperatorOverride = z.infer<typeof AuthorizedOperatorOverrideSchema>;
 
 /** Accept only the two explicitly authorized override forms. */
 export const AuthorizedPromptOverrideSchema = z
@@ -204,9 +192,7 @@ export const AuthorizedPromptOverrideSchema = z
     AuthorizedOperatorOverrideObjectSchema,
   ])
   .readonly();
-export type AuthorizedPromptOverride = z.infer<
-  typeof AuthorizedPromptOverrideSchema
->;
+export type AuthorizedPromptOverride = z.infer<typeof AuthorizedPromptOverrideSchema>;
 
 export const PromptOverrideSchema = AuthorizedPromptOverrideSchema;
 export type PromptOverride = AuthorizedPromptOverride;

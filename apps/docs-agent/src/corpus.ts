@@ -27,7 +27,10 @@ const readme = import.meta.glob("../../../README.md", {
 
 export const docsCorpus: readonly RawDoc[] = Object.freeze([
   ...Object.entries(documentation).map(([path, text]) => {
-    const id = path.split("/").at(-1)!.replace(/\.mdx$/, "");
+    const id = path
+      .split("/")
+      .at(-1)!
+      .replace(/\.mdx$/, "");
     return {
       id: `docs/${id}`,
       title: frontmatterValue(text, "title") ?? titleCase(id),
@@ -53,11 +56,7 @@ export const docsCorpus: readonly RawDoc[] = Object.freeze([
 ]);
 
 export const docsReference = docsCorpus
-  .map((entry) => [
-    `SOURCE: ${entry.title}`,
-    `URL: ${entry.url}`,
-    entry.text,
-  ].join("\n"))
+  .map((entry) => [`SOURCE: ${entry.title}`, `URL: ${entry.url}`, entry.text].join("\n"))
   .join("\n\n---\n\n");
 
 function frontmatterValue(text: string, key: string): string | undefined {

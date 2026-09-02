@@ -8,8 +8,8 @@ order: 1
 import { Code } from "astro:components";
 import supportExample from "../templates/starter/src/support.ts?raw";
 
-A **function** is one finite invocation. Use a prompt for AI work or `run` for
-native TypeScript and orchestration. A function has exactly one of them.
+A **function** is one finite invocation. Use a prompt for AI work or `run` for native TypeScript and
+orchestration. A function has exactly one of them.
 
 ```ts
 import { flary, z } from "flary";
@@ -23,8 +23,7 @@ export const summarize = app.fn({
 });
 ```
 
-Zod validates the input before execution and the output before return or
-durable storage.
+Zod validates the input before execution and the output before return or durable storage.
 
 ```ts
 const result = await summarize({ text: "A long document..." });
@@ -38,9 +37,9 @@ for await (const event of run.stream()) render(event);
 const result = await run.result();
 ```
 
-Named native steps store parsed results and reuse completed work after a
-restart. Keep prompt text, schemas, and tools in normal TypeScript files. The
-starter in `templates/starter` is built during package acceptance tests.
+Named native steps store parsed results and reuse completed work after a restart. Keep prompt text,
+schemas, and tools in normal TypeScript files. The starter in `templates/starter` is built during
+package acceptance tests.
 
 ## Tested starter source
 

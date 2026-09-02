@@ -35,11 +35,7 @@ test("the router selects a supported engine and emits durable events", async () 
   assert.equal(result.status, "completed");
   assert.equal(result.engine, "dynamic-worker");
   assert.deepEqual(result.output, { ok: true });
-  assert.deepEqual(events, [
-    "execution.started",
-    "execution.output",
-    "execution.completed",
-  ]);
+  assert.deepEqual(events, ["execution.started", "execution.output", "execution.completed"]);
 });
 
 test("the router returns a typed failure without leaking an exception", async () => {

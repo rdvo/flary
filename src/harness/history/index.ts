@@ -29,17 +29,23 @@ export const HistoryCheckpointInputSchema = z
     reason: HistoryCheckpointReasonSchema,
     createdAt: TimestampSchema.default(() => new Date().toISOString()),
     events: z.array(z.json()).max(50_000).default([]),
-    files: z.array(
-      z
-        .object({
-          path: z.string().trim().min(1).max(2_000),
-          content: z.string().max(64 * 1024 * 1024),
-          mediaType: z.string().trim().min(1).max(255).default("text/plain"),
-          sha256: z.string().regex(/^[0-9a-f]{64}$/i).optional(),
-          metadata: MetadataSchema.optional(),
-        })
-        .strict(),
-    ).max(10_000).default([]),
+    files: z
+      .array(
+        z
+          .object({
+            path: z.string().trim().min(1).max(2_000),
+            content: z.string().max(64 * 1024 * 1024),
+            mediaType: z.string().trim().min(1).max(255).default("text/plain"),
+            sha256: z
+              .string()
+              .regex(/^[0-9a-f]{64}$/i)
+              .optional(),
+            metadata: MetadataSchema.optional(),
+          })
+          .strict(),
+      )
+      .max(10_000)
+      .default([]),
     metadata: MetadataSchema.optional(),
   })
   .strict();
@@ -85,9 +91,7 @@ export class FlaryHistoryProjector {
     };
     const before = await this.store.read(input.repository, input.id);
     const commit = await this.store.checkpoint(commitInput);
-    const indexedDocumentIds = this.indexer
-      ? await this.indexer.indexCommit(commit)
-      : [];
+    const indexedDocumentIds = this.indexer ? await this.indexer.indexCommit(commit) : [];
     return {
       commit: ArtifactCommitSchema.parse(commit),
       indexedDocumentIds,

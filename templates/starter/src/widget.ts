@@ -14,7 +14,7 @@ class FlaryChat extends HTMLElement {
     const title=this.getAttribute('title')||'Support assistant';
     this.shadowRoot.innerHTML='<style>${widgetStyles.replaceAll(
       "`",
-      "\\`"
+      "\\`",
     )}</style><section class="panel" aria-label="'+escapeHtml(title)+'"><header><strong>'+escapeHtml(title)+'</strong><span class="status">Ready to help</span></header><div class="messages" aria-live="polite"><div class="message">How can I help?</div></div><form><input aria-label="Message" placeholder="Write a message" autocomplete="off" required><button>Send</button></form></section>';
     this.shadowRoot.querySelector('form').addEventListener('submit',(event)=>this.send(event));
   }
@@ -35,8 +35,7 @@ customElements.define('flary-chat',FlaryChat);
 export function widgetDemo(title = "Support assistant"): string {
   const safeTitle = title.replace(
     /[&<>"]/g,
-    (character) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[character]!)
+    (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[character]!,
   );
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${safeTitle} · Flary</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#e8efec;padding:1.5rem}</style></head><body><flary-chat title="${safeTitle}"></flary-chat><script src="/widget.js"></script></body></html>`;
 }

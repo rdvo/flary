@@ -1,6 +1,8 @@
 ---
 title: Codex-style coding agent
-description: Build a durable coding thread with built-in file tools, Linux commands, Git, subagents, checkpoints, and realtime reconnect.
+description:
+  Build a durable coding thread with built-in file tools, Linux commands, Git, subagents,
+  checkpoints, and realtime reconnect.
 section: Examples
 order: 2
 ---
@@ -10,9 +12,9 @@ import toolsExample from "../../templates/starter/src/tools.ts?raw";
 import coderExample from "../../templates/starter/src/coder.ts?raw";
 import serverExample from "../../templates/starter/src/index.ts?raw";
 
-This example gives you the behavior of a headless coding agent: it inspects a
-repository, changes files, runs checks, delegates reviews, keeps the complete
-thread, and reconnects after the client or Worker stops.
+This example gives you the behavior of a headless coding agent: it inspects a repository, changes
+files, runs checks, delegates reviews, keeps the complete thread, and reconnects after the client or
+Worker stops.
 
 The important part is small:
 
@@ -24,9 +26,9 @@ const codingTools = app.tools({
 });
 ```
 
-`app.workspace()` adds the file and Git tools. You do not write your own grep,
-read, edit, write, or delete functions. `app.sandbox()` adds a Linux runtime
-for tests, builds, package installation, and durable processes.
+`app.workspace()` adds the file and Git tools. You do not write your own grep, read, edit, write, or
+delete functions. `app.sandbox()` adds a Linux runtime for tests, builds, package installation, and
+durable processes.
 
 <div
   class="agent-flow"
@@ -70,10 +72,9 @@ for tests, builds, package installation, and durable processes.
 
 ## What tools are built in?
 
-The registry name becomes the tool namespace. Flary puts the small core list
-in the agent instructions, so the agent already knows that grep, read, edit,
-write, delete, Git, and shell actions exist. It loads a full schema only when
-it selects one action:
+The registry name becomes the tool namespace. Flary puts the small core list in the agent
+instructions, so the agent already knows that grep, read, edit, write, delete, Git, and shell
+actions exist. It loads a full schema only when it selects one action:
 
 | Source      | Built-in tools                                                                                                                | Default policy                                              |
 | ----------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
@@ -84,26 +85,24 @@ it selects one action:
 | `shell`     | `exec`, `processStart`, `processAttach`, `processStdin`, `processSignal`, `processSleep`, `processWake`                       | Commands and controls are governed writes; attach is a read |
 | `github`    | Tools discovered from the connected MCP server                                                                                | Uses MCP annotations plus Flary policy                      |
 
-Workspace paths stay inside the authenticated thread workspace. Credentials
-do not enter tool input, generated code, or model context.
+Workspace paths stay inside the authenticated thread workspace. Credentials do not enter tool input,
+generated code, or model context.
 
 ## What does the executor do?
 
-The model sees one `execute` tool, not every file, Git, shell, MCP, and OpenAPI
-schema. Flary runs the model's bounded TypeScript in a Cloudflare Dynamic
-Worker with direct network access disabled.
+The model sees one `execute` tool, not every file, Git, shell, MCP, and OpenAPI schema. Flary runs
+the model's bounded TypeScript in a Cloudflare Dynamic Worker with direct network access disabled.
 
 This is a hybrid tool surface:
 
-- **Always visible:** `execute`, plus the names and purpose of configured core
-  workspace, shell, and browser actions.
+- **Always visible:** `execute`, plus the names and purpose of configured core workspace, shell, and
+  browser actions.
 - **Loaded when selected:** the exact input schema for one core action.
 - **Fully lazy:** MCP, OpenAPI, local functions, skills, and uncommon tools.
 
-The agent does not need to search to learn that `workspace.grep` exists. It
-still calls `tools.describe({ id: "workspace.grep" })` before the first call so
-Flary can supply and validate the exact schema. Search is most useful for a
-large or changing external catalog.
+The agent does not need to search to learn that `workspace.grep` exists. It still calls
+`tools.describe({ id: "workspace.grep" })` before the first call so Flary can supply and validate
+the exact schema. Search is most useful for a large or changing external catalog.
 
 Conceptually, one turn can generate this code:
 
@@ -138,36 +137,34 @@ return tools.call({
 });
 ```
 
-Search returns small descriptors without schemas. Describe loads one selected
-schema. Call validates the input, checks policy, pauses for approval when
-needed, records the audit, and journals the result for replay. A Dynamic Worker
-restart cannot make a completed write run twice.
+Search returns small descriptors without schemas. Describe loads one selected schema. Call validates
+the input, checks policy, pauses for approval when needed, records the audit, and journals the
+result for replay. A Dynamic Worker restart cannot make a completed write run twice.
 
-The Dynamic Worker coordinates tool calls. It is not the Linux machine.
-Workspace Durable Objects own files and Git state. Cloudflare Sandbox runs
-Linux commands. Thread Control owns realtime commands, approvals, limits, and
-the public session projection. R2 stores durable files, checkpoints, and cold
-archives.
+The Dynamic Worker coordinates tool calls. It is not the Linux machine. Workspace Durable Objects
+own files and Git state. Cloudflare Sandbox runs Linux commands. Thread Control owns realtime
+commands, approvals, limits, and the public session projection. R2 stores durable files,
+checkpoints, and cold archives.
 
 ## Complete tools file
 
-This is the source used by `flary create`. The package consumer test builds it
-from a clean installation.
+This is the source used by `flary create`. The package consumer test builds it from a clean
+installation.
 
 <Code code={toolsExample} lang="ts" />
 
 ## Complete agent and reviewer
 
-The reviewer is a separate durable child thread. A deployment can assign it a
-different allowed provider or model. Parent and child messages use durable
-mailboxes, and their usage counts against the root limits.
+The reviewer is a separate durable child thread. A deployment can assign it a different allowed
+provider or model. Parent and child messages use durable mailboxes, and their usage counts against
+the root limits.
 
 <Code code={coderExample} lang="ts" />
 
 ## Serve the agents
 
-`app.serve()` generates the thread, realtime, approval, audit, checkpoint,
-process, and model-control routes. You do not write one API route per action.
+`app.serve()` generates the thread, realtime, approval, audit, checkpoint, process, and
+model-control routes. You do not write one API route per action.
 
 <Code code={serverExample} lang="ts" />
 
@@ -189,9 +186,9 @@ for await (const event of thread.stream({ after: savedCursor })) {
 }
 ```
 
-The UI stores the thread ID and newest cursor. It does not resend the complete
-conversation. The same thread can continue from a web app, Telegram bot,
-Discord bot, mobile client, or another backend process.
+The UI stores the thread ID and newest cursor. It does not resend the complete conversation. The
+same thread can continue from a web app, Telegram bot, Discord bot, mobile client, or another
+backend process.
 
 After a completed turn, inspect or restore the immutable workspace checkpoint:
 
@@ -206,6 +203,5 @@ const diff = await thread.checkpoints.diff({
 await thread.checkpoints.restore(latest.id);
 ```
 
-Git push, pull requests, destructive file changes, browser actions, and other
-sensitive operations remain subject to the application's policy and approval
-UI.
+Git push, pull requests, destructive file changes, browser actions, and other sensitive operations
+remain subject to the application's policy and approval UI.

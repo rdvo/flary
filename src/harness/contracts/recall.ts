@@ -5,14 +5,9 @@ import {
   MetadataSchema,
   NonEmptyStringSchema,
   TimestampSchema,
-} from "./common";
+} from "./common.js";
 
-export const RecallScopeKindSchema = z.enum([
-  "session",
-  "project",
-  "app",
-  "organization",
-]);
+export const RecallScopeKindSchema = z.enum(["session", "project", "app", "organization"]);
 export type RecallScopeKind = z.infer<typeof RecallScopeKindSchema>;
 
 // A document can carry parent scope IDs even when its primary scope is a
@@ -51,11 +46,7 @@ export const RecallScopeSchema = z
   });
 export type RecallScope = z.infer<typeof RecallScopeSchema>;
 
-export const RecallSearchModeSchema = z.enum([
-  "exact",
-  "semantic",
-  "hybrid",
-]);
+export const RecallSearchModeSchema = z.enum(["exact", "semantic", "hybrid"]);
 export type RecallSearchMode = z.infer<typeof RecallSearchModeSchema>;
 
 export const RecallKindSchema = z.enum([
@@ -131,9 +122,7 @@ export const RecallSearchRequestSchema = z
   })
   .strict();
 export type RecallSearchRequest = z.infer<typeof RecallSearchRequestSchema>;
-export type RecallSearchRequestInput = z.input<
-  typeof RecallSearchRequestSchema
->;
+export type RecallSearchRequestInput = z.input<typeof RecallSearchRequestSchema>;
 
 export const RecallResultSchema = z
   .object({

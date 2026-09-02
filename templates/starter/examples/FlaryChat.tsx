@@ -8,7 +8,13 @@ declare module "react" {
   }
 }
 
-export function FlaryChat({ workerUrl, title = "Support assistant" }: { workerUrl: string; title?: string }) {
+export function FlaryChat({
+  workerUrl,
+  title = "Support assistant",
+}: {
+  workerUrl: string;
+  title?: string;
+}) {
   useEffect(() => {
     const source = `${workerUrl.replace(/\/$/, "")}/widget.js`;
     if (document.querySelector(`script[src="${source}"]`)) return;

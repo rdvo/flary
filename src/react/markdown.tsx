@@ -2,8 +2,10 @@ import * as React from "react";
 import type { ComponentProps } from "react";
 import { Streamdown } from "streamdown";
 
-export interface FlaryMarkdownProps
-  extends Omit<ComponentProps<typeof Streamdown>, "children" | "mode"> {
+export interface FlaryMarkdownProps extends Omit<
+  ComponentProps<typeof Streamdown>,
+  "children" | "mode"
+> {
   children: string;
   /** Set this while the assistant message is still receiving tokens. */
   streaming?: boolean;
@@ -30,7 +32,7 @@ export function FlaryMarkdown({
       controls={
         typeof controls === "object"
           ? { code: true, table: true, ...controls }
-          : controls ?? { code: true, table: true }
+          : (controls ?? { code: true, table: true })
       }
     >
       {children}

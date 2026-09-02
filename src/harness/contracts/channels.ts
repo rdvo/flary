@@ -7,8 +7,8 @@ import {
   NonEmptyStringSchema,
   ReferenceSchema,
   TimestampSchema,
-} from "./common";
-import { SecretReferenceSchema } from "./secrets";
+} from "./common.js";
+import { SecretReferenceSchema } from "./secrets.js";
 
 // Identify a run input or output channel.
 export const ChannelTypeSchema = z.enum([

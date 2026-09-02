@@ -24,14 +24,11 @@ test("message admission exposes safe server timing", async () => {
     service,
   });
 
-  const response = await router.request(
-    "/apps/docs/threads/thread_1/messages",
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ message: "Hello" }),
-    },
-  );
+  const response = await router.request("/apps/docs/threads/thread_1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "Hello" }),
+  });
 
   assert.equal(response.status, 202);
   assert.match(
@@ -62,9 +59,7 @@ test("the host reads a conversation only after tenant authorization", async () =
     service,
   });
 
-  const response = await router.request(
-    "/apps/docs/threads/thread_1/conversation",
-  );
+  const response = await router.request("/apps/docs/threads/thread_1/conversation");
 
   assert.equal(response.status, 200);
   assert.deepEqual(calls, ["tenant_1:thread_1"]);
@@ -83,7 +78,11 @@ test("the host streams safe conversation updates after tenant authorization", as
   const calls: unknown[] = [];
   const service = {
     async conversationUpdates(target, input) {
-      calls.push({ organizationId: target.authorization.organizationId, threadId: target.threadId, input });
+      calls.push({
+        organizationId: target.authorization.organizationId,
+        threadId: target.threadId,
+        input,
+      });
       return new Response("event: data\ndata:[]\n\n", {
         headers: { "content-type": "text/event-stream" },
       });
@@ -134,7 +133,7 @@ test("the host rejects an invalid live conversation cursor", async () => {
     "/apps/docs/threads/thread_1/conversation?view=updates&offset=wrong&live=sse",
   );
   assert.equal(response.status, 400);
-  assert.equal((await response.json() as any).error.type, "invalid_offset");
+  assert.equal(((await response.json()) as any).error.type, "invalid_offset");
 });
 
 test("the Flue-compatible proxy authorizes streams, aborts, and attachments", async () => {
@@ -151,7 +150,10 @@ test("the Flue-compatible proxy authorizes streams, aborts, and attachments", as
       calls.push(`attachment:${target.authorization.organizationId}:${attachmentId}`);
       return new Response("bytes", { headers: { "content-type": "image/png" } });
     },
-  } as Pick<FlaryThreadHostService, "conversationUpdates" | "interrupt" | "attachment"> as FlaryThreadHostService;
+  } as Pick<
+    FlaryThreadHostService,
+    "conversationUpdates" | "interrupt" | "attachment"
+  > as FlaryThreadHostService;
   let authorizations = 0;
   const router = createFlaryHostRouter<object>({
     authorize: () => {
@@ -165,15 +167,14 @@ test("the Flue-compatible proxy authorizes streams, aborts, and attachments", as
   });
   const base = "/apps/docs/threads/thread_1/flue/agents/untrusted/untrusted";
 
-  assert.equal((await router.request(`${base}?view=updates&offset=1_2&live=long-poll`)).status, 200);
+  assert.equal(
+    (await router.request(`${base}?view=updates&offset=1_2&live=long-poll`)).status,
+    200,
+  );
   assert.equal((await router.request(`${base}/abort`, { method: "POST" })).status, 202);
   const attachment = await router.request(`${base}/attachments/file_1`);
   assert.equal(attachment.status, 200);
   assert.equal(await attachment.text(), "bytes");
   assert.equal(authorizations, 3);
-  assert.deepEqual(calls, [
-    "stream:tenant_1:1_2",
-    "abort:tenant_1",
-    "attachment:tenant_1:file_1",
-  ]);
+  assert.deepEqual(calls, ["stream:tenant_1:1_2", "abort:tenant_1", "attachment:tenant_1:file_1"]);
 });

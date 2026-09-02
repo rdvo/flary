@@ -9,7 +9,9 @@ import {
 test("generated workspace connections share one durable object and expose Git", async () => {
   const calls: Array<{ name: string; body: any }> = [];
   const namespace = {
-    idFromName(name: string) { return name; },
+    idFromName(name: string) {
+      return name;
+    },
     get(id: { toString(): string } | string) {
       return {
         async fetch(request: Request) {
@@ -37,25 +39,24 @@ test("generated workspace connections share one durable object and expose Git", 
     assert.equal(descriptor?.operation, "read", `${name} is a built-in read tool`);
     assert.equal(descriptor?.requiresApproval, false);
   }
-  assert.deepEqual(
-    parent.descriptors.find((tool) => tool.name === "read")?.inputSchema.required,
-    ["path"],
-  );
-  assert.deepEqual(
-    parent.descriptors.find((tool) => tool.name === "stat")?.inputSchema.required,
-    ["path"],
+  assert.deepEqual(parent.descriptors.find((tool) => tool.name === "read")?.inputSchema.required, [
+    "path",
+  ]);
+  assert.deepEqual(parent.descriptors.find((tool) => tool.name === "stat")?.inputSchema.required, [
+    "path",
+  ]);
+  assert.ok(
+    parent.descriptors
+      .find((tool) => tool.name === "glob")
+      ?.inputSchema.required?.includes("pattern"),
   );
   assert.ok(
-    parent.descriptors.find((tool) => tool.name === "glob")?.inputSchema.required
-      ?.includes("pattern"),
-  );
-  assert.ok(
-    parent.descriptors.find((tool) => tool.name === "grep")?.inputSchema.required
-      ?.includes("query"),
+    parent.descriptors
+      .find((tool) => tool.name === "grep")
+      ?.inputSchema.required?.includes("query"),
   );
   assert.equal(
-    parent.descriptors.find((tool) => tool.name === "grep")?.inputSchema
-      .additionalProperties,
+    parent.descriptors.find((tool) => tool.name === "grep")?.inputSchema.additionalProperties,
     false,
   );
   for (const name of ["write", "edit", "batchEdit", "move", "delete"]) {
@@ -65,14 +66,8 @@ test("generated workspace connections share one durable object and expose Git", 
   }
   assert.ok(parent.descriptors.some((tool) => tool.name === "git_status"));
   assert.ok(parent.descriptors.some((tool) => tool.name === "git_push"));
-  assert.equal(
-    parent.descriptors.find((tool) => tool.name === "git_status")?.operation,
-    "read",
-  );
-  assert.equal(
-    parent.descriptors.find((tool) => tool.name === "git_push")?.requiresApproval,
-    true,
-  );
+  assert.equal(parent.descriptors.find((tool) => tool.name === "git_status")?.operation, "read");
+  assert.equal(parent.descriptors.find((tool) => tool.name === "git_push")?.requiresApproval, true);
   await parent.call("write", { path: "src/index.ts", content: "one" });
   await child.call("read", { path: "src/index.ts" });
   assert.equal(calls[0]?.name, calls[1]?.name);
@@ -81,7 +76,9 @@ test("generated workspace connections share one durable object and expose Git", 
 
 test("draft workspace writes stay writes without approval", async () => {
   const namespace = {
-    idFromName(name: string) { return name; },
+    idFromName(name: string) {
+      return name;
+    },
     get() {
       return { fetch: async () => Response.json({ output: { ok: true } }) };
     },
@@ -103,44 +100,47 @@ test("draft workspace writes stay writes without approval", async () => {
 
 test("model workspace connections hide trusted host metadata", async () => {
   const namespace = {
-    idFromName(name: string) { return name; },
+    idFromName(name: string) {
+      return name;
+    },
     get() {
       return {
-        fetch: async () => Response.json({
-          output: {
-            files: [
-              { path: ".tracked/context.json" },
-              { path: "index.html" },
-            ],
-          },
-        }),
+        fetch: async () =>
+          Response.json({
+            output: {
+              files: [{ path: ".tracked/context.json" }, { path: "index.html" }],
+            },
+          }),
       };
     },
   };
-  const tools = await createCloudflareWorkspaceConnection(namespace, {
-    organizationId: "tenant",
-    appId: "coder",
-    projectId: "repo",
-    workspaceId: "draft",
-    branch: "main",
-  }, { hiddenPaths: [".tracked"] });
+  const tools = await createCloudflareWorkspaceConnection(
+    namespace,
+    {
+      organizationId: "tenant",
+      appId: "coder",
+      projectId: "repo",
+      workspaceId: "draft",
+      branch: "main",
+    },
+    { hiddenPaths: [".tracked"] },
+  );
   assert.deepEqual(await tools.call("list", {}), {
     files: [{ path: "index.html" }],
   });
-  await assert.rejects(
-    tools.call("read", { path: ".tracked/context.json" }),
-    /not available/,
-  );
+  await assert.rejects(tools.call("read", { path: ".tracked/context.json" }), /not available/);
 });
 
 test("workspace lifecycle controls stay on the trusted host boundary", async () => {
   const calls: Array<{ method: string; input: unknown }> = [];
   const namespace = {
-    idFromName(name: string) { return name; },
+    idFromName(name: string) {
+      return name;
+    },
     get() {
       return {
         async fetch(request: Request) {
-          const body = await request.json() as { input: unknown };
+          const body = (await request.json()) as { input: unknown };
           calls.push({
             method: new URL(request.url).pathname.split("/").at(-1) ?? "",
             input: body.input,
@@ -180,5 +180,8 @@ test("workspace lifecycle controls stay on the trusted host boundary", async () 
     metadata: { kind: "test", hostRequestId: "checkpoint_1" },
   });
   const tools = await createCloudflareWorkspaceConnection(namespace, scope);
-  assert.equal(tools.descriptors.some((tool) => tool.name.startsWith("__")), false);
+  assert.equal(
+    tools.descriptors.some((tool) => tool.name.startsWith("__")),
+    false,
+  );
 });

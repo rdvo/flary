@@ -24,15 +24,11 @@ test("writes a branch workspace file through the Cloud API mount", async () => {
     },
   });
 
-  const response = await client.writeWorkspaceFile(
-    "project one",
-    "branch main",
-    {
+  const response = await client.writeWorkspaceFile("project one", "branch main", {
     path: "src/index.ts",
     content: "export const ok = 1;",
     mediaType: "text/typescript",
-    },
-  );
+  });
 
   assert.equal(
     requestUrl,
@@ -106,12 +102,12 @@ test("manages redacted connections through the same Cloud API client", async () 
 
   assert.equal(connection.slug, "github");
   assert.equal(secret.name, "github-token");
-  assert.equal(bodies.some((body) => JSON.stringify(body).includes("secret-value")), true);
-  assert.equal(urls[0], "https://cloud.flary.test/api/apps/app-1/connections");
   assert.equal(
-    urls[1],
-    "https://cloud.flary.test/api/apps/app-1/connections/connection-1/secrets",
+    bodies.some((body) => JSON.stringify(body).includes("secret-value")),
+    true,
   );
+  assert.equal(urls[0], "https://cloud.flary.test/api/apps/app-1/connections");
+  assert.equal(urls[1], "https://cloud.flary.test/api/apps/app-1/connections/connection-1/secrets");
 });
 
 test("drives provider OAuth through the reusable SDK", async () => {

@@ -80,9 +80,9 @@ function asNode(value: unknown): SyntaxNode | undefined {
   if (!value || typeof value !== "object") return undefined;
   const node = value as Partial<SyntaxNode>;
   return typeof node.type === "string" &&
-      typeof node.start === "number" &&
-      typeof node.end === "number"
-    ? node as SyntaxNode
+    typeof node.start === "number" &&
+    typeof node.end === "number"
+    ? (node as SyntaxNode)
     : undefined;
 }
 
@@ -108,8 +108,10 @@ function hasObjectProperty(node: SyntaxNode, name: string): boolean {
     const property = asNode(value);
     if (!property || property.type !== "Property" || property.computed === true) return false;
     const key = asNode(property.key);
-    return (key?.type === "Identifier" && key.name === name) ||
-      (key?.type === "Literal" && key.value === name);
+    return (
+      (key?.type === "Identifier" && key.name === name) ||
+      (key?.type === "Literal" && key.value === name)
+    );
   });
 }
 

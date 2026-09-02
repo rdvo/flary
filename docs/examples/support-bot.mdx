@@ -5,8 +5,8 @@ section: Examples
 order: 1
 ---
 
-Use a function for one question. Use an agent when a support ticket needs many
-messages, tools, approvals, or child investigations.
+Use a function for one question. Use an agent when a support ticket needs many messages, tools,
+approvals, or child investigations.
 
 ## Define the support function
 
@@ -18,10 +18,12 @@ const app = flary({ model: "openai/gpt-5" });
 const searchDocs = app.fn({
   description: "Search product documentation",
   input: z.object({ query: z.string().min(1) }),
-  output: z.array(z.object({
-    title: z.string(),
-    url: z.string().url(),
-  })),
+  output: z.array(
+    z.object({
+      title: z.string(),
+      url: z.string().url(),
+    }),
+  ),
   run: ({ query }) => docs.search(query),
 });
 
@@ -60,8 +62,8 @@ const result = await api.support({
 });
 ```
 
-Your application owns login, customer identity, billing, and the screen. Flary
-owns model execution, tools, validation, and durable runs.
+Your application owns login, customer identity, billing, and the screen. Flary owns model execution,
+tools, validation, and durable runs.
 
 ## Keep one thread per ticket
 
@@ -73,6 +75,5 @@ export const supportAgent = app.agent({
 });
 ```
 
-Store the product ticket ID with `thread.ref.threadId`. Reopen that thread for
-each reply. See [Build your UI or bot](/docs/clients/) for the transport
-pattern.
+Store the product ticket ID with `thread.ref.threadId`. Reopen that thread for each reply. See
+[Build your UI or bot](/docs/clients/) for the transport pattern.

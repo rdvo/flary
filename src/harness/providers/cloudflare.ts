@@ -1,7 +1,4 @@
-import {
-  JsonObjectSchema,
-  type JsonObject,
-} from "../contracts/common.js";
+import { JsonObjectSchema, type JsonObject } from "../contracts/common.js";
 import { OpenAICompatibleAdapter } from "./openai-compatible.js";
 import {
   ModelRequestSchema,
@@ -76,7 +73,11 @@ export class CloudflareAIGatewayAdapter extends OpenAICompatibleAdapter {
 }
 
 export interface WorkersAIBinding {
-  run(model: string, input: Record<string, unknown>, options?: { signal?: AbortSignal }): Promise<unknown>;
+  run(
+    model: string,
+    input: Record<string, unknown>,
+    options?: { signal?: AbortSignal },
+  ): Promise<unknown>;
 }
 
 /** Use a Cloudflare Workers AI binding without putting a provider key in Flary. */
@@ -87,22 +88,43 @@ export class CloudflareWorkersAIAdapter implements ModelAdapter {
 
   constructor(private readonly binding: WorkersAIBinding) {}
 
-  async complete(input: ModelRequest, options: ProviderRequestOptions = {}): Promise<ModelResponse> {
+  async complete(
+    input: ModelRequest,
+    options: ProviderRequestOptions = {},
+  ): Promise<ModelResponse> {
     const request = ModelRequestSchema.parse(input);
     const responseId = `cf_${crypto.randomUUID()}`;
-    const result = await this.binding.run(request.model, {
-      messages: request.messages.map(toWorkersAIMessage),
-      ...(request.maxOutputTokens ? { max_tokens: request.maxOutputTokens } : {}),
-      ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
-      ...(request.tools ? { tools: request.tools.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.inputSchema })) } : {}),
-    }, { signal: options.signal });
-    const root = result && typeof result === "object" ? result as Record<string, unknown> : {};
-    const content = typeof root.response === "string"
-      ? root.response
-      : typeof root.result === "string"
-        ? root.result
-        : typeof result === "string" ? result : "";
-    const usage = root.usage && typeof root.usage === "object" ? root.usage as Record<string, unknown> : undefined;
+    const result = await this.binding.run(
+      request.model,
+      {
+        messages: request.messages.map(toWorkersAIMessage),
+        ...(request.maxOutputTokens ? { max_tokens: request.maxOutputTokens } : {}),
+        ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
+        ...(request.tools
+          ? {
+              tools: request.tools.map((tool) => ({
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.inputSchema,
+              })),
+            }
+          : {}),
+      },
+      { signal: options.signal },
+    );
+    const root = result && typeof result === "object" ? (result as Record<string, unknown>) : {};
+    const content =
+      typeof root.response === "string"
+        ? root.response
+        : typeof root.result === "string"
+          ? root.result
+          : typeof result === "string"
+            ? result
+            : "";
+    const usage =
+      root.usage && typeof root.usage === "object"
+        ? (root.usage as Record<string, unknown>)
+        : undefined;
     const toolCalls = readWorkersAIToolCalls(root.tool_calls, responseId);
     return ModelResponseSchema.parse({
       id: typeof root.id === "string" ? root.id : responseId,
@@ -111,29 +133,51 @@ export class CloudflareWorkersAIAdapter implements ModelAdapter {
       toolCalls,
       finishReason: toolCalls.length > 0 ? "tool_call" : "stop",
       provider: "cloudflare",
-      ...(usage ? { usage: {
-        inputTokens: numeric(usage.prompt_tokens ?? usage.input_tokens),
-        outputTokens: numeric(usage.completion_tokens ?? usage.output_tokens),
-        totalTokens: numeric(usage.total_tokens),
-      } } : {}),
+      ...(usage
+        ? {
+            usage: {
+              inputTokens: numeric(usage.prompt_tokens ?? usage.input_tokens),
+              outputTokens: numeric(usage.completion_tokens ?? usage.output_tokens),
+              totalTokens: numeric(usage.total_tokens),
+            },
+          }
+        : {}),
     });
   }
 
-  async *stream(input: ModelRequest, options: ProviderRequestOptions = {}): AsyncIterable<ModelStreamEvent> {
+  async *stream(
+    input: ModelRequest,
+    options: ProviderRequestOptions = {},
+  ): AsyncIterable<ModelStreamEvent> {
     const response = await this.complete(input, options);
-    yield ProviderStreamEventSchema.parse({ type: "start", responseId: response.id, model: response.model });
-    if (response.content) yield ProviderStreamEventSchema.parse({ type: "text_delta", responseId: response.id, delta: response.content });
-    if (response.usage) yield ProviderStreamEventSchema.parse({ type: "usage", responseId: response.id, usage: response.usage });
+    yield ProviderStreamEventSchema.parse({
+      type: "start",
+      responseId: response.id,
+      model: response.model,
+    });
+    if (response.content)
+      yield ProviderStreamEventSchema.parse({
+        type: "text_delta",
+        responseId: response.id,
+        delta: response.content,
+      });
+    if (response.usage)
+      yield ProviderStreamEventSchema.parse({
+        type: "usage",
+        responseId: response.id,
+        usage: response.usage,
+      });
     yield ProviderStreamEventSchema.parse({ type: "finish", responseId: response.id, response });
   }
 }
 
 function toWorkersAIMessage(message: ProviderMessage): Record<string, unknown> {
-  const content = typeof message.content === "string"
-    ? message.content
-    : message.content
-      .map((part) => part.type === "text" ? part.text : `[image: ${part.url}]`)
-      .join("\n");
+  const content =
+    typeof message.content === "string"
+      ? message.content
+      : message.content
+          .map((part) => (part.type === "text" ? part.text : `[image: ${part.url}]`))
+          .join("\n");
   return {
     role: message.role,
     content,
@@ -161,9 +205,10 @@ function readWorkersAIToolCalls(value: unknown, responseId: string): ProviderToo
       return [];
     }
     const record = candidate as Record<string, unknown>;
-    const fn = record.function && typeof record.function === "object" && !Array.isArray(record.function)
-      ? record.function as Record<string, unknown>
-      : record;
+    const fn =
+      record.function && typeof record.function === "object" && !Array.isArray(record.function)
+        ? (record.function as Record<string, unknown>)
+        : record;
     const name = typeof fn.name === "string" ? fn.name : undefined;
     if (!name) return [];
     const raw = fn.arguments;
@@ -183,15 +228,19 @@ function readWorkersAIToolCalls(value: unknown, responseId: string): ProviderToo
       if (parsedArguments.success) args = parsedArguments.data;
       rawArguments = JSON.stringify(raw);
     }
-    return [{
-      id: typeof record.id === "string" ? record.id : `${responseId}_tool_${index}`,
-      name,
-      arguments: args,
-      ...(rawArguments ? { rawArguments } : {}),
-    }];
+    return [
+      {
+        id: typeof record.id === "string" ? record.id : `${responseId}_tool_${index}`,
+        name,
+        arguments: args,
+        ...(rawArguments ? { rawArguments } : {}),
+      },
+    ];
   });
 }
 
 function numeric(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : undefined;
 }

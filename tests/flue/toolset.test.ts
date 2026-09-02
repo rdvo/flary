@@ -83,10 +83,7 @@ const scope: FlaryToolScope = {
   runId: "run_1",
 };
 
-function flueTool(
-  tools: Awaited<ReturnType<typeof createFlaryToolset>>["tools"],
-  name: string,
-) {
+function flueTool(tools: Awaited<ReturnType<typeof createFlaryToolset>>["tools"], name: string) {
   const tool = tools.find((value) => value.name === name);
   assert.ok(tool, `Missing Flue tool: ${name}`);
   return tool;
@@ -114,12 +111,18 @@ test("host-neutral toolset keeps workspace schemas lazy and enforces read-only a
     workspaceId: "workspace_1",
     branch: "main",
   });
-  const search = await flueTool(toolset.tools, "tool_search").run({
+  const search = (await flueTool(toolset.tools, "tool_search").run({
     input: { query: "workspace file", maxResults: 20 },
-  }) as Array<Record<string, unknown>>;
+  })) as Array<Record<string, unknown>>;
   assert.ok(search.some((item) => item.id === "workspace.file.read"));
-  assert.equal(search.some((item) => item.id === "workspace.file.write"), false);
-  assert.equal(search.some((item) => "inputSchema" in item), false);
+  assert.equal(
+    search.some((item) => item.id === "workspace.file.write"),
+    false,
+  );
+  assert.equal(
+    search.some((item) => "inputSchema" in item),
+    false,
+  );
 
   await assert.rejects(
     () =>
@@ -156,12 +159,12 @@ test("workspace writes need approval and replay from the journal", async () => {
     callId: "write_1",
     idempotencyKey: "write_key_1",
   };
-  const first = await flueTool(toolset.tools, "tool_call").run({
+  const first = (await flueTool(toolset.tools, "tool_call").run({
     input: call,
-  }) as Record<string, unknown>;
-  const replay = await flueTool(toolset.tools, "tool_call").run({
+  })) as Record<string, unknown>;
+  const replay = (await flueTool(toolset.tools, "tool_call").run({
     input: call,
-  }) as Record<string, unknown>;
+  })) as Record<string, unknown>;
 
   assert.equal(first.status, "fulfilled");
   assert.equal(replay.deduplicated, true);
@@ -178,7 +181,7 @@ test("Code Mode exposes one execute tool and can use the private lazy catalog", 
     codeMode: {
       enabled: true,
       async execute({ tools }) {
-        const matches = await tools.search("read workspace file") as Array<{
+        const matches = (await tools.search("read workspace file")) as Array<{
           id: string;
         }>;
         return tools.call(matches[0]!.id, {
@@ -190,10 +193,13 @@ test("Code Mode exposes one execute tool and can use the private lazy catalog", 
     sandbox: { enabled: false },
   });
 
-  assert.deepEqual(toolset.tools.map((tool) => tool.name), ["execute"]);
-  const result = await flueTool(toolset.tools, "execute").run({
+  assert.deepEqual(
+    toolset.tools.map((tool) => tool.name),
+    ["execute"],
+  );
+  const result = (await flueTool(toolset.tools, "execute").run({
     input: { code: "return tools.search('workspace')" },
-  }) as Record<string, unknown>;
+  })) as Record<string, unknown>;
   assert.equal(result.status, "fulfilled");
   assert.equal(JSON.stringify(result).includes("ready = true"), true);
 });
@@ -216,12 +222,12 @@ test("Code Mode assigns stable call ordinals so a recovered write runs once", as
     },
   });
   const execute = flueTool(toolset.tools, "execute");
-  const first = await execute.run({
+  const first = (await execute.run({
     input: { code: "return tools.call('workspace.file.write', input)" },
-  }) as Record<string, unknown>;
-  const replay = await execute.run({
+  })) as Record<string, unknown>;
+  const replay = (await execute.run({
     input: { code: "return tools.call('workspace.file.write', input)" },
-  }) as Record<string, unknown>;
+  })) as Record<string, unknown>;
 
   assert.equal(first.status, "fulfilled");
   assert.equal(replay.deduplicated, true);
@@ -252,10 +258,13 @@ test("host extensions share the same catalog and capability checks", async () =>
       });
     },
   });
-  const search = await flueTool(toolset.tools, "tool_search").run({
+  const search = (await flueTool(toolset.tools, "tool_search").run({
     input: { query: "order" },
-  }) as Array<{ id: string }>;
-  assert.deepEqual(search.map((item) => item.id), ["orders.lookup"]);
+  })) as Array<{ id: string }>;
+  assert.deepEqual(
+    search.map((item) => item.id),
+    ["orders.lookup"],
+  );
 });
 
 test("Cloudflare workspace adapter passes the full immutable scope to a host binding", async () => {
@@ -298,7 +307,7 @@ test("Cloudflare workspace namespaces isolate tenant, project, and branch object
       get() {
         return {
           async fetch(request: Request) {
-            const body = await request.json() as {
+            const body = (await request.json()) as {
               scope: { branch: string };
             };
             return Response.json({
@@ -335,17 +344,14 @@ test("Cloudflare workspace namespaces isolate tenant, project, and branch object
     branch: "main",
   });
 
-  assert.equal(
-    (await main.read({ path: entry.path, encoding: "utf8" })).content,
-    "main",
-  );
-  assert.equal(
-    (await feature.read({ path: entry.path, encoding: "utf8" })).content,
-    "feature/a",
-  );
+  assert.equal((await main.read({ path: entry.path, encoding: "utf8" })).content, "main");
+  assert.equal((await feature.read({ path: entry.path, encoding: "utf8" })).content, "feature/a");
   await otherProject.read({ path: entry.path, encoding: "utf8" });
   assert.equal(new Set(objectNames).size, 3);
-  assert.equal(objectNames.every((name) => /^workspace_[0-9a-f]{64}$/.test(name)), true);
+  assert.equal(
+    objectNames.every((name) => /^workspace_[0-9a-f]{64}$/.test(name)),
+    true,
+  );
 });
 
 test("Sandbox fails closed without both capability and an explicit adapter", async () => {
@@ -386,31 +392,30 @@ test("MCP authorization stays scoped and a missing credential fails closed", asy
         ? { protocolVersion: "2025-03-26" }
         : body.method === "tools/list"
           ? {
-              tools: [{
-                name: "docs.search",
-                description: "Search approved documentation",
-                inputSchema: {
-                  type: "object",
-                  properties: { query: { type: "string" } },
-                  required: ["query"],
-                  additionalProperties: false,
+              tools: [
+                {
+                  name: "docs.search",
+                  description: "Search approved documentation",
+                  inputSchema: {
+                    type: "object",
+                    properties: { query: { type: "string" } },
+                    required: ["query"],
+                    additionalProperties: false,
+                  },
+                  annotations: { readOnlyHint: true },
                 },
-                annotations: { readOnlyHint: true },
-              }],
+              ],
             }
           : {
               content: [{ type: "text", text: "result" }],
               isError: false,
             };
-    return new Response(
-      JSON.stringify({ jsonrpc: "2.0", id: body.id, result }),
-      {
-        headers: {
-          "content-type": "application/json",
-          "mcp-session-id": "session_1",
-        },
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result }), {
+      headers: {
+        "content-type": "application/json",
+        "mcp-session-id": "session_1",
       },
-    );
+    });
   };
   const toolset = await createFlaryToolset({
     scope,
@@ -432,37 +437,34 @@ test("MCP authorization stays scoped and a missing credential fails closed", asy
           },
           credentials: async ({ scope: credentialScope }) => {
             assert.equal(credentialScope.organizationId, "org_acme");
-            return credentialAvailable
-              ? { kind: "bearer", value: "private-token" }
-              : undefined;
+            return credentialAvailable ? { kind: "bearer", value: "private-token" } : undefined;
           },
           clientOptions: { fetch: fetcher },
         };
       },
     },
   });
-  const search = await flueTool(toolset.tools, "tool_search").run({
+  const search = (await flueTool(toolset.tools, "tool_search").run({
     input: { query: "documentation" },
-  }) as Array<{ id: string }>;
+  })) as Array<{ id: string }>;
   assert.equal(search.length, 1);
   assert.equal(JSON.stringify(search).includes("private-token"), false);
   assert.equal(JSON.stringify(search).includes("connection_docs"), false);
 
   credentialAvailable = false;
-  const result = await flueTool(toolset.tools, "tool_call").run({
+  const result = (await flueTool(toolset.tools, "tool_call").run({
     input: {
       id: search[0]!.id,
       arguments: { query: "install" },
       callId: "mcp_read_1",
     },
-  }) as Record<string, unknown>;
+  })) as Record<string, unknown>;
   assert.equal(result.status, "rejected");
   assert.equal(JSON.stringify(result).includes("private-token"), false);
   assert.equal(
     requests.every(
       (request) =>
-        request.authorization === "Bearer private-token" ||
-        request.authorization === null,
+        request.authorization === "Bearer private-token" || request.authorization === null,
     ),
     true,
   );
@@ -480,23 +482,25 @@ test("API connections validate inputs and outputs in the shared runtime", async 
         kind: "api",
         id,
         revision: "orders_v1",
-        discover: () => [{
-          id: "orders.get",
-          description: "Get one order",
-          operation: "read",
-          inputSchema: {
-            type: "object",
-            properties: { orderId: { type: "string", minLength: 1 } },
-            required: ["orderId"],
-            additionalProperties: false,
+        discover: () => [
+          {
+            id: "orders.get",
+            description: "Get one order",
+            operation: "read",
+            inputSchema: {
+              type: "object",
+              properties: { orderId: { type: "string", minLength: 1 } },
+              required: ["orderId"],
+              additionalProperties: false,
+            },
+            outputSchema: {
+              type: "object",
+              properties: { status: { type: "string" } },
+              required: ["status"],
+              additionalProperties: false,
+            },
           },
-          outputSchema: {
-            type: "object",
-            properties: { status: { type: "string" } },
-            required: ["status"],
-            additionalProperties: false,
-          },
-        }],
+        ],
         async call() {
           calls += 1;
           return { status: "ready" };
@@ -504,29 +508,29 @@ test("API connections validate inputs and outputs in the shared runtime", async 
       }),
     },
   });
-  const search = await flueTool(toolset.tools, "tool_search").run({
+  const search = (await flueTool(toolset.tools, "tool_search").run({
     input: { query: "order" },
-  }) as Array<{ id: string }>;
+  })) as Array<{ id: string }>;
   assert.equal(search.length, 1);
   assert.equal(JSON.stringify(search).includes("connection_orders"), false);
 
-  const invalid = await flueTool(toolset.tools, "tool_call").run({
+  const invalid = (await flueTool(toolset.tools, "tool_call").run({
     input: {
       id: search[0]!.id,
       arguments: {},
       callId: "api_invalid_1",
     },
-  }) as Record<string, unknown>;
+  })) as Record<string, unknown>;
   assert.equal(invalid.status, "rejected");
   assert.equal(calls, 0);
 
-  const result = await flueTool(toolset.tools, "tool_call").run({
+  const result = (await flueTool(toolset.tools, "tool_call").run({
     input: {
       id: search[0]!.id,
       arguments: { orderId: "order_1" },
       callId: "api_valid_1",
     },
-  }) as Record<string, unknown>;
+  })) as Record<string, unknown>;
   assert.equal(result.status, "fulfilled");
   assert.equal(calls, 1);
 });

@@ -6,10 +6,7 @@ import {
   SESSION_LEDGER_SCHEMA_VERSION,
   type SessionRecordDraft,
 } from "../../src/harness/session/contracts.ts";
-import {
-  sealSessionRecord,
-  verifySessionChain,
-} from "../../src/harness/session/integrity.ts";
+import { sealSessionRecord, verifySessionChain } from "../../src/harness/session/integrity.ts";
 import {
   exportSessionJsonl,
   importSessionJsonl,
@@ -56,27 +53,20 @@ test("rejects a changed public payload and a broken previous hash", async () => 
     ...first,
     publicPayload: { title: "Changed after sealing" },
   };
-  await assert.rejects(
-    verifySessionChain([changed]),
-    /record hash does not match/i,
-  );
+  await assert.rejects(verifySessionChain([changed]), /record hash does not match/i);
 
   const second = await sealSessionRecord(
     { ...baseDraft, sourceCursor: "flue:2" },
     2,
     "a".repeat(64),
   );
-  await assert.rejects(
-    verifySessionChain([first, second]),
-    /previous hash does not match/i,
-  );
+  await assert.rejects(verifySessionChain([first, second]), /previous hash does not match/i);
 });
 
 test("reports the JSONL line that has invalid data", async () => {
   const first = await sealSessionRecord(baseDraft, 1, null);
   await assert.rejects(
     importSessionJsonl(`${exportSessionJsonl([first])}{"bad":true}\n`),
-    (error: unknown) =>
-      error instanceof SessionJsonlError && error.lineNumber === 2,
+    (error: unknown) => error instanceof SessionJsonlError && error.lineNumber === 2,
   );
 });
