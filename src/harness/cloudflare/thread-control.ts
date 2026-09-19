@@ -55,6 +55,7 @@ import {
   type LegacyExportErrorCode,
   LegacyExportConflictError,
   LegacyExportManifestSchema,
+  LEGACY_EXPORT_LEASE_MS,
   LegacyExportResultSchema,
   LEGACY_EXPORT_SOURCE_REVISION,
   discoverLegacyAttachmentReferences,
@@ -718,7 +719,7 @@ export function createCloudflareThreadService<TEnv extends Record<string, unknow
     async submit(target, rawInput) {
       const input = ThreadMessageRequestSchema.parse(rawInput);
       const exportState = await rpc(controlName(target), "legacyExportState", ownership(target));
-      if (readLegacyExportState(exportState.state)?.status === "active") {
+      if (legacyExportLeaseActive(readLegacyExportState(exportState.state))) {
         throw new FlaryHostError(
           409,
           "legacy_export_active",
@@ -798,14 +799,23 @@ export function createCloudflareThreadService<TEnv extends Record<string, unknow
         message: input.message,
         admittedAt: new Date().toISOString(),
       });
-      const admission = await gateway.send(runtimeAgentId(binding), instanceId, input.message, {
-        idempotencyKey: admissionId,
-        model: toFlueModelSpecifier(runtimeSelection),
-        ...(input.images ? { images: input.images } : {}),
-        ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
-        ...(input.cacheRetention ? { cacheRetention: input.cacheRetention } : {}),
-        ...(turnContext ? { turnContext } : {}),
-      });
+      let admission: FlueAdmission;
+      try {
+        admission = await gateway.send(runtimeAgentId(binding), instanceId, input.message, {
+          idempotencyKey: admissionId,
+          model: toFlueModelSpecifier(runtimeSelection),
+          ...(input.images ? { images: input.images } : {}),
+          ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
+          ...(input.cacheRetention ? { cacheRetention: input.cacheRetention } : {}),
+          ...(turnContext ? { turnContext } : {}),
+        });
+      } catch (error) {
+        await rpc(controlName(target), "legacyExportSubmissionSettle", {
+          ...ownership(target),
+          admissionId,
+        }).catch(() => undefined);
+        throw error;
+      }
       await rpc(controlName(target), "record", {
         ...ownership(target),
         recordType: "turn.started",
@@ -1369,6 +1379,11 @@ export async function handleFlaryThreadControlObjectRequest(input: {
       admission_id TEXT PRIMARY KEY NOT NULL,
       admitted_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS flary_legacy_export_submissions (
+      admission_id TEXT PRIMARY KEY NOT NULL,
+      admitted_at TEXT NOT NULL,
+      settled_at TEXT
+    );
     CREATE TABLE IF NOT EXISTS flary_interactive_reservations (
       reservation_id TEXT PRIMARY KEY NOT NULL,
       kind TEXT NOT NULL,
@@ -1626,29 +1641,49 @@ async function dispatchThreadControl(
   if (method === "legacyExportBegin") {
     const operationId = String(body.operationId ?? "");
     if (!operationId) throw new Error("The legacy export operation id is required");
-    const existing = readLegacyExportState(readControlValue(sql, "legacy-export"));
-    if (existing?.status === "active") throw new LegacyExportActiveError();
-    put(sql, "legacy-export", {
-      status: "active",
-      operationId,
-      ...(existing?.status === "complete" ? { previous: existing } : {}),
+    return sql.transactionSync(() => {
+      const existing = readLegacyExportState(readControlValue(sql, "legacy-export"));
+      if (legacyExportLeaseActive(existing)) {
+        throw new LegacyExportActiveError("The legacy export is already in progress");
+      }
+      if (hasUnsettledLegacyExportSubmission(sql)) {
+        throw new LegacyExportActiveError("The legacy thread has an unsettled submission");
+      }
+      const previous = completedLegacyExportState(existing);
+      const now = Date.now();
+      const startedAt = new Date(now).toISOString();
+      const leaseUntil = new Date(now + LEGACY_EXPORT_LEASE_MS).toISOString();
+      put(sql, "legacy-export", {
+        status: "active",
+        operationId,
+        ownerToken: operationId,
+        startedAt,
+        leaseUntil,
+        ...(previous ? { previous } : {}),
+      });
+      return {
+        started: true,
+        operationId,
+        ownerToken: operationId,
+        startedAt,
+        leaseUntil,
+      };
     });
-    return { started: true, operationId };
   }
   if (method === "legacyExportComplete") {
-    const operationId = String(body.operationId ?? "");
+    const operationId = String(body.ownerToken ?? body.operationId ?? "");
     const existing = readLegacyExportState(readControlValue(sql, "legacy-export"));
-    if (existing?.status !== "active" || existing.operationId !== operationId) {
-      throw new Error("The legacy export operation is not active");
+    if (!legacyExportLeaseOwnedBy(existing, operationId)) {
+      throw new Error("The legacy export operation is not active or its lease expired");
     }
     const manifest = LegacyExportManifestSchema.parse(body.manifest);
     put(sql, "legacy-export", { status: "complete", manifest });
     return { completed: true, digest: manifest.digest.value };
   }
   if (method === "legacyExportRelease") {
-    const operationId = String(body.operationId ?? "");
+    const ownerToken = String(body.ownerToken ?? body.operationId ?? "");
     const existing = readLegacyExportState(readControlValue(sql, "legacy-export"));
-    if (existing?.status === "active" && existing.operationId === operationId) {
+    if (existing?.status === "active" && existing.ownerToken === ownerToken) {
       if (existing.previous) put(sql, "legacy-export", existing.previous);
       else sql.exec("DELETE FROM flary_thread_control WHERE key = ?", "legacy-export");
     }
@@ -1808,6 +1843,7 @@ async function dispatchThreadControl(
       "flary_session_ledger_metadata",
       "flary_session_projection_dedupe",
       "flary_interactive_admissions",
+      "flary_legacy_export_submissions",
       "flary_interactive_reservations",
       "flary_session_archive_segments",
       "flary_canonical_session_archives",
@@ -2189,27 +2225,52 @@ async function dispatchThreadControl(
   if (method === "admitTurn") {
     const binding = requireBinding(sql);
     const admissionId = String(body.admissionId ?? "");
-    const existing = sql
-      .exec<{ admission_id: string }>(
-        "SELECT admission_id FROM flary_interactive_admissions WHERE admission_id = ?",
-        admissionId,
-      )
-      .toArray()[0];
-    if (existing) return { admitted: true, replay: true };
-    await reserveRootInteractiveUsage(sql, host?.env, binding, {
-      reservationId: `turn_${admissionId}`,
-      kind: "provider-step",
-      delta: emptyUsage({ steps: 1 }),
-    });
-    return sql.transactionSync(() => {
+    if (!admissionId) throw new Error("An admission id is required");
+    const admitted = sql.transactionSync(() => {
+      const existing = sql
+        .exec<{ admission_id: string }>(
+          "SELECT admission_id FROM flary_interactive_admissions WHERE admission_id = ?",
+          admissionId,
+        )
+        .toArray()[0];
+      if (existing) return { admitted: true as const, replay: true as const };
+      assertLegacyExportAdmissionOpen(sql);
+      const now = new Date().toISOString();
       sql.exec(
         `INSERT INTO flary_interactive_admissions
           (admission_id, admitted_at) VALUES (?, ?)`,
         admissionId,
-        new Date().toISOString(),
+        now,
       );
-      return { admitted: true, replay: false };
+      sql.exec(
+        `INSERT INTO flary_legacy_export_submissions
+          (admission_id, admitted_at, settled_at) VALUES (?, ?, NULL)`,
+        admissionId,
+        now,
+      );
+      return { admitted: true as const, replay: false as const };
     });
+    if (admitted.replay) return admitted;
+    try {
+      await reserveRootInteractiveUsage(sql, host?.env, binding, {
+        reservationId: `turn_${admissionId}`,
+        kind: "provider-step",
+        delta: emptyUsage({ steps: 1 }),
+      });
+    } catch (error) {
+      sql.transactionSync(() => {
+        sql.exec("DELETE FROM flary_legacy_export_submissions WHERE admission_id = ?", admissionId);
+        sql.exec("DELETE FROM flary_interactive_admissions WHERE admission_id = ?", admissionId);
+      });
+      throw error;
+    }
+    return admitted;
+  }
+  if (method === "legacyExportSubmissionSettle") {
+    assertOwner(sql, body);
+    const admissionId = String(body.admissionId ?? "");
+    if (admissionId) settleLegacyExportSubmission(sql, admissionId);
+    return { settled: true };
   }
   if (method === "reserveUsage" || method === "settleUsage" || method === "unknownUsage") {
     const binding = requireBinding(sql);
@@ -2618,9 +2679,11 @@ export async function handleFlaryThreadControlAlarm(input: {
         ? input.env.FLARY_INTERNAL_TOKEN
         : undefined,
   });
+  let deferredExportLeaseUntil: number | undefined;
   for (const row of due) {
     const schedule = objectValue(JSON.parse(row.schedule_json));
     const scheduledFor = Number(row.next_run_at);
+    const admissionId = `schedule_${row.schedule_id}_${scheduledFor}`;
     const claimed = storage.sql.transactionSync(() => {
       const existing = storage.sql
         .exec<{ status: string }>(
@@ -2631,6 +2694,12 @@ export async function handleFlaryThreadControlAlarm(input: {
         )
         .toArray()[0];
       if (existing) return false;
+      const exportState = readLegacyExportState(readControlValue(storage.sql, "legacy-export"));
+      if (legacyExportLeaseActive(exportState)) {
+        deferredExportLeaseUntil = Date.parse(exportState?.leaseUntil ?? "");
+        return false;
+      }
+      assertLegacyExportAdmissionOpen(storage.sql);
       const nextRunAt = nextScheduleTime(schedule, scheduledFor);
       storage.sql.exec(
         `INSERT INTO flary_thread_schedule_runs
@@ -2639,6 +2708,12 @@ export async function handleFlaryThreadControlAlarm(input: {
         row.schedule_id,
         scheduledFor,
         new Date().toISOString(),
+        new Date().toISOString(),
+      );
+      storage.sql.exec(
+        `INSERT INTO flary_legacy_export_submissions
+          (admission_id, admitted_at, settled_at) VALUES (?, ?, NULL)`,
+        admissionId,
         new Date().toISOString(),
       );
       storage.sql.exec(
@@ -2655,7 +2730,6 @@ export async function handleFlaryThreadControlAlarm(input: {
     });
     if (!claimed) continue;
     try {
-      const admissionId = `schedule_${row.schedule_id}_${scheduledFor}`;
       await reserveRootInteractiveUsage(storage.sql, input.env, binding, {
         reservationId: `turn_${admissionId}`,
         kind: "provider-step",
@@ -2675,6 +2749,11 @@ export async function handleFlaryThreadControlAlarm(input: {
         row.schedule_id,
         scheduledFor,
       );
+      await appendLedger(storage.sql, binding, "schedule.run", {
+        scheduleId: row.schedule_id,
+        scheduledFor,
+        admission,
+      });
       const projection = projectAdmission({
         sql: storage.sql,
         env: input.env,
@@ -2683,12 +2762,8 @@ export async function handleFlaryThreadControlAlarm(input: {
         admissionId,
       });
       input.execution?.waitUntil(projection);
-      await appendLedger(storage.sql, binding, "schedule.run", {
-        scheduleId: row.schedule_id,
-        scheduledFor,
-        admission,
-      });
     } catch (error) {
+      settleLegacyExportSubmission(storage.sql, admissionId);
       storage.sql.exec(
         `UPDATE flary_thread_schedule_runs
          SET status = 'failed', error = ?, updated_at = ?
@@ -2701,6 +2776,9 @@ export async function handleFlaryThreadControlAlarm(input: {
     }
   }
   await scheduleNextAlarm(storage.sql, storage);
+  if (deferredExportLeaseUntil && storage.setAlarm) {
+    await storage.setAlarm(Math.max(Date.now() + 1_000, deferredExportLeaseUntil));
+  }
   if (projections.length > 0 && storage.setAlarm) {
     await storage.setAlarm(Date.now() + 30_000);
   }
@@ -3100,19 +3178,25 @@ async function submitRealtimeMessageDirect(input: {
     message: request.message,
     admittedAt: new Date().toISOString(),
   });
-  const admission = await gateway.send(
-    runtimeAgentId(binding),
-    threadName(binding.thread),
-    request.message,
-    {
-      idempotencyKey: admissionId,
-      model: toFlueModelSpecifier(runtimeSelection),
-      ...(request.images ? { images: request.images } : {}),
-      ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
-      ...(request.cacheRetention ? { cacheRetention: request.cacheRetention } : {}),
-      ...(turnContext ? { turnContext } : {}),
-    },
-  );
+  let admission: FlueAdmission;
+  try {
+    admission = await gateway.send(
+      runtimeAgentId(binding),
+      threadName(binding.thread),
+      request.message,
+      {
+        idempotencyKey: admissionId,
+        model: toFlueModelSpecifier(runtimeSelection),
+        ...(request.images ? { images: request.images } : {}),
+        ...(request.thinkingLevel ? { thinkingLevel: request.thinkingLevel } : {}),
+        ...(request.cacheRetention ? { cacheRetention: request.cacheRetention } : {}),
+        ...(turnContext ? { turnContext } : {}),
+      },
+    );
+  } catch (error) {
+    settleLegacyExportSubmission(input.sql, admissionId);
+    throw error;
+  }
   await appendLedger(input.sql, binding, "turn.started", {
     admissionId,
     submissionId: admission.submissionId,
@@ -3992,6 +4076,7 @@ async function projectAdmission(input: {
       admission: input.admission,
       status: "completed",
     });
+    if (input.admissionId) settleLegacyExportSubmission(input.sql, input.admissionId);
   } catch (error) {
     if (input.admissionId && !providerStepSettled) {
       await rootInteractiveReservationAction(input.sql, input.env, input.binding, "unknownUsage", {
@@ -4003,6 +4088,7 @@ async function projectAdmission(input: {
       status: "failed",
       error: error instanceof Error ? error.message : String(error),
     });
+    if (input.admissionId) settleLegacyExportSubmission(input.sql, input.admissionId);
     if (input.modelPin) {
       await appendLedger(input.sql, input.binding, "provider.segment.completed", {
         ...(input.segmentId ? { segmentId: input.segmentId } : {}),
@@ -5608,18 +5694,29 @@ async function exportLegacyThread(input: LegacyExportRpcInput): Promise<LegacyEx
           ? currentState.previous
           : undefined;
     if (completedState) {
-      const manifest = LegacyExportManifestSchema.parse(completedState.manifest);
+      let manifest: LegacyExportManifest;
+      try {
+        manifest = LegacyExportManifestSchema.parse(completedState.manifest);
+      } catch {
+        throw new LegacyExportError(
+          "legacy_export_integrity",
+          "The persisted legacy export state contains an invalid manifest",
+        );
+      }
       if (manifest.digest.value !== digest) {
         throw new LegacyExportConflictError(manifest.digest.value, digest);
       }
-      await verifyLegacyArchiveObjects(input.env, manifest);
-      await control("legacyExportRelease", { operationId });
+      const persisted = await verifyLegacyArchiveObjects(input.env, manifest, {
+        thread,
+        digest,
+      });
+      await control("legacyExportRelease", { operationId, ownerToken: operationId });
       locked = false;
       return LegacyExportResultSchema.parse({
         outcome: "already_exported",
         threadId: input.target.threadId,
         digest,
-        manifest,
+        manifest: persisted,
       });
     }
     const store = legacyExportStore(input.env);
@@ -5695,7 +5792,11 @@ async function exportLegacyThread(input: LegacyExportRpcInput): Promise<LegacyEx
     if (persisted.digest.value !== digest) {
       throw new Error("The legacy export manifest digest changed during persistence");
     }
-    await control("legacyExportComplete", { operationId, manifest: persisted });
+    await control("legacyExportComplete", {
+      operationId,
+      ownerToken: operationId,
+      manifest: persisted,
+    });
     locked = false;
     return LegacyExportResultSchema.parse({
       outcome: "exported",
@@ -5705,14 +5806,21 @@ async function exportLegacyThread(input: LegacyExportRpcInput): Promise<LegacyEx
     });
   } catch (error) {
     if (error instanceof LegacyExportConflictError) {
-      await control("legacyExportRelease", { operationId }).catch(() => undefined);
+      await control("legacyExportRelease", {
+        operationId,
+        ownerToken: operationId,
+      }).catch(() => undefined);
       locked = false;
       throw new FlaryHostError(409, error.code, error.message, {
         existingDigest: error.existingDigest,
         requestedDigest: error.requestedDigest,
       });
     }
-    if (locked) await control("legacyExportRelease", { operationId }).catch(() => undefined);
+    if (locked)
+      await control("legacyExportRelease", {
+        operationId,
+        ownerToken: operationId,
+      }).catch(() => undefined);
     locked = false;
     if (isLegacyExportActiveError(error)) {
       return LegacyExportResultSchema.parse({
@@ -5829,24 +5937,139 @@ function legacyExportStore(env: Record<string, unknown>): LegacyExportArchiveSto
 async function verifyLegacyArchiveObjects(
   env: Record<string, unknown>,
   manifest: LegacyExportManifest,
-): Promise<void> {
+  expected?: {
+    readonly thread: LegacyExportManifest["thread"];
+    readonly digest: string;
+  },
+): Promise<LegacyExportManifest> {
   const store = legacyExportStore(env);
-  const canonical = await store.get(manifest.canonical.storageKey);
-  if (!canonical) throw new Error("The immutable legacy canonical archive is missing");
-  for (const attachment of manifest.attachments) {
+  const integrity = (message: string): never => {
+    throw new LegacyExportError("legacy_export_integrity", message);
+  };
+  let persisted: LegacyExportManifest;
+  try {
+    const persistedBytes = await store.get(manifest.storageKey);
+    if (!persistedBytes) {
+      throw new LegacyExportError(
+        "legacy_export_integrity",
+        "The persisted legacy export manifest is missing",
+      );
+    }
+    persisted = LegacyExportManifestSchema.parse(
+      JSON.parse(new TextDecoder().decode(persistedBytes)),
+    );
+  } catch (error) {
+    if (error instanceof LegacyExportError) throw error;
+    throw new LegacyExportError(
+      "legacy_export_integrity",
+      "The persisted legacy export manifest is corrupt",
+    );
+  }
+  if (stableJson(persisted) !== stableJson(manifest)) {
+    integrity("The persisted legacy export manifest does not match control state");
+  }
+  if (expected && stableJson(persisted.thread) !== stableJson(expected.thread)) {
+    integrity("The persisted legacy export manifest belongs to a different thread");
+  }
+  if (expected && persisted.digest.value !== expected.digest) {
+    integrity("The persisted legacy export manifest digest is inconsistent");
+  }
+  if (persisted.source.revision !== LEGACY_EXPORT_SOURCE_REVISION) {
+    integrity("The persisted legacy export manifest source revision is unsupported");
+  }
+  const expectedManifestKey = legacyExportObjectKey(
+    persisted.thread.threadId,
+    persisted.digest.value,
+    "manifest.json.aes",
+  );
+  if (persisted.storageKey !== expectedManifestKey) {
+    integrity("The persisted legacy export manifest identity is invalid");
+  }
+  const canonicalBytes = await store.get(persisted.canonical.storageKey);
+  if (!canonicalBytes) {
+    throw new LegacyExportError(
+      "legacy_export_integrity",
+      "The immutable legacy canonical archive is missing",
+    );
+  }
+  let canonical: LegacyCanonicalArchive;
+  try {
+    canonical = parseLegacyCanonical(JSON.parse(new TextDecoder().decode(canonicalBytes)));
+  } catch {
+    throw new LegacyExportError(
+      "legacy_export_integrity",
+      "The immutable legacy canonical archive is corrupt",
+    );
+  }
+  const expectedCanonicalKey = legacyExportObjectKey(
+    persisted.thread.threadId,
+    persisted.digest.value,
+    "canonical.json.aes",
+  );
+  if (persisted.canonical.storageKey !== expectedCanonicalKey) {
+    integrity("The immutable legacy canonical archive identity is invalid");
+  }
+  const batches = await legacyExportBatchMetadata(canonical);
+  const expectedCanonical = {
+    format: "flue-canonical" as const,
+    version: 1 as const,
+    storageKey: persisted.canonical.storageKey,
+    batchCount: canonical.batches.length,
+    batches,
+    ...(canonical.throughTurnId ? { throughTurnId: canonical.throughTurnId } : {}),
+  };
+  if (stableJson(persisted.canonical) !== stableJson(expectedCanonical)) {
+    integrity("The persisted legacy canonical metadata is inconsistent");
+  }
+  const storageKeyByDigest = new Map<string, string>();
+  for (const attachment of persisted.attachments) {
+    if (attachment.chunkCount !== attachment.chunkDigests.length) {
+      integrity(`Archived attachment '${attachment.id}' has invalid chunk metadata`);
+    }
+    const expectedStorageKey =
+      storageKeyByDigest.get(attachment.digest) ??
+      legacyExportAttachmentKey(
+        persisted.thread.threadId,
+        persisted.digest.value,
+        attachment.id,
+        attachment.digest,
+      );
+    storageKeyByDigest.set(attachment.digest, expectedStorageKey);
+    if (attachment.storageKey !== expectedStorageKey) {
+      integrity(`Archived attachment '${attachment.id}' has an invalid storage identity`);
+    }
     const bytes = await store.get(attachment.storageKey);
-    if (!bytes || (await sha256Bytes(bytes)) !== attachment.digest) {
+    if (!bytes) {
       throw new LegacyExportAttachmentError(
         attachment.id,
-        `Archived attachment '${attachment.id}' failed verification`,
+        `Archived attachment '${attachment.id}' is missing`,
+      );
+    }
+    if (bytes.byteLength !== attachment.size || (await sha256Bytes(bytes)) !== attachment.digest) {
+      throw new LegacyExportAttachmentError(
+        attachment.id,
+        `Archived attachment '${attachment.id}' failed byte-digest verification`,
       );
     }
   }
+  const recomputedDigest = await legacyExportDigest({
+    thread: persisted.thread,
+    sourceRevision: persisted.source.revision,
+    canonical,
+    attachments: persisted.attachments,
+  });
+  if (recomputedDigest !== persisted.digest.value) {
+    integrity("The persisted legacy export manifest digest does not match its objects");
+  }
+  return persisted;
 }
 
 interface LegacyExportState {
   readonly status: "active" | "complete";
   readonly operationId?: string;
+  readonly ownerToken?: string;
+  readonly startedAt?: string;
+  readonly leaseUntil?: string;
   readonly manifest?: unknown;
   readonly previous?: LegacyExportState;
 }
@@ -5855,6 +6078,81 @@ function readLegacyExportState(value: unknown): LegacyExportState | undefined {
   const state = objectValue(value);
   if (state.status !== "active" && state.status !== "complete") return undefined;
   return state as unknown as LegacyExportState;
+}
+
+function legacyExportLeaseActive(state: LegacyExportState | undefined, now = Date.now()): boolean {
+  if (state?.status !== "active" || typeof state.ownerToken !== "string") return false;
+  const leaseUntil = Date.parse(state.leaseUntil ?? "");
+  return Number.isFinite(leaseUntil) && leaseUntil > now;
+}
+
+function legacyExportLeaseOwnedBy(
+  state: LegacyExportState | undefined,
+  ownerToken: string,
+): boolean {
+  return Boolean(ownerToken) && legacyExportLeaseActive(state) && state?.ownerToken === ownerToken;
+}
+
+function completedLegacyExportState(
+  state: LegacyExportState | undefined,
+): LegacyExportState | undefined {
+  if (state?.status === "complete") return state;
+  return state?.previous?.status === "complete" ? state.previous : undefined;
+}
+
+/** Remove only an expired/malformed lease; a valid lease remains authoritative. */
+function clearExpiredLegacyExportLease(
+  sql: ThreadControlStorage["sql"],
+  state: LegacyExportState | undefined,
+): void {
+  if (state?.status !== "active" || legacyExportLeaseActive(state)) return;
+  const previous = completedLegacyExportState(state);
+  if (previous) put(sql, "legacy-export", previous);
+  else sql.exec("DELETE FROM flary_thread_control WHERE key = ?", "legacy-export");
+}
+
+/**
+ * Admission and export acquisition share this DO-local SQLite fence. The
+ * projection check covers submissions that were admitted before tracking;
+ * the dedicated table closes the smaller admit-to-track race.
+ */
+function hasUnsettledLegacyExportSubmission(sql: ThreadControlStorage["sql"]): boolean {
+  if (
+    sql
+      .exec<{ admission_id: string }>(
+        `SELECT admission_id FROM flary_legacy_export_submissions
+         WHERE settled_at IS NULL LIMIT 1`,
+      )
+      .toArray().length > 0
+  ) {
+    return true;
+  }
+  return sql
+    .exec<{ value_json: string }>(
+      "SELECT value_json FROM flary_thread_control WHERE key LIKE 'projection:%'",
+    )
+    .toArray()
+    .some((row) => objectValue(JSON.parse(row.value_json)).status === "active");
+}
+
+function assertLegacyExportAdmissionOpen(sql: ThreadControlStorage["sql"]): void {
+  const state = readLegacyExportState(readControlValue(sql, "legacy-export"));
+  if (legacyExportLeaseActive(state)) {
+    throw new LegacyExportActiveError(
+      "The thread is being exported and does not accept new submissions",
+    );
+  }
+  clearExpiredLegacyExportLease(sql, state);
+}
+
+function settleLegacyExportSubmission(sql: ThreadControlStorage["sql"], admissionId: string): void {
+  sql.exec(
+    `UPDATE flary_legacy_export_submissions
+     SET settled_at = COALESCE(settled_at, ?)
+     WHERE admission_id = ?`,
+    new Date().toISOString(),
+    admissionId,
+  );
 }
 
 function isLegacyExportActiveError(error: unknown): boolean {

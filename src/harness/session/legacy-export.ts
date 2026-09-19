@@ -6,6 +6,11 @@ import { SessionSha256Schema } from "./contracts.js";
 export const LEGACY_EXPORT_FORMAT = "flary-legacy-export" as const;
 export const LEGACY_EXPORT_VERSION = 1 as const;
 export const LEGACY_EXPORT_SOURCE_REVISION = "npm:@flue/runtime-legacy@1.0.0-beta.9" as const;
+/**
+ * A deliberately conservative 15-minute lease bounds crash recovery while
+ * allowing large beta.9 archives to finish without a false takeover.
+ */
+export const LEGACY_EXPORT_LEASE_MS = 15 * 60 * 1000;
 
 export const LegacyExportOutcomeSchema = z.enum([
   "exported",

@@ -71,7 +71,7 @@ test("legacy export digest is deterministic and excludes timestamps", async () =
     canonical: { ...canonical, batches: [...canonical.batches, [{ id: "assistant_1" }]] },
     attachments: [attachment],
   });
-  assert.notEqual(first, retry);
+  assert.equal(first, retry);
   assert.notEqual(first, changed);
   assert.equal(
     await legacyExportDigest({
@@ -112,12 +112,11 @@ test("legacy export attachment traversal is conservative and ordered", () => {
 });
 
 test("legacy export conflicts and active refusal have typed errors", () => {
-  assert.throws(
-    () => new LegacyExportConflictError("a".repeat(64), "b".repeat(64)),
-    (error: unknown) =>
-      error instanceof LegacyExportConflictError &&
-      error.existingDigest === "a".repeat(64) &&
-      error.requestedDigest === "b".repeat(64),
-  );
-  assert.throws(() => new LegacyExportActiveError(), LegacyExportActiveError);
+  const conflict = new LegacyExportConflictError("a".repeat(64), "b".repeat(64));
+  assert.ok(conflict instanceof LegacyExportConflictError);
+  assert.equal(conflict.existingDigest, "a".repeat(64));
+  assert.equal(conflict.requestedDigest, "b".repeat(64));
+  const active = new LegacyExportActiveError();
+  assert.ok(active instanceof LegacyExportActiveError);
+  assert.equal(active.code, "legacy_export_active");
 });

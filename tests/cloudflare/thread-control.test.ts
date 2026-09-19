@@ -1801,3 +1801,283 @@ test("root realtime replay includes child events only when requested", async () 
   );
   assert.equal(withoutChildren.attachment().sent, events.cursor);
 });
+
+test("legacy export leases recover after expiry and release only their owner", async () => {
+  const controls = namespace();
+  const service = createCloudflareThreadService({ env: {}, namespace: controls });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_export_lease",
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  await service.create(scope, {
+    threadId: "thread_export_lease",
+    agentId: "coder",
+    workspace: {
+      organizationId: "tenant_export_lease",
+      appId: "coder",
+      projectId: "project",
+      workspaceId: "workspace",
+      branch: "main",
+    },
+  });
+  const control = controls.get(
+    controls.idFromName("thread:tenant_export_lease:coder:thread_export_lease"),
+  );
+  const call = (body: Record<string, unknown>) =>
+    control.fetch(
+      new Request("https://flary.internal/export", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    );
+  const first = await call({
+    method: "legacyExportBegin",
+    tenantId: "tenant_export_lease",
+    applicationId: "coder",
+    operationId: "owner_one",
+  });
+  const firstState = (await first.json()) as {
+    leaseUntil: string;
+    ownerToken: string;
+  };
+  assert.equal(firstState.ownerToken, "owner_one");
+  assert.ok(Date.parse(firstState.leaseUntil) > Date.now());
+
+  const storage = controls.stores.get("thread:tenant_export_lease:coder:thread_export_lease")!;
+  storage.sql.exec(
+    "UPDATE flary_thread_control SET value_json = ? WHERE key = ?",
+    JSON.stringify({
+      status: "active",
+      operationId: "owner_one",
+      ownerToken: "owner_one",
+      startedAt: new Date(Date.now() - 2_000).toISOString(),
+      leaseUntil: new Date(Date.now() - 1_000).toISOString(),
+    }),
+    "legacy-export",
+  );
+  const recovered = await call({
+    method: "legacyExportBegin",
+    tenantId: "tenant_export_lease",
+    applicationId: "coder",
+    operationId: "owner_two",
+  });
+  assert.equal(recovered.ok, true);
+  const recoveredState = (await (
+    await call({
+      method: "legacyExportState",
+      tenantId: "tenant_export_lease",
+      applicationId: "coder",
+    })
+  ).json()) as { state: { ownerToken: string } };
+  assert.equal(recoveredState.state.ownerToken, "owner_two");
+
+  await call({
+    method: "legacyExportRelease",
+    tenantId: "tenant_export_lease",
+    applicationId: "coder",
+    operationId: "owner_one",
+    ownerToken: "owner_one",
+  });
+  const afterOldRelease = (await (
+    await call({
+      method: "legacyExportState",
+      tenantId: "tenant_export_lease",
+      applicationId: "coder",
+    })
+  ).json()) as { state: { ownerToken: string } };
+  assert.equal(afterOldRelease.state.ownerToken, "owner_two");
+
+  await call({
+    method: "legacyExportRelease",
+    tenantId: "tenant_export_lease",
+    applicationId: "coder",
+    operationId: "owner_two",
+    ownerToken: "owner_two",
+  });
+  const released = (await (
+    await call({
+      method: "legacyExportState",
+      tenantId: "tenant_export_lease",
+      applicationId: "coder",
+    })
+  ).json()) as { state?: unknown };
+  assert.equal(released.state, undefined);
+});
+
+test("legacy export fence rejects an unsettled admission and a held lease atomically", async () => {
+  const controls = namespace();
+  const service = createCloudflareThreadService({ env: {}, namespace: controls });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_export_fence",
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  await service.create(scope, {
+    threadId: "thread_export_fence",
+    agentId: "coder",
+    workspace: {
+      organizationId: "tenant_export_fence",
+      appId: "coder",
+      projectId: "project",
+      workspaceId: "workspace",
+      branch: "main",
+    },
+  });
+  const name = "thread:tenant_export_fence:coder:thread_export_fence";
+  const control = controls.get(controls.idFromName(name));
+  const call = (body: Record<string, unknown>) =>
+    control.fetch(
+      new Request("https://flary.internal/export-fence", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    );
+  const admitted = await call({
+    method: "admitTurn",
+    tenantId: "tenant_export_fence",
+    applicationId: "coder",
+    admissionId: "pending_submission",
+  });
+  assert.equal(admitted.ok, true);
+  const blockedBySubmission = await call({
+    method: "legacyExportBegin",
+    tenantId: "tenant_export_fence",
+    applicationId: "coder",
+    operationId: "export_one",
+  });
+  assert.equal(blockedBySubmission.ok, false);
+  assert.match(String((await blockedBySubmission.json()).error), /unsettled submission/i);
+
+  const storage = controls.stores.get(name)!;
+  storage.sql.exec(
+    "UPDATE flary_legacy_export_submissions SET settled_at = ? WHERE admission_id = ?",
+    new Date().toISOString(),
+    "pending_submission",
+  );
+  const begun = await call({
+    method: "legacyExportBegin",
+    tenantId: "tenant_export_fence",
+    applicationId: "coder",
+    operationId: "export_one",
+  });
+  assert.equal(begun.ok, true);
+  const blockedAdmission = await call({
+    method: "admitTurn",
+    tenantId: "tenant_export_fence",
+    applicationId: "coder",
+    admissionId: "new_submission",
+  });
+  assert.equal(blockedAdmission.ok, false);
+  assert.match(String((await blockedAdmission.json()).error), /being exported/i);
+});
+
+test("legacy export retry detects corrupt manifests and missing attachment objects", async () => {
+  const controls = namespace();
+  const objects = new Map<string, Uint8Array>();
+  const bucket = {
+    async put(key: string, value: ArrayBuffer | ArrayBufferView) {
+      const bytes =
+        value instanceof ArrayBuffer
+          ? new Uint8Array(value)
+          : new Uint8Array(
+              value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength),
+            );
+      objects.set(key, bytes.slice());
+    },
+    async get(key: string) {
+      const value = objects.get(key);
+      return value ? { arrayBuffer: async () => value.slice().buffer } : null;
+    },
+  };
+  const attachmentBytes = Uint8Array.of(1, 2, 3);
+  const attachmentDigest = "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81";
+  const canonical = {
+    format: "flue-canonical",
+    version: 1,
+    batches: [
+      [
+        {
+          type: "attachment",
+          attachment: {
+            id: "image_1",
+            mimeType: "image/png",
+            size: attachmentBytes.length,
+            digest: attachmentDigest,
+          },
+        },
+      ],
+    ],
+  };
+  const engine = {
+    idFromName(name: string) {
+      return name;
+    },
+    get() {
+      return {
+        async fetch(request: Request) {
+          const action = new URL(request.url).searchParams.get("flary");
+          if (action === "export") return Response.json(canonical);
+          if (action === "export-attachment") {
+            return Response.json({
+              attachment: {
+                id: "image_1",
+                mimeType: "image/png",
+                size: attachmentBytes.length,
+                digest: attachmentDigest,
+                conversationId: "conversation_1",
+                chunkCount: 1,
+              },
+              chunks: [{ chunkIndex: 0, base64: "AQID" }],
+            });
+          }
+          return Response.json({ error: "unsupported" }, { status: 400 });
+        },
+      };
+    },
+  };
+  const env = {
+    FLUE_CODER_AGENT: engine,
+    FLARY_SESSION_ARCHIVE: bucket,
+    FLARY_SESSION_ARCHIVE_KEY: "p".repeat(48),
+  };
+  const service = createCloudflareThreadService({ env, namespace: controls });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_export_retry",
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  const target = { ...scope, threadId: "thread_export_retry" };
+  await service.create(scope, {
+    threadId: target.threadId,
+    agentId: "coder",
+    workspace: {
+      organizationId: "tenant_export_retry",
+      appId: "coder",
+      projectId: "project",
+      workspaceId: "workspace",
+      branch: "main",
+    },
+  });
+  const first = await service.legacyExport!(target);
+  assert.equal(first.outcome, "exported");
+  if (first.outcome !== "exported") return;
+  const manifestObject = objects.get(first.manifest.storageKey)!.slice();
+  objects.set(first.manifest.storageKey, Uint8Array.of(1, 2, 3));
+  const corruptManifest = await service.legacyExport!(target);
+  assert.equal(corruptManifest.outcome, "failed");
+  assert.equal(corruptManifest.errorCode, "legacy_export_integrity");
+  objects.set(first.manifest.storageKey, manifestObject);
+  objects.delete(first.manifest.attachments[0].storageKey);
+  const missingAttachment = await service.legacyExport!(target);
+  assert.equal(missingAttachment.outcome, "failed");
+  assert.equal(missingAttachment.errorCode, "legacy_export_missing_attachment");
+});

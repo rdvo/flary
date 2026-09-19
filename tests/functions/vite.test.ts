@@ -6,7 +6,25 @@ import test from "node:test";
 import { z } from "zod";
 
 import { flary as createApp } from "../../src/harness/functions/index.ts";
-import { flaryVite } from "../../src/vite.ts";
+import { encodeWorkerSafeBase64, flaryVite } from "../../src/vite.ts";
+
+function decodeBase64(value: string): Uint8Array {
+  return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
+}
+
+test("Worker attachment base64 encoding round-trips boundaries and multiple chunks", () => {
+  const lengths = [0, 1, 2, 3, 0x6000 - 1, 0x6000, 0x6000 + 1, 0x6000 * 2 + 2];
+  for (const length of lengths) {
+    const bytes = Uint8Array.from({ length }, (_, index) => (index * 17 + 3) % 256);
+    assert.deepEqual(decodeBase64(encodeWorkerSafeBase64(bytes)), bytes);
+  }
+  const first = Uint8Array.from({ length: 0x6000 + 1 }, (_, index) => index % 251);
+  const second = Uint8Array.from({ length: 2 }, (_, index) => 250 + index);
+  const combined = Uint8Array.from([...first, ...second]);
+  const encoded = encodeWorkerSafeBase64(combined);
+  assert.equal(encoded.slice(0, -2).includes("="), false);
+  assert.deepEqual(decodeBase64(encoded), combined);
+});
 
 test("the Vite plugin emits populated Flue runtime entries", () => {
   const app = createApp({ model: "openai/gpt-5" });
@@ -416,6 +434,8 @@ test("the Vite plugin generates Flue Durable Object entry and bindings", (t) => 
   assert.match(generatedEntry, /cloudflareAgents\.compact\(this\)/);
   assert.match(generatedEntry, /cloudflareAgents\.rollback\(this/);
   assert.match(generatedEntry, /export-attachment/);
+  assert.match(generatedEntry, /encodeFlaryAttachmentBase64/);
+  assert.doesNotMatch(generatedEntry, /index \+= 0x8000/);
   assert.match(generatedEntry, /flaryAction === 'delete'/);
   assert.match(generatedEntry, /await this\.destroy\(\)/);
   assert.match(generatedEntry, /body\.excludeTarget === true/);
