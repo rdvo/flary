@@ -197,9 +197,10 @@ export class SqliteSubagentCoordinator {
       }
 
       const now = this.#now().toISOString();
+      const threadId = `thread_${this.#id()}`;
       const seededTurns = selectSeededTurns(this.listTurns(parent.threadId), request.seedTurns);
       const thread = SubagentThreadSchema.parse({
-        threadId: `thread_${this.#id()}`,
+        threadId,
         sessionId: this.#sessionId,
         rootThreadId: this.#rootThreadId,
         parentThreadId: parent.threadId,
@@ -220,7 +221,15 @@ export class SqliteSubagentCoordinator {
         ...(request.nickname ? { nickname: request.nickname } : {}),
         createdAt: now,
         updatedAt: now,
-        ...(request.metadata ? { metadata: request.metadata } : {}),
+        metadata: {
+          ...request.metadata,
+          // These fields are coordinator-owned. Terminal paths must be able
+          // to recover the immediate fence owner after a DO restart, and a
+          // caller must not be able to redirect that owner with metadata.
+          flarySubagentParentExportFenceOwnerThreadId: parent.threadId,
+          flarySubagentParentExportFenceAdmissionId: `subagent_${threadId}`,
+          flarySubagentParentExportFenceAttemptToken: crypto.randomUUID(),
+        },
       });
 
       this.insertThread(thread);

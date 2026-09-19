@@ -70,7 +70,13 @@ import {
   type LegacyExportManifest,
   type LegacyExportResult,
 } from "../session/index.js";
-import { FlueAdmissionSchema, type FlueAdmission, type FlueAgentGateway } from "../flue/service.js";
+import {
+  fluePostAcceptanceAdmission,
+  fluePostAcceptanceFailure,
+  FlueAdmissionSchema,
+  type FlueAdmission,
+  type FlueAgentGateway,
+} from "../flue/service.js";
 import { FlaryHostError } from "../host/errors.js";
 import { redactErrorMessage, redactText } from "../execution/redaction.js";
 import { assertPublicBrowserUrl, browserStateObjectKey } from "../functions/browser.js";
@@ -271,11 +277,17 @@ export function createCloudflareThreadService<TEnv extends Record<string, unknow
     );
     const value = await response.json().catch(() => undefined);
     if (!response.ok) {
-      throw new Error(
+      const detail =
         value && typeof value === "object" && "error" in value
-          ? String((value as { error: unknown }).error)
-          : `Thread Control failed (${response.status})`,
-      );
+          ? (value as { error: unknown }).error
+          : undefined;
+      const message =
+        detail && typeof detail === "object" && "message" in detail
+          ? String((detail as { message: unknown }).message)
+          : detail !== undefined
+            ? String(detail)
+            : `Thread Control failed (${response.status})`;
+      throw new Error(message);
     }
     return value;
   };
@@ -318,6 +330,58 @@ export function createCloudflareThreadService<TEnv extends Record<string, unknow
       if (!projectionQueue) throw error;
       await projectionQueue.send({ controlName: name, ...body });
     }
+  };
+  const markAcceptedSubmission = async (
+    target: FlaryThreadTarget,
+    binding: ThreadBinding,
+    admissionId: string,
+    admission: FlueAdmission,
+  ): Promise<void> => {
+    // Persist the receipt in the child DO before any ledger/projection work.
+    // A retry can then replay this accepted submission without sending again.
+    await rpc(controlName(target), "acceptSubmission", {
+      ...ownership(target),
+      admissionId,
+      admission,
+    });
+
+    // A subagent's fence is owned by its actual parent DO. The binding's
+    // parentThread is authoritative; metadata is only accepted when it agrees
+    // with that topology and the coordinator-derived child identity.
+    const parentThreadId = binding.parentThread?.threadId;
+    const metadata = binding.metadata ?? {};
+    const ownerThreadId =
+      typeof metadata.flarySubagentParentExportFenceOwnerThreadId === "string"
+        ? metadata.flarySubagentParentExportFenceOwnerThreadId
+        : undefined;
+    const fenceAdmissionId =
+      typeof metadata.flarySubagentParentExportFenceAdmissionId === "string"
+        ? metadata.flarySubagentParentExportFenceAdmissionId
+        : undefined;
+    const attemptToken =
+      typeof metadata.flarySubagentParentExportFenceAttemptToken === "string"
+        ? metadata.flarySubagentParentExportFenceAttemptToken
+        : undefined;
+    if (
+      !parentThreadId ||
+      ownerThreadId !== parentThreadId ||
+      fenceAdmissionId !== `subagent_${binding.thread.threadId}` ||
+      fenceAdmissionId !== admissionId ||
+      !attemptToken
+    ) {
+      return;
+    }
+    await rpc(
+      `thread:${target.authorization.organizationId}:${target.appId}:${parentThreadId}`,
+      "subagentExportFenceAccepted",
+      {
+        ...ownership(target),
+        childThreadId: binding.thread.threadId,
+        admissionId,
+        attemptToken,
+        admission,
+      },
+    );
   };
 
   const service: FlaryThreadHostService = {
@@ -806,6 +870,8 @@ export function createCloudflareThreadService<TEnv extends Record<string, unknow
       });
       let admission: FlueAdmission;
       try {
+        // This await is the exact Flue acceptance boundary. Everything after
+        // it is host bookkeeping and must not release an export fence.
         admission = await gateway.send(runtimeAgentId(binding), instanceId, input.message, {
           idempotencyKey: admissionId,
           model: toFlueModelSpecifier(runtimeSelection),
@@ -821,32 +887,39 @@ export function createCloudflareThreadService<TEnv extends Record<string, unknow
         }).catch(() => undefined);
         throw error;
       }
-      await rpc(controlName(target), "record", {
-        ...ownership(target),
-        recordType: "turn.started",
-        payload: {
+      try {
+        await markAcceptedSubmission(target, binding, admissionId, admission);
+        await rpc(controlName(target), "record", {
+          ...ownership(target),
+          recordType: "turn.started",
+          payload: {
+            admissionId,
+            submissionId: admission.submissionId,
+            mode: input.mode ?? "queue",
+            modelPin: pin,
+            segmentId,
+          },
+        });
+        await rpc(controlName(target), "record", {
+          ...ownership(target),
+          recordType: "turn.settings",
+          payload: { modelPin: pin, admissionId },
+        });
+        await trackAdmission(controlName(target), {
+          ...ownership(target),
+          admission,
           admissionId,
-          submissionId: admission.submissionId,
-          mode: input.mode ?? "queue",
+          agentId: binding.agentId,
+          instanceId,
           modelPin: pin,
           segmentId,
-        },
-      });
-      await rpc(controlName(target), "record", {
-        ...ownership(target),
-        recordType: "turn.settings",
-        payload: { modelPin: pin, admissionId },
-      });
-      await trackAdmission(controlName(target), {
-        ...ownership(target),
-        admission,
-        admissionId,
-        agentId: binding.agentId,
-        instanceId,
-        modelPin: pin,
-        segmentId,
-        turnMessage: input.message,
-      });
+          turnMessage: input.message,
+        });
+      } catch (error) {
+        // Keep the JSON-safe admission identity attached to the failure. The
+        // caller can retain the fence without relying on Error subclasses.
+        throw fluePostAcceptanceFailure(admission, error);
+      }
       return admission;
     },
     async conversation(target) {
@@ -1145,7 +1218,13 @@ export function createCloudflareThreadService<TEnv extends Record<string, unknow
         const parentBinding = await service.inspect(parentTarget);
         const childMetadata = objectValue(child.metadata);
         const parentExportFenceAdmissionId = `subagent_${child.threadId}`;
-        const parentExportFenceAttemptToken = crypto.randomUUID();
+        const parentExportFenceAttemptToken =
+          childMetadata.flarySubagentParentExportFenceOwnerThreadId === parentThreadId &&
+          childMetadata.flarySubagentParentExportFenceAdmissionId ===
+            parentExportFenceAdmissionId &&
+          typeof childMetadata.flarySubagentParentExportFenceAttemptToken === "string"
+            ? childMetadata.flarySubagentParentExportFenceAttemptToken
+            : crypto.randomUUID();
         const childBinding = ThreadBindingSchema.parse({
           ...parentBinding,
           thread: {
@@ -1181,7 +1260,7 @@ export function createCloudflareThreadService<TEnv extends Record<string, unknow
           binding: childBinding,
         });
         await d1?.put(childBinding);
-        let childWorkEstablished = false;
+        let childWorkAccepted = false;
         try {
           await rpc(controlName(parentTarget), "admitTurn", {
             ...ownership(parentTarget),
@@ -1205,6 +1284,7 @@ export function createCloudflareThreadService<TEnv extends Record<string, unknow
               idempotencyKey: parentExportFenceAdmissionId,
             },
           );
+          childWorkAccepted = true;
           await rpc(controlName(target), "subagent", {
             ...ownership(target),
             action: "start",
@@ -1214,21 +1294,24 @@ export function createCloudflareThreadService<TEnv extends Record<string, unknow
               subagentFenceAttemptToken: parentExportFenceAttemptToken,
             },
           });
-          childWorkEstablished = true;
         } catch (error) {
-          await rpc(controlName(target), "subagent", {
-            ...ownership(target),
-            action: "fail",
-            input: {
-              threadId: child.threadId,
-              error: {
-                code: "subagent_admission_failed",
-                message: error instanceof Error ? error.message : String(error),
-                retryable: true,
+          // A successful gateway.send may be wrapped by a serializable
+          // post-acceptance phase signal, even though submit() throws while
+          // recording/tracking. A start RPC failure is also post-acceptance.
+          childWorkAccepted = childWorkAccepted || fluePostAcceptanceAdmission(error) !== undefined;
+          if (!childWorkAccepted) {
+            await rpc(controlName(target), "subagent", {
+              ...ownership(target),
+              action: "fail",
+              input: {
+                threadId: child.threadId,
+                error: {
+                  code: "subagent_admission_failed",
+                  message: error instanceof Error ? error.message : String(error),
+                  retryable: true,
+                },
               },
-            },
-          }).catch(() => undefined);
-          if (!childWorkEstablished) {
+            }).catch(() => undefined);
             await settleSubagentExportFence({
               env: options.env,
               organizationId: target.authorization.organizationId,
@@ -1239,6 +1322,8 @@ export function createCloudflareThreadService<TEnv extends Record<string, unknow
               attemptToken: parentExportFenceAttemptToken,
             }).catch(() => undefined);
           }
+          // Accepted work can still be running. Do not send a terminal fail
+          // or release its parent's fence; report the bookkeeping/start error.
           throw error;
         }
       }
@@ -2282,6 +2367,21 @@ async function dispatchThreadControl(
             admission: tracked.admission,
           };
         }
+        if (subagentChildThreadId) {
+          const acceptedFence = readSubagentExportFence(sql, subagentChildThreadId);
+          if (
+            acceptedFence?.admissionId === admissionId &&
+            acceptedFence.attemptToken === subagentFenceAttemptToken &&
+            acceptedFence.admission
+          ) {
+            return {
+              admitted: true as const,
+              replay: true as const,
+              send: false as const,
+              admission: acceptedFence.admission,
+            };
+          }
+        }
         rearmLegacyExportSubmission(sql, admissionId);
         if (subagentChildThreadId && subagentFenceAttemptToken) {
           prepareSubagentExportFence(
@@ -2329,6 +2429,40 @@ async function dispatchThreadControl(
       throw error;
     }
     return admitted;
+  }
+  if (method === "subagentExportFenceAccepted") {
+    const binding = requireBinding(sql);
+    const childThreadId = String(body.childThreadId ?? "");
+    const admissionId = String(body.admissionId ?? "");
+    const attemptToken = String(body.attemptToken ?? "");
+    const admission = FlueAdmissionSchema.parse(body.admission);
+    if (!childThreadId || !admissionId || !attemptToken) {
+      throw new Error("A child fence acceptance identity is required");
+    }
+    const current = readSubagentExportFence(sql, childThreadId);
+    if (
+      !current ||
+      current.ownerThreadId !== binding.thread.threadId ||
+      current.admissionId !== admissionId ||
+      current.attemptToken !== attemptToken
+    ) {
+      throw new Error("The child fence acceptance identity is invalid");
+    }
+    if (current.settledAt) {
+      return { accepted: true, replay: true };
+    }
+    if (
+      !markSubagentExportFenceAttempt(
+        sql,
+        childThreadId,
+        attemptToken,
+        admission.submissionId,
+        admission,
+      )
+    ) {
+      throw new Error("The child fence acceptance is stale");
+    }
+    return { accepted: true, replay: false };
   }
   if (method === "legacyExportSubmissionSettle") {
     assertOwner(sql, body);
@@ -2456,6 +2590,24 @@ async function dispatchThreadControl(
     else await broadcast;
     return { recorded: true, replay: false };
   }
+  if (method === "acceptSubmission") {
+    const binding = requireBinding(sql);
+    const admission = FlueAdmissionSchema.parse(body.admission);
+    const admissionId = String(body.admissionId ?? "");
+    if (!admissionId) throw new Error("An admission id is required");
+    const existing = trackedAdmissionForId(sql, admissionId);
+    if (existing) {
+      return { accepted: true, replay: true, admission: existing.admission };
+    }
+    put(sql, `projection:${admission.submissionId}`, {
+      admission,
+      agentId: binding.agentId,
+      instanceId: threadName(binding.thread),
+      admissionId,
+      status: "accepted",
+    });
+    return { accepted: true, replay: false, admission };
+  }
   if (method === "track") {
     const binding = requireBinding(sql);
     const admission = body.admission as FlueAdmission;
@@ -2545,24 +2697,19 @@ async function dispatchThreadControl(
           localThreadId: binding.thread.threadId,
           organizationId: binding.thread.organizationId,
           applicationId: binding.thread.appId,
-          ownerThreadId:
-            storedFence?.ownerThreadId ??
-            (typeof metadata.flarySubagentParentExportFenceOwnerThreadId === "string"
-              ? metadata.flarySubagentParentExportFenceOwnerThreadId
-              : binding.thread.threadId),
-          admissionId:
-            storedFence?.admissionId ??
-            (typeof metadata.flarySubagentParentExportFenceAdmissionId === "string"
-              ? metadata.flarySubagentParentExportFenceAdmissionId
-              : `subagent_${threadId}`),
+          // The coordinator's parentThreadId and the DO-local fence row are
+          // authoritative. Never let caller metadata or a terminal input
+          // redirect a nested settlement to another owner/attempt.
+          ownerThreadId: storedFence?.ownerThreadId ?? parentThreadId,
+          admissionId: storedFence?.admissionId ?? `subagent_${threadId}`,
           childThreadId: threadId,
           attemptToken:
-            typeof subagentInput.subagentFenceAttemptToken === "string"
-              ? subagentInput.subagentFenceAttemptToken
-              : (storedFence?.attemptToken ??
-                (typeof metadata.flarySubagentParentExportFenceAttemptToken === "string"
-                  ? metadata.flarySubagentParentExportFenceAttemptToken
-                  : undefined)),
+            storedFence?.attemptToken ??
+            (typeof metadata.flarySubagentParentExportFenceOwnerThreadId === "string" &&
+            metadata.flarySubagentParentExportFenceOwnerThreadId === parentThreadId &&
+            typeof metadata.flarySubagentParentExportFenceAttemptToken === "string"
+              ? metadata.flarySubagentParentExportFenceAttemptToken
+              : undefined),
           submissionId:
             typeof subagentInput.subagentSubmissionId === "string"
               ? subagentInput.subagentSubmissionId
@@ -4480,6 +4627,7 @@ interface SubagentExportFenceRecord {
   readonly admissionId: string;
   readonly attemptToken: string;
   readonly childThreadId: string;
+  readonly admission?: FlueAdmission;
   readonly submissionId?: string;
   readonly settledAt?: string;
 }
@@ -4502,11 +4650,13 @@ function readSubagentExportFence(
   ) {
     return undefined;
   }
+  const admission = FlueAdmissionSchema.safeParse(record.admission);
   return {
     ownerThreadId: record.ownerThreadId,
     admissionId: record.admissionId,
     attemptToken: record.attemptToken,
     childThreadId: record.childThreadId,
+    ...(admission.success ? { admission: admission.data } : {}),
     ...(typeof record.submissionId === "string" ? { submissionId: record.submissionId } : {}),
     ...(typeof record.settledAt === "string" ? { settledAt: record.settledAt } : {}),
   };
@@ -4536,16 +4686,20 @@ function markSubagentExportFenceAttempt(
   childThreadId: string,
   attemptToken: string,
   submissionId: string,
-): void {
-  sql.transactionSync(() => {
+  admission?: FlueAdmission,
+): boolean {
+  return sql.transactionSync(() => {
     const current = readSubagentExportFence(sql, childThreadId);
     if (!current || current.attemptToken !== attemptToken || current.settledAt) {
-      return;
+      return false;
     }
+    if (current.submissionId && current.submissionId !== submissionId) return false;
     put(sql, subagentExportFenceKey(childThreadId), {
       ...current,
       submissionId,
+      ...(admission ? { admission } : {}),
     });
+    return true;
   });
 }
 
@@ -4637,13 +4791,18 @@ async function settleSubagent(
   value: Record<string, unknown>,
 ): Promise<void> {
   const metadata = input.binding.metadata ?? {};
-  const parentFenceOwnerThreadId =
+  const actualParentThreadId = input.binding.parentThread?.threadId;
+  const metadataOwnerThreadId =
     typeof metadata.flarySubagentParentExportFenceOwnerThreadId === "string"
       ? metadata.flarySubagentParentExportFenceOwnerThreadId
-      : typeof metadata.flarySubagentParentThreadId === "string"
-        ? metadata.flarySubagentParentThreadId
-        : undefined;
+      : undefined;
+  const parentFenceOwnerThreadId =
+    actualParentThreadId &&
+    (!metadataOwnerThreadId || metadataOwnerThreadId === actualParentThreadId)
+      ? actualParentThreadId
+      : undefined;
   const attemptToken =
+    parentFenceOwnerThreadId &&
     typeof metadata.flarySubagentParentExportFenceAttemptToken === "string"
       ? metadata.flarySubagentParentExportFenceAttemptToken
       : undefined;
@@ -4653,10 +4812,7 @@ async function settleSubagent(
         organizationId: input.binding.thread.organizationId,
         applicationId: input.binding.thread.appId,
         ownerThreadId: parentFenceOwnerThreadId,
-        admissionId:
-          typeof metadata.flarySubagentParentExportFenceAdmissionId === "string"
-            ? metadata.flarySubagentParentExportFenceAdmissionId
-            : `subagent_${input.binding.thread.threadId}`,
+        admissionId: `subagent_${input.binding.thread.threadId}`,
         childThreadId: input.binding.thread.threadId,
         ...(attemptToken ? { attemptToken } : {}),
         submissionId: input.admission.submissionId,

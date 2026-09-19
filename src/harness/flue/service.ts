@@ -48,6 +48,42 @@ export const FlueAdmissionSchema = z
   .strict();
 export type FlueAdmission = z.infer<typeof FlueAdmissionSchema>;
 
+/**
+ * A JSON-safe phase signal for work accepted by Flue before host bookkeeping
+ * completed. Callers must inspect this data rather than rely on instanceof,
+ * because a host may pass the failure through a Durable Object boundary.
+ */
+export interface FluePostAcceptanceFailure {
+  readonly phase: "post-acceptance";
+  readonly admission: FlueAdmission;
+  readonly message: string;
+}
+
+export function fluePostAcceptanceFailure(
+  admission: FlueAdmission,
+  error: unknown,
+): Error & { readonly flueSubmission: FluePostAcceptanceFailure } {
+  const message = error instanceof Error ? error.message : String(error);
+  const wrapped = new Error(`Flue accepted the submission but host bookkeeping failed: ${message}`);
+  Object.assign(wrapped, {
+    flueSubmission: {
+      phase: "post-acceptance" as const,
+      admission,
+      message,
+    },
+  });
+  return wrapped as Error & { readonly flueSubmission: FluePostAcceptanceFailure };
+}
+
+export function fluePostAcceptanceAdmission(error: unknown): FlueAdmission | undefined {
+  if (!error || typeof error !== "object" || Array.isArray(error)) return undefined;
+  const candidate = (error as { flueSubmission?: unknown }).flueSubmission;
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return undefined;
+  if ((candidate as { phase?: unknown }).phase !== "post-acceptance") return undefined;
+  const parsed = FlueAdmissionSchema.safeParse((candidate as { admission?: unknown }).admission);
+  return parsed.success ? parsed.data : undefined;
+}
+
 export const FlaryRunRecordSchema = z
   .object({
     runId: IdentifierSchema,

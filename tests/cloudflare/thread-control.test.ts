@@ -420,69 +420,467 @@ test("pre-acceptance child failure settles its parent fence", async () => {
   assert.equal(opened.ok, true, await opened.text());
 });
 
-test("nested child settles only the immediate parent's fence", async () => {
-  const fixture = await exportFenceFixture("nested");
-  const parentId = fixture.childId;
-  const parentScope = fixture.scope;
-  await fixture.service.create(parentScope, {
-    threadId: parentId,
+test("post-acceptance bookkeeping failure keeps the parent fence active", async () => {
+  const controls = namespace();
+  const originalGet = controls.get;
+  controls.get = (id: unknown) => {
+    const stub = originalGet(id);
+    return {
+      async fetch(request: Request) {
+        const body = (await request
+          .clone()
+          .json()
+          .catch(() => ({}))) as Record<string, unknown>;
+        if (body.method === "record") {
+          return Response.json({ error: { message: "ledger unavailable" } }, { status: 503 });
+        }
+        return stub.fetch(request);
+      },
+    };
+  };
+  const engine = {
+    idFromName(name: string) {
+      return name;
+    },
+    get() {
+      return {
+        async fetch(request: Request) {
+          if (request.method !== "POST") return Response.json([]);
+          return Response.json(
+            {
+              streamUrl: "https://flue.internal/accepted_submission",
+              offset: "0",
+              submissionId: "submission_post_acceptance",
+            },
+            { status: 202 },
+          );
+        },
+      };
+    },
+  };
+  const env = { FLARY_THREAD_CONTROL: controls, FLUE_CODER_AGENT: engine };
+  const service = createCloudflareThreadService({ env, namespace: controls });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_fence_post_acceptance",
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  await service.create(scope, {
+    threadId: "thread_fence_post_acceptance",
     agentId: "coder",
     workspace: {
-      organizationId: parentScope.authorization.organizationId,
-      appId: parentScope.appId,
+      organizationId: scope.authorization.organizationId,
+      appId: scope.appId,
       projectId: "project",
-      workspaceId: "nested_parent_workspace",
+      workspaceId: "workspace_post_acceptance",
       branch: "main",
     },
-    metadata: {
-      flarySubagentRootThreadId: fixture.rootThreadId,
-      flarySubagentParentThreadId: fixture.rootThreadId,
-      subagent: true,
+  });
+  const target = { ...scope, threadId: "thread_fence_post_acceptance" };
+  await assert.rejects(
+    service.subagentAction!(target, "spawn", {
+      requestId: "spawn_post_acceptance",
+      parentThreadId: target.threadId,
+      agentId: "coder",
+      task: "Keep the accepted child fenced.",
+      seedTurns: 0,
+    }),
+    /accepted the submission|ledger unavailable/i,
+  );
+  const storage = controls.stores.get(
+    `thread:${scope.authorization.organizationId}:${scope.appId}:${target.threadId}`,
+  )!;
+  const blocked = await handleFlaryThreadControlObjectRequest({
+    storage,
+    request: new Request("https://flary.internal/export", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "legacyExportBegin",
+        tenantId: scope.authorization.organizationId,
+        applicationId: scope.appId,
+        operationId: "export_while_post_acceptance_child_runs",
+      }),
+    }),
+  });
+  assert.equal(blocked.ok, false);
+  const listed = await handleFlaryThreadControlObjectRequest({
+    storage,
+    request: new Request("https://flary.internal/list", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "subagent",
+        action: "list",
+        tenantId: scope.authorization.organizationId,
+        applicationId: scope.appId,
+      }),
+    }),
+  });
+  const child = ((await listed.json()) as { threads: Array<{ threadId: string }> }).threads.find(
+    (thread) => thread.threadId !== target.threadId,
+  );
+  assert.ok(child);
+  const completed = await handleFlaryThreadControlObjectRequest({
+    storage,
+    request: new Request("https://flary.internal/complete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "subagent",
+        action: "complete",
+        tenantId: scope.authorization.organizationId,
+        applicationId: scope.appId,
+        input: {
+          requestId: "complete_post_acceptance",
+          idempotencyKey: "complete_post_acceptance",
+          threadId: child!.threadId,
+          output: { summary: "accepted child finished" },
+        },
+      }),
+    }),
+  });
+  assert.equal(completed.ok, true, await completed.text());
+  const opened = await handleFlaryThreadControlObjectRequest({
+    storage,
+    request: new Request("https://flary.internal/export", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "legacyExportBegin",
+        tenantId: scope.authorization.organizationId,
+        applicationId: scope.appId,
+        operationId: "export_after_post_acceptance_completion",
+      }),
+    }),
+  });
+  assert.equal(opened.ok, true, await opened.text());
+});
+
+test("root start failure after acceptance keeps the child fence active", async () => {
+  const controls = namespace();
+  const originalGet = controls.get;
+  controls.get = (id: unknown) => {
+    const stub = originalGet(id);
+    return {
+      async fetch(request: Request) {
+        const body = (await request
+          .clone()
+          .json()
+          .catch(() => ({}))) as Record<string, unknown>;
+        if (body.method === "subagent" && body.action === "start") {
+          return Response.json({ error: { message: "coordinator unavailable" } }, { status: 503 });
+        }
+        return stub.fetch(request);
+      },
+    };
+  };
+  const engine = {
+    idFromName(name: string) {
+      return name;
+    },
+    get() {
+      return {
+        async fetch(request: Request) {
+          if (request.method !== "POST") return Response.json([]);
+          return Response.json(
+            {
+              streamUrl: "https://flue.internal/accepted_start_failure",
+              offset: "0",
+              submissionId: "submission_start_failure",
+            },
+            { status: 202 },
+          );
+        },
+      };
+    },
+  };
+  const env = {
+    FLARY_THREAD_CONTROL: controls,
+    FLUE_CODER_AGENT: engine,
+    FLARY_SESSION_PROJECTION_QUEUE: { async send() {} },
+  };
+  const service = createCloudflareThreadService({ env, namespace: controls });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_fence_start_failure",
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  await service.create(scope, {
+    threadId: "thread_fence_start_failure",
+    agentId: "coder",
+    workspace: {
+      organizationId: scope.authorization.organizationId,
+      appId: scope.appId,
+      projectId: "project",
+      workspaceId: "workspace_start_failure",
+      branch: "main",
     },
   });
-  const parentStorage = fixture.controls.stores.get(
-    `thread:${parentScope.authorization.organizationId}:${parentScope.appId}:${parentId}`,
+  const target = { ...scope, threadId: "thread_fence_start_failure" };
+  await assert.rejects(
+    service.subagentAction!(target, "spawn", {
+      requestId: "spawn_start_failure",
+      parentThreadId: target.threadId,
+      agentId: "coder",
+      task: "Keep the accepted child fenced.",
+      seedTurns: 0,
+    }),
+    /coordinator unavailable/i,
+  );
+  const storage = controls.stores.get(
+    `thread:${scope.authorization.organizationId}:${scope.appId}:${target.threadId}`,
   )!;
-  const nested = await fixture.call({
+  const blocked = await handleFlaryThreadControlObjectRequest({
+    storage,
+    request: new Request("https://flary.internal/export", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "legacyExportBegin",
+        tenantId: scope.authorization.organizationId,
+        applicationId: scope.appId,
+        operationId: "export_while_start_failure_child_runs",
+      }),
+    }),
+  });
+  assert.equal(blocked.ok, false);
+  const listed = await handleFlaryThreadControlObjectRequest({
+    storage,
+    request: new Request("https://flary.internal/list", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "subagent",
+        action: "list",
+        tenantId: scope.authorization.organizationId,
+        applicationId: scope.appId,
+      }),
+    }),
+  });
+  const child = ((await listed.json()) as { threads: Array<{ threadId: string }> }).threads.find(
+    (thread) => thread.threadId !== target.threadId,
+  );
+  assert.ok(child);
+  const completed = await handleFlaryThreadControlObjectRequest({
+    storage,
+    request: new Request("https://flary.internal/complete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "subagent",
+        action: "complete",
+        tenantId: scope.authorization.organizationId,
+        applicationId: scope.appId,
+        input: {
+          requestId: "complete_start_failure",
+          idempotencyKey: "complete_start_failure",
+          threadId: child!.threadId,
+          output: { summary: "accepted child finished" },
+        },
+      }),
+    }),
+  });
+  assert.equal(completed.ok, true, await completed.text());
+  const opened = await handleFlaryThreadControlObjectRequest({
+    storage,
+    request: new Request("https://flary.internal/export", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "legacyExportBegin",
+        tenantId: scope.authorization.organizationId,
+        applicationId: scope.appId,
+        operationId: "export_after_start_failure_completion",
+      }),
+    }),
+  });
+  assert.equal(opened.ok, true, await opened.text());
+});
+
+test("normal nested child cancellation settles only the immediate parent's fence", async () => {
+  const controls = namespace();
+  let submission = 0;
+  const engine = {
+    idFromName(name: string) {
+      return name;
+    },
+    get() {
+      return {
+        async fetch(request: Request) {
+          if (request.method !== "POST") return Response.json([]);
+          submission += 1;
+          return Response.json(
+            {
+              streamUrl: `https://flue.internal/submission_${submission}`,
+              offset: "0",
+              submissionId: `submission_nested_${submission}`,
+            },
+            { status: 202 },
+          );
+        },
+      };
+    },
+  };
+  const queued: unknown[] = [];
+  const env = {
+    FLARY_THREAD_CONTROL: controls,
+    FLUE_CODER_AGENT: engine,
+    FLARY_SESSION_PROJECTION_QUEUE: {
+      async send(value: unknown) {
+        queued.push(value);
+      },
+    },
+  };
+  const service = createCloudflareThreadService({ env, namespace: controls });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_fence_nested_normal",
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  await service.create(scope, {
+    threadId: "thread_fence_nested_normal",
+    agentId: "coder",
+    workspace: {
+      organizationId: scope.authorization.organizationId,
+      appId: scope.appId,
+      projectId: "project",
+      workspaceId: "workspace_nested_normal",
+      branch: "main",
+    },
+  });
+  const rootTarget = { ...scope, threadId: "thread_fence_nested_normal" };
+  const parent = await service.subagentAction!(rootTarget, "spawn", {
+    requestId: "spawn_parent_normal",
+    parentThreadId: rootTarget.threadId,
+    agentId: "coder",
+    task: "Review the parent change.",
+    seedTurns: 0,
+  });
+  const parentId = String(parent.thread.threadId);
+  const parentTarget = { ...scope, threadId: parentId };
+  const nested = await service.subagentAction!(parentTarget, "spawn", {
+    requestId: "spawn_nested_normal",
+    parentThreadId: parentId,
+    agentId: "coder",
+    task: "Review the nested change.",
+    seedTurns: 0,
+  });
+  const nestedId = String(nested.thread.threadId);
+  await service.subagentAction!(parentTarget, "cancel", {
+    requestId: "cancel_nested_normal",
+    idempotencyKey: "cancel_nested_normal",
+    threadId: nestedId,
+  });
+  await service.subagentAction!(parentTarget, "close", {
+    requestId: "close_nested_normal",
+    idempotencyKey: "close_nested_normal",
+    threadId: nestedId,
+  });
+
+  const parentStorage = controls.stores.get(
+    `thread:${scope.authorization.organizationId}:${scope.appId}:${parentId}`,
+  )!;
+  const parentExport = await handleFlaryThreadControlObjectRequest({
+    storage: parentStorage,
+    request: new Request("https://flary.internal/export", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "legacyExportBegin",
+        tenantId: scope.authorization.organizationId,
+        applicationId: scope.appId,
+        operationId: "parent_export_after_nested_cancel",
+      }),
+    }),
+  });
+  assert.equal(parentExport.ok, true, await parentExport.text());
+  const rootStorage = controls.stores.get(
+    `thread:${scope.authorization.organizationId}:${scope.appId}:${rootTarget.threadId}`,
+  )!;
+  const rootExport = await handleFlaryThreadControlObjectRequest({
+    storage: rootStorage,
+    request: new Request("https://flary.internal/export", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "legacyExportBegin",
+        tenantId: scope.authorization.organizationId,
+        applicationId: scope.appId,
+        operationId: "root_export_still_blocked_by_parent",
+      }),
+    }),
+  });
+  assert.equal(rootExport.ok, false);
+  assert.match(await rootExport.text(), /unsettled submission/i);
+  assert.ok(queued.length > 0);
+});
+
+test("caller fence metadata cannot redirect terminal settlement", async () => {
+  const fixture = await exportFenceFixture("spoofed_owner");
+  const spawned = await fixture.call({
     method: "subagent",
     action: "spawn",
     input: {
-      requestId: "spawn_nested",
-      parentThreadId: parentId,
+      requestId: "spawn_spoofed_owner",
+      parentThreadId: fixture.rootThreadId,
       agentId: "coder",
-      task: "Review the nested change.",
+      task: "Ignore the spoofed owner.",
       seedTurns: 0,
       metadata: {
-        flarySubagentParentExportFenceOwnerThreadId: parentId,
+        flarySubagentParentExportFenceOwnerThreadId: "thread_attacker",
+        flarySubagentParentExportFenceAdmissionId: "subagent_attacker",
+        flarySubagentParentExportFenceAttemptToken: "attempt_attacker",
       },
     },
   });
-  const nestedId = String(nested.thread.threadId);
-  const nestedAdmissionId = `subagent_${nestedId}`;
-  await fixture.call({ method: "admitTurn", admissionId: nestedAdmissionId }, parentStorage);
-  await fixture.call({ method: "admitTurn", admissionId: "root_sibling" });
+  const spawnedChildId = String(spawned.thread.threadId);
+  const spawnedAdmissionId = `subagent_${spawnedChildId}`;
+  const metadata = spawned.thread.metadata as Record<string, unknown>;
+  assert.equal(metadata.flarySubagentParentExportFenceOwnerThreadId, fixture.rootThreadId);
+  assert.equal(metadata.flarySubagentParentExportFenceAdmissionId, spawnedAdmissionId);
+  const attemptToken = String(metadata.flarySubagentParentExportFenceAttemptToken);
+  await fixture.call({
+    method: "admitTurn",
+    admissionId: spawnedAdmissionId,
+    subagentChildThreadId: spawnedChildId,
+    subagentFenceAttemptToken: attemptToken,
+  });
   await fixture.call({
     method: "subagent",
     action: "complete",
     input: {
-      requestId: "complete_nested",
-      idempotencyKey: "complete_nested",
-      threadId: nestedId,
-      output: { summary: "nested done" },
+      requestId: "complete_spoofed_owner",
+      idempotencyKey: "complete_spoofed_owner",
+      threadId: spawnedChildId,
+      output: { summary: "done" },
     },
   });
-
-  const parentExport = await fixture.call(
-    { method: "legacyExportBegin", operationId: "parent_export_after_nested" },
-    parentStorage,
-  );
-  assert.equal(parentExport.started, true);
-  const rootExport = await fixture.call({
-    method: "legacyExportBegin",
-    operationId: "root_export_with_sibling",
+  await fixture.call({
+    method: "subagent",
+    action: "complete",
+    input: {
+      requestId: "complete_fixture_child",
+      idempotencyKey: "complete_fixture_child",
+      threadId: fixture.childId,
+      output: { summary: "done" },
+    },
   });
-  assert.equal(rootExport.ok, false);
-  assert.match(String(rootExport.error), /unsettled submission/i);
+  const opened = await fixture.call({
+    method: "legacyExportBegin",
+    operationId: "export_after_spoofed_owner",
+  });
+  assert.equal(opened.started, true);
+  const attacker = fixture.controls.stores.get(
+    `thread:${fixture.scope.authorization.organizationId}:${fixture.scope.appId}:thread_attacker`,
+  );
+  assert.equal(attacker, undefined);
 });
 
 test("duplicate and out-of-order terminal updates settle the same fence idempotently", async () => {

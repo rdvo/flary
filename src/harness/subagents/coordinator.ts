@@ -147,7 +147,14 @@ export class InMemorySubagentCoordinator {
       nickname: request.nickname,
       createdAt: now,
       updatedAt: now,
-      metadata: request.metadata,
+      metadata: {
+        ...request.metadata,
+        // Keep fence ownership in the durable coordinator record. It is
+        // derived from lineage, not accepted from caller metadata.
+        flarySubagentParentExportFenceOwnerThreadId: parent.threadId,
+        flarySubagentParentExportFenceAdmissionId: `subagent_${threadId}`,
+        flarySubagentParentExportFenceAttemptToken: crypto.randomUUID(),
+      },
     });
     this.#threads.set(thread.threadId, thread);
     this.#turns.set(thread.threadId, seededTurns);
