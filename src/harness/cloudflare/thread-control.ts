@@ -4124,6 +4124,7 @@ async function projectAdmission(input: {
     // checkpointing and parent propagation instead of leaving a child stuck.
     put(input.sql, `projection:${input.admission.submissionId}`, {
       admission: input.admission,
+      ...(input.admissionId ? { admissionId: input.admissionId } : {}),
       status: "completed",
     });
     if (input.admissionId) settleLegacyExportSubmission(input.sql, input.admissionId);
@@ -4135,6 +4136,7 @@ async function projectAdmission(input: {
     }
     put(input.sql, `projection:${input.admission.submissionId}`, {
       admission: input.admission,
+      ...(input.admissionId ? { admissionId: input.admissionId } : {}),
       status: "failed",
       error: error instanceof Error ? error.message : String(error),
     });

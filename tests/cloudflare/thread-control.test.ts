@@ -106,6 +106,269 @@ function d1Database() {
   };
 }
 
+type TerminalOutcome = "completed" | "failed";
+
+async function terminalReplayFixture(outcome: TerminalOutcome, suffix: string) {
+  const controls = namespace();
+  const tenantId = `tenant_terminal_${suffix}`;
+  const threadId = `thread_terminal_${suffix}`;
+  const admissionId = `terminal_${suffix}`;
+  const submissionId = `submission_${suffix}`;
+  let providerAdmissions = 0;
+  const engine = {
+    idFromName(name: string) {
+      return name;
+    },
+    get() {
+      return {
+        async fetch(request: Request) {
+          if (request.method === "POST") {
+            providerAdmissions += 1;
+            return Response.json(
+              {
+                streamUrl: `https://flue.internal/agents/coder/retry_${suffix}`,
+                offset: "0",
+                submissionId: `retry_${suffix}`,
+              },
+              { status: 202 },
+            );
+          }
+          const settled = {
+            type: "submission-settled",
+            position: { batch: 1, index: 0 },
+            conversationId: threadId,
+            submissionId,
+            outcome,
+            ...(outcome === "completed"
+              ? { result: { text: "terminal result" } }
+              : { error: { message: "terminal provider failure" } }),
+          };
+          return Response.json([settled], {
+            headers: {
+              "Stream-Next-Offset": "1",
+              "Stream-Up-To-Date": "true",
+              "Stream-Closed": "true",
+            },
+          });
+        },
+      };
+    },
+  };
+  const env = { FLARY_THREAD_CONTROL: controls, FLUE_CODER_AGENT: engine };
+  const service = createCloudflareThreadService({ env, namespace: controls });
+  const scope = {
+    authorization: {
+      organizationId: tenantId,
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  await service.create(scope, {
+    threadId,
+    agentId: "coder",
+    workspace: {
+      organizationId: tenantId,
+      appId: "coder",
+      projectId: "project",
+      workspaceId: "workspace",
+      branch: "main",
+    },
+    model: { provider: "openai", model: "gpt-5.6-luna" },
+  });
+  const storage = controls.stores.get(`thread:${tenantId}:coder:${threadId}`)!;
+  const admission = {
+    streamUrl: `https://flue.internal/agents/coder/terminal_${suffix}`,
+    offset: "0",
+    submissionId,
+  };
+  const admit = await handleFlaryThreadControlObjectRequest({
+    storage,
+    env,
+    request: new Request("https://flary.internal/admit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "admitTurn",
+        tenantId,
+        applicationId: "coder",
+        admissionId,
+      }),
+    }),
+  });
+  assert.equal(admit.ok, true, await admit.text());
+  const background: Promise<unknown>[] = [];
+  const tracked = await handleFlaryThreadControlObjectRequest({
+    storage,
+    env,
+    execution: {
+      waitUntil(work) {
+        background.push(work);
+      },
+    },
+    request: new Request("https://flary.internal/track", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "track",
+        tenantId,
+        applicationId: "coder",
+        admission,
+        admissionId,
+        agentId: "coder",
+        instanceId: `thread:${tenantId}:coder:${threadId}`,
+      }),
+    }),
+  });
+  assert.equal(tracked.ok, true, await tracked.text());
+  await Promise.allSettled(background);
+  const row = storage.sql
+    .exec<{ value_json: string }>(
+      "SELECT value_json FROM flary_thread_control WHERE key = ?",
+      `projection:${submissionId}`,
+    )
+    .toArray()[0];
+  assert.ok(row);
+  const projection = JSON.parse(row.value_json) as Record<string, unknown>;
+  assert.equal(projection.status, outcome);
+  assert.equal(projection.admissionId, admissionId);
+  return {
+    controls,
+    env,
+    service,
+    scope,
+    target: { ...scope, threadId },
+    storage,
+    admission,
+    admissionId,
+    getProviderAdmissions: () => providerAdmissions,
+  };
+}
+
+test("terminal service admissions replay the stored receipt without sending", async () => {
+  for (const outcome of ["completed", "failed"] as const) {
+    const fixture = await terminalReplayFixture(outcome, `service_${outcome}`);
+    const replay = await fixture.service.submit(fixture.target, {
+      message: "must not be sent",
+      idempotencyKey: fixture.admissionId,
+    });
+    assert.deepEqual(replay, fixture.admission);
+    assert.equal(fixture.getProviderAdmissions(), 0);
+  }
+});
+
+test("terminal direct realtime admissions replay without sending", async () => {
+  for (const outcome of ["completed", "failed"] as const) {
+    const fixture = await terminalReplayFixture(outcome, `realtime_direct_${outcome}`);
+    const sent: Array<Record<string, unknown>> = [];
+    let attachment: Record<string, unknown> = {
+      tenantId: fixture.scope.authorization.organizationId,
+      applicationId: "coder",
+      threadId: fixture.target.threadId,
+      includeChildren: false,
+      actor: fixture.scope.authorization.actor,
+      sent: 0,
+      acknowledged: 0,
+    };
+    const socket = {
+      send(value: string) {
+        sent.push(JSON.parse(value));
+      },
+      close() {},
+      serializeAttachment(value: unknown) {
+        attachment = value as Record<string, unknown>;
+      },
+      deserializeAttachment() {
+        return attachment;
+      },
+    };
+    await handleFlaryThreadControlWebSocketMessage({
+      storage: fixture.storage,
+      env: fixture.env,
+      socket,
+      message: JSON.stringify({
+        version: 1,
+        type: "command",
+        requestId: `request_${outcome}`,
+        idempotencyKey: fixture.admissionId,
+        command: "send",
+        input: { message: "must not be sent" },
+      }),
+      execution: { waitUntil() {} },
+    });
+    assert.equal(fixture.getProviderAdmissions(), 0);
+    assert.equal(sent.filter((frame) => frame.type === "error").length, 0);
+    assert.ok(sent.some((frame) => frame.type === "result"));
+  }
+});
+
+test("terminal queued realtime admissions replay without sending", async () => {
+  for (const outcome of ["completed", "failed"] as const) {
+    const fixture = await terminalReplayFixture(outcome, `realtime_queued_${outcome}`);
+    const queued: unknown[] = [];
+    const sent: Array<Record<string, unknown>> = [];
+    let attachment: Record<string, unknown> = {
+      tenantId: fixture.scope.authorization.organizationId,
+      applicationId: "coder",
+      threadId: fixture.target.threadId,
+      includeChildren: false,
+      actor: fixture.scope.authorization.actor,
+      sent: 0,
+      acknowledged: 0,
+    };
+    const socket = {
+      send(value: string) {
+        sent.push(JSON.parse(value));
+      },
+      close() {},
+      serializeAttachment(value: unknown) {
+        attachment = value as Record<string, unknown>;
+      },
+      deserializeAttachment() {
+        return attachment;
+      },
+    };
+    await handleFlaryThreadControlWebSocketMessage({
+      storage: fixture.storage,
+      env: {
+        ...fixture.env,
+        FLARY_SESSION_PROJECTION_QUEUE: {
+          async send(value: unknown) {
+            queued.push(value);
+          },
+        },
+      },
+      socket,
+      message: JSON.stringify({
+        version: 1,
+        type: "command",
+        requestId: `request_${outcome}`,
+        idempotencyKey: fixture.admissionId,
+        command: "send",
+        input: { message: "must not be sent" },
+      }),
+    });
+    assert.equal(queued.length, 1);
+    let acknowledged = false;
+    await handleFlarySessionProjectionQueue({
+      env: fixture.env,
+      messages: [
+        {
+          body: queued[0],
+          ack() {
+            acknowledged = true;
+          },
+          retry() {
+            assert.fail("The terminal replay should not retry");
+          },
+        },
+      ],
+    });
+    assert.equal(acknowledged, true);
+    assert.equal(fixture.getProviderAdmissions(), 0);
+    assert.ok(sent.some((frame) => frame.type === "accepted"));
+  }
+});
+
 test("provider failures become short safe public messages", () => {
   assert.equal(
     publicAgentFailureMessage(
@@ -2060,6 +2323,24 @@ test("a failed service send cannot replay through an active export lease", async
   assert.equal(replay.ok, false);
   assert.match(String((await replay.json()).error), /being exported/i);
   assert.equal(providerAdmissions, 1);
+  const release = await control.fetch(
+    new Request("https://flary.internal/export", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "legacyExportRelease",
+        tenantId: "tenant_failed_retry",
+        applicationId: "coder",
+        operationId: "export_retry",
+      }),
+    }),
+  );
+  assert.equal(release.ok, true);
+  await assert.rejects(
+    service.submit(target, { message: "hello", idempotencyKey: "failed_retry" }),
+    /provider unavailable|direct submission failed/i,
+  );
+  assert.equal(providerAdmissions, 2);
 });
 
 test("a failed realtime send rechecks the export lease before retrying", async () => {
@@ -2162,11 +2443,32 @@ test("a failed realtime send rechecks the export lease before retrying", async (
     execution,
   });
   assert.equal(providerAdmissions, 1);
+  const release = await control.fetch(
+    new Request("https://flary.internal/export", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "legacyExportRelease",
+        tenantId: "tenant_realtime_retry",
+        applicationId: "coder",
+        operationId: "export_realtime_retry",
+      }),
+    }),
+  );
+  assert.equal(release.ok, true);
+  await handleFlaryThreadControlWebSocketMessage({
+    storage,
+    env,
+    socket,
+    message,
+    execution,
+  });
+  assert.equal(providerAdmissions, 2);
   assert.deepEqual(
     sent.filter((frame) => frame.type === "accepted").map((frame) => frame.duplicate),
-    [false, true],
+    [false, true, true],
   );
-  assert.equal(sent.filter((frame) => frame.type === "error").length, 2);
+  assert.equal(sent.filter((frame) => frame.type === "error").length, 3);
 });
 
 test("legacy export retry detects corrupt manifests and missing attachment objects", async () => {
