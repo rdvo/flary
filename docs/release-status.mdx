@@ -28,6 +28,13 @@ generated consumer gates as `1.0.0-rc.2` before it moved to `latest`.
 pull-request CI, and package metadata cleanup. It does not remove or rename the `1.0.0` public
 exports.
 
+`1.0.2` is an export-sweep bridge. It keeps the installed `@flue/runtime-legacy` beta.9 runtime and
+adds an authenticated per-thread export plus an explicit-ID `flary doctor` sweep. Operators must
+export every idle legacy thread before 1.1.0; active or failed results must be retried. Completed
+archives are immutable and SHA-256 verified. The export digest covers ordered canonical batches,
+record identity, attachment metadata, and attachment/chunk digests, but excludes export timestamps
+and storage keys, so identical retries are `already_exported` and changed sources are conflicts.
+
 Publishing uses npm trusted publishing from `.github/workflows/publish.yml`. The npm package must
 trust the `rdvo/flary` repository and the `publish.yml` workflow. Release jobs do not use a stored
 write token.

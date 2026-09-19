@@ -922,6 +922,18 @@ export function createFlaryHostRouter<TBindings extends object>(
     return context.json({ archive: await service.exportSession(target) });
   });
 
+  router.post("/apps/:appId/threads/:threadId/export-legacy", async (context) => {
+    const target = await targetFor(
+      context.req.raw,
+      context.env,
+      context.req.param("appId"),
+      context.req.param("threadId"),
+    );
+    const service = serviceFor(context.env);
+    if (!service.legacyExport) throw featureUnavailable("Legacy thread export");
+    return context.json(await service.legacyExport(target));
+  });
+
   router.post("/apps/:appId/threads/:threadId/goal", async (context) => {
     const target = await targetFor(
       context.req.raw,

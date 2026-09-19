@@ -48,6 +48,26 @@ import {
   type SessionArchiveBucket,
   type SessionRecord,
   type SessionRecordType,
+  LegacyExportArchiveStore,
+  LegacyExportActiveError,
+  LegacyExportAttachmentError,
+  LegacyExportError,
+  type LegacyExportErrorCode,
+  LegacyExportConflictError,
+  LegacyExportManifestSchema,
+  LegacyExportResultSchema,
+  LEGACY_EXPORT_SOURCE_REVISION,
+  discoverLegacyAttachmentReferences,
+  legacyExportAttachmentKey,
+  legacyExportBatchMetadata,
+  legacyExportDigest,
+  legacyExportObjectKey,
+  sha256Bytes,
+  stableJson,
+  type LegacyCanonicalArchive,
+  type LegacyExportAttachment,
+  type LegacyExportManifest,
+  type LegacyExportResult,
 } from "../session/index.js";
 import type { FlueAdmission, FlueAgentGateway } from "../flue/service.js";
 import { FlaryHostError } from "../host/errors.js";
@@ -697,6 +717,14 @@ export function createCloudflareThreadService<TEnv extends Record<string, unknow
     },
     async submit(target, rawInput) {
       const input = ThreadMessageRequestSchema.parse(rawInput);
+      const exportState = await rpc(controlName(target), "legacyExportState", ownership(target));
+      if (readLegacyExportState(exportState.state)?.status === "active") {
+        throw new FlaryHostError(
+          409,
+          "legacy_export_active",
+          "The thread is being exported and does not accept new submissions",
+        );
+      }
       const binding = await service.inspect(target);
       const instanceId = threadName(binding.thread);
       const admissionId = input.idempotencyKey ?? crypto.randomUUID();
@@ -1015,6 +1043,15 @@ export function createCloudflareThreadService<TEnv extends Record<string, unknow
         ...unsigned,
         sha256: await sha256Json(unsigned),
       } satisfies ThreadPortableArchive;
+    },
+    async legacyExport(target) {
+      const binding = await service.inspect(target);
+      return exportLegacyThread({
+        env: options.env,
+        binding,
+        target,
+        rpc,
+      });
     },
     async setGoal(target, input) {
       return rpc(controlName(target), "record", {
@@ -1583,6 +1620,40 @@ async function dispatchThreadControl(
     return { deletion };
   }
   if (method === "inspect") return { binding: requireBinding(sql) };
+  if (method === "legacyExportState") {
+    return { state: readLegacyExportState(readControlValue(sql, "legacy-export")) };
+  }
+  if (method === "legacyExportBegin") {
+    const operationId = String(body.operationId ?? "");
+    if (!operationId) throw new Error("The legacy export operation id is required");
+    const existing = readLegacyExportState(readControlValue(sql, "legacy-export"));
+    if (existing?.status === "active") throw new LegacyExportActiveError();
+    put(sql, "legacy-export", {
+      status: "active",
+      operationId,
+      ...(existing?.status === "complete" ? { previous: existing } : {}),
+    });
+    return { started: true, operationId };
+  }
+  if (method === "legacyExportComplete") {
+    const operationId = String(body.operationId ?? "");
+    const existing = readLegacyExportState(readControlValue(sql, "legacy-export"));
+    if (existing?.status !== "active" || existing.operationId !== operationId) {
+      throw new Error("The legacy export operation is not active");
+    }
+    const manifest = LegacyExportManifestSchema.parse(body.manifest);
+    put(sql, "legacy-export", { status: "complete", manifest });
+    return { completed: true, digest: manifest.digest.value };
+  }
+  if (method === "legacyExportRelease") {
+    const operationId = String(body.operationId ?? "");
+    const existing = readLegacyExportState(readControlValue(sql, "legacy-export"));
+    if (existing?.status === "active" && existing.operationId === operationId) {
+      if (existing.previous) put(sql, "legacy-export", existing.previous);
+      else sql.exec("DELETE FROM flary_thread_control WHERE key = ?", "legacy-export");
+    }
+    return { released: true };
+  }
   if (method === "recordPromptSnapshot") {
     const binding = requireBinding(sql);
     const promptHash = String(body.promptHash ?? "");
@@ -5347,6 +5418,13 @@ function assertOwner(
   }
 }
 
+function readControlValue(sql: ThreadControlStorage["sql"], key: string): unknown {
+  const row = sql
+    .exec<{ value_json: string }>("SELECT value_json FROM flary_thread_control WHERE key = ?", key)
+    .toArray()[0];
+  return row ? JSON.parse(row.value_json) : undefined;
+}
+
 function put(sql: ThreadControlStorage["sql"], key: string, value: unknown): void {
   sql.exec(
     `INSERT INTO flary_thread_control (key, value_json)
@@ -5387,7 +5465,7 @@ async function agentApprovalRpc(
 async function agentControlRpc(
   env: Record<string, unknown>,
   binding: ThreadBinding,
-  action: "compact" | "rollback" | "export" | "import",
+  action: "compact" | "rollback" | "export" | "export-attachment" | "import",
   input: unknown,
 ): Promise<unknown> {
   const agentId = runtimeAgentId(binding);
@@ -5454,6 +5532,348 @@ async function projectAgentSnapshot(
     },
     `flue:control:${agentId}:${instanceId}:${offset}`,
   );
+}
+
+interface LegacyExportRpcInput {
+  readonly env: Record<string, unknown>;
+  readonly binding: ThreadBinding;
+  readonly target: FlaryThreadTarget;
+  readonly rpc: (name: string, method: string, body: Record<string, unknown>) => Promise<any>;
+}
+
+interface LegacyAttachmentBytes {
+  readonly reference: ReturnType<typeof discoverLegacyAttachmentReferences>[number];
+  readonly conversationId: string;
+  readonly bytes: Uint8Array;
+  readonly chunkDigests: readonly string[];
+  readonly chunkCount: number;
+}
+
+async function exportLegacyThread(input: LegacyExportRpcInput): Promise<LegacyExportResult> {
+  const operationId = `legacy_export_${crypto.randomUUID().replaceAll("-", "")}`;
+  const control = (method: string, body: Record<string, unknown> = {}) =>
+    input.rpc(
+      `thread:${input.target.authorization.organizationId}:${input.target.appId}:${input.target.threadId}`,
+      method,
+      {
+        tenantId: input.target.authorization.organizationId,
+        applicationId: input.target.appId,
+        ...body,
+      },
+    );
+  let locked = false;
+  try {
+    await control("legacyExportBegin", { operationId });
+    locked = true;
+    const canonicalValue = await agentControlRpc(input.env, input.binding, "export", {});
+    if (objectValue(canonicalValue).runtimeUnavailable) {
+      throw new FlaryHostError(
+        503,
+        "legacy_export_unavailable",
+        "The beta.9 canonical session engine is not available for export",
+      );
+    }
+    const canonical = parseLegacyCanonical(canonicalValue);
+    const references = discoverLegacyAttachmentReferences(canonical);
+    const attachments: LegacyAttachmentBytes[] = [];
+    for (const reference of references) {
+      const value = await agentControlRpc(input.env, input.binding, "export-attachment", {
+        attachmentId: reference.id,
+      });
+      attachments.push(await parseLegacyAttachment(value, reference));
+    }
+    const thread = {
+      tenantId: input.target.authorization.organizationId,
+      applicationId: input.target.appId,
+      threadId: input.target.threadId,
+      agentId: input.binding.agentId,
+    };
+    const digest = await legacyExportDigest({
+      thread,
+      sourceRevision: LEGACY_EXPORT_SOURCE_REVISION,
+      canonical,
+      attachments: attachments.map((attachment) => ({
+        ...attachment.reference,
+        conversationId: attachment.conversationId,
+        chunkCount: attachment.chunkCount,
+        chunkDigests: attachment.chunkDigests,
+      })),
+    });
+    const current = await control("legacyExportState");
+    const currentState = readLegacyExportState(current.state);
+    const completedState =
+      currentState?.status === "complete"
+        ? currentState
+        : currentState?.previous?.status === "complete"
+          ? currentState.previous
+          : undefined;
+    if (completedState) {
+      const manifest = LegacyExportManifestSchema.parse(completedState.manifest);
+      if (manifest.digest.value !== digest) {
+        throw new LegacyExportConflictError(manifest.digest.value, digest);
+      }
+      await verifyLegacyArchiveObjects(input.env, manifest);
+      await control("legacyExportRelease", { operationId });
+      locked = false;
+      return LegacyExportResultSchema.parse({
+        outcome: "already_exported",
+        threadId: input.target.threadId,
+        digest,
+        manifest,
+      });
+    }
+    const store = legacyExportStore(input.env);
+    const now = new Date().toISOString();
+    const canonicalStorageKey = legacyExportObjectKey(
+      input.target.threadId,
+      digest,
+      "canonical.json.aes",
+    );
+    const manifestStorageKey = legacyExportObjectKey(
+      input.target.threadId,
+      digest,
+      "manifest.json.aes",
+    );
+    await store.put(canonicalStorageKey, new TextEncoder().encode(stableJson(canonical)));
+    const manifestAttachments: LegacyExportAttachment[] = [];
+    const attachmentStorageKeys = new Map<string, string>();
+    for (const attachment of attachments) {
+      const storageKey =
+        attachmentStorageKeys.get(attachment.reference.digest) ??
+        legacyExportAttachmentKey(
+          input.target.threadId,
+          digest,
+          attachment.reference.id,
+          attachment.reference.digest,
+        );
+      if (!attachmentStorageKeys.has(attachment.reference.digest)) {
+        attachmentStorageKeys.set(attachment.reference.digest, storageKey);
+        await store.put(storageKey, attachment.bytes);
+      }
+      manifestAttachments.push({
+        ...attachment.reference,
+        conversationId: attachment.conversationId,
+        chunkCount: attachment.chunkCount,
+        chunkDigests: [...attachment.chunkDigests],
+        storageKey,
+      });
+    }
+    const manifest = LegacyExportManifestSchema.parse({
+      format: "flary-legacy-export",
+      version: 1,
+      storageKey: manifestStorageKey,
+      thread,
+      source: {
+        runtime: "@flue/runtime-legacy",
+        version: "1.0.0-beta.9",
+        revision: LEGACY_EXPORT_SOURCE_REVISION,
+      },
+      createdAt: now,
+      exportedAt: now,
+      canonical: {
+        format: "flue-canonical",
+        version: 1,
+        storageKey: canonicalStorageKey,
+        batchCount: canonical.batches.length,
+        batches: await legacyExportBatchMetadata(canonical),
+        ...(canonical.throughTurnId ? { throughTurnId: canonical.throughTurnId } : {}),
+      },
+      digest: {
+        algorithm: "SHA-256",
+        value: digest,
+        input: "canonical-batches-and-attachment-digests-v1",
+      },
+      attachments: manifestAttachments,
+      completionMarker: "legacy-export-complete-v1",
+    });
+    await store.put(manifestStorageKey, new TextEncoder().encode(stableJson(manifest)));
+    const readBack = await store.get(manifestStorageKey);
+    if (!readBack) throw new Error("The legacy export manifest did not persist");
+    const persisted = LegacyExportManifestSchema.parse(
+      JSON.parse(new TextDecoder().decode(readBack)),
+    );
+    if (persisted.digest.value !== digest) {
+      throw new Error("The legacy export manifest digest changed during persistence");
+    }
+    await control("legacyExportComplete", { operationId, manifest: persisted });
+    locked = false;
+    return LegacyExportResultSchema.parse({
+      outcome: "exported",
+      threadId: input.target.threadId,
+      digest,
+      manifest: persisted,
+    });
+  } catch (error) {
+    if (error instanceof LegacyExportConflictError) {
+      await control("legacyExportRelease", { operationId }).catch(() => undefined);
+      locked = false;
+      throw new FlaryHostError(409, error.code, error.message, {
+        existingDigest: error.existingDigest,
+        requestedDigest: error.requestedDigest,
+      });
+    }
+    if (locked) await control("legacyExportRelease", { operationId }).catch(() => undefined);
+    locked = false;
+    if (isLegacyExportActiveError(error)) {
+      return LegacyExportResultSchema.parse({
+        outcome: "active",
+        threadId: input.target.threadId,
+        errorCode: "legacy_export_active",
+        message: error instanceof Error ? error.message : "The legacy thread is active",
+      });
+    }
+    return LegacyExportResultSchema.parse({
+      outcome: "failed",
+      threadId: input.target.threadId,
+      errorCode: legacyExportErrorCode(error),
+      message: error instanceof Error ? error.message : "The legacy export failed",
+    });
+  }
+}
+
+function parseLegacyCanonical(value: unknown): LegacyCanonicalArchive {
+  const candidate = objectValue(value);
+  if (candidate.format !== "flue-canonical" || candidate.version !== 1) {
+    throw new Error("The beta.9 canonical archive is invalid");
+  }
+  if (
+    !Array.isArray(candidate.batches) ||
+    candidate.batches.some((batch) => !Array.isArray(batch))
+  ) {
+    throw new Error("The beta.9 canonical archive batches are invalid");
+  }
+  return candidate as unknown as LegacyCanonicalArchive;
+}
+
+async function parseLegacyAttachment(
+  value: unknown,
+  reference: ReturnType<typeof discoverLegacyAttachmentReferences>[number],
+): Promise<LegacyAttachmentBytes> {
+  const candidate = objectValue(value);
+  const metadata = objectValue(candidate.attachment);
+  if (
+    metadata.id !== reference.id ||
+    metadata.mimeType !== reference.mimeType ||
+    Number(metadata.size) !== reference.size ||
+    metadata.digest !== reference.digest ||
+    typeof metadata.conversationId !== "string" ||
+    !Array.isArray(candidate.chunks)
+  ) {
+    throw new LegacyExportAttachmentError(
+      reference.id,
+      `Attachment '${reference.id}' metadata is inconsistent`,
+    );
+  }
+  const chunks = candidate.chunks
+    .map((chunk) => objectValue(chunk))
+    .sort((left, right) => Number(left.chunkIndex) - Number(right.chunkIndex));
+  if (chunks.length !== Number(metadata.chunkCount)) {
+    throw new LegacyExportAttachmentError(
+      reference.id,
+      `Attachment '${reference.id}' has incomplete chunks`,
+    );
+  }
+  const bytesParts: Uint8Array[] = [];
+  const chunkDigests: string[] = [];
+  for (const [index, chunk] of chunks.entries()) {
+    if (Number(chunk.chunkIndex) !== index || typeof chunk.base64 !== "string") {
+      throw new LegacyExportAttachmentError(
+        reference.id,
+        `Attachment '${reference.id}' has invalid chunk identity`,
+      );
+    }
+    const bytes = decodeBase64(chunk.base64);
+    bytesParts.push(bytes);
+    chunkDigests.push(await sha256Bytes(bytes));
+  }
+  const bytes = new Uint8Array(bytesParts.reduce((size, part) => size + part.byteLength, 0));
+  let offset = 0;
+  for (const part of bytesParts) {
+    bytes.set(part, offset);
+    offset += part.byteLength;
+  }
+  if (bytes.byteLength !== reference.size || (await sha256Bytes(bytes)) !== reference.digest) {
+    throw new LegacyExportAttachmentError(
+      reference.id,
+      `Attachment '${reference.id}' bytes failed SHA-256 verification`,
+    );
+  }
+  return {
+    reference,
+    conversationId: metadata.conversationId,
+    bytes,
+    chunkDigests,
+    chunkCount: Number(metadata.chunkCount),
+  };
+}
+
+function decodeBase64(value: string): Uint8Array {
+  const decoded = atob(value);
+  return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
+}
+
+function legacyExportStore(env: Record<string, unknown>): LegacyExportArchiveStore {
+  const bucket = env.FLARY_SESSION_ARCHIVE as SessionArchiveBucket | undefined;
+  const secret =
+    typeof env.FLARY_SESSION_ARCHIVE_KEY === "string" ? env.FLARY_SESSION_ARCHIVE_KEY : undefined;
+  if (!bucket || !secret) {
+    throw new FlaryHostError(
+      503,
+      "legacy_export_unavailable",
+      "The session archive storage is not configured",
+    );
+  }
+  return new LegacyExportArchiveStore({ bucket, secret });
+}
+
+async function verifyLegacyArchiveObjects(
+  env: Record<string, unknown>,
+  manifest: LegacyExportManifest,
+): Promise<void> {
+  const store = legacyExportStore(env);
+  const canonical = await store.get(manifest.canonical.storageKey);
+  if (!canonical) throw new Error("The immutable legacy canonical archive is missing");
+  for (const attachment of manifest.attachments) {
+    const bytes = await store.get(attachment.storageKey);
+    if (!bytes || (await sha256Bytes(bytes)) !== attachment.digest) {
+      throw new LegacyExportAttachmentError(
+        attachment.id,
+        `Archived attachment '${attachment.id}' failed verification`,
+      );
+    }
+  }
+}
+
+interface LegacyExportState {
+  readonly status: "active" | "complete";
+  readonly operationId?: string;
+  readonly manifest?: unknown;
+  readonly previous?: LegacyExportState;
+}
+
+function readLegacyExportState(value: unknown): LegacyExportState | undefined {
+  const state = objectValue(value);
+  if (state.status !== "active" && state.status !== "complete") return undefined;
+  return state as unknown as LegacyExportState;
+}
+
+function isLegacyExportActiveError(error: unknown): boolean {
+  return (
+    error instanceof LegacyExportActiveError ||
+    (error instanceof Error && /active|unsettled|submission is active/i.test(error.message))
+  );
+}
+
+function legacyExportErrorCode(error: unknown): LegacyExportErrorCode {
+  if (error instanceof LegacyExportAttachmentError) return "legacy_export_missing_attachment";
+  if (error instanceof FlaryHostError && error.code === "legacy_export_unavailable") {
+    return "legacy_export_unavailable";
+  }
+  if (error instanceof LegacyExportError) return error.code;
+  if (error instanceof Error && /attachment/i.test(error.message)) {
+    return "legacy_export_missing_attachment";
+  }
+  return "legacy_export_failed";
 }
 
 function objectValue(value: unknown): Record<string, unknown> {

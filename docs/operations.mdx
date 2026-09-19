@@ -15,6 +15,11 @@ Before production:
 - Keep write idempotency keys and block automatic replay of unknown outcomes.
 - Test Worker and Durable Object restart during streams, tools, approvals, and archive sealing.
 - Run `npx flary doctor` after each deployment change.
+- Before 1.1.0, sweep legacy beta.9 threads with explicit IDs only:
+  `npx flary doctor . --app-id my-app --threads-file legacy-thread-ids.txt`. Provide
+  `FLARY_ACCESS_TOKEN` in the environment or `.dev.vars`; the command processes IDs sequentially and
+  reports `exported`, `already_exported`, `active`, and `failed` outcomes. Retry every `active` or
+  `failed` result. Completed archives are immutable and SHA-256 verified.
 
 Use Cloudflare logs and Flary's tenant-scoped usage and audit APIs for operations. Public audit
 views contain hashes, sizes, state, and safe metadata, not secret values.

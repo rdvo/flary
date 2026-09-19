@@ -2,6 +2,22 @@
 
 All notable changes to Flary are documented in this file.
 
+## 1.0.2 - 2026-09-19
+
+### Added
+
+- Added an authenticated, immutable beta.9 legacy export operation and explicit `doctor` export
+  sweep for operator-supplied thread IDs.
+- Added deterministic SHA-256 manifests with read-back verification, attachment inventories, and
+  idempotent retry/conflict handling.
+
+### Migration
+
+- 1.0.2 is an export-sweep bridge. Keep `@flue/runtime-legacy` beta.9 installed and export every
+  idle legacy thread before upgrading to 1.1.0.
+- Active and failed threads must be retried. Archives are immutable and digest-verified; a changed
+  source never overwrites a completed archive.
+
 ## 1.0.1 - 2026-09-01
 
 ### Changed

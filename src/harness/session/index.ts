@@ -10,3 +10,4 @@ export * from "./projector.js";
 export * from "./r2-archive.js";
 export * from "./provider-history.js";
 export * from "./canonical-r2-archive.js";
+export * from "./legacy-export.js";

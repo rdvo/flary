@@ -101,6 +101,9 @@ interface ParsedArgs {
   readonly deploy?: boolean;
   readonly domain?: string;
   readonly mailboxes?: readonly string[];
+  readonly appId?: string;
+  readonly threadIds: readonly string[];
+  readonly threadFile?: string;
   readonly yes: boolean;
   readonly hasNewFlags: boolean;
 }
@@ -202,6 +205,11 @@ Usage:
   flary setup [directory]    Resume setup or change provider and features
   flary deploy [directory]   Build, provision, deploy, and verify
   flary doctor [directory]   Check the local and deployed configuration
+
+Doctor export sweep options:
+  --app-id <application>                    Authenticated application id
+  --thread <thread-id>                      Repeat for each explicit legacy thread
+  --threads-file <file>                     Newline-delimited or JSON thread ids
   flary init [directory]     Add typed Flary files to an existing project
   flary help                 Show this help
 
@@ -238,6 +246,9 @@ function parseArgs(args: readonly string[]): ParsedArgs {
   let deploy: boolean | undefined;
   let domain: string | undefined;
   let mailboxes: string[] | undefined;
+  let appId: string | undefined;
+  const threadIds: string[] = [];
+  let threadFile: string | undefined;
   let yes = false;
   let hasNewFlags = false;
   for (let index = 0; index < rest.length; index += 1) {
@@ -278,6 +289,9 @@ function parseArgs(args: readonly string[]): ParsedArgs {
     else if (value === "--no-deploy") deploy = false;
     else if (value === "--domain") domain = normalizeDomain(take());
     else if (value === "--mailboxes") mailboxes = parseMailboxLocalParts(take());
+    else if (value === "--app-id") appId = take();
+    else if (value === "--thread" || value === "--thread-id") threadIds.push(take());
+    else if (value === "--threads-file") threadFile = take();
     else if (value === "--yes" || value === "-y") yes = true;
     else throw new Error(`Unknown option: ${value}`);
   }
@@ -294,6 +308,9 @@ function parseArgs(args: readonly string[]): ParsedArgs {
     deploy,
     domain,
     mailboxes,
+    appId,
+    threadIds,
+    threadFile,
     yes,
     hasNewFlags,
   };
@@ -1581,6 +1598,7 @@ async function setupProject(
 
 async function doctorProject(
   target: string,
+  parsed: ParsedArgs,
   options: Required<Pick<RunFlaryCliOptions, "env" | "runner" | "log">>,
 ): Promise<void> {
   const checks: Array<[string, boolean, string]> = [];
@@ -1693,9 +1711,112 @@ async function doctorProject(
       checks.push(["Deployed health", Boolean(health?.ok), state.deployedUrl]);
     }
   }
+  if (state) {
+    await appendLegacyExportChecks(target, parsed, state, options.env, checks, options.log);
+  }
   for (const [name, ok, detail] of checks)
     options.log(`${ok ? "PASS" : "FAIL"}  ${name}: ${detail}`);
   if (checks.some(([, ok]) => !ok)) throw new Error("Flary doctor found a problem.");
+}
+
+async function appendLegacyExportChecks(
+  target: string,
+  parsed: ParsedArgs,
+  state: FlaryProjectState,
+  env: NodeJS.ProcessEnv,
+  checks: Array<[string, boolean, string]>,
+  log: (message: string) => void,
+): Promise<void> {
+  if (parsed.threadIds.length === 0 && !parsed.threadFile) return;
+  let threadIds = [...parsed.threadIds].map((value) => value.trim()).filter(Boolean);
+  if (parsed.threadFile) {
+    try {
+      const source = await readFile(resolve(target, parsed.threadFile), "utf8");
+      let parsedJson: unknown;
+      try {
+        parsedJson = JSON.parse(source);
+      } catch {
+        parsedJson = undefined;
+      }
+      const fromJson = Array.isArray(parsedJson)
+        ? parsedJson.filter((value): value is string => typeof value === "string")
+        : undefined;
+      const fromLines = source
+        .split(/\r?\n/)
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0 && !value.startsWith("#"));
+      threadIds.push(...(fromJson ?? fromLines));
+    } catch (error) {
+      checks.push([
+        "Legacy export inputs",
+        false,
+        error instanceof Error ? error.message : "could not read --threads-file",
+      ]);
+      return;
+    }
+  }
+  threadIds = [...new Set(threadIds)];
+  const values = await readKeyValueFile(join(target, ".dev.vars"));
+  const token = env.FLARY_ACCESS_TOKEN ?? values.FLARY_ACCESS_TOKEN;
+  const missing = [
+    !state.deployedUrl ? "deployed URL" : undefined,
+    !parsed.appId ? "--app-id" : undefined,
+    !token ? "FLARY_ACCESS_TOKEN" : undefined,
+  ].filter((value): value is string => Boolean(value));
+  if (missing.length > 0 || threadIds.length === 0) {
+    checks.push([
+      "Legacy export inputs",
+      false,
+      missing.length > 0 ? `missing ${missing.join(", ")}` : "no thread ids were supplied",
+    ]);
+    return;
+  }
+  checks.push(["Legacy export inputs", true, `${threadIds.length} explicit thread ids`]);
+  const counts = { exported: 0, already_exported: 0, active: 0, failed: 0 };
+  for (const threadId of threadIds) {
+    let outcome: keyof typeof counts = "failed";
+    let detail = "request failed";
+    try {
+      const response = await fetch(
+        new URL(
+          `/api/apps/${encodeURIComponent(parsed.appId!)}/threads/${encodeURIComponent(threadId)}/export-legacy`,
+          state.deployedUrl,
+        ),
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${token}`,
+            "content-type": "application/json",
+          },
+          signal: AbortSignal.timeout(60_000),
+        },
+      );
+      const body = (await response.json().catch(() => undefined)) as
+        Record<string, unknown> | undefined;
+      if (
+        response.ok &&
+        (body?.outcome === "exported" ||
+          body?.outcome === "already_exported" ||
+          body?.outcome === "active" ||
+          body?.outcome === "failed")
+      ) {
+        outcome = body.outcome;
+        detail = typeof body.message === "string" ? body.message : "ok";
+      } else {
+        detail = typeof body?.error === "string" ? body.error : `HTTP ${response.status}`;
+      }
+    } catch (error) {
+      detail = error instanceof Error ? error.message : "request failed";
+    }
+    counts[outcome] += 1;
+    log(`EXPORT  ${outcome.padEnd(15)} ${threadId}: ${detail}`);
+  }
+  const retriable = counts.active + counts.failed;
+  checks.push([
+    "Legacy export sweep",
+    retriable === 0,
+    `exported=${counts.exported}, already_exported=${counts.already_exported}, active=${counts.active}, failed=${counts.failed}`,
+  ]);
 }
 
 function doctorBindingProblems(
@@ -1870,6 +1991,8 @@ export async function prepareQuickstartProject(
         packageManager: input.packageManager ?? "npm",
         deploy: false,
         yes: true,
+        appId: undefined,
+        threadIds: [],
         hasNewFlags: true,
         ...(input.accountId ? { account: input.accountId } : {}),
       },
@@ -1972,6 +2095,6 @@ export async function runFlaryCli(
     log(`Deployment ready: ${state.deployedUrl ?? state.workerName}`);
     return;
   }
-  if (parsed.command === "doctor") return doctorProject(target, { env, runner, log });
+  if (parsed.command === "doctor") return doctorProject(target, parsed, { env, runner, log });
   throw new Error(`Unknown Flary command: ${parsed.command}\nRun "flary help" for usage.`);
 }

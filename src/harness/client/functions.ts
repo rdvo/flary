@@ -38,6 +38,7 @@ import type {
   UserInputRecord,
 } from "../contracts/index.js";
 import type { ModelInput, ReasoningEffort } from "../contracts/provider.js";
+import type { LegacyExportResult } from "../session/legacy-export.js";
 
 export interface FlaryFunctionClientOptions {
   readonly baseUrl: string;
@@ -152,6 +153,7 @@ export interface FlaryAgentThreadHandle {
       { jsonl: string; replace?: boolean } | { archive: ThreadPortableArchive; replace?: boolean },
   ): Promise<unknown>;
   export(): ReturnType<FlaryThreadClient["exportSession"]>;
+  legacyExport(): Promise<LegacyExportResult>;
   compact(input?: { reason?: string }): Promise<unknown>;
   rename(title: string): Promise<ThreadBinding>;
   archive(): Promise<void>;
@@ -451,6 +453,7 @@ function makeAgentThreadHandle(
     rollback: (input) => client.rollback(ref, input),
     restore: (input) => client.restore(ref, input),
     export: () => client.exportSession(ref),
+    legacyExport: () => client.legacyExport(ref),
     compact: (input = {}) => client.compact(ref, input),
     rename: (title) => client.rename(ref, title),
     archive: () => client.archive(ref),

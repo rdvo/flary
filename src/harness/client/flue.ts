@@ -61,6 +61,7 @@ import {
   type RealtimeServerFrame,
 } from "../contracts/index.js";
 import { ThreadRefSchema } from "../contracts/tenancy.js";
+import { LegacyExportResultSchema, type LegacyExportResult } from "../session/legacy-export.js";
 import { threadName } from "../storage/scopes.js";
 
 export interface CreateFlaryThreadClientOptions extends Omit<CreateFlueClientOptions, "baseUrl"> {
@@ -689,6 +690,17 @@ export class FlaryThreadClient {
 
   restore(refInput: ThreadRef, input: unknown) {
     return this.control(refInput, "restore", ThreadRestoreRequestSchema.parse(input));
+  }
+
+  async legacyExport(refInput: ThreadRef): Promise<LegacyExportResult> {
+    const ref = ThreadRefSchema.parse(refInput);
+    const value = await this.apiJson(
+      `${this.#apiPath}/apps/${encodeURIComponent(
+        ref.appId,
+      )}/threads/${encodeURIComponent(ref.threadId)}/export-legacy`,
+      { method: "POST" },
+    );
+    return LegacyExportResultSchema.parse(value);
   }
 
   async exportSession(refInput: ThreadRef): Promise<ThreadPortableArchive> {

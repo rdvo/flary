@@ -52,6 +52,7 @@ import type {
 } from "../contracts/connections.js";
 import type { ConnectionSecretInput } from "../contracts/secrets.js";
 import type { ConnectionSecretMetadata } from "../contracts/connections.js";
+import type { LegacyExportResult } from "../session/legacy-export.js";
 
 export const FlaryHostAuthorizationSchema = z
   .object({
@@ -219,6 +220,8 @@ export interface FlaryThreadHostService {
   rollback?(target: FlaryThreadTarget, input: ThreadRollbackRequest): Promise<unknown>;
   restore?(target: FlaryThreadTarget, input: ThreadRestoreRequest): Promise<unknown>;
   exportSession?(target: FlaryThreadTarget): Promise<ThreadPortableArchive>;
+  /** Authenticated, immutable beta.9 export used by the 1.0.2 bridge sweep. */
+  legacyExport?(target: FlaryThreadTarget): Promise<LegacyExportResult>;
   setGoal?(target: FlaryThreadTarget, input: ThreadGoalRequest): Promise<unknown>;
   clearGoal?(target: FlaryThreadTarget): Promise<unknown>;
   turns?(target: FlaryThreadTarget, input: ThreadRecordListRequest): Promise<readonly unknown[]>;
@@ -319,3 +322,5 @@ export type {
   ThreadRollbackRequest,
   ThreadRef,
 };
+
+export type { LegacyExportResult };

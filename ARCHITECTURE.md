@@ -42,6 +42,21 @@ functions should accept named domain types after parsing.
 The event log is the transcript authority. Derived views, telemetry, and history indexes must not
 become a second transcript source.
 
+## Legacy export bridge
+
+The 1.0.2 bridge uses the authenticated per-thread host route to call the installed beta.9
+`exportCanonical()` operation. A Durable Object-local export state fences Flary admissions while
+that operation runs; beta.9 also refuses export when a submission is unsettled. The resulting
+archive stores ordered `flue-canonical` v1 batch boundaries and all canonical record identity, plus
+every conservatively discovered `{ type: "attachment", attachment: ... }` reference and its verified
+bytes/chunk digests. Its SHA-256 input excludes timestamps and storage keys, and the completion
+marker is written only after encrypted R2 object read-back succeeds. Completed archives are
+immutable: equal source digests retry idempotently, while changed source digests conflict.
+
+Operators supply explicit legacy thread IDs to `flary doctor`; no unauthenticated project-wide
+thread enumeration is added. Every idle legacy thread must be exported before 1.1.0, and active or
+failed results must be retried.
+
 ## Repository directories
 
 - `src`: published runtime and client source.

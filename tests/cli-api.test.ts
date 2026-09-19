@@ -574,3 +574,97 @@ test("deployment URL recognizes a Wrangler custom domain", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("doctor aggregates explicit legacy export outcomes sequentially", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "flary-cli-export-sweep-"));
+  const target = path.join(root, "project");
+  const logs: string[] = [];
+  const originalFetch = globalThis.fetch;
+  try {
+    await mkdir(path.join(target, ".flary"), { recursive: true });
+    await mkdir(path.join(target, "dist"), { recursive: true });
+    await mkdir(path.join(target, "node_modules", ".bin"), { recursive: true });
+    await writeFile(path.join(target, "node_modules", ".bin", "wrangler"), "");
+    await writeFile(path.join(target, "wrangler.jsonc"), "{}");
+    await writeFile(
+      path.join(target, ".flary", "project.json"),
+      JSON.stringify({
+        version: 1,
+        template: "backend",
+        provider: "none",
+        features: [],
+        packageManager: "npm",
+        workerName: "export-sweep",
+        accountId: "account_1",
+        deployedUrl: "https://example.test",
+        requiredSecrets: [],
+      }),
+    );
+    await writeFile(
+      path.join(target, "dist", "flary.wrangler.json"),
+      JSON.stringify({
+        durable_objects: {
+          bindings: [
+            { name: "FLARY_RUN_SERVICE" },
+            { name: "FLARY_THREAD_CONTROL" },
+            { name: "FLARY_WORKSPACE" },
+          ],
+        },
+        d1_databases: [{ binding: "FLARY_THREAD_CATALOG" }],
+        r2_buckets: [{ binding: "FLARY_SESSION_ARCHIVE" }, { binding: "WORKSPACE_BLOBS" }],
+        queues: { producers: [{ binding: "FLARY_SESSION_PROJECTION_QUEUE" }] },
+      }),
+    );
+    await writeFile(
+      path.join(target, ".dev.vars"),
+      `FLARY_ACCESS_TOKEN=${JSON.stringify("token")}
+`,
+    );
+    const outcomes = ["exported", "already_exported", "active", "failed"];
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      if (url.endsWith("/health")) return new Response("ok", { status: 200 });
+      const outcome = outcomes.shift() ?? "failed";
+      return new Response(
+        JSON.stringify({ outcome, threadId: url.split("/").at(-2), message: outcome }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      );
+    };
+    const runner: CommandRunner = {
+      async run(command, args) {
+        if (args.includes("whoami")) return { code: 0, stdout: '{"accounts":[]}', stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      },
+    };
+    await assert.rejects(
+      runFlaryCli(
+        [
+          "doctor",
+          target,
+          "--app-id",
+          "app_1",
+          "--thread",
+          "thread_exported",
+          "--thread",
+          "thread_existing",
+          "--thread",
+          "thread_active",
+          "--thread",
+          "thread_failed",
+        ],
+        { env: {}, runner, log: (message) => logs.push(message) },
+      ),
+      /Flary doctor found a problem/,
+    );
+    assert.ok(logs.some((message) => message.includes("exported")));
+    assert.ok(logs.some((message) => message.includes("already_exported")));
+    assert.ok(logs.some((message) => message.includes("active")));
+    assert.ok(logs.some((message) => message.includes("failed")));
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(root, { recursive: true, force: true });
+  }
+});
