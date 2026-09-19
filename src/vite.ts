@@ -970,12 +970,6 @@ function patchGeneratedFlueInternalRoutes(
   const entry = path.join(root, ".flue-vite", "_entry.ts");
   if (!fs.existsSync(entry)) return;
   let source = fs.readFileSync(entry, "utf8");
-  if (
-    source.includes("export-attachment") &&
-    !source.includes("function encodeFlaryAttachmentBase64")
-  ) {
-    source = `${GENERATED_WORKER_BASE64_HELPER}\n${source}`;
-  }
   for (const functionEntry of functions) {
     const kind = functionEntry.mode === "run" ? "workflow" : "agent";
     const variable = new RegExp(
@@ -1001,6 +995,12 @@ function patchGeneratedFlueInternalRoutes(
         "cloudflareAgents.rollback(this, body.turnId, body.reason)",
         "cloudflareAgents.rollback(this, body.turnId, body.reason, body.excludeTarget === true)",
       );
+  }
+  if (
+    source.includes("export-attachment") &&
+    !source.includes("function encodeFlaryAttachmentBase64")
+  ) {
+    source = `${GENERATED_WORKER_BASE64_HELPER}\n${source}`;
   }
   fs.writeFileSync(entry, source, "utf8");
 }

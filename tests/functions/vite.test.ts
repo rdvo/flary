@@ -434,7 +434,16 @@ test("the Vite plugin generates Flue Durable Object entry and bindings", (t) => 
   assert.match(generatedEntry, /cloudflareAgents\.compact\(this\)/);
   assert.match(generatedEntry, /cloudflareAgents\.rollback\(this/);
   assert.match(generatedEntry, /export-attachment/);
-  assert.match(generatedEntry, /encodeFlaryAttachmentBase64/);
+  assert.match(generatedEntry, /function encodeFlaryAttachmentBase64\(value\)/);
+  assert.equal(
+    (generatedEntry.match(/function encodeFlaryAttachmentBase64\(value\)/g) ?? []).length,
+    1,
+  );
+  assert.match(
+    generatedEntry,
+    /function encodeFlaryAttachmentBase64\(value\)[\s\S]*?flaryAction === 'export-attachment'/,
+  );
+  assert.match(generatedEntry, /const sliceSize = 0x6000/);
   assert.doesNotMatch(generatedEntry, /index \+= 0x8000/);
   assert.match(generatedEntry, /flaryAction === 'delete'/);
   assert.match(generatedEntry, /await this\.destroy\(\)/);

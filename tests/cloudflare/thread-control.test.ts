@@ -1976,6 +1976,197 @@ test("legacy export fence rejects an unsettled admission and a held lease atomic
   });
   assert.equal(blockedAdmission.ok, false);
   assert.match(String((await blockedAdmission.json()).error), /being exported/i);
+
+  const replayDuringExport = await call({
+    method: "admitTurn",
+    tenantId: "tenant_export_fence",
+    applicationId: "coder",
+    admissionId: "pending_submission",
+  });
+  assert.equal(replayDuringExport.ok, false);
+  assert.match(String((await replayDuringExport.json()).error), /being exported/i);
+});
+
+test("a failed service send cannot replay through an active export lease", async () => {
+  const controls = namespace();
+  let providerAdmissions = 0;
+  const engine = {
+    idFromName(name: string) {
+      return name;
+    },
+    get() {
+      return {
+        async fetch(request: Request) {
+          if (request.method !== "POST") return Response.json([]);
+          providerAdmissions += 1;
+          return Response.json({ error: { message: "provider unavailable" } }, { status: 503 });
+        },
+      };
+    },
+  };
+  const env = { FLARY_THREAD_CONTROL: controls, FLUE_CODER_AGENT: engine };
+  const service = createCloudflareThreadService({ env, namespace: controls });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_failed_retry",
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  const binding = await service.create(scope, {
+    threadId: "thread_failed_retry",
+    agentId: "coder",
+    workspace: {
+      organizationId: "tenant_failed_retry",
+      appId: "coder",
+      projectId: "project",
+      workspaceId: "workspace",
+      branch: "main",
+    },
+    model: { provider: "openai", model: "gpt-5.6-luna" },
+  });
+  const target = { ...scope, threadId: binding.thread.threadId };
+  await assert.rejects(
+    service.submit(target, { message: "hello", idempotencyKey: "failed_retry" }),
+    /provider unavailable|direct submission failed/i,
+  );
+  const name = "thread:tenant_failed_retry:coder:thread_failed_retry";
+  const control = controls.get(controls.idFromName(name));
+  const begin = await control.fetch(
+    new Request("https://flary.internal/export", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "legacyExportBegin",
+        tenantId: "tenant_failed_retry",
+        applicationId: "coder",
+        operationId: "export_retry",
+      }),
+    }),
+  );
+  assert.equal(begin.ok, true, await begin.text());
+  const replay = await control.fetch(
+    new Request("https://flary.internal/export", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "admitTurn",
+        tenantId: "tenant_failed_retry",
+        applicationId: "coder",
+        admissionId: "failed_retry",
+      }),
+    }),
+  );
+  assert.equal(replay.ok, false);
+  assert.match(String((await replay.json()).error), /being exported/i);
+  assert.equal(providerAdmissions, 1);
+});
+
+test("a failed realtime send rechecks the export lease before retrying", async () => {
+  const controls = namespace();
+  let providerAdmissions = 0;
+  const engine = {
+    idFromName(name: string) {
+      return name;
+    },
+    get() {
+      return {
+        async fetch(request: Request) {
+          if (request.method !== "POST") return Response.json([]);
+          providerAdmissions += 1;
+          return Response.json({ error: { message: "provider unavailable" } }, { status: 503 });
+        },
+      };
+    },
+  };
+  const env = { FLARY_THREAD_CONTROL: controls, FLUE_CODER_AGENT: engine };
+  const service = createCloudflareThreadService({ env, namespace: controls });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_realtime_retry",
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  await service.create(scope, {
+    threadId: "thread_realtime_retry",
+    agentId: "coder",
+    workspace: {
+      organizationId: "tenant_realtime_retry",
+      appId: "coder",
+      projectId: "project",
+      workspaceId: "workspace",
+      branch: "main",
+    },
+    model: { provider: "openai", model: "gpt-5.6-luna" },
+  });
+  const name = "thread:tenant_realtime_retry:coder:thread_realtime_retry";
+  const storage = controls.stores.get(name)!;
+  let attachment: Record<string, unknown> = {
+    tenantId: "tenant_realtime_retry",
+    applicationId: "coder",
+    threadId: "thread_realtime_retry",
+    includeChildren: false,
+    actor: { id: "user", kind: "user" },
+    sent: 0,
+    acknowledged: 0,
+  };
+  const sent: Array<Record<string, unknown>> = [];
+  const socket = {
+    send(value: string) {
+      sent.push(JSON.parse(value));
+    },
+    close() {},
+    serializeAttachment(value: unknown) {
+      attachment = value as Record<string, unknown>;
+    },
+    deserializeAttachment() {
+      return attachment;
+    },
+  };
+  const message = JSON.stringify({
+    version: 1,
+    type: "command",
+    requestId: "request_retry",
+    idempotencyKey: "realtime_retry",
+    command: "send",
+    input: { message: "hello" },
+  });
+  const execution = { waitUntil() {} };
+  await handleFlaryThreadControlWebSocketMessage({
+    storage,
+    env,
+    socket,
+    message,
+    execution,
+  });
+  const control = controls.get(controls.idFromName(name));
+  const begin = await control.fetch(
+    new Request("https://flary.internal/export", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "legacyExportBegin",
+        tenantId: "tenant_realtime_retry",
+        applicationId: "coder",
+        operationId: "export_realtime_retry",
+      }),
+    }),
+  );
+  assert.equal(begin.ok, true, await begin.text());
+  await handleFlaryThreadControlWebSocketMessage({
+    storage,
+    env,
+    socket,
+    message,
+    execution,
+  });
+  assert.equal(providerAdmissions, 1);
+  assert.deepEqual(
+    sent.filter((frame) => frame.type === "accepted").map((frame) => frame.duplicate),
+    [false, true],
+  );
+  assert.equal(sent.filter((frame) => frame.type === "error").length, 2);
 });
 
 test("legacy export retry detects corrupt manifests and missing attachment objects", async () => {

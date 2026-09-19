@@ -70,7 +70,7 @@ import {
   type LegacyExportManifest,
   type LegacyExportResult,
 } from "../session/index.js";
-import type { FlueAdmission, FlueAgentGateway } from "../flue/service.js";
+import { FlueAdmissionSchema, type FlueAdmission, type FlueAgentGateway } from "../flue/service.js";
 import { FlaryHostError } from "../host/errors.js";
 import { redactErrorMessage, redactText } from "../execution/redaction.js";
 import { assertPublicBrowserUrl, browserStateObjectKey } from "../functions/browser.js";
@@ -769,10 +769,15 @@ export function createCloudflareThreadService<TEnv extends Record<string, unknow
       });
       const pin = ResolvedModelPinSchema.parse(pinnedValue.pin);
       const segmentId = String(pinnedValue.segmentId ?? `segment_${admissionId}`);
-      await rpc(controlName(target), "admitTurn", {
-        ...ownership(target),
-        admissionId,
-      });
+      const admitted = objectValue(
+        await rpc(controlName(target), "admitTurn", {
+          ...ownership(target),
+          admissionId,
+        }),
+      );
+      if (admitted.send === false && admitted.admission) {
+        return FlueAdmissionSchema.parse(admitted.admission);
+      }
       if (input.mode === "steer") {
         // Keep the interrupted turn visible before admitting its replacement.
         // The Flue abort is asynchronous, so the ledger records the durable
@@ -1548,12 +1553,17 @@ async function dispatchThreadControl(
         ? (body.error as Record<string, unknown>)
         : undefined;
     const result = error ? undefined : body.result;
+    const accepted = !error || realtimeCommandRuntimeAccepted(sql, idempotencyKey);
     sql.exec(
       `UPDATE flary_realtime_commands
        SET status = ?, result_json = ?, updated_at = ?
        WHERE idempotency_key = ?`,
-      error ? "failed" : "completed",
-      JSON.stringify(error ? { error } : { result }),
+      error && !accepted ? "pending" : error ? "failed" : "completed",
+      JSON.stringify(
+        error
+          ? { error, ...(accepted ? { accepted: true } : { retryable: true }) }
+          : { result, accepted: true },
+      ),
       new Date().toISOString(),
       idempotencyKey,
     );
@@ -2233,8 +2243,19 @@ async function dispatchThreadControl(
           admissionId,
         )
         .toArray()[0];
-      if (existing) return { admitted: true as const, replay: true as const };
-      assertLegacyExportAdmissionOpen(sql);
+      if (existing) {
+        const tracked = trackedAdmissionForId(sql, admissionId);
+        if (tracked) {
+          return {
+            admitted: true as const,
+            replay: true as const,
+            send: false as const,
+            admission: tracked.admission,
+          };
+        }
+        rearmLegacyExportSubmission(sql, admissionId);
+        return { admitted: true as const, replay: true as const, send: true as const };
+      }
       const now = new Date().toISOString();
       sql.exec(
         `INSERT INTO flary_interactive_admissions
@@ -2242,15 +2263,10 @@ async function dispatchThreadControl(
         admissionId,
         now,
       );
-      sql.exec(
-        `INSERT INTO flary_legacy_export_submissions
-          (admission_id, admitted_at, settled_at) VALUES (?, ?, NULL)`,
-        admissionId,
-        now,
-      );
-      return { admitted: true as const, replay: false as const };
+      rearmLegacyExportSubmission(sql, admissionId);
+      return { admitted: true as const, replay: false as const, send: true as const };
     });
-    if (admitted.replay) return admitted;
+    if (admitted.replay && admitted.send === false) return admitted;
     try {
       await reserveRootInteractiveUsage(sql, host?.env, binding, {
         reservationId: `turn_${admissionId}`,
@@ -2699,7 +2715,6 @@ export async function handleFlaryThreadControlAlarm(input: {
         deferredExportLeaseUntil = Date.parse(exportState?.leaseUntil ?? "");
         return false;
       }
-      assertLegacyExportAdmissionOpen(storage.sql);
       const nextRunAt = nextScheduleTime(schedule, scheduledFor);
       storage.sql.exec(
         `INSERT INTO flary_thread_schedule_runs
@@ -2710,12 +2725,7 @@ export async function handleFlaryThreadControlAlarm(input: {
         new Date().toISOString(),
         new Date().toISOString(),
       );
-      storage.sql.exec(
-        `INSERT INTO flary_legacy_export_submissions
-          (admission_id, admitted_at, settled_at) VALUES (?, ?, NULL)`,
-        admissionId,
-        new Date().toISOString(),
-      );
+      rearmLegacyExportSubmission(storage.sql, admissionId);
       storage.sql.exec(
         `UPDATE flary_thread_schedules
          SET next_run_at = ?, enabled = ?, updated_at = ?
@@ -2739,6 +2749,7 @@ export async function handleFlaryThreadControlAlarm(input: {
         runtimeAgentId(binding),
         threadName(binding.thread),
         String(schedule.message ?? ""),
+        { idempotencyKey: admissionId },
       );
       storage.sql.exec(
         `UPDATE flary_thread_schedule_runs
@@ -2951,54 +2962,69 @@ export async function handleFlaryThreadControlWebSocketMessage(input: {
       frame.idempotencyKey,
     )
     .toArray()[0];
+  let retrying = false;
   if (existing) {
-    input.socket.send(
-      JSON.stringify({
-        version: 1,
-        type: "accepted",
-        requestId: frame.requestId,
-        duplicate: true,
-      } satisfies RealtimeServerFrame),
-    );
-    if (existing.result_json) {
-      const stored = objectValue(JSON.parse(existing.result_json));
-      input.socket.send(
-        JSON.stringify(
-          stored.error
-            ? {
-                version: 1,
-                type: "error",
-                requestId: frame.requestId,
-                code: String(objectValue(stored.error).code ?? "command_failed"),
-                message: String(objectValue(stored.error).message ?? "The realtime command failed"),
-              }
-            : {
-                version: 1,
-                type: "result",
-                requestId: frame.requestId,
-                result: stored.result,
-              },
-        ),
+    const stored = existing.result_json ? objectValue(JSON.parse(existing.result_json)) : {};
+    if (stored.retryable === true) {
+      storage.sql.exec(
+        `UPDATE flary_realtime_commands
+         SET status = 'pending', result_json = NULL, updated_at = ?
+         WHERE idempotency_key = ?`,
+        now,
+        frame.idempotencyKey,
       );
+      retrying = true;
+    } else {
+      input.socket.send(
+        JSON.stringify({
+          version: 1,
+          type: "accepted",
+          requestId: frame.requestId,
+          duplicate: true,
+        } satisfies RealtimeServerFrame),
+      );
+      if (existing.result_json) {
+        input.socket.send(
+          JSON.stringify(
+            stored.error
+              ? {
+                  version: 1,
+                  type: "error",
+                  requestId: frame.requestId,
+                  code: String(objectValue(stored.error).code ?? "command_failed"),
+                  message: String(
+                    objectValue(stored.error).message ?? "The realtime command failed",
+                  ),
+                }
+              : {
+                  version: 1,
+                  type: "result",
+                  requestId: frame.requestId,
+                  result: stored.result,
+                },
+          ),
+        );
+      }
+      return;
     }
-    return;
+  } else {
+    storage.sql.exec(
+      `INSERT INTO flary_realtime_commands
+        (idempotency_key, request_id, command, status, result_json, created_at, updated_at)
+       VALUES (?, ?, ?, 'pending', NULL, ?, ?)`,
+      frame.idempotencyKey,
+      frame.requestId,
+      frame.command,
+      now,
+      now,
+    );
   }
-  storage.sql.exec(
-    `INSERT INTO flary_realtime_commands
-      (idempotency_key, request_id, command, status, result_json, created_at, updated_at)
-     VALUES (?, ?, ?, 'pending', NULL, ?, ?)`,
-    frame.idempotencyKey,
-    frame.requestId,
-    frame.command,
-    now,
-    now,
-  );
   input.socket.send(
     JSON.stringify({
       version: 1,
       type: "accepted",
       requestId: frame.requestId,
-      duplicate: false,
+      duplicate: retrying,
     } satisfies RealtimeServerFrame),
   );
   if ((frame.command === "send" || frame.command === "steer") && input.execution) {
@@ -3138,21 +3164,26 @@ async function submitRealtimeMessageDirect(input: {
   );
   const pin = ResolvedModelPinSchema.parse(pinnedValue.pin);
   const segmentId = String(pinnedValue.segmentId ?? `segment_${admissionId}`);
-  await dispatchThreadControl(
-    input.sql,
-    "admitTurn",
-    {
-      tenantId: input.attachment.tenantId,
-      applicationId: input.attachment.applicationId,
-      admissionId,
-    },
-    {
-      env: input.env,
-      execution: input.execution,
-      storage: input.storage,
-      webSockets: input.webSockets,
-    },
+  const admitted = objectValue(
+    await dispatchThreadControl(
+      input.sql,
+      "admitTurn",
+      {
+        tenantId: input.attachment.tenantId,
+        applicationId: input.attachment.applicationId,
+        admissionId,
+      },
+      {
+        env: input.env,
+        execution: input.execution,
+        storage: input.storage,
+        webSockets: input.webSockets,
+      },
+    ),
   );
+  if (admitted.send === false && admitted.admission) {
+    return FlueAdmissionSchema.parse(admitted.admission);
+  }
   const gateway = createCloudflareFlueGateway(input.env, {
     token:
       typeof input.env.FLARY_INTERNAL_TOKEN === "string"
@@ -3294,16 +3325,35 @@ function realtimeAttachment(socket: ThreadControlWebSocket): RealtimeSocketAttac
   return value as RealtimeSocketAttachment;
 }
 
+function realtimeCommandRuntimeAccepted(
+  sql: ThreadControlStorage["sql"],
+  idempotencyKey: string,
+): boolean {
+  const unsettled = sql
+    .exec<{ admission_id: string }>(
+      `SELECT admission_id FROM flary_legacy_export_submissions
+       WHERE admission_id = ? AND settled_at IS NULL`,
+      idempotencyKey,
+    )
+    .toArray()[0];
+  return Boolean(unsettled || trackedAdmissionForId(sql, idempotencyKey));
+}
+
 async function storeRealtimeCommandFailure(
   sql: ThreadControlStorage["sql"],
   frame: Extract<RealtimeClientFrame, { type: "command" }>,
   code: string,
   message: string,
 ): Promise<void> {
+  const accepted = realtimeCommandRuntimeAccepted(sql, frame.idempotencyKey);
   sql.exec(
-    `UPDATE flary_realtime_commands SET status = 'failed', result_json = ?, updated_at = ?
+    `UPDATE flary_realtime_commands SET status = ?, result_json = ?, updated_at = ?
      WHERE idempotency_key = ?`,
-    JSON.stringify({ error: { code, message } }),
+    accepted ? "failed" : "pending",
+    JSON.stringify({
+      error: { code, message },
+      ...(accepted ? { accepted: true } : { retryable: true }),
+    }),
     new Date().toISOString(),
     frame.idempotencyKey,
   );
@@ -6109,6 +6159,48 @@ function clearExpiredLegacyExportLease(
   const previous = completedLegacyExportState(state);
   if (previous) put(sql, "legacy-export", previous);
   else sql.exec("DELETE FROM flary_thread_control WHERE key = ?", "legacy-export");
+}
+
+interface TrackedAdmission {
+  readonly admission: FlueAdmission;
+  readonly status: string;
+}
+
+function trackedAdmissionForId(
+  sql: ThreadControlStorage["sql"],
+  admissionId: string,
+): TrackedAdmission | undefined {
+  const rows = sql
+    .exec<{ value_json: string }>(
+      "SELECT value_json FROM flary_thread_control WHERE key LIKE 'projection:%'",
+    )
+    .toArray();
+  for (const row of rows) {
+    const projection = objectValue(JSON.parse(row.value_json));
+    if (projection.admissionId !== admissionId) continue;
+    const admission = FlueAdmissionSchema.safeParse(projection.admission);
+    if (admission.success && typeof projection.status === "string") {
+      return { admission: admission.data, status: projection.status };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Atomically join or rejoin the export fence immediately before a runtime
+ * send. A settled row means the previous attempt failed before Flue accepted
+ * it; re-arming it makes an ID retry subject to the same lease check.
+ */
+function rearmLegacyExportSubmission(sql: ThreadControlStorage["sql"], admissionId: string): void {
+  assertLegacyExportAdmissionOpen(sql);
+  const now = new Date().toISOString();
+  sql.exec(
+    `INSERT INTO flary_legacy_export_submissions
+      (admission_id, admitted_at, settled_at) VALUES (?, ?, NULL)
+     ON CONFLICT(admission_id) DO UPDATE SET settled_at = NULL`,
+    admissionId,
+    now,
+  );
 }
 
 /**
