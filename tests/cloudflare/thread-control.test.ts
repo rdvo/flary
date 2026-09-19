@@ -244,6 +244,370 @@ async function terminalReplayFixture(outcome: TerminalOutcome, suffix: string) {
   };
 }
 
+async function exportFenceFixture(suffix: string) {
+  const controls = namespace();
+  const service = createCloudflareThreadService({ env: {}, namespace: controls });
+  const scope = {
+    authorization: {
+      organizationId: `tenant_fence_${suffix}`,
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  await service.create(scope, {
+    threadId: `thread_fence_${suffix}`,
+    agentId: "coder",
+    workspace: {
+      organizationId: scope.authorization.organizationId,
+      appId: scope.appId,
+      projectId: "project",
+      workspaceId: `workspace_${suffix}`,
+      branch: "main",
+    },
+  });
+  const rootThreadId = `thread_fence_${suffix}`;
+  const rootName = `thread:${scope.authorization.organizationId}:${scope.appId}:${rootThreadId}`;
+  const storage = controls.stores.get(rootName)!;
+  const call = async (body: Record<string, unknown>, targetStorage = storage) => {
+    const response = await handleFlaryThreadControlObjectRequest({
+      storage: targetStorage,
+      env: { FLARY_THREAD_CONTROL: controls },
+      request: new Request("https://flary.internal/subagent-fence", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          tenantId: scope.authorization.organizationId,
+          applicationId: scope.appId,
+          ...body,
+        }),
+      }),
+    });
+    const value = await response.json();
+    return {
+      ...(value && typeof value === "object" ? value : {}),
+      ok: response.ok,
+    } as Record<string, any>;
+  };
+  const spawned = await call({
+    method: "subagent",
+    action: "spawn",
+    input: {
+      requestId: `spawn_${suffix}`,
+      parentThreadId: rootThreadId,
+      agentId: "coder",
+      task: "Review the change.",
+      seedTurns: 0,
+    },
+  });
+  const childId = String(spawned.thread.threadId);
+  const admissionId = `subagent_${childId}`;
+  await call({ method: "admitTurn", admissionId });
+  return { controls, service, scope, storage, rootThreadId, childId, admissionId, call };
+}
+
+test("parent export stays blocked while a child is active and opens after completion", async () => {
+  const fixture = await exportFenceFixture("complete");
+  const blocked = await fixture.call({
+    method: "legacyExportBegin",
+    operationId: "export_active",
+  });
+  assert.equal(blocked.ok, false);
+  assert.match(String(blocked.error), /unsettled submission/i);
+
+  await fixture.call({
+    method: "subagent",
+    action: "complete",
+    input: {
+      requestId: "complete_child",
+      idempotencyKey: "complete_child",
+      threadId: fixture.childId,
+      output: { summary: "done" },
+    },
+  });
+  const opened = await fixture.call({
+    method: "legacyExportBegin",
+    operationId: "export_after_complete",
+  });
+  assert.equal(opened.started, true);
+});
+
+test("parent export opens after terminal child failure or cancellation", async () => {
+  for (const action of ["fail", "cancel"] as const) {
+    const fixture = await exportFenceFixture(action);
+    await fixture.call({
+      method: "subagent",
+      action,
+      input: {
+        requestId: `${action}_child`,
+        idempotencyKey: `${action}_child`,
+        threadId: fixture.childId,
+        ...(action === "fail"
+          ? { error: { code: "provider_failed", message: "provider failed", retryable: true } }
+          : {}),
+      },
+    });
+    const opened = await fixture.call({
+      method: "legacyExportBegin",
+      operationId: `export_after_${action}`,
+    });
+    assert.equal(opened.started, true);
+  }
+});
+
+test("pre-acceptance child failure settles its parent fence", async () => {
+  const controls = namespace();
+  const engine = {
+    idFromName(name: string) {
+      return name;
+    },
+    get() {
+      return {
+        async fetch(request: Request) {
+          if (request.method === "POST") {
+            return Response.json({ error: { message: "provider unavailable" } }, { status: 503 });
+          }
+          return Response.json([]);
+        },
+      };
+    },
+  };
+  const env = { FLARY_THREAD_CONTROL: controls, FLUE_CODER_AGENT: engine };
+  const service = createCloudflareThreadService({ env, namespace: controls });
+  const scope = {
+    authorization: {
+      organizationId: "tenant_fence_spawn_failure",
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  await service.create(scope, {
+    threadId: "thread_fence_spawn_failure",
+    agentId: "coder",
+    workspace: {
+      organizationId: scope.authorization.organizationId,
+      appId: scope.appId,
+      projectId: "project",
+      workspaceId: "workspace",
+      branch: "main",
+    },
+  });
+  const target = { ...scope, threadId: "thread_fence_spawn_failure" };
+  await assert.rejects(
+    service.subagentAction!(target, "spawn", {
+      requestId: "spawn_provider_failure",
+      parentThreadId: target.threadId,
+      agentId: "coder",
+      task: "This admission fails before active work.",
+    }),
+    /provider unavailable|direct submission failed/i,
+  );
+  const storage = controls.stores.get(
+    "thread:tenant_fence_spawn_failure:coder:thread_fence_spawn_failure",
+  )!;
+  const opened = await handleFlaryThreadControlObjectRequest({
+    storage,
+    request: new Request("https://flary.internal/export", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "legacyExportBegin",
+        tenantId: scope.authorization.organizationId,
+        applicationId: scope.appId,
+        operationId: "export_after_spawn_failure",
+      }),
+    }),
+  });
+  assert.equal(opened.ok, true, await opened.text());
+});
+
+test("nested child settles only the immediate parent's fence", async () => {
+  const fixture = await exportFenceFixture("nested");
+  const parentId = fixture.childId;
+  const parentScope = fixture.scope;
+  await fixture.service.create(parentScope, {
+    threadId: parentId,
+    agentId: "coder",
+    workspace: {
+      organizationId: parentScope.authorization.organizationId,
+      appId: parentScope.appId,
+      projectId: "project",
+      workspaceId: "nested_parent_workspace",
+      branch: "main",
+    },
+    metadata: {
+      flarySubagentRootThreadId: fixture.rootThreadId,
+      flarySubagentParentThreadId: fixture.rootThreadId,
+      subagent: true,
+    },
+  });
+  const parentStorage = fixture.controls.stores.get(
+    `thread:${parentScope.authorization.organizationId}:${parentScope.appId}:${parentId}`,
+  )!;
+  const nested = await fixture.call({
+    method: "subagent",
+    action: "spawn",
+    input: {
+      requestId: "spawn_nested",
+      parentThreadId: parentId,
+      agentId: "coder",
+      task: "Review the nested change.",
+      seedTurns: 0,
+      metadata: {
+        flarySubagentParentExportFenceOwnerThreadId: parentId,
+      },
+    },
+  });
+  const nestedId = String(nested.thread.threadId);
+  const nestedAdmissionId = `subagent_${nestedId}`;
+  await fixture.call({ method: "admitTurn", admissionId: nestedAdmissionId }, parentStorage);
+  await fixture.call({ method: "admitTurn", admissionId: "root_sibling" });
+  await fixture.call({
+    method: "subagent",
+    action: "complete",
+    input: {
+      requestId: "complete_nested",
+      idempotencyKey: "complete_nested",
+      threadId: nestedId,
+      output: { summary: "nested done" },
+    },
+  });
+
+  const parentExport = await fixture.call(
+    { method: "legacyExportBegin", operationId: "parent_export_after_nested" },
+    parentStorage,
+  );
+  assert.equal(parentExport.started, true);
+  const rootExport = await fixture.call({
+    method: "legacyExportBegin",
+    operationId: "root_export_with_sibling",
+  });
+  assert.equal(rootExport.ok, false);
+  assert.match(String(rootExport.error), /unsettled submission/i);
+});
+
+test("duplicate and out-of-order terminal updates settle the same fence idempotently", async () => {
+  const fixture = await exportFenceFixture("duplicate");
+  await fixture.call({
+    method: "subagent",
+    action: "complete",
+    input: {
+      requestId: "complete_first",
+      idempotencyKey: "complete_first",
+      threadId: fixture.childId,
+      output: { summary: "done" },
+    },
+  });
+  await fixture.call({
+    method: "subagent",
+    action: "fail",
+    input: {
+      requestId: "fail_late",
+      idempotencyKey: "fail_late",
+      threadId: fixture.childId,
+      error: { code: "late_failure", message: "late", retryable: true },
+    },
+  });
+  const row = fixture.storage.sql
+    .exec<{ settled_at: string | null }>(
+      "SELECT settled_at FROM flary_legacy_export_submissions WHERE admission_id = ?",
+      fixture.admissionId,
+    )
+    .toArray()[0];
+  assert.ok(row?.settled_at);
+});
+
+test("out-of-order terminal notifications cannot settle a newer child attempt", async () => {
+  const fixture = await exportFenceFixture("attempt_identity");
+  const firstAttempt = "attempt_one";
+  const secondAttempt = "attempt_two";
+  await fixture.call({
+    method: "admitTurn",
+    admissionId: fixture.admissionId,
+    subagentChildThreadId: fixture.childId,
+    subagentFenceAttemptToken: firstAttempt,
+  });
+  await fixture.call({
+    method: "legacyExportSubmissionSettle",
+    admissionId: fixture.admissionId,
+    subagentChildThreadId: fixture.childId,
+    subagentFenceAttemptToken: firstAttempt,
+    subagentSubmissionId: "submission_one",
+  });
+  await fixture.call({
+    method: "admitTurn",
+    admissionId: fixture.admissionId,
+    subagentChildThreadId: fixture.childId,
+    subagentFenceAttemptToken: secondAttempt,
+  });
+  await fixture.call({
+    method: "legacyExportSubmissionSettle",
+    admissionId: fixture.admissionId,
+    subagentChildThreadId: fixture.childId,
+    subagentFenceAttemptToken: firstAttempt,
+    subagentSubmissionId: "submission_one",
+  });
+  const pending = fixture.storage.sql
+    .exec<{ settled_at: string | null }>(
+      "SELECT settled_at FROM flary_legacy_export_submissions WHERE admission_id = ?",
+      fixture.admissionId,
+    )
+    .toArray()[0];
+  assert.equal(pending?.settled_at, null);
+  await fixture.call({
+    method: "legacyExportSubmissionSettle",
+    admissionId: fixture.admissionId,
+    subagentChildThreadId: fixture.childId,
+    subagentFenceAttemptToken: secondAttempt,
+    subagentSubmissionId: "submission_two",
+  });
+  const settled = fixture.storage.sql
+    .exec<{ settled_at: string | null }>(
+      "SELECT settled_at FROM flary_legacy_export_submissions WHERE admission_id = ?",
+      fixture.admissionId,
+    )
+    .toArray()[0];
+  assert.ok(settled?.settled_at);
+});
+
+test("retrying a pre-acceptance spawn rechecks the parent export lease", async () => {
+  const fixture = await exportFenceFixture("retry");
+  await fixture.call({
+    method: "subagent",
+    action: "complete",
+    input: {
+      requestId: "complete_retry_fixture",
+      idempotencyKey: "complete_retry_fixture",
+      threadId: fixture.childId,
+      output: { summary: "fixture complete" },
+    },
+  });
+  const firstExport = await fixture.call({
+    method: "legacyExportBegin",
+    operationId: "export_blocks_first_admission",
+  });
+  assert.equal(firstExport.started, true);
+  const blocked = await fixture.call({
+    method: "admitTurn",
+    admissionId: "pre_acceptance_retry",
+  });
+  assert.equal(blocked.ok, false);
+  await fixture.call({
+    method: "legacyExportRelease",
+    operationId: "export_blocks_first_admission",
+  });
+  const admitted = await fixture.call({
+    method: "admitTurn",
+    admissionId: "pre_acceptance_retry",
+  });
+  assert.equal(admitted.admitted, true);
+  const blockedByNewFence = await fixture.call({
+    method: "legacyExportBegin",
+    operationId: "export_after_retry_admission",
+  });
+  assert.equal(blockedByNewFence.ok, false);
+  assert.match(String(blockedByNewFence.error), /unsettled submission/i);
+});
+
 test("terminal service admissions replay the stored receipt without sending", async () => {
   for (const outcome of ["completed", "failed"] as const) {
     const fixture = await terminalReplayFixture(outcome, `service_${outcome}`);

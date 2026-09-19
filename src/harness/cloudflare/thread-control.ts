@@ -1140,8 +1140,12 @@ export function createCloudflareThreadService<TEnv extends Record<string, unknow
           reasoningEffort?: string;
           metadata?: Record<string, unknown>;
         };
-        const parentBinding = await service.inspect(target);
+        const parentThreadId = child.parentThreadId ?? target.threadId;
+        const parentTarget = { ...target, threadId: parentThreadId };
+        const parentBinding = await service.inspect(parentTarget);
         const childMetadata = objectValue(child.metadata);
+        const parentExportFenceAdmissionId = `subagent_${child.threadId}`;
+        const parentExportFenceAttemptToken = crypto.randomUUID();
         const childBinding = ThreadBindingSchema.parse({
           ...parentBinding,
           thread: {
@@ -1158,9 +1162,12 @@ export function createCloudflareThreadService<TEnv extends Record<string, unknow
           metadata: {
             ...parentBinding.metadata,
             ...childMetadata,
-            parentThreadId: child.parentThreadId ?? target.threadId,
+            parentThreadId,
             flarySubagentRootThreadId: child.rootThreadId,
-            flarySubagentParentThreadId: child.parentThreadId ?? target.threadId,
+            flarySubagentParentThreadId: parentThreadId,
+            flarySubagentParentExportFenceOwnerThreadId: parentThreadId,
+            flarySubagentParentExportFenceAdmissionId: parentExportFenceAdmissionId,
+            flarySubagentParentExportFenceAttemptToken: parentExportFenceAttemptToken,
             subagent: true,
           },
         });
@@ -1174,10 +1181,13 @@ export function createCloudflareThreadService<TEnv extends Record<string, unknow
           binding: childBinding,
         });
         await d1?.put(childBinding);
+        let childWorkEstablished = false;
         try {
-          await rpc(controlName(target), "admitTurn", {
-            ...ownership(target),
-            admissionId: `subagent_${child.threadId}`,
+          await rpc(controlName(parentTarget), "admitTurn", {
+            ...ownership(parentTarget),
+            admissionId: parentExportFenceAdmissionId,
+            subagentChildThreadId: child.threadId,
+            subagentFenceAttemptToken: parentExportFenceAttemptToken,
           });
           const admission = await service.submit(
             {
@@ -1192,7 +1202,7 @@ export function createCloudflareThreadService<TEnv extends Record<string, unknow
               message: child.task,
               ...(child.model ? { model: child.model } : {}),
               ...(child.reasoningEffort ? { thinkingLevel: child.reasoningEffort as never } : {}),
-              idempotencyKey: `subagent_${child.threadId}`,
+              idempotencyKey: parentExportFenceAdmissionId,
             },
           );
           await rpc(controlName(target), "subagent", {
@@ -1201,8 +1211,10 @@ export function createCloudflareThreadService<TEnv extends Record<string, unknow
             input: {
               threadId: child.threadId,
               admissionId: admission.submissionId,
+              subagentFenceAttemptToken: parentExportFenceAttemptToken,
             },
           });
+          childWorkEstablished = true;
         } catch (error) {
           await rpc(controlName(target), "subagent", {
             ...ownership(target),
@@ -1216,6 +1228,17 @@ export function createCloudflareThreadService<TEnv extends Record<string, unknow
               },
             },
           }).catch(() => undefined);
+          if (!childWorkEstablished) {
+            await settleSubagentExportFence({
+              env: options.env,
+              organizationId: target.authorization.organizationId,
+              applicationId: target.appId,
+              ownerThreadId: parentThreadId,
+              admissionId: parentExportFenceAdmissionId,
+              childThreadId: child.threadId,
+              attemptToken: parentExportFenceAttemptToken,
+            }).catch(() => undefined);
+          }
           throw error;
         }
       }
@@ -2236,6 +2259,12 @@ async function dispatchThreadControl(
     const binding = requireBinding(sql);
     const admissionId = String(body.admissionId ?? "");
     if (!admissionId) throw new Error("An admission id is required");
+    const subagentChildThreadId =
+      typeof body.subagentChildThreadId === "string" ? body.subagentChildThreadId : undefined;
+    const subagentFenceAttemptToken =
+      typeof body.subagentFenceAttemptToken === "string"
+        ? body.subagentFenceAttemptToken
+        : undefined;
     const admitted = sql.transactionSync(() => {
       const existing = sql
         .exec<{ admission_id: string }>(
@@ -2254,6 +2283,15 @@ async function dispatchThreadControl(
           };
         }
         rearmLegacyExportSubmission(sql, admissionId);
+        if (subagentChildThreadId && subagentFenceAttemptToken) {
+          prepareSubagentExportFence(
+            sql,
+            binding.thread.threadId,
+            subagentChildThreadId,
+            admissionId,
+            subagentFenceAttemptToken,
+          );
+        }
         return { admitted: true as const, replay: true as const, send: true as const };
       }
       const now = new Date().toISOString();
@@ -2264,6 +2302,15 @@ async function dispatchThreadControl(
         now,
       );
       rearmLegacyExportSubmission(sql, admissionId);
+      if (subagentChildThreadId && subagentFenceAttemptToken) {
+        prepareSubagentExportFence(
+          sql,
+          binding.thread.threadId,
+          subagentChildThreadId,
+          admissionId,
+          subagentFenceAttemptToken,
+        );
+      }
       return { admitted: true as const, replay: false as const, send: true as const };
     });
     if (admitted.replay && admitted.send === false) return admitted;
@@ -2277,6 +2324,7 @@ async function dispatchThreadControl(
       sql.transactionSync(() => {
         sql.exec("DELETE FROM flary_legacy_export_submissions WHERE admission_id = ?", admissionId);
         sql.exec("DELETE FROM flary_interactive_admissions WHERE admission_id = ?", admissionId);
+        if (subagentChildThreadId) clearSubagentExportFence(sql, subagentChildThreadId);
       });
       throw error;
     }
@@ -2285,7 +2333,28 @@ async function dispatchThreadControl(
   if (method === "legacyExportSubmissionSettle") {
     assertOwner(sql, body);
     const admissionId = String(body.admissionId ?? "");
-    if (admissionId) settleLegacyExportSubmission(sql, admissionId);
+    const childThreadId =
+      typeof body.subagentChildThreadId === "string" ? body.subagentChildThreadId : undefined;
+    const attemptToken =
+      typeof body.subagentFenceAttemptToken === "string"
+        ? body.subagentFenceAttemptToken
+        : undefined;
+    const submissionId =
+      typeof body.subagentSubmissionId === "string" ? body.subagentSubmissionId : undefined;
+    if (admissionId) {
+      if (childThreadId && attemptToken) {
+        const storedFence = readSubagentExportFence(sql, childThreadId);
+        if (storedFence) {
+          settleSubagentExportFenceRow(sql, childThreadId, admissionId, attemptToken, submissionId);
+        } else {
+          // Children created before the attempt-token fence was deployed have
+          // no local identity record; preserve their stable admission replay.
+          settleLegacyExportSubmission(sql, admissionId);
+        }
+      } else {
+        settleLegacyExportSubmission(sql, admissionId);
+      }
+    }
     return { settled: true };
   }
   if (method === "reserveUsage" || method === "settleUsage" || method === "unknownUsage") {
@@ -2433,7 +2502,21 @@ async function dispatchThreadControl(
   if (method === "subagent") {
     const binding = requireBinding(sql);
     const action = String(body.action);
-    const result = subagentAction(sql, binding, action, objectValue(body.input));
+    const subagentInput = objectValue(body.input);
+    const result = subagentAction(sql, binding, action, subagentInput);
+    if (
+      action === "start" &&
+      typeof subagentInput.threadId === "string" &&
+      typeof subagentInput.subagentFenceAttemptToken === "string" &&
+      typeof subagentInput.admissionId === "string"
+    ) {
+      markSubagentExportFenceAttempt(
+        sql,
+        subagentInput.threadId,
+        subagentInput.subagentFenceAttemptToken,
+        subagentInput.admissionId,
+      );
+    }
     if (action !== "list" && action !== "wait") {
       const recordType: SessionRecordType =
         action === "spawn"
@@ -2447,6 +2530,45 @@ async function dispatchThreadControl(
         action,
         result: jsonValue(result),
       });
+    }
+    if (action === "complete" || action === "fail" || action === "cancel" || action === "close") {
+      const thread = objectValue(objectValue(result).thread);
+      const threadId = typeof thread.threadId === "string" ? thread.threadId : undefined;
+      const parentThreadId =
+        typeof thread.parentThreadId === "string" ? thread.parentThreadId : undefined;
+      if (threadId && parentThreadId) {
+        const metadata = objectValue(thread.metadata);
+        const storedFence = readSubagentExportFence(sql, threadId);
+        await settleSubagentExportFence({
+          env: host?.env,
+          sql,
+          localThreadId: binding.thread.threadId,
+          organizationId: binding.thread.organizationId,
+          applicationId: binding.thread.appId,
+          ownerThreadId:
+            storedFence?.ownerThreadId ??
+            (typeof metadata.flarySubagentParentExportFenceOwnerThreadId === "string"
+              ? metadata.flarySubagentParentExportFenceOwnerThreadId
+              : binding.thread.threadId),
+          admissionId:
+            storedFence?.admissionId ??
+            (typeof metadata.flarySubagentParentExportFenceAdmissionId === "string"
+              ? metadata.flarySubagentParentExportFenceAdmissionId
+              : `subagent_${threadId}`),
+          childThreadId: threadId,
+          attemptToken:
+            typeof subagentInput.subagentFenceAttemptToken === "string"
+              ? subagentInput.subagentFenceAttemptToken
+              : (storedFence?.attemptToken ??
+                (typeof metadata.flarySubagentParentExportFenceAttemptToken === "string"
+                  ? metadata.flarySubagentParentExportFenceAttemptToken
+                  : undefined)),
+          submissionId:
+            typeof subagentInput.subagentSubmissionId === "string"
+              ? subagentInput.subagentSubmissionId
+              : storedFence?.submissionId,
+        });
+      }
     }
     return result;
   }
@@ -4340,6 +4462,171 @@ async function workspaceControl(
   return objectValue(body).output;
 }
 
+interface SubagentExportFence {
+  readonly env?: Record<string, unknown>;
+  readonly sql?: ThreadControlStorage["sql"];
+  readonly localThreadId?: string;
+  readonly organizationId: string;
+  readonly applicationId: string;
+  readonly ownerThreadId: string;
+  readonly admissionId: string;
+  readonly childThreadId?: string;
+  readonly attemptToken?: string;
+  readonly submissionId?: string;
+}
+
+interface SubagentExportFenceRecord {
+  readonly ownerThreadId: string;
+  readonly admissionId: string;
+  readonly attemptToken: string;
+  readonly childThreadId: string;
+  readonly submissionId?: string;
+  readonly settledAt?: string;
+}
+
+function subagentExportFenceKey(childThreadId: string): string {
+  return `subagent-export-fence:${childThreadId}`;
+}
+
+function readSubagentExportFence(
+  sql: ThreadControlStorage["sql"],
+  childThreadId: string,
+): SubagentExportFenceRecord | undefined {
+  const value = readControlValue(sql, subagentExportFenceKey(childThreadId));
+  const record = objectValue(value);
+  if (
+    typeof record.ownerThreadId !== "string" ||
+    typeof record.admissionId !== "string" ||
+    typeof record.attemptToken !== "string" ||
+    typeof record.childThreadId !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    ownerThreadId: record.ownerThreadId,
+    admissionId: record.admissionId,
+    attemptToken: record.attemptToken,
+    childThreadId: record.childThreadId,
+    ...(typeof record.submissionId === "string" ? { submissionId: record.submissionId } : {}),
+    ...(typeof record.settledAt === "string" ? { settledAt: record.settledAt } : {}),
+  };
+}
+
+function prepareSubagentExportFence(
+  sql: ThreadControlStorage["sql"],
+  ownerThreadId: string,
+  childThreadId: string,
+  admissionId: string,
+  attemptToken: string,
+): void {
+  put(sql, subagentExportFenceKey(childThreadId), {
+    ownerThreadId,
+    childThreadId,
+    admissionId,
+    attemptToken,
+  } satisfies SubagentExportFenceRecord);
+}
+
+function clearSubagentExportFence(sql: ThreadControlStorage["sql"], childThreadId: string): void {
+  sql.exec("DELETE FROM flary_thread_control WHERE key = ?", subagentExportFenceKey(childThreadId));
+}
+
+function markSubagentExportFenceAttempt(
+  sql: ThreadControlStorage["sql"],
+  childThreadId: string,
+  attemptToken: string,
+  submissionId: string,
+): void {
+  sql.transactionSync(() => {
+    const current = readSubagentExportFence(sql, childThreadId);
+    if (!current || current.attemptToken !== attemptToken || current.settledAt) {
+      return;
+    }
+    put(sql, subagentExportFenceKey(childThreadId), {
+      ...current,
+      submissionId,
+    });
+  });
+}
+
+function settleSubagentExportFenceRow(
+  sql: ThreadControlStorage["sql"],
+  childThreadId: string,
+  admissionId: string,
+  attemptToken: string,
+  submissionId?: string,
+): boolean {
+  return sql.transactionSync(() => {
+    const current = readSubagentExportFence(sql, childThreadId);
+    if (
+      !current ||
+      current.admissionId !== admissionId ||
+      current.attemptToken !== attemptToken ||
+      current.settledAt ||
+      (current.submissionId !== undefined &&
+        submissionId !== undefined &&
+        current.submissionId !== submissionId)
+    ) {
+      return false;
+    }
+    settleLegacyExportSubmission(sql, admissionId);
+    put(sql, subagentExportFenceKey(childThreadId), {
+      ...current,
+      settledAt: new Date().toISOString(),
+    });
+    return true;
+  });
+}
+
+/**
+ * Settle the fence in the DO that admitted the child. The coordinator update
+ * is rooted for lineage, but nested children deliberately keep their export
+ * fence in their immediate parent's DO.
+ */
+async function settleSubagentExportFence(input: SubagentExportFence): Promise<void> {
+  if (input.sql && input.localThreadId === input.ownerThreadId) {
+    if (input.childThreadId && input.attemptToken) {
+      const storedFence = readSubagentExportFence(input.sql, input.childThreadId);
+      if (storedFence) {
+        settleSubagentExportFenceRow(
+          input.sql,
+          input.childThreadId,
+          input.admissionId,
+          input.attemptToken,
+          input.submissionId,
+        );
+      } else {
+        settleLegacyExportSubmission(input.sql, input.admissionId);
+      }
+    } else {
+      settleLegacyExportSubmission(input.sql, input.admissionId);
+    }
+    return;
+  }
+  const namespace = input.env?.FLARY_THREAD_CONTROL as DurableObjectNamespace | undefined;
+  if (!namespace) return;
+  const name = `thread:${input.organizationId}:${input.applicationId}:${input.ownerThreadId}`;
+  const response = await namespace.get(namespace.idFromName(name)).fetch(
+    new Request("https://flary.internal/subagent-export-settle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "legacyExportSubmissionSettle",
+        tenantId: input.organizationId,
+        applicationId: input.applicationId,
+        admissionId: input.admissionId,
+        ...(input.childThreadId ? { subagentChildThreadId: input.childThreadId } : {}),
+        ...(input.attemptToken ? { subagentFenceAttemptToken: input.attemptToken } : {}),
+        ...(input.submissionId ? { subagentSubmissionId: input.submissionId } : {}),
+      }),
+    }),
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(`Parent export fence settlement failed: ${JSON.stringify(body)}`);
+  }
+}
+
 async function settleSubagent(
   input: {
     readonly env: Record<string, unknown>;
@@ -4349,7 +4636,45 @@ async function settleSubagent(
   action: "complete" | "fail",
   value: Record<string, unknown>,
 ): Promise<void> {
-  await updateSubagentAtRoot(input, action, `settle_${input.admission.submissionId}`, value);
+  const metadata = input.binding.metadata ?? {};
+  const parentFenceOwnerThreadId =
+    typeof metadata.flarySubagentParentExportFenceOwnerThreadId === "string"
+      ? metadata.flarySubagentParentExportFenceOwnerThreadId
+      : typeof metadata.flarySubagentParentThreadId === "string"
+        ? metadata.flarySubagentParentThreadId
+        : undefined;
+  const attemptToken =
+    typeof metadata.flarySubagentParentExportFenceAttemptToken === "string"
+      ? metadata.flarySubagentParentExportFenceAttemptToken
+      : undefined;
+  const fenceError = parentFenceOwnerThreadId
+    ? await settleSubagentExportFence({
+        env: input.env,
+        organizationId: input.binding.thread.organizationId,
+        applicationId: input.binding.thread.appId,
+        ownerThreadId: parentFenceOwnerThreadId,
+        admissionId:
+          typeof metadata.flarySubagentParentExportFenceAdmissionId === "string"
+            ? metadata.flarySubagentParentExportFenceAdmissionId
+            : `subagent_${input.binding.thread.threadId}`,
+        childThreadId: input.binding.thread.threadId,
+        ...(attemptToken ? { attemptToken } : {}),
+        submissionId: input.admission.submissionId,
+      }).catch((error) => error)
+    : undefined;
+  let updateError: unknown;
+  try {
+    await updateSubagentAtRoot(input, action, `settle_${input.admission.submissionId}`, {
+      ...value,
+      ...(parentFenceOwnerThreadId ? { subagentChildThreadId: input.binding.thread.threadId } : {}),
+      ...(attemptToken ? { subagentFenceAttemptToken: attemptToken } : {}),
+      ...(parentFenceOwnerThreadId ? { subagentSubmissionId: input.admission.submissionId } : {}),
+    });
+  } catch (error) {
+    updateError = error;
+  }
+  if (updateError) throw updateError;
+  if (fenceError) throw fenceError;
   const parentThreadId = input.binding.metadata?.flarySubagentParentThreadId;
   if (action === "complete" && typeof parentThreadId === "string") {
     await sendSubagentResultToParent(
