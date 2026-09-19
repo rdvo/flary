@@ -1,5 +1,5 @@
 import { and, eq, inArray } from "drizzle-orm";
-import { registerProvider } from "@flue/runtime";
+import { registerProvider } from "@flue/runtime-legacy";
 import { type ProviderCredential, type ProviderCredentialResolver } from "flary/providers";
 import {
   AdmittedProviderCredentialSchema,

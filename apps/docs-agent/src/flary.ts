@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { registerProvider } from "@flue/runtime";
+import { registerProvider } from "@flue/runtime-legacy";
 import { flary, z } from "flary";
 
 export const BindingsSchema = z.object({

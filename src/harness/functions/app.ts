@@ -2043,7 +2043,7 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
     if (!loader) return undefined;
     let ctx: FlaryDurableObjectState | undefined;
     try {
-      const cloudflare = await import("@flue/runtime/cloudflare");
+      const cloudflare = await import("@flue/runtime-legacy/cloudflare");
       const current = cloudflare.getCloudflareContext() as ReturnType<
         typeof cloudflare.getCloudflareContext
       > & { readonly durableObjectState?: FlaryDurableObjectState };
@@ -2099,7 +2099,7 @@ export class FlaryApplication<TBindings extends object = Record<string, unknown>
   private async defaultStepStore(): Promise<FlaryStepStore | undefined> {
     if (this.stepStore) return this.stepStore;
     try {
-      const cloudflare = await import("@flue/runtime/cloudflare");
+      const cloudflare = await import("@flue/runtime-legacy/cloudflare");
       const current = cloudflare.getCloudflareContext();
       const storage = current.storage as { readonly sql?: unknown };
       if (storage.sql && typeof storage.sql === "object") {

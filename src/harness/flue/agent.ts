@@ -5,7 +5,7 @@ import {
   type AgentRuntimeConfig,
   type ThinkingLevel,
   type ToolDefinition,
-} from "@flue/runtime";
+} from "@flue/runtime-legacy";
 import { z } from "zod";
 
 import {

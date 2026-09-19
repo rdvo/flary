@@ -1,5 +1,5 @@
 import { and, eq, inArray } from "drizzle-orm";
-import { observe, type FlueObservation, type FlueEventContext } from "@flue/runtime";
+import { observe, type FlueObservation, type FlueEventContext } from "@flue/runtime-legacy";
 import { ArtifactRecallIndexer, FlaryHistoryProjector, TurbopufferRecallIndex } from "flary";
 import { R2ArtifactHistoryStore } from "flary/storage";
 import { ThreadBindingSchema, type ThreadBinding } from "flary/contracts";

@@ -1,4 +1,4 @@
-import { defineTool, type ToolDefinition } from "@flue/runtime";
+import { defineTool, type ToolDefinition } from "@flue/runtime-legacy";
 import * as v from "valibot";
 
 import type { LazyToolRuntime } from "../tools/runtime.js";

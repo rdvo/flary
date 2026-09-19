@@ -1,4 +1,4 @@
-import { createFlueClient } from "@flue/sdk";
+import { createFlueClient } from "@flue/sdk-legacy";
 
 import {
   createFlueAgentGateway,
@@ -328,7 +328,7 @@ export function createCloudflareFlueGateway<TEnv extends Record<string, unknown>
     });
   return {
     ...gateway,
-    // @flue/sdk@1.0.0-beta.9 only forwards `message` and `images`. Provider
+    // @flue/sdk-legacy@1.0.0-beta.9 only forwards `message` and `images`. Provider
     // switching needs the patched direct-submission fields as well, so send
     // the request to the Flue Durable Object without the lossy SDK helper.
     async send(agentName, instanceId, message, sendOptions = {}) {

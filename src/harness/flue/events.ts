@@ -1,4 +1,4 @@
-import type { FlueEvent } from "@flue/runtime";
+import type { FlueEvent } from "@flue/runtime-legacy";
 
 import {
   JsonObjectSchema,

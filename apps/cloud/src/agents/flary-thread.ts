@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
-import { defineAgent, type AgentRouteHandler } from "@flue/runtime";
-import { extend } from "@flue/runtime/cloudflare";
+import { defineAgent, type AgentRouteHandler } from "@flue/runtime-legacy";
+import { extend } from "@flue/runtime-legacy/cloudflare";
 import {
   AdmittedProviderCredentialSchema,
   ModelSelectionSchema,

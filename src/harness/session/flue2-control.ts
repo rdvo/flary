@@ -1,5 +1,5 @@
-import type { ConversationRecord, ConversationStreamStore } from "@flue/runtime-v2/adapter";
-import { agentStreamPath } from "@flue/runtime-v2/internal";
+import type { ConversationRecord, ConversationStreamStore } from "@flue/runtime/adapter";
+import { agentStreamPath } from "@flue/runtime/internal";
 
 import type { Flue2SessionEngineControl } from "./flue2-engine.js";
 

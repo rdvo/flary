@@ -1,4 +1,4 @@
-import { flue } from "@flue/runtime/routing";
+import { flue } from "@flue/runtime-legacy/routing";
 
 /**
  * One Flue router instance is shared by the Worker entry point and the

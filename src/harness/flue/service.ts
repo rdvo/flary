@@ -5,7 +5,7 @@ import {
   type CreateFlueClientOptions,
   type FlueEvent,
   type FlueClient,
-} from "@flue/sdk";
+} from "@flue/sdk-legacy";
 import { z } from "zod";
 
 import {

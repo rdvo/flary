@@ -6,7 +6,7 @@ import {
   type FlueClient,
   type FlueConversationHistoryOptions,
   type AgentSendResult,
-} from "@flue/sdk";
+} from "@flue/sdk-legacy";
 
 import {
   ApprovalDecisionSchema,

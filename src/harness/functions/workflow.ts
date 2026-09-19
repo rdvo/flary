@@ -7,8 +7,8 @@ import {
   type AgentDefinition,
   type AgentRuntimeConfig,
   type WorkflowDefinition,
-} from "@flue/runtime";
-import { buildPackagedSkill, createSkillReference } from "@flue/runtime/internal";
+} from "@flue/runtime-legacy";
+import { buildPackagedSkill, createSkillReference } from "@flue/runtime-legacy/internal";
 import * as v from "valibot";
 import { z } from "zod";
 

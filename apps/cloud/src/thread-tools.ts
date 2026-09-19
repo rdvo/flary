@@ -1,7 +1,7 @@
 import * as v from "valibot";
 import { and, eq, inArray } from "drizzle-orm";
-import { defineTool } from "@flue/runtime";
-import { getCloudflareContext } from "@flue/runtime/cloudflare";
+import { defineTool } from "@flue/runtime-legacy";
+import { getCloudflareContext } from "@flue/runtime-legacy/cloudflare";
 import {
   CodeModeInputSchema,
   SandboxInputSchema,

@@ -7,7 +7,7 @@ import {
 } from "../providers/oauth.js";
 import { openaiCodexProvider } from "@earendil-works/pi-ai/providers/openai-codex";
 import type { OAuthCredential } from "@earendil-works/pi-ai";
-import { registerProvider } from "@flue/runtime";
+import { registerProvider } from "@flue/runtime-legacy";
 import type { SubscriptionProvider } from "../contracts/connections.js";
 
 interface D1StatementLike {

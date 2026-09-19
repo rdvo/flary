@@ -1,5 +1,5 @@
 import { Validator, type Schema as JsonSchema } from "@cfworker/json-schema";
-import type { ToolDefinition } from "@flue/runtime";
+import type { ToolDefinition } from "@flue/runtime-legacy";
 import { z } from "zod";
 
 import {

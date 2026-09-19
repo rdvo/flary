@@ -1,4 +1,4 @@
-import { defineTool, type ToolDefinition } from "@flue/runtime";
+import { defineTool, type ToolDefinition } from "@flue/runtime-legacy";
 import { Validator, type Schema as JsonSchema } from "@cfworker/json-schema";
 import * as v from "valibot";
 import { z } from "zod";
@@ -333,7 +333,7 @@ async function resolveCodeMode(
     return options;
   }
   try {
-    const cloudflare = await import("@flue/runtime/cloudflare");
+    const cloudflare = await import("@flue/runtime-legacy/cloudflare");
     const current = cloudflare.getCloudflareContext();
     const loader = current.env.LOADER ?? current.env.WORKER_LOADER;
     if (!loader) throw new Error("Worker Loader binding is missing");
@@ -800,7 +800,7 @@ function registerSandboxTool(
 
 async function defaultJournal(): Promise<ToolExecutionJournal> {
   try {
-    const cloudflare = await import("@flue/runtime/cloudflare");
+    const cloudflare = await import("@flue/runtime-legacy/cloudflare");
     const current = cloudflare.getCloudflareContext();
     const storage = current.storage as { readonly sql?: unknown };
     if (storage.sql) {
