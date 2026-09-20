@@ -2655,6 +2655,18 @@ async function dispatchThreadControl(
     const binding = requireBinding(sql);
     const action = String(body.action);
     const subagentInput = objectValue(body.input);
+    const terminalControlAction =
+      action === "complete" || action === "fail" || action === "cancel" || action === "close";
+    const controlIdempotencyKey =
+      typeof subagentInput.idempotencyKey === "string" ? subagentInput.idempotencyKey : undefined;
+    // A terminal control call is idempotent in the coordinator: a duplicate
+    // idempotency key returns the cached original result. Detect that replay
+    // BEFORE the control runs, so a stale terminal request cannot settle a fence
+    // the child may have since re-armed under a newer attempt.
+    const controlReplayed =
+      terminalControlAction && controlIdempotencyKey
+        ? initializeSubagents(sql, binding).hasControlResult(action, controlIdempotencyKey)
+        : false;
     const result = subagentAction(sql, binding, action, subagentInput);
     if (
       action === "start" &&
@@ -2683,7 +2695,7 @@ async function dispatchThreadControl(
         result: jsonValue(result),
       });
     }
-    if (action === "complete" || action === "fail" || action === "cancel" || action === "close") {
+    if (terminalControlAction) {
       const thread = objectValue(objectValue(result).thread);
       const threadId = typeof thread.threadId === "string" ? thread.threadId : undefined;
       const parentThreadId =
@@ -2691,30 +2703,51 @@ async function dispatchThreadControl(
       if (threadId && parentThreadId) {
         const metadata = objectValue(thread.metadata);
         const storedFence = readSubagentExportFence(sql, threadId);
-        await settleSubagentExportFence({
-          env: host?.env,
-          sql,
-          localThreadId: binding.thread.threadId,
-          organizationId: binding.thread.organizationId,
-          applicationId: binding.thread.appId,
-          // The coordinator's parentThreadId and the DO-local fence row are
-          // authoritative. Never let caller metadata or a terminal input
-          // redirect a nested settlement to another owner/attempt.
-          ownerThreadId: storedFence?.ownerThreadId ?? parentThreadId,
-          admissionId: storedFence?.admissionId ?? `subagent_${threadId}`,
-          childThreadId: threadId,
-          attemptToken:
-            storedFence?.attemptToken ??
-            (typeof metadata.flarySubagentParentExportFenceOwnerThreadId === "string" &&
-            metadata.flarySubagentParentExportFenceOwnerThreadId === parentThreadId &&
-            typeof metadata.flarySubagentParentExportFenceAttemptToken === "string"
-              ? metadata.flarySubagentParentExportFenceAttemptToken
-              : undefined),
-          submissionId:
-            typeof subagentInput.subagentSubmissionId === "string"
-              ? subagentInput.subagentSubmissionId
-              : storedFence?.submissionId,
-        });
+        const suppliedAttemptToken =
+          typeof subagentInput.subagentFenceAttemptToken === "string"
+            ? subagentInput.subagentFenceAttemptToken
+            : undefined;
+        const suppliedSubmissionId =
+          typeof subagentInput.subagentSubmissionId === "string"
+            ? subagentInput.subagentSubmissionId
+            : undefined;
+        const metadataAttemptToken =
+          typeof metadata.flarySubagentParentExportFenceOwnerThreadId === "string" &&
+          metadata.flarySubagentParentExportFenceOwnerThreadId === parentThreadId &&
+          typeof metadata.flarySubagentParentExportFenceAttemptToken === "string"
+            ? metadata.flarySubagentParentExportFenceAttemptToken
+            : undefined;
+        // A supplied attempt token names the exact child attempt this terminal
+        // event belongs to: use it verbatim and never fall back to the stored
+        // token, which may already point at a newer re-armed attempt.
+        const attemptToken =
+          suppliedAttemptToken ?? storedFence?.attemptToken ?? metadataAttemptToken;
+        // A token-less terminal event may only settle when it cannot be confused
+        // with a newer attempt: either the stored fence has not recorded a
+        // submission yet, or the event's submission matches the stored one. Never
+        // substitute the stored submission for a missing one.
+        const submissionSafeForTokenless =
+          storedFence?.submissionId === undefined ||
+          (suppliedSubmissionId !== undefined && suppliedSubmissionId === storedFence.submissionId);
+        const settlementBlocked =
+          controlReplayed || (suppliedAttemptToken === undefined && !submissionSafeForTokenless);
+        if (!settlementBlocked) {
+          await settleSubagentExportFence({
+            env: host?.env,
+            sql,
+            localThreadId: binding.thread.threadId,
+            organizationId: binding.thread.organizationId,
+            applicationId: binding.thread.appId,
+            // The coordinator's parentThreadId and the DO-local fence row are
+            // authoritative. Never let caller metadata or a terminal input
+            // redirect a nested settlement to another owner/attempt.
+            ownerThreadId: storedFence?.ownerThreadId ?? parentThreadId,
+            admissionId: storedFence?.admissionId ?? `subagent_${threadId}`,
+            childThreadId: threadId,
+            ...(attemptToken ? { attemptToken } : {}),
+            ...(suppliedSubmissionId !== undefined ? { submissionId: suppliedSubmissionId } : {}),
+          });
+        }
       }
     }
     return result;
@@ -4276,9 +4309,20 @@ async function projectAdmission(input: {
   });
   let providerStepSettled = false;
   let providerFailure: string | undefined;
+  // Distinguish a terminal Flue outcome (a settled event was observed, or the
+  // gateway wait resolved/rejected on its own) from a host bookkeeping failure
+  // that throws while the submission is still streaming. Only a terminal
+  // outcome may settle the child admission row and the parent export fence; a
+  // mid-stream bookkeeping failure must leave the projection recoverable.
+  let terminalFlueOutcome = false;
+  let bookkeepingActive = false;
   try {
     const result = await gateway.wait(input.admission, async (event) => {
       providerFailure = providerFailureFromFlueEvent(event) ?? providerFailure;
+      if (flueEventReachedTerminalOutcome(event)) terminalFlueOutcome = true;
+      // Any throw from here until the reset below is host bookkeeping, not a
+      // terminal Flue outcome, unless the submission also settled this event.
+      bookkeepingActive = true;
       const sourceCursor = canonicalEventCursor(
         input.admission.submissionId,
         event as unknown as Record<string, unknown>,
@@ -4289,7 +4333,10 @@ async function projectAdmission(input: {
           sourceCursor,
         )
         .toArray()[0];
-      if (seen) return;
+      if (seen) {
+        bookkeepingActive = false;
+        return;
+      }
       const providerStepEvent =
         String((event as unknown as Record<string, unknown>).type ?? "") === "message-started" ||
         String((event as unknown as Record<string, unknown>).type ?? "") === "turn_request";
@@ -4356,9 +4403,13 @@ async function projectAdmission(input: {
       const appliedLimit = limit.exceeded ? limit : rootLimit;
       if (appliedLimit.exceeded) {
         await gateway.abort(runtimeAgentId(input.binding), threadName(input.binding.thread));
+        // Aborting the submission is itself a terminal Flue outcome; keep the
+        // existing terminal-failure settlement below.
+        terminalFlueOutcome = true;
         throw new Error(appliedLimit.message);
       }
       await sealSessionArchiveIfNeeded(input.sql, input.env, input.binding.thread.threadId);
+      bookkeepingActive = false;
     });
     const resultValue = objectValue(result);
     if (typeof resultValue.text !== "string" || resultValue.text.trim().length === 0) {
@@ -4398,6 +4449,13 @@ async function projectAdmission(input: {
     });
     if (input.admissionId) settleLegacyExportSubmission(input.sql, input.admissionId);
   } catch (error) {
+    if (bookkeepingActive && !terminalFlueOutcome) {
+      // Host bookkeeping failed mid-stream while the Flue submission may still
+      // be running. Leave the projection "active" so the recovery alarm replays
+      // it (projectionNeedsRecovery), and do NOT settle the child admission row
+      // or the parent export fence. Surface the error unchanged, as before.
+      throw error;
+    }
     if (input.admissionId && !providerStepSettled) {
       await rootInteractiveReservationAction(input.sql, input.env, input.binding, "unknownUsage", {
         reservationId: `turn_${input.admissionId}`,
@@ -4438,6 +4496,17 @@ async function projectAdmission(input: {
     }).catch(() => undefined);
     throw error;
   }
+}
+
+/**
+ * A `submission-settled` event is the only Flue stream event that reports the
+ * submission reaching a terminal outcome (completed, failed, or aborted). This
+ * is deliberately conservative: a false negative merely defers settlement to
+ * the gateway resolve/reject or the recovery alarm, whereas a false positive
+ * could release the parent export fence while the submission is still running.
+ */
+export function flueEventReachedTerminalOutcome(event: unknown): boolean {
+  return String(objectValue(event).type ?? "") === "submission-settled";
 }
 
 export function providerFailureFromFlueEvent(event: unknown): string | undefined {

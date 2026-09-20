@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   createCloudflareThreadService,
   handleFlarySessionProjectionQueue,
+  handleFlaryThreadControlAlarm,
   handleFlaryThreadControlObjectRequest,
   handleFlaryThreadControlWebSocketMessage,
   projectionNeedsRecovery,
@@ -914,57 +915,131 @@ test("duplicate and out-of-order terminal updates settle the same fence idempote
   assert.ok(row?.settled_at);
 });
 
-test("out-of-order terminal notifications cannot settle a newer child attempt", async () => {
+test("a stale wrong-token terminal is a no-op through the subagent dispatcher", async () => {
   const fixture = await exportFenceFixture("attempt_identity");
   const firstAttempt = "attempt_one";
   const secondAttempt = "attempt_two";
+  const settledAt = () =>
+    fixture.storage.sql
+      .exec<{ settled_at: string | null }>(
+        "SELECT settled_at FROM flary_legacy_export_submissions WHERE admission_id = ?",
+        fixture.admissionId,
+      )
+      .toArray()[0]?.settled_at ?? null;
+  const settle = (
+    action: "complete" | "fail",
+    idempotencyKey: string,
+    attemptToken: string,
+    submissionId: string,
+  ) =>
+    fixture.call({
+      method: "subagent",
+      action,
+      input: {
+        requestId: idempotencyKey,
+        idempotencyKey,
+        threadId: fixture.childId,
+        subagentFenceAttemptToken: attemptToken,
+        subagentSubmissionId: submissionId,
+        ...(action === "fail"
+          ? { error: { code: "stale", message: "stale", retryable: true } }
+          : {}),
+      },
+    });
+
   await fixture.call({
     method: "admitTurn",
     admissionId: fixture.admissionId,
     subagentChildThreadId: fixture.childId,
     subagentFenceAttemptToken: firstAttempt,
   });
-  await fixture.call({
-    method: "legacyExportSubmissionSettle",
-    admissionId: fixture.admissionId,
-    subagentChildThreadId: fixture.childId,
-    subagentFenceAttemptToken: firstAttempt,
-    subagentSubmissionId: "submission_one",
-  });
+  await settle("complete", "settle_first", firstAttempt, "submission_one");
+  assert.ok(settledAt());
+
   await fixture.call({
     method: "admitTurn",
     admissionId: fixture.admissionId,
     subagentChildThreadId: fixture.childId,
     subagentFenceAttemptToken: secondAttempt,
   });
+  // The DO-local fence now points at the second attempt. A terminal that names
+  // the stale first attempt token must be a no-op even though the dispatcher
+  // could otherwise substitute the current fence identity for it.
+  await settle("fail", "settle_stale", firstAttempt, "submission_one");
+  assert.equal(settledAt(), null);
+
+  await settle("complete", "settle_second", secondAttempt, "submission_two");
+  assert.ok(settledAt());
+});
+
+test("a replayed terminal request cannot settle a re-armed child attempt", async () => {
+  const fixture = await exportFenceFixture("replay_rearm");
+  const settledAt = () =>
+    fixture.storage.sql
+      .exec<{ settled_at: string | null }>(
+        "SELECT settled_at FROM flary_legacy_export_submissions WHERE admission_id = ?",
+        fixture.admissionId,
+      )
+      .toArray()[0]?.settled_at ?? null;
+
   await fixture.call({
-    method: "legacyExportSubmissionSettle",
+    method: "admitTurn",
     admissionId: fixture.admissionId,
     subagentChildThreadId: fixture.childId,
-    subagentFenceAttemptToken: firstAttempt,
-    subagentSubmissionId: "submission_one",
+    subagentFenceAttemptToken: "attempt_a",
   });
-  const pending = fixture.storage.sql
-    .exec<{ settled_at: string | null }>(
-      "SELECT settled_at FROM flary_legacy_export_submissions WHERE admission_id = ?",
-      fixture.admissionId,
-    )
-    .toArray()[0];
-  assert.equal(pending?.settled_at, null);
   await fixture.call({
-    method: "legacyExportSubmissionSettle",
+    method: "subagent",
+    action: "fail",
+    input: {
+      requestId: "terminal_a",
+      idempotencyKey: "terminal_a",
+      threadId: fixture.childId,
+      subagentFenceAttemptToken: "attempt_a",
+      subagentSubmissionId: "submission_a",
+      error: { code: "a", message: "a", retryable: true },
+    },
+  });
+  assert.ok(settledAt());
+
+  // Re-arm the child as a new attempt that has not recorded a submission yet.
+  await fixture.call({
+    method: "admitTurn",
     admissionId: fixture.admissionId,
     subagentChildThreadId: fixture.childId,
-    subagentFenceAttemptToken: secondAttempt,
-    subagentSubmissionId: "submission_two",
+    subagentFenceAttemptToken: "attempt_b",
   });
-  const settled = fixture.storage.sql
-    .exec<{ settled_at: string | null }>(
-      "SELECT settled_at FROM flary_legacy_export_submissions WHERE admission_id = ?",
-      fixture.admissionId,
-    )
-    .toArray()[0];
-  assert.ok(settled?.settled_at);
+  assert.equal(settledAt(), null);
+
+  // Replaying attempt A's cached terminal (same idempotency key, no fence
+  // identity) returns the coordinator's cached result. It must not settle B,
+  // whose fence would otherwise match a token-less substitution.
+  await fixture.call({
+    method: "subagent",
+    action: "fail",
+    input: {
+      requestId: "terminal_a",
+      idempotencyKey: "terminal_a",
+      threadId: fixture.childId,
+      error: { code: "a", message: "a", retryable: true },
+    },
+  });
+  assert.equal(settledAt(), null);
+
+  // A genuine terminal for attempt B still settles the fence.
+  await fixture.call({
+    method: "subagent",
+    action: "complete",
+    input: {
+      requestId: "terminal_b",
+      idempotencyKey: "terminal_b",
+      threadId: fixture.childId,
+      subagentFenceAttemptToken: "attempt_b",
+      subagentSubmissionId: "submission_b",
+      output: { summary: "done" },
+    },
+  });
+  assert.ok(settledAt());
 });
 
 test("retrying a pre-acceptance spawn rechecks the parent export lease", async () => {
@@ -1129,6 +1204,206 @@ test("terminal queued realtime admissions replay without sending", async () => {
     assert.equal(fixture.getProviderAdmissions(), 0);
     assert.ok(sent.some((frame) => frame.type === "accepted"));
   }
+});
+
+test("a genuine provider terminal failure still settles the admission fence", async () => {
+  const fixture = await terminalReplayFixture("failed", "provider_failure");
+  // A failed submission-settled event is a terminal Flue outcome, so the catch
+  // path still settles the child admission (unlike a bookkeeping failure).
+  const row = fixture.storage.sql
+    .exec<{ settled_at: string | null }>(
+      "SELECT settled_at FROM flary_legacy_export_submissions WHERE admission_id = ?",
+      fixture.admissionId,
+    )
+    .toArray()[0];
+  assert.ok(row?.settled_at);
+});
+
+test("a non-terminal bookkeeping failure keeps the export blocked until recovery", async () => {
+  const controls = namespace();
+  const tenantId = "tenant_bookkeeping_recovery";
+  const threadId = "thread_bookkeeping_recovery";
+  const admissionId = "bookkeeping_recovery";
+  const submissionId = "submission_bookkeeping_recovery";
+  const engine = {
+    idFromName(name: string) {
+      return name;
+    },
+    get() {
+      return {
+        async fetch(request: Request) {
+          if (request.method === "POST") {
+            return Response.json(
+              {
+                streamUrl: `https://flue.internal/agents/coder/${threadId}`,
+                offset: "0",
+                submissionId,
+              },
+              { status: 202 },
+            );
+          }
+          return Response.json(
+            [
+              {
+                type: "message-delta",
+                position: { batch: 0, index: 0 },
+                conversationId: threadId,
+                submissionId,
+                delta: { text: "partial" },
+              },
+              {
+                type: "submission-settled",
+                position: { batch: 1, index: 0 },
+                conversationId: threadId,
+                submissionId,
+                outcome: "completed",
+                result: { text: "final result" },
+              },
+            ],
+            {
+              headers: {
+                "Stream-Next-Offset": "2",
+                "Stream-Up-To-Date": "true",
+                "Stream-Closed": "true",
+              },
+            },
+          );
+        },
+      };
+    },
+  };
+  const env = { FLARY_THREAD_CONTROL: controls, FLUE_CODER_AGENT: engine };
+  const service = createCloudflareThreadService({ env, namespace: controls });
+  const scope = {
+    authorization: {
+      organizationId: tenantId,
+      actor: { id: "user", kind: "user" as const },
+    },
+    appId: "coder",
+  };
+  await service.create(scope, {
+    threadId,
+    agentId: "coder",
+    workspace: {
+      organizationId: tenantId,
+      appId: "coder",
+      projectId: "project",
+      workspaceId: "workspace",
+      branch: "main",
+    },
+    model: { provider: "openai", model: "gpt-5.6-luna" },
+  });
+  const storage = controls.stores.get(`thread:${tenantId}:coder:${threadId}`)!;
+  const admission = {
+    streamUrl: `https://flue.internal/agents/coder/${admissionId}`,
+    offset: "0",
+    submissionId,
+  };
+  const legacyExportBegin = async (operationId: string) => {
+    const response = await handleFlaryThreadControlObjectRequest({
+      storage,
+      env,
+      request: new Request("https://flary.internal/legacy-export-begin", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          method: "legacyExportBegin",
+          tenantId,
+          applicationId: "coder",
+          operationId,
+        }),
+      }),
+    });
+    const value = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    return { ...value, ok: response.ok };
+  };
+  const projectionStatus = () => {
+    const row = storage.sql
+      .exec<{ value_json: string }>(
+        "SELECT value_json FROM flary_thread_control WHERE key = ?",
+        `projection:${submissionId}`,
+      )
+      .toArray()[0];
+    return row ? (JSON.parse(row.value_json) as { status?: string }).status : undefined;
+  };
+
+  const admit = await handleFlaryThreadControlObjectRequest({
+    storage,
+    env,
+    request: new Request("https://flary.internal/admit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ method: "admitTurn", tenantId, applicationId: "coder", admissionId }),
+    }),
+  });
+  assert.equal(admit.ok, true, await admit.text());
+
+  // The message-delta projects, but broadcasting it throws (host bookkeeping).
+  // The submission is still streaming, so this must not settle the admission.
+  const firstRun: Promise<unknown>[] = [];
+  await handleFlaryThreadControlObjectRequest({
+    storage,
+    env,
+    execution: {
+      waitUntil(work) {
+        firstRun.push(work);
+      },
+    },
+    webSockets: {
+      acceptWebSocket() {},
+      getWebSockets() {
+        throw new Error("socket registry unavailable");
+      },
+    },
+    request: new Request("https://flary.internal/track", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        method: "track",
+        tenantId,
+        applicationId: "coder",
+        admission,
+        admissionId,
+        agentId: "coder",
+        instanceId: `thread:${tenantId}:coder:${threadId}`,
+      }),
+    }),
+  });
+  const firstResults = await Promise.allSettled(firstRun);
+  const rejected = firstResults.filter(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  assert.ok(
+    rejected.some((result) => /socket registry unavailable/.test(String(result.reason))),
+    "the bookkeeping error must surface",
+  );
+  assert.equal(projectionStatus(), "active");
+  const blocked = await legacyExportBegin("export_during_recovery");
+  assert.equal(blocked.ok, false);
+  assert.match(String(blocked.error), /unsettled submission/i);
+
+  // The recovery alarm replays the projection with a healthy socket host; the
+  // submission now reaches its terminal outcome and settles the fence.
+  const recovery: Promise<unknown>[] = [];
+  await handleFlaryThreadControlAlarm({
+    storage,
+    env,
+    execution: {
+      waitUntil(work) {
+        recovery.push(work);
+      },
+    },
+    webSockets: {
+      acceptWebSocket() {},
+      getWebSockets() {
+        return [];
+      },
+    },
+  });
+  await Promise.allSettled(recovery);
+  assert.equal(projectionStatus(), "completed");
+  const opened = await legacyExportBegin("export_after_recovery");
+  assert.equal(opened.started, true);
 });
 
 test("provider failures become short safe public messages", () => {

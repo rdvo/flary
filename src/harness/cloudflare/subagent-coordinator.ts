@@ -347,6 +347,25 @@ export class SqliteSubagentCoordinator {
     });
   }
 
+  /**
+   * Report whether a control result is already recorded for this idempotency
+   * key. Callers use this to detect — before {@link control} runs — that the
+   * next call will return a cached/replayed result, so out-of-band side effects
+   * (such as export-fence settlement) are not replayed against a child that has
+   * since been re-armed under a newer attempt.
+   */
+  hasControlResult(action: string, idempotencyKey: string): boolean {
+    return (
+      this.first<{ present: number }>(
+        `SELECT 1 AS present
+         FROM flary_subagent_idempotency
+         WHERE scope = ? AND idempotency_key = ?`,
+        `control:${action}`,
+        idempotencyKey,
+      ) !== undefined
+    );
+  }
+
   readMessages(threadId: string, afterSequence = 0): SubagentMailboxMessage[] {
     this.requireThread(threadId);
     return this.#sql
