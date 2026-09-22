@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ConversationStreamChunk } from "@flue/sdk";
+import type { ConversationStreamChunk } from "@flue/sdk-legacy";
 
 import {
   InMemoryFlaryRunRepository,

@@ -1,0 +1,330 @@
+diff --git a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.d.ts b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.d.ts
+index 1e18587..feb0661 100644
+--- a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.d.ts
++++ b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.d.ts
+@@ -5,5 +5,15 @@
+  * It is only intended for CLI use, not browser environments.
+  */
+ import type { OAuthAuth } from "../types.ts";
++import type { OAuthCredentials } from "../types.ts";
++export interface AnthropicManualOAuthStart {
++    authorizationUrl: string;
++    verifier: string;
++    state: string;
++    redirectUri: string;
++    expiresInSeconds: number;
++}
++export declare function startAnthropicManualOAuth(): Promise<AnthropicManualOAuthStart>;
++export declare function completeAnthropicManualOAuth(input: string, expectedState: string, verifier: string, redirectUri?: string): Promise<OAuthCredentials>;
+ export declare const anthropicOAuth: OAuthAuth;
+ //# sourceMappingURL=anthropic.d.ts.map
+\ No newline at end of file
+diff --git a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.js b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.js
+index 05ba3fc..db2a72c 100644
+--- a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.js
++++ b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/anthropic.js
+@@ -185,6 +185,43 @@ async function exchangeAuthorizationCode(code, state, verifier, redirectUri) {
+         expires: Date.now() + tokenData.expires_in * 1000 - 5 * 60 * 1000,
+     };
+ }
++/**
++ * Start the Claude Pro/Max authorization-code flow without opening a local
++ * callback server. This is suitable for a Worker or another remote host.
++ */
++export async function startAnthropicManualOAuth() {
++    const { verifier, challenge } = await generatePKCE();
++    const authParams = new URLSearchParams({
++        code: "true",
++        client_id: CLIENT_ID,
++        response_type: "code",
++        redirect_uri: REDIRECT_URI,
++        scope: SCOPES,
++        code_challenge: challenge,
++        code_challenge_method: "S256",
++        state: verifier,
++    });
++    return {
++        authorizationUrl: `${AUTHORIZE_URL}?${authParams.toString()}`,
++        verifier,
++        state: verifier,
++        redirectUri: REDIRECT_URI,
++        expiresInSeconds: 15 * 60,
++    };
++}
++/**
++ * Complete a Worker-safe Claude Pro/Max authorization flow.
++ */
++export async function completeAnthropicManualOAuth(input, expectedState, verifier, redirectUri = REDIRECT_URI) {
++    const parsed = parseAuthorizationInput(input);
++    if (parsed.state && parsed.state !== expectedState) {
++        throw new Error("OAuth state mismatch");
++    }
++    if (!parsed.code) {
++        throw new Error("Missing authorization code");
++    }
++    return exchangeAuthorizationCode(parsed.code, parsed.state ?? expectedState, verifier, redirectUri);
++}
+ async function loginAnthropic(interaction) {
+     const { verifier, challenge } = await generatePKCE();
+     const server = await startCallbackServer(verifier);
+diff --git a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.d.ts b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.d.ts
+index 792fa80..bfa780c 100644
+--- a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.d.ts
++++ b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.d.ts
+@@ -5,5 +5,29 @@
+  * It is only intended for CLI use, not browser environments.
+  */
+ import type { OAuthAuth } from "../types.ts";
++import type { OAuthCredentials } from "../types.ts";
++export interface OpenAICodexDeviceAuthorization {
++    deviceAuthId: string;
++    userCode: string;
++    intervalSeconds: number;
++    verificationUri: string;
++    redirectUri: string;
++    expiresInSeconds: number;
++}
++export interface OpenAICodexManualOAuthStart {
++    authorizationUrl: string;
++    verifier: string;
++    state: string;
++    redirectUri: string;
++    expiresInSeconds: number;
++}
++export type OpenAICodexDevicePollResult =
++    | { status: "pending"; intervalSeconds: number }
++    | { status: "slow_down"; intervalSeconds: number }
++    | { status: "complete"; credential: OAuthCredentials };
++export declare function startOpenAICodexDeviceAuthorization(signal?: AbortSignal): Promise<OpenAICodexDeviceAuthorization>;
++export declare function startOpenAICodexManualOAuth(): Promise<OpenAICodexManualOAuthStart>;
++export declare function completeOpenAICodexManualOAuth(input: string, expectedState: string, verifier: string, redirectUri?: string, signal?: AbortSignal): Promise<OAuthCredentials>;
++export declare function pollOpenAICodexDeviceAuthorization(device: OpenAICodexDeviceAuthorization, signal?: AbortSignal): Promise<OpenAICodexDevicePollResult>;
+ export declare const openaiCodexOAuth: OAuthAuth;
+ //# sourceMappingURL=openai-codex.d.ts.map
+\ No newline at end of file
+diff --git a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.js b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.js
+index 5275b3b..7faa16c 100644
+--- a/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.js
++++ b/node_modules/@earendil-works/pi-ai/dist/auth/oauth/openai-codex.js
+@@ -107,6 +107,9 @@ async function readTokenResponse(response, operation) {
+         access: json.access_token,
+         refresh: json.refresh_token,
+         expires: Date.now() + json.expires_in * 1000,
++        ...(typeof json.id_token === "string" && json.id_token.length > 0
++            ? { idToken: json.id_token }
++            : {}),
+     };
+ }
+ async function exchangeAuthorizationCode(code, verifier, redirectUri = REDIRECT_URI, signal) {
+@@ -172,6 +175,101 @@ async function startOpenAICodexDeviceAuth(signal) {
+         intervalSeconds,
+     };
+ }
++/**
++ * Start an OpenAI Codex device-code flow without a local callback server.
++ */
++export async function startOpenAICodexDeviceAuthorization(signal) {
++    const device = await startOpenAICodexDeviceAuth(signal);
++    return {
++        ...device,
++        verificationUri: DEVICE_VERIFICATION_URI,
++        redirectUri: DEVICE_REDIRECT_URI,
++        expiresInSeconds: DEVICE_CODE_TIMEOUT_SECONDS,
++    };
++}
++/**
++ * Start a browser callback flow without opening a local server. A self-hosted
++ * client can listen on the returned localhost redirect and submit the final
++ * callback URL through `completeOpenAICodexManualOAuth`.
++ */
++export async function startOpenAICodexManualOAuth() {
++    const { verifier, challenge } = await generatePKCE();
++    const stateBytes = new Uint8Array(16);
++    globalThis.crypto.getRandomValues(stateBytes);
++    const state = Array.from(stateBytes, (value) => value.toString(16).padStart(2, "0")).join("");
++    const url = new URL(AUTHORIZE_URL);
++    url.searchParams.set("response_type", "code");
++    url.searchParams.set("client_id", CLIENT_ID);
++    url.searchParams.set("redirect_uri", REDIRECT_URI);
++    url.searchParams.set("scope", SCOPE);
++    url.searchParams.set("code_challenge", challenge);
++    url.searchParams.set("code_challenge_method", "S256");
++    url.searchParams.set("state", state);
++    url.searchParams.set("id_token_add_organizations", "true");
++    url.searchParams.set("codex_cli_simplified_flow", "true");
++    url.searchParams.set("originator", "flary");
++    return {
++        authorizationUrl: url.toString(),
++        verifier,
++        state,
++        redirectUri: REDIRECT_URI,
++        expiresInSeconds: 15 * 60,
++    };
++}
++/** Complete one browser callback flow from its final URL or code. */
++export async function completeOpenAICodexManualOAuth(input, expectedState, verifier, redirectUri = REDIRECT_URI, signal) {
++    const parsed = parseAuthorizationInput(input);
++    if (parsed.state && parsed.state !== expectedState) {
++        throw new Error("OAuth state mismatch");
++    }
++    if (!parsed.code) {
++        throw new Error("Missing authorization code");
++    }
++    return exchangeAuthorizationCodeForCredentials(parsed.code, verifier, redirectUri, signal);
++}
++/**
++ * Poll an OpenAI Codex device-code flow once. Remote runtimes persist the
++ * returned interval and call this again instead of holding one request open.
++ */
++export async function pollOpenAICodexDeviceAuthorization(device, signal) {
++    const response = await fetchWithLoginCancellation(DEVICE_TOKEN_URL, {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify({
++            device_auth_id: device.deviceAuthId,
++            user_code: device.userCode,
++        }),
++        signal,
++    });
++    if (response.ok) {
++        const json = await response.json();
++        if (!json?.authorization_code || !json.code_verifier) {
++            throw new Error("Invalid OpenAI Codex device authorization response");
++        }
++        const credential = await exchangeAuthorizationCodeForCredentials(json.authorization_code, json.code_verifier, device.redirectUri ?? DEVICE_REDIRECT_URI, signal);
++        return { status: "complete", credential };
++    }
++    const responseBody = await response.text().catch(() => "");
++    let errorCode;
++    try {
++        const json = JSON.parse(responseBody);
++        const error = json?.error;
++        errorCode = typeof error === "object" ? error?.code : error;
++    }
++    catch { }
++    if (response.status === 403 ||
++        response.status === 404 ||
++        errorCode === "deviceauth_authorization_pending") {
++        return { status: "pending", intervalSeconds: device.intervalSeconds };
++    }
++    if (errorCode === "slow_down") {
++        return {
++            status: "slow_down",
++            intervalSeconds: Math.max(1, device.intervalSeconds + 5),
++        };
++    }
++    throw new Error(`OpenAI Codex device authorization failed (${response.status})`);
++}
+ async function pollOpenAICodexDeviceAuth(device, signal) {
+     return pollOAuthDeviceCodeFlow({
+         intervalSeconds: device.intervalSeconds,
+@@ -329,9 +427,7 @@ function credentialsFromToken(token) {
+     }
+     return {
+         type: "oauth",
+-        access: token.access,
+-        refresh: token.refresh,
+-        expires: token.expires,
++        ...token,
+         accountId,
+     };
+ }
+diff --git a/node_modules/@earendil-works/pi-ai/dist/providers/data/google.json b/node_modules/@earendil-works/pi-ai/dist/providers/data/google.json
+index 686c371..46d08e6 100644
+--- a/node_modules/@earendil-works/pi-ai/dist/providers/data/google.json
++++ b/node_modules/@earendil-works/pi-ai/dist/providers/data/google.json
+@@ -1 +1 @@
+-{"google-generative-ai":{"deep-research-max-preview-04-2026":{"id":"deep-research-max-preview-04-2026","name":"Deep Research Max Preview (Apr-21-2026)","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":2,"output":12,"cacheRead":0.2,"cacheWrite":0},"contextWindow":131072,"maxTokens":65536},"deep-research-preview-04-2026":{"id":"deep-research-preview-04-2026","name":"Deep Research Preview (Apr-21-2026)","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":2,"output":12,"cacheRead":0.2,"cacheWrite":0},"contextWindow":131072,"maxTokens":65536},"gemini-2.0-flash":{"id":"gemini-2.0-flash","name":"Gemini 2.0 Flash","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":false,"input":["text","image"],"cost":{"input":0.1,"output":0.4,"cacheRead":0.025,"cacheWrite":0},"contextWindow":1048576,"maxTokens":8192},"gemini-2.0-flash-lite":{"id":"gemini-2.0-flash-lite","name":"Gemini 2.0 Flash-Lite","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":false,"input":["text","image"],"cost":{"input":0.075,"output":0.3,"cacheRead":0,"cacheWrite":0},"contextWindow":1048576,"maxTokens":8192},"gemini-2.5-computer-use-preview-10-2025":{"id":"gemini-2.5-computer-use-preview-10-2025","name":"Gemini 2.5 Computer Use Preview 10-2025","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":1.25,"output":10,"cacheRead":0,"cacheWrite":0},"contextWindow":131072,"maxTokens":65536},"gemini-2.5-flash":{"id":"gemini-2.5-flash","name":"Gemini 2.5 Flash","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0.3,"output":2.5,"cacheRead":0.03,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536},"gemini-2.5-flash-lite":{"id":"gemini-2.5-flash-lite","name":"Gemini 2.5 Flash-Lite","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0.1,"output":0.4,"cacheRead":0.01,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536},"gemini-2.5-pro":{"id":"gemini-2.5-pro","name":"Gemini 2.5 Pro","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":1.25,"output":10,"cacheRead":0.125,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536},"gemini-3-flash-preview":{"id":"gemini-3-flash-preview","name":"Gemini 3 Flash Preview","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0.5,"output":3,"cacheRead":0.05,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null}},"gemini-3-pro-preview":{"id":"gemini-3-pro-preview","name":"Gemini 3 Pro Preview","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":2,"output":12,"cacheRead":0.2,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null,"minimal":null,"low":"LOW","medium":null,"high":"HIGH"}},"gemini-3.1-flash-lite":{"id":"gemini-3.1-flash-lite","name":"Gemini 3.1 Flash Lite","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0.25,"output":1.5,"cacheRead":0.025,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null}},"gemini-3.1-flash-lite-image":{"id":"gemini-3.1-flash-lite-image","name":"Nano Banana 2 Lite","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0.25,"output":30,"cacheRead":0,"cacheWrite":0},"contextWindow":65536,"maxTokens":65536,"thinkingLevelMap":{"off":null}},"gemini-3.1-flash-lite-preview":{"id":"gemini-3.1-flash-lite-preview","name":"Gemini 3.1 Flash Lite Preview","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0.25,"output":1.5,"cacheRead":0.025,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null}},"gemini-3.1-flash-live-preview":{"id":"gemini-3.1-flash-live-preview","name":"Gemini 3.1 Flash Live Preview","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0.75,"output":4.5,"cacheRead":0,"cacheWrite":0},"contextWindow":131072,"maxTokens":65536,"thinkingLevelMap":{"off":null}},"gemini-3.1-pro-preview":{"id":"gemini-3.1-pro-preview","name":"Gemini 3.1 Pro Preview","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":2,"output":12,"cacheRead":0.2,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null,"minimal":null,"low":"LOW","medium":null,"high":"HIGH"}},"gemini-3.1-pro-preview-customtools":{"id":"gemini-3.1-pro-preview-customtools","name":"Gemini 3.1 Pro Preview Custom Tools","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":2,"output":12,"cacheRead":0.2,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null,"minimal":null,"low":"LOW","medium":null,"high":"HIGH"}},"gemini-3.5-flash":{"id":"gemini-3.5-flash","name":"Gemini 3.5 Flash","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":1.5,"output":9,"cacheRead":0.15,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null}},"gemini-3.5-flash-lite":{"id":"gemini-3.5-flash-lite","name":"Gemini 3.5 Flash Lite","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0.3,"output":2.5,"cacheRead":0.03,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null}},"gemini-3.6-flash":{"id":"gemini-3.6-flash","name":"Gemini 3.6 Flash","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":1.5,"output":7.5,"cacheRead":0.15,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null}},"gemini-flash-latest":{"id":"gemini-flash-latest","name":"Gemini Flash Latest","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":1.5,"output":9,"cacheRead":0.15,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null}},"gemini-flash-lite-latest":{"id":"gemini-flash-lite-latest","name":"Gemini Flash-Lite Latest","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0.25,"output":1.5,"cacheRead":0.025,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null}},"gemini-robotics-er-1.6-preview":{"id":"gemini-robotics-er-1.6-preview","name":"Gemini Robotics-ER 1.6 Preview","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":1,"output":5,"cacheRead":0,"cacheWrite":0},"contextWindow":131072,"maxTokens":65536},"gemma-4-26b-a4b-it":{"id":"gemma-4-26b-a4b-it","name":"Gemma 4 26B A4B IT","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0},"contextWindow":262144,"maxTokens":32768,"thinkingLevelMap":{"off":null,"minimal":"MINIMAL","low":null,"medium":null,"high":"HIGH"}},"gemma-4-31b-it":{"id":"gemma-4-31b-it","name":"Gemma 4 31B IT","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0},"contextWindow":262144,"maxTokens":32768,"thinkingLevelMap":{"off":null,"minimal":"MINIMAL","low":null,"medium":null,"high":"HIGH"}}}}
++{"google-generative-ai":{"deep-research-max-preview-04-2026":{"id":"deep-research-max-preview-04-2026","name":"Deep Research Max Preview (Apr-21-2026)","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":2,"output":12,"cacheRead":0.2,"cacheWrite":0},"contextWindow":131072,"maxTokens":65536},"deep-research-preview-04-2026":{"id":"deep-research-preview-04-2026","name":"Deep Research Preview (Apr-21-2026)","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":2,"output":12,"cacheRead":0.2,"cacheWrite":0},"contextWindow":131072,"maxTokens":65536},"gemini-2.0-flash":{"id":"gemini-2.0-flash","name":"Gemini 2.0 Flash","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":false,"input":["text","image"],"cost":{"input":0.1,"output":0.4,"cacheRead":0.025,"cacheWrite":0},"contextWindow":1048576,"maxTokens":8192},"gemini-2.0-flash-lite":{"id":"gemini-2.0-flash-lite","name":"Gemini 2.0 Flash-Lite","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":false,"input":["text","image"],"cost":{"input":0.075,"output":0.3,"cacheRead":0,"cacheWrite":0},"contextWindow":1048576,"maxTokens":8192},"gemini-2.5-computer-use-preview-10-2025":{"id":"gemini-2.5-computer-use-preview-10-2025","name":"Gemini 2.5 Computer Use Preview 10-2025","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":1.25,"output":10,"cacheRead":0,"cacheWrite":0},"contextWindow":131072,"maxTokens":65536},"gemini-2.5-flash":{"id":"gemini-2.5-flash","name":"Gemini 2.5 Flash","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0.3,"output":2.5,"cacheRead":0.03,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536},"gemini-2.5-flash-lite":{"id":"gemini-2.5-flash-lite","name":"Gemini 2.5 Flash-Lite","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0.1,"output":0.4,"cacheRead":0.01,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536},"gemini-2.5-pro":{"id":"gemini-2.5-pro","name":"Gemini 2.5 Pro","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":1.25,"output":10,"cacheRead":0.125,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536},"gemini-3-flash-preview":{"id":"gemini-3-flash-preview","name":"Gemini 3 Flash Preview","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0.5,"output":3,"cacheRead":0.05,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null}},"gemini-3-pro-preview":{"id":"gemini-3-pro-preview","name":"Gemini 3 Pro Preview","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":2,"output":12,"cacheRead":0.2,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null,"minimal":null,"low":"LOW","medium":null,"high":"HIGH"}},"gemini-3.1-flash-lite":{"id":"gemini-3.1-flash-lite","name":"Gemini 3.1 Flash Lite","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0.25,"output":1.5,"cacheRead":0.025,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null}},"gemini-3.1-flash-lite-image":{"id":"gemini-3.1-flash-lite-image","name":"Nano Banana 2 Lite","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0.25,"output":30,"cacheRead":0,"cacheWrite":0},"contextWindow":65536,"maxTokens":65536,"thinkingLevelMap":{"off":null}},"gemini-3.1-flash-lite-preview":{"id":"gemini-3.1-flash-lite-preview","name":"Gemini 3.1 Flash Lite Preview","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0.25,"output":1.5,"cacheRead":0.025,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null}},"gemini-3.1-flash-live-preview":{"id":"gemini-3.1-flash-live-preview","name":"Gemini 3.1 Flash Live Preview","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0.75,"output":4.5,"cacheRead":0,"cacheWrite":0},"contextWindow":131072,"maxTokens":65536,"thinkingLevelMap":{"off":null}},"gemini-3.1-pro-preview":{"id":"gemini-3.1-pro-preview","name":"Gemini 3.1 Pro Preview","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":2,"output":12,"cacheRead":0.2,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null,"minimal":null,"low":"LOW","medium":null,"high":"HIGH"}},"gemini-3.1-pro-preview-customtools":{"id":"gemini-3.1-pro-preview-customtools","name":"Gemini 3.1 Pro Preview Custom Tools","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":2,"output":12,"cacheRead":0.2,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null,"minimal":null,"low":"LOW","medium":null,"high":"HIGH"}},"gemini-3.5-flash":{"id":"gemini-3.5-flash","name":"Gemini 3.5 Flash","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":1.5,"output":9,"cacheRead":0.15,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null}},"gemini-3.5-flash-lite":{"id":"gemini-3.5-flash-lite","name":"Gemini 3.5 Flash Lite","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0.3,"output":2.5,"cacheRead":0.03,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null}},"gemini-3.6-flash":{"id":"gemini-3.6-flash","name":"Gemini 3.6 Flash","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":1.5,"output":7.5,"cacheRead":0.15,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null}},"gemini-3.7-flash":{"id":"gemini-3.7-flash","name":"Gemini 3.7 Flash","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0.75,"output":3.75,"cacheRead":0.075,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null,"minimal":null,"low":"LOW","medium":"MEDIUM","high":"HIGH"}},"gemini-flash-latest":{"id":"gemini-flash-latest","name":"Gemini Flash Latest","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":1.5,"output":9,"cacheRead":0.15,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null}},"gemini-flash-lite-latest":{"id":"gemini-flash-lite-latest","name":"Gemini Flash-Lite Latest","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0.25,"output":1.5,"cacheRead":0.025,"cacheWrite":0},"contextWindow":1048576,"maxTokens":65536,"thinkingLevelMap":{"off":null}},"gemini-robotics-er-1.6-preview":{"id":"gemini-robotics-er-1.6-preview","name":"Gemini Robotics-ER 1.6 Preview","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":1,"output":5,"cacheRead":0,"cacheWrite":0},"contextWindow":131072,"maxTokens":65536},"gemma-4-26b-a4b-it":{"id":"gemma-4-26b-a4b-it","name":"Gemma 4 26B A4B IT","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0},"contextWindow":262144,"maxTokens":32768,"thinkingLevelMap":{"off":null,"minimal":"MINIMAL","low":null,"medium":null,"high":"HIGH"}},"gemma-4-31b-it":{"id":"gemma-4-31b-it","name":"Gemma 4 31B IT","api":"google-generative-ai","provider":"google","baseUrl":"https://generativelanguage.googleapis.com/v1beta","reasoning":true,"input":["text","image"],"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0},"contextWindow":262144,"maxTokens":32768,"thinkingLevelMap":{"off":null,"minimal":"MINIMAL","low":null,"medium":null,"high":"HIGH"}}}}
+diff --git a/node_modules/@earendil-works/pi-ai/dist/worker-oauth.d.ts b/node_modules/@earendil-works/pi-ai/dist/worker-oauth.d.ts
+new file mode 100644
+index 0000000..e235332
+--- /dev/null
++++ b/node_modules/@earendil-works/pi-ai/dist/worker-oauth.d.ts
+@@ -0,0 +1,54 @@
++import type { OAuthCredentials } from "./auth/types.ts";
++
++export interface AnthropicManualOAuthStart {
++    authorizationUrl: string;
++    verifier: string;
++    state: string;
++    redirectUri: string;
++    expiresInSeconds: number;
++}
++
++export interface OpenAICodexDeviceAuthorization {
++    deviceAuthId: string;
++    userCode: string;
++    intervalSeconds: number;
++    verificationUri: string;
++    redirectUri: string;
++    expiresInSeconds: number;
++}
++export interface OpenAICodexManualOAuthStart {
++    authorizationUrl: string;
++    verifier: string;
++    state: string;
++    redirectUri: string;
++    expiresInSeconds: number;
++}
++
++export type OpenAICodexDevicePollResult =
++    | { status: "pending"; intervalSeconds: number }
++    | { status: "slow_down"; intervalSeconds: number }
++    | { status: "complete"; credential: OAuthCredentials };
++
++export declare function startAnthropicManualOAuth(): Promise<AnthropicManualOAuthStart>;
++export declare function completeAnthropicManualOAuth(
++    input: string,
++    state: string,
++    verifier: string,
++    redirectUri?: string,
++): Promise<OAuthCredentials>;
++export declare function startOpenAICodexDeviceAuthorization(
++    signal?: AbortSignal,
++): Promise<OpenAICodexDeviceAuthorization>;
++export declare function startOpenAICodexManualOAuth(): Promise<OpenAICodexManualOAuthStart>;
++export declare function completeOpenAICodexManualOAuth(
++    input: string,
++    expectedState: string,
++    verifier: string,
++    redirectUri?: string,
++    signal?: AbortSignal,
++): Promise<OAuthCredentials>;
++export declare function pollOpenAICodexDeviceAuthorization(
++    device: OpenAICodexDeviceAuthorization,
++    signal?: AbortSignal,
++): Promise<OpenAICodexDevicePollResult>;
++//# sourceMappingURL=worker-oauth.d.ts.map
+diff --git a/node_modules/@earendil-works/pi-ai/dist/worker-oauth.js b/node_modules/@earendil-works/pi-ai/dist/worker-oauth.js
+new file mode 100644
+index 0000000..667dbf0
+--- /dev/null
++++ b/node_modules/@earendil-works/pi-ai/dist/worker-oauth.js
+@@ -0,0 +1,11 @@
++export {
++    completeAnthropicManualOAuth,
++    startAnthropicManualOAuth,
++} from "./auth/oauth/anthropic.js";
++export {
++    completeOpenAICodexManualOAuth,
++    pollOpenAICodexDeviceAuthorization,
++    startOpenAICodexManualOAuth,
++    startOpenAICodexDeviceAuthorization,
++} from "./auth/oauth/openai-codex.js";
++//# sourceMappingURL=worker-oauth.js.map
+diff --git a/node_modules/@earendil-works/pi-ai/package.json b/node_modules/@earendil-works/pi-ai/package.json
+index a6773c7..ceefcfb 100644
+--- a/node_modules/@earendil-works/pi-ai/package.json
++++ b/node_modules/@earendil-works/pi-ai/package.json
+@@ -31,6 +31,10 @@
+ 			"types": "./dist/oauth.d.ts",
+ 			"import": "./dist/oauth.js"
+ 		},
++		"./worker-oauth": {
++			"types": "./dist/worker-oauth.d.ts",
++			"import": "./dist/worker-oauth.js"
++		},
+ 		"./bedrock-provider": {
+ 			"types": "./dist/bedrock-provider.d.ts",
+ 			"import": "./dist/bedrock-provider.js"

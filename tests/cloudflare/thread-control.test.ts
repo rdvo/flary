@@ -14,9 +14,15 @@ import {
 } from "../../src/harness/cloudflare/thread-control.ts";
 import { D1ThreadCatalog } from "../../src/harness/cloudflare/d1-thread-catalog.ts";
 
+type TestNamespace = {
+  stores: Map<string, ReturnType<typeof sqlStorage>>;
+  idFromName(name: string): string;
+  get(id: unknown): { fetch(request: Request): Promise<Response> };
+};
+
 function namespace() {
   const stores = new Map<string, ReturnType<typeof sqlStorage>>();
-  return {
+  const controls: TestNamespace = {
     stores,
     idFromName(name: string) {
       return name;
@@ -30,11 +36,16 @@ function namespace() {
       }
       return {
         fetch(request: Request) {
-          return handleFlaryThreadControlObjectRequest({ storage: storage!, request });
+          return handleFlaryThreadControlObjectRequest({
+            storage: storage!,
+            request,
+            env: { FLARY_THREAD_CONTROL: controls },
+          });
         },
       };
     },
   };
+  return controls;
 }
 
 function sqlStorage() {
@@ -265,6 +276,7 @@ async function exportFenceFixture(suffix: string) {
       workspaceId: `workspace_${suffix}`,
       branch: "main",
     },
+    model: { provider: "openai", model: "gpt-5.6-luna" },
   });
   const rootThreadId = `thread_fence_${suffix}`;
   const rootName = `thread:${scope.authorization.organizationId}:${scope.appId}:${rootThreadId}`;
@@ -391,6 +403,7 @@ test("pre-acceptance child failure settles its parent fence", async () => {
       workspaceId: "workspace",
       branch: "main",
     },
+    model: { provider: "openai", model: "gpt-5.6-luna" },
   });
   const target = { ...scope, threadId: "thread_fence_spawn_failure" };
   await assert.rejects(
@@ -478,6 +491,7 @@ test("post-acceptance bookkeeping failure keeps the parent fence active", async 
       workspaceId: "workspace_post_acceptance",
       branch: "main",
     },
+    model: { provider: "openai", model: "gpt-5.6-luna" },
   });
   const target = { ...scope, threadId: "thread_fence_post_acceptance" };
   await assert.rejects(
@@ -520,10 +534,13 @@ test("post-acceptance bookkeeping failure keeps the parent fence active", async 
       }),
     }),
   });
-  const child = ((await listed.json()) as { threads: Array<{ threadId: string }> }).threads.find(
-    (thread) => thread.threadId !== target.threadId,
-  );
+  const child = (
+    (await listed.json()) as {
+      threads: Array<{ threadId: string; metadata?: Record<string, unknown> }>;
+    }
+  ).threads.find((thread) => thread.threadId !== target.threadId);
   assert.ok(child);
+  const childAttemptToken = String(child!.metadata?.flarySubagentParentExportFenceAttemptToken);
   const completed = await handleFlaryThreadControlObjectRequest({
     storage,
     request: new Request("https://flary.internal/complete", {
@@ -538,6 +555,7 @@ test("post-acceptance bookkeeping failure keeps the parent fence active", async 
           requestId: "complete_post_acceptance",
           idempotencyKey: "complete_post_acceptance",
           threadId: child!.threadId,
+          subagentFenceAttemptToken: childAttemptToken,
           output: { summary: "accepted child finished" },
         },
       }),
@@ -621,6 +639,7 @@ test("root start failure after acceptance keeps the child fence active", async (
       workspaceId: "workspace_start_failure",
       branch: "main",
     },
+    model: { provider: "openai", model: "gpt-5.6-luna" },
   });
   const target = { ...scope, threadId: "thread_fence_start_failure" };
   await assert.rejects(
@@ -663,10 +682,13 @@ test("root start failure after acceptance keeps the child fence active", async (
       }),
     }),
   });
-  const child = ((await listed.json()) as { threads: Array<{ threadId: string }> }).threads.find(
-    (thread) => thread.threadId !== target.threadId,
-  );
+  const child = (
+    (await listed.json()) as {
+      threads: Array<{ threadId: string; metadata?: Record<string, unknown> }>;
+    }
+  ).threads.find((thread) => thread.threadId !== target.threadId);
   assert.ok(child);
+  const childAttemptToken = String(child!.metadata?.flarySubagentParentExportFenceAttemptToken);
   const completed = await handleFlaryThreadControlObjectRequest({
     storage,
     request: new Request("https://flary.internal/complete", {
@@ -681,6 +703,7 @@ test("root start failure after acceptance keeps the child fence active", async (
           requestId: "complete_start_failure",
           idempotencyKey: "complete_start_failure",
           threadId: child!.threadId,
+          subagentFenceAttemptToken: childAttemptToken,
           output: { summary: "accepted child finished" },
         },
       }),
@@ -703,7 +726,7 @@ test("root start failure after acceptance keeps the child fence active", async (
   assert.equal(opened.ok, true, await opened.text());
 });
 
-test("normal nested child cancellation settles only the immediate parent's fence", async () => {
+test("attempt-scoped nested child cancellation settles only the immediate parent's fence", async () => {
   const controls = namespace();
   let submission = 0;
   const engine = {
@@ -755,6 +778,7 @@ test("normal nested child cancellation settles only the immediate parent's fence
       workspaceId: "workspace_nested_normal",
       branch: "main",
     },
+    model: { provider: "openai", model: "gpt-5.6-luna" },
   });
   const rootTarget = { ...scope, threadId: "thread_fence_nested_normal" };
   const parent = await service.subagentAction!(rootTarget, "spawn", {
@@ -774,17 +798,21 @@ test("normal nested child cancellation settles only the immediate parent's fence
     seedTurns: 0,
   });
   const nestedId = String(nested.thread.threadId);
+  const nestedAttemptToken = String(
+    (nested.thread.metadata as Record<string, unknown>).flarySubagentParentExportFenceAttemptToken,
+  );
   await service.subagentAction!(parentTarget, "cancel", {
     requestId: "cancel_nested_normal",
     idempotencyKey: "cancel_nested_normal",
     threadId: nestedId,
+    subagentFenceAttemptToken: nestedAttemptToken,
   });
   await service.subagentAction!(parentTarget, "close", {
     requestId: "close_nested_normal",
     idempotencyKey: "close_nested_normal",
     threadId: nestedId,
+    subagentFenceAttemptToken: nestedAttemptToken,
   });
-
   const parentStorage = controls.stores.get(
     `thread:${scope.authorization.organizationId}:${scope.appId}:${parentId}`,
   )!;
@@ -801,7 +829,17 @@ test("normal nested child cancellation settles only the immediate parent's fence
       }),
     }),
   });
-  assert.equal(parentExport.ok, true, await parentExport.text());
+  const nestedFence = parentStorage.sql
+    .exec<{ settled_at: string | null }>(
+      "SELECT settled_at FROM flary_legacy_export_submissions WHERE admission_id = ?",
+      `subagent_${nestedId}`,
+    )
+    .toArray()[0];
+  assert.ok(nestedFence?.settled_at);
+  // The parent still has its own accepted run. Settling its child must not
+  // release that separate admission or permit exporting the running parent.
+  assert.equal(parentExport.ok, false);
+  assert.match(await parentExport.text(), /unsettled submission/i);
   const rootStorage = controls.stores.get(
     `thread:${scope.authorization.organizationId}:${scope.appId}:${rootTarget.threadId}`,
   )!;
@@ -943,7 +981,7 @@ test("a stale wrong-token terminal is a no-op through the subagent dispatcher", 
         subagentSubmissionId: submissionId,
         ...(action === "fail"
           ? { error: { code: "stale", message: "stale", retryable: true } }
-          : {}),
+          : { output: { summary: "done" } }),
       },
     });
 
@@ -3574,6 +3612,7 @@ test("legacy export retry detects corrupt manifests and missing attachment objec
   };
   const env = {
     FLUE_CODER_AGENT: engine,
+    FLUE_AGENT_CODER: engine,
     FLARY_SESSION_ARCHIVE: bucket,
     FLARY_SESSION_ARCHIVE_KEY: "p".repeat(48),
   };

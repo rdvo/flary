@@ -25,15 +25,18 @@ try {
   process.exit(0);
 }
 const patchDirectory = path.resolve(__dirname, "../npm-patches");
-const relativePatchDirectory = path.relative(installRoot, patchDirectory);
-const result = spawnSync(
-  process.execPath,
-  [patchPackageCli, "--patch-dir", relativePatchDirectory],
-  {
-    cwd: installRoot,
-    stdio: "inherit",
-  },
-);
+const packageRoot = path.resolve(__dirname, "..");
+for (const appRoot of [...new Set([installRoot, packageRoot])]) {
+  const relativePatchDirectory = path.relative(appRoot, patchDirectory);
+  const result = spawnSync(
+    process.execPath,
+    [patchPackageCli, "--patch-dir", relativePatchDirectory],
+    {
+      cwd: appRoot,
+      stdio: "inherit",
+    },
+  );
 
-if (result.error) throw result.error;
-if (result.status !== 0) process.exit(result.status ?? 1);
+  if (result.error) throw result.error;
+  if (result.status !== 0) process.exit(result.status ?? 1);
+}

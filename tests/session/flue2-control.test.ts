@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { InMemoryConversationStreamStore, type ConversationRecord } from "@flue/runtime-v2/adapter";
-import { agentStreamPath, handleAgentConversationRead } from "@flue/runtime-v2/internal";
+import { InMemoryConversationStreamStore, type ConversationRecord } from "@flue/runtime/adapter";
+import { agentStreamPath, handleAgentConversationRead } from "@flue/runtime/internal";
 
 import { createFlue2CanonicalControl } from "../../src/harness/session/flue2-control.ts";
 // Flue 2 pins this file name. This test exercises its real context builder.
 // @ts-expect-error Flue's private compiled symbol is intentionally not typed.
-import { rt as buildConversationContext } from "../../node_modules/@flue/runtime-v2/dist/dispatch-nU3cIlT-.mjs";
+import { rt as buildConversationContext } from "../../node_modules/@flue/runtime/dist/dispatch-Dohpn4Ea.mjs";
 
 test("canonical rollback creates an active branch that survives store reattachment", async () => {
   const store = new InMemoryConversationStreamStore();

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolveModel } from "@flue/runtime/internal";
+import { resolveModel } from "@flue/runtime-legacy/internal";
 
 import {
   CloudflareProviderOAuthPersistence,

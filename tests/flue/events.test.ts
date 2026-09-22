@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { FlueEvent } from "@flue/runtime";
+import type { FlueEvent } from "@flue/runtime-legacy";
 
 import { normalizeFlueEvent } from "../../src/harness/flue/events.js";
 

@@ -1,7 +1,7 @@
-diff --git a/node_modules/@flue/runtime/dist/cloudflare/internal.mjs b/node_modules/@flue/runtime/dist/cloudflare/internal.mjs
+diff --git a/node_modules/@flue/runtime-legacy/dist/cloudflare/internal.mjs b/node_modules/@flue/runtime-legacy/dist/cloudflare/internal.mjs
 index de97a5a18da20a2f4e3667baa577da182849518d..bd697fdfd5b4737bb487a4a0579e05f25f6cda99 100644
---- a/node_modules/@flue/runtime/dist/cloudflare/internal.mjs
-+++ b/node_modules/@flue/runtime/dist/cloudflare/internal.mjs
+--- a/node_modules/@flue/runtime-legacy/dist/cloudflare/internal.mjs
++++ b/node_modules/@flue/runtime-legacy/dist/cloudflare/internal.mjs
 @@ -325,8 +325,12 @@ const WORKERS_AI_COMPAT = {
  	sendSessionAffinityHeaders: true,
  	supportsLongCacheRetention: false
@@ -95,10 +95,10 @@ index de97a5a18da20a2f4e3667baa577da182849518d..bd697fdfd5b4737bb487a4a0579e05f2
  			stream.push({
  				type: "done",
  				reason: output.stopReason,
-diff --git a/node_modules/@flue/runtime/dist/conversation-projections-XMug3C6A.mjs b/node_modules/@flue/runtime/dist/conversation-projections-XMug3C6A.mjs
+diff --git a/node_modules/@flue/runtime-legacy/dist/conversation-projections-XMug3C6A.mjs b/node_modules/@flue/runtime-legacy/dist/conversation-projections-XMug3C6A.mjs
 index d05220033fe9d56662329e478c7ebc7db283f3ba..6233650f71f541a78567ea9cda5e3990a688d2f8 100644
---- a/node_modules/@flue/runtime/dist/conversation-projections-XMug3C6A.mjs
-+++ b/node_modules/@flue/runtime/dist/conversation-projections-XMug3C6A.mjs
+--- a/node_modules/@flue/runtime-legacy/dist/conversation-projections-XMug3C6A.mjs
++++ b/node_modules/@flue/runtime-legacy/dist/conversation-projections-XMug3C6A.mjs
 @@ -99,7 +99,8 @@ const AgentProfileSchema = v.strictObject({
  	subagents: v.optional(v.array(v.unknown())),
  	thinkingLevel: v.optional(v.string()),
@@ -136,10 +136,10 @@ index d05220033fe9d56662329e478c7ebc7db283f3ba..6233650f71f541a78567ea9cda5e3990
  	const latestCompactionIndex = path.findLastIndex((entry) => entry.type === "compaction");
  	if (latestCompactionIndex === -1) return pathToContextEntries(path, options);
  	const compaction = path[latestCompactionIndex];
-diff --git a/node_modules/@flue/runtime/dist/conversation-stream-store-Bitz7UoW.mjs b/node_modules/@flue/runtime/dist/conversation-stream-store-Bitz7UoW.mjs
+diff --git a/node_modules/@flue/runtime-legacy/dist/conversation-stream-store-Bitz7UoW.mjs b/node_modules/@flue/runtime-legacy/dist/conversation-stream-store-Bitz7UoW.mjs
 index 94032552cc83d3596ae6e53bd46ec6c9c9749b01..fd33f9f39136b6a80ffddb69a9d36947973c7d96 100644
---- a/node_modules/@flue/runtime/dist/conversation-stream-store-Bitz7UoW.mjs
-+++ b/node_modules/@flue/runtime/dist/conversation-stream-store-Bitz7UoW.mjs
+--- a/node_modules/@flue/runtime-legacy/dist/conversation-stream-store-Bitz7UoW.mjs
++++ b/node_modules/@flue/runtime-legacy/dist/conversation-stream-store-Bitz7UoW.mjs
 @@ -15,6 +15,16 @@ const DURABILITY_DEFAULT_MAX_ATTEMPTS = 10;
  const DURABILITY_DEFAULT_TIMEOUT_MS = 36e5;
  /** Default lease duration for submission ownership in milliseconds (30 seconds). */
@@ -441,10 +441,10 @@ index 94032552cc83d3596ae6e53bd46ec6c9c9749b01..fd33f9f39136b6a80ffddb69a9d36947
  			if (opts.isShutdownAbort?.(error)) {
  				if (submission.kind === "direct") observers.fail(submission.submissionId, error);
  				throw error;
-diff --git a/node_modules/@flue/runtime/dist/internal.d.mts b/node_modules/@flue/runtime/dist/internal.d.mts
+diff --git a/node_modules/@flue/runtime-legacy/dist/internal.d.mts b/node_modules/@flue/runtime-legacy/dist/internal.d.mts
 index c785e222c499ceaf7d2638f8e73ea75a1e0720b6..38f58a47531d70c79048730bf8fff06a5a353cf7 100644
---- a/node_modules/@flue/runtime/dist/internal.d.mts
-+++ b/node_modules/@flue/runtime/dist/internal.d.mts
+--- a/node_modules/@flue/runtime-legacy/dist/internal.d.mts
++++ b/node_modules/@flue/runtime-legacy/dist/internal.d.mts
 @@ -84,6 +84,14 @@ interface CloudflareAgentRuntime {
    attach(instance: CloudflareAgentInstance, prepared: CloudflareAgentPreparedCoordinator): void;
    onStart(instance: CloudflareAgentInstance, inherited: () => Promise<unknown> | unknown): Promise<void>;
@@ -460,10 +460,10 @@ index c785e222c499ceaf7d2638f8e73ea75a1e0720b6..38f58a47531d70c79048730bf8fff06a
    onRequest(instance: CloudflareAgentInstance, request: Request): Promise<Response | null>;
    onFiberRecovered(instance: CloudflareAgentInstance, ctx: CloudflareAgentRecoveredFiberContext, inherited: () => Promise<unknown> | unknown): Promise<unknown>;
  }
-diff --git a/node_modules/@flue/runtime/dist/internal.mjs b/node_modules/@flue/runtime/dist/internal.mjs
+diff --git a/node_modules/@flue/runtime-legacy/dist/internal.mjs b/node_modules/@flue/runtime-legacy/dist/internal.mjs
 index 1147b979db854e2c491a1ab802b4848a84e1dbd1..ca0ce77652c90d7f8c9bcabc39d97b115d0e44e3 100644
---- a/node_modules/@flue/runtime/dist/internal.mjs
-+++ b/node_modules/@flue/runtime/dist/internal.mjs
+--- a/node_modules/@flue/runtime-legacy/dist/internal.mjs
++++ b/node_modules/@flue/runtime-legacy/dist/internal.mjs
 @@ -703,7 +703,8 @@ async function initializeRootHarness(agent, config, emitEvent) {
  		model: resolvedModel,
  		thinkingLevel: definition.thinkingLevel ?? config.agentConfig.thinkingLevel,
@@ -605,10 +605,10 @@ index 1147b979db854e2c491a1ab802b4848a84e1dbd1..ca0ce77652c90d7f8c9bcabc39d97b11
  		if (isAbortRequest(request, this.agentName, this.instance.name)) {
  			const aborted = await this.abortInstance();
  			return Response.json({ aborted });
-diff --git a/node_modules/@flue/runtime/dist/providers-CsCcTxMU.mjs b/node_modules/@flue/runtime/dist/providers-CsCcTxMU.mjs
+diff --git a/node_modules/@flue/runtime-legacy/dist/providers-CsCcTxMU.mjs b/node_modules/@flue/runtime-legacy/dist/providers-CsCcTxMU.mjs
 index 529cb1b7ff323a065484b9ddf009cf0f4975bbae..073e65b583eda16874b30ae2fe840e4eb2271d1b 100644
---- a/node_modules/@flue/runtime/dist/providers-CsCcTxMU.mjs
-+++ b/node_modules/@flue/runtime/dist/providers-CsCcTxMU.mjs
+--- a/node_modules/@flue/runtime-legacy/dist/providers-CsCcTxMU.mjs
++++ b/node_modules/@flue/runtime-legacy/dist/providers-CsCcTxMU.mjs
 @@ -157,8 +157,9 @@ function buildModelFromRegistration(providerId, registration, modelId) {
  		const gateway = registration.gateway === false ? void 0 : registration.gateway ?? { id: "default" };
  		return attachModelBinding(base, registration.binding, gateway);
@@ -640,10 +640,10 @@ index 529cb1b7ff323a065484b9ddf009cf0f4975bbae..073e65b583eda16874b30ae2fe840e4e
  		contextWindow: registration.models?.[modelId]?.contextWindow ?? registration.contextWindow ?? base.contextWindow,
  		maxTokens: registration.models?.[modelId]?.maxTokens ?? registration.maxTokens ?? base.maxTokens
  	};
-diff --git a/node_modules/@flue/runtime/dist/providers-DHepWsgE.d.mts b/node_modules/@flue/runtime/dist/providers-DHepWsgE.d.mts
+diff --git a/node_modules/@flue/runtime-legacy/dist/providers-DHepWsgE.d.mts b/node_modules/@flue/runtime-legacy/dist/providers-DHepWsgE.d.mts
 index 668c44f4a1eb71ed4e3c66b0ab60021b213df9a7..cfeaa0c1dec2cabe5c4c97af5178193819ae13c4 100644
---- a/node_modules/@flue/runtime/dist/providers-DHepWsgE.d.mts
-+++ b/node_modules/@flue/runtime/dist/providers-DHepWsgE.d.mts
+--- a/node_modules/@flue/runtime-legacy/dist/providers-DHepWsgE.d.mts
++++ b/node_modules/@flue/runtime-legacy/dist/providers-DHepWsgE.d.mts
 @@ -56,6 +56,12 @@ interface ProviderTelemetryRegistration {
  }
  /** Register an HTTP-backed provider ID with {@link registerProvider}. */
@@ -677,10 +677,10 @@ index 668c44f4a1eb71ed4e3c66b0ab60021b213df9a7..cfeaa0c1dec2cabe5c4c97af51781938
    }>;
    /**
     * Sends `store: true` for OpenAI Responses API providers. Only enable when
-diff --git a/node_modules/@flue/runtime/dist/run-store-CYeXjR-d.mjs b/node_modules/@flue/runtime/dist/run-store-CYeXjR-d.mjs
+diff --git a/node_modules/@flue/runtime-legacy/dist/run-store-CYeXjR-d.mjs b/node_modules/@flue/runtime-legacy/dist/run-store-CYeXjR-d.mjs
 index 7aad15d8afe459fc75d990bde7bacc0992a62529..44b98ea4f90716f188fcfce05a59496394ff019e 100644
---- a/node_modules/@flue/runtime/dist/run-store-CYeXjR-d.mjs
-+++ b/node_modules/@flue/runtime/dist/run-store-CYeXjR-d.mjs
+--- a/node_modules/@flue/runtime-legacy/dist/run-store-CYeXjR-d.mjs
++++ b/node_modules/@flue/runtime-legacy/dist/run-store-CYeXjR-d.mjs
 @@ -10,7 +10,12 @@ const DirectAgentImageSchema = v.object({
  });
  const DirectAgentPayloadSchema = v.object({
@@ -695,10 +695,10 @@ index 7aad15d8afe459fc75d990bde7bacc0992a62529..44b98ea4f90716f188fcfce05a594963
  });
  const WorkflowRouteParamSchema = v.object({ name: v.string() });
  /** Shared `?wait` query contract for agent and workflow invocation routes. */
-diff --git a/node_modules/@flue/runtime/dist/types-USSZhfC6.d.mts b/node_modules/@flue/runtime/dist/types-USSZhfC6.d.mts
+diff --git a/node_modules/@flue/runtime-legacy/dist/types-USSZhfC6.d.mts b/node_modules/@flue/runtime-legacy/dist/types-USSZhfC6.d.mts
 index e41ab79c03df8f1af64e73af81b76e545d17fa69..ec43f75de26a77b593ce3e18a6cc750681fcab40 100644
---- a/node_modules/@flue/runtime/dist/types-USSZhfC6.d.mts
-+++ b/node_modules/@flue/runtime/dist/types-USSZhfC6.d.mts
+--- a/node_modules/@flue/runtime-legacy/dist/types-USSZhfC6.d.mts
++++ b/node_modules/@flue/runtime-legacy/dist/types-USSZhfC6.d.mts
 @@ -83,6 +83,16 @@ type DirectAgentImage = PromptImage & {
  interface DirectAgentPayload {
    message: string;

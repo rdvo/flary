@@ -359,13 +359,15 @@ test("the Vite plugin generates Flue Durable Object entry and bindings", (t) => 
   const root = path.resolve("tests/fixtures/function-runtime");
   const cli = path.resolve("apps/cloud/node_modules/.bin/flue");
   const agents = path.resolve("apps/cloud/node_modules/agents");
-  if (!fs.existsSync(cli) || !fs.existsSync(agents)) {
+  const runtime = path.resolve("apps/cloud/node_modules/@flue/runtime");
+  if (!fs.existsSync(cli) || !fs.existsSync(agents) || !fs.existsSync(runtime)) {
     t.skip("the Cloudflare Flue build dependencies are not installed in the workspace");
     return;
   }
   const fixtureNodeModules = path.join(root, "node_modules");
   const fixtureAgents = path.join(fixtureNodeModules, "agents");
-  fs.mkdirSync(fixtureNodeModules, { recursive: true });
+  fs.mkdirSync(path.join(fixtureNodeModules, "@flue"), { recursive: true });
+  fs.symlinkSync(runtime, path.join(fixtureNodeModules, "@flue/runtime"), "dir");
   if (!fs.existsSync(fixtureAgents)) fs.symlinkSync(agents, fixtureAgents, "dir");
   t.after(() => fs.rmSync(fixtureNodeModules, { recursive: true, force: true }));
   const plugin = flaryVite({
@@ -509,12 +511,14 @@ test("explicit root controls generated queue names in a monorepo", (t) => {
 
   const cli = path.resolve("apps/cloud/node_modules/.bin/flue");
   const agents = path.resolve("apps/cloud/node_modules/agents");
-  if (!fs.existsSync(cli) || !fs.existsSync(agents)) {
+  const runtime = path.resolve("apps/cloud/node_modules/@flue/runtime");
+  if (!fs.existsSync(cli) || !fs.existsSync(agents) || !fs.existsSync(runtime)) {
     t.skip("the Cloudflare Flue build dependencies are not installed in the workspace");
     return;
   }
   const fixtureNodeModules = path.join(workerRoot, "node_modules");
-  fs.mkdirSync(fixtureNodeModules, { recursive: true });
+  fs.mkdirSync(path.join(fixtureNodeModules, "@flue"), { recursive: true });
+  fs.symlinkSync(runtime, path.join(fixtureNodeModules, "@flue/runtime"), "dir");
   fs.symlinkSync(agents, path.join(fixtureNodeModules, "agents"), "dir");
 
   const plugin = flaryVite({

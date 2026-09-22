@@ -32,18 +32,35 @@ run("npm", ["install", tarball, "--loglevel", "error"], consumer);
 run("npm", ["audit", "--audit-level=high"], consumer);
 
 const flue = fs.readFileSync(
-  path.join(consumer, "node_modules/@flue/runtime/dist/conversation-stream-store-Bitz7UoW.mjs"),
+  path.join(
+    consumer,
+    "node_modules/@flue/runtime-legacy/dist/conversation-stream-store-Bitz7UoW.mjs",
+  ),
   "utf8",
 );
-const pi = fs.readFileSync(
-  path.join(consumer, "node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js"),
+const canonicalRuntimeDirectory = path.join(consumer, "node_modules/@flue/runtime/dist");
+const canonicalRuntimeFile = fs
+  .readdirSync(canonicalRuntimeDirectory)
+  .find((name) => /^dispatch-[A-Za-z0-9_-]+\.mjs$/.test(name));
+if (!canonicalRuntimeFile) {
+  throw new Error("The clean npm install is missing the canonical Flue dispatch module");
+}
+const canonicalRuntime = fs.readFileSync(
+  path.join(canonicalRuntimeDirectory, canonicalRuntimeFile),
   "utf8",
 );
+const piWorkerOauth = fs.readFileSync(
+  path.join(consumer, "node_modules/@earendil-works/pi-ai/dist/worker-oauth.js"),
+  "utf8",
+);
+if (!canonicalRuntime.includes("canonicalPath") || !canonicalRuntime.includes('"flary_rollback"')) {
+  throw new Error("The clean npm install did not apply the canonical Flue rollback patch");
+}
 if (!flue.includes("activeCacheRetention")) {
   throw new Error("The clean npm install did not apply the Flue cache patch");
 }
-if (!pi.includes("effectiveSessionId")) {
-  throw new Error("The clean npm install did not apply the Pi cache patch");
+if (!piWorkerOauth.includes("startOpenAICodexDeviceAuthorization")) {
+  throw new Error("The clean npm install did not apply the Pi worker OAuth patch");
 }
 
 run(

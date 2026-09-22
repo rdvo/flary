@@ -17,9 +17,15 @@ const PATCHED = `function buildConversationContextEntries(conversation, options 
 
 function applyFlue2SessionPatch(searchPaths) {
   const packageRoot = searchPaths
-    .map((root) => path.resolve(root, "node_modules/@flue/runtime-v2"))
-    .concat(path.resolve(__dirname, "../node_modules/@flue/runtime-v2"))
-    .find((root) => fs.existsSync(path.join(root, "package.json")));
+    .map((root) => path.resolve(root, "node_modules/@flue/runtime"))
+    .concat(path.resolve(__dirname, "../node_modules/@flue/runtime"))
+    .find((root) => {
+      const manifest = path.join(root, "package.json");
+      return (
+        fs.existsSync(manifest) &&
+        JSON.parse(fs.readFileSync(manifest, "utf8")).version.startsWith("2.")
+      );
+    });
   if (!packageRoot) return false;
   const directory = path.join(packageRoot, "dist");
   const dispatchFile = fs
@@ -30,7 +36,7 @@ function applyFlue2SessionPatch(searchPaths) {
   const source = fs.readFileSync(file, "utf8");
   if (source.includes(PATCHED)) return true;
   if (!source.includes(ORIGINAL)) {
-    throw new Error("[flary] Flue 2.0.2 changed. The session rollback patch did not apply.");
+    throw new Error("[flary] Flue 2.1.0 changed. The session rollback patch did not apply.");
   }
   fs.writeFileSync(file, source.replace(ORIGINAL, PATCHED));
   return true;
