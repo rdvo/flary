@@ -167,13 +167,13 @@ jobs:
           set -euo pipefail
           version="${{ steps.release.outputs.version }}"
           npm_tag="${{ steps.release.outputs.npm_tag }}"
-          for attempt in 1 2 3 4 5; do
+          for attempt in $(seq 1 30); do
             published=$(npm view "flary@$npm_tag" version 2>/dev/null || true)
             if [[ "$published" == "$version" ]]; then
               exit 0
             fi
-            if [[ "$attempt" != "5" ]]; then
-              sleep 5
+            if [[ "$attempt" != "30" ]]; then
+              sleep 10
             fi
           done
           echo "npm tag $npm_tag points to ${published:-nothing} instead of $version." >&2
