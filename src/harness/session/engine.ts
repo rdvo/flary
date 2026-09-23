@@ -152,7 +152,8 @@ export function assertInteractiveSessionEngine(
 }
 
 /**
- * Capabilities supplied by Flary's pinned Flue 2.0.2 session adapter.
+ * Capabilities supplied by Flary's pinned Flue session adapter.
+ * The original 2.0.2 export name is retained for API compatibility.
  *
  * The adapter stores the resolved model before transport admission. Its
  * trusted Durable Object control surface owns compaction, canonical branch
@@ -177,14 +178,14 @@ export function requiresFlue2StableRelease(version: string): boolean {
 }
 
 export async function loadPinnedFlue2Runtime(): Promise<{
-  readonly version: "2.0.2";
+  readonly version: "2.1.0";
   readonly runtime: typeof import("@flue/runtime");
   readonly sdk: typeof import("@flue/sdk");
   readonly capabilities: SessionEngineCapabilities;
 }> {
   const [runtime, sdk] = await Promise.all([import("@flue/runtime"), import("@flue/sdk")]);
   return {
-    version: "2.0.2",
+    version: "2.1.0",
     runtime,
     sdk,
     capabilities: FLUE_2_0_2_FLARY_CAPABILITIES,

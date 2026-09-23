@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 
 import {
   assertInteractiveSessionEngine,
@@ -29,13 +30,15 @@ const completeCapabilities = {
   approvalContinuation: true,
 } as const;
 
-test("Flue 2.0.2 exposes the complete Flary session adapter", async () => {
+test("Flue 2.1.0 exposes the complete Flary session adapter", async () => {
   const loaded = await loadPinnedFlue2Runtime();
-  assert.equal(loaded.version, "2.0.2");
+  const manifest = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+  assert.equal(loaded.version, manifest.dependencies["@flue/runtime"]);
+  assert.equal(loaded.version, manifest.dependencies["@flue/sdk"]);
   assert.deepEqual(loaded.capabilities, FLUE_2_0_2_FLARY_CAPABILITIES);
   assert.doesNotThrow(() =>
     assertInteractiveSessionEngine({
-      pin: { id: "flue-2", version: "2.0.2", revision: "npm:2.0.2" },
+      pin: { id: "flue-2", version: "2.1.0", revision: "npm:2.1.0" },
       capabilities: loaded.capabilities,
     }),
   );

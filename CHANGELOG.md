@@ -2,7 +2,7 @@
 
 All notable changes to Flary are documented in this file.
 
-## 1.0.2 - 2026-09-19
+## 1.0.2 - 2026-09-23
 
 ### Added
 
@@ -10,6 +10,11 @@ All notable changes to Flary are documented in this file.
   sweep for operator-supplied thread IDs.
 - Added deterministic SHA-256 manifests with read-back verification, attachment inventories, and
   idempotent retry/conflict handling.
+
+### Fixed
+
+- Apply dependency patches to hoisted and nested npm copies, with strict errors and version checks.
+- Report the pinned Flue 2.1.0 runtime accurately in the session-engine release check.
 
 ### Migration
 
