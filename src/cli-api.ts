@@ -75,6 +75,7 @@ export interface RunFlaryCliOptions {
   readonly runner?: CommandRunner;
   readonly log?: (message: string) => void;
   readonly prompt?: CliPrompt;
+  readonly progress?: (stage: string, message: string) => void;
 }
 
 export interface CliPrompt {
@@ -670,10 +671,17 @@ async function scaffoldProject(
   target: string,
   answers: SetupAnswers,
   parsed: ParsedArgs,
+  allowQuickstartState = false,
 ): Promise<FlaryProjectState> {
   if (await exists(target)) {
     const entries = await readdir(target);
-    if (entries.length > 0) throw new Error(`Target directory is not empty: ${target}`);
+    const setupOnly =
+      allowQuickstartState &&
+      entries.length === 1 &&
+      entries[0] === ".flary" &&
+      (await readdir(join(target, ".flary"))).every((name) => name === "quickstart.json");
+    if (entries.length > 0 && !setupOnly)
+      throw new Error(`Target directory is not empty: ${target}`);
   } else {
     await mkdir(target, { recursive: true });
   }
@@ -1142,12 +1150,14 @@ async function deployProject(
     prompt: CliPrompt;
     account?: string;
     log: (message: string) => void;
+    progress?: (stage: string, message: string) => void;
   },
 ): Promise<FlaryProjectState> {
   let state = await readProjectState(target);
   if (!(await exists(join(target, "node_modules"))))
     await installProject(target, state, input.runner, input.env);
   if (state.features.includes("sandbox")) await checkDocker(target, input.runner, input.env);
+  input.progress?.("account", "Checking your Cloudflare account…");
   state = await authenticateWrangler(
     target,
     state,
@@ -1156,12 +1166,14 @@ async function deployProject(
     input.prompt,
     input.account,
   );
+  input.progress?.("build", "Building your assistant…");
   const build = await input.runner.run(state.packageManager, ["run", "build"], {
     cwd: target,
     env: input.env,
   });
   if (build.code !== 0) throw new Error("The project build failed.");
   const [wrangler, prefix] = await localWrangler(target, state);
+  input.progress?.("validate", "Checking deployment configuration…");
   const validation = await input.runner.run(wrangler, [...prefix, "deploy", "--dry-run"], {
     cwd: target,
     env: input.env,
@@ -1226,6 +1238,7 @@ async function deployProject(
     await chmod(secretFile, 0o600);
     const deployArgs = [...prefix, "deploy"];
     if (Object.keys(selectedSecrets).length > 0) deployArgs.push("--secrets-file", secretFile);
+    input.progress?.("publish", "Publishing your assistant and configuring its resources…");
     const deployed = await input.runner.run(wrangler, deployArgs, {
       cwd: target,
       env: { ...input.env, WRANGLER_OUTPUT_FILE_PATH: deploymentOutputFile },
@@ -1246,6 +1259,7 @@ async function deployProject(
     const url = await deploymentUrl(deployed.stdout + "\n" + deployed.stderr, deploymentOutputFile);
     const next = { ...state, deployedUrl: url };
     await writeProjectState(target, next);
+    input.progress?.("verify", "Checking the live assistant and testing a response…");
     await verifyDeployment(next, selectedSecrets, input.log);
     return next;
   } finally {
@@ -1953,7 +1967,7 @@ export interface QuickstartProjectInput {
 /** Create or update the generated widget project without exposing secret values. */
 export async function prepareQuickstartProject(
   input: QuickstartProjectInput,
-  options: Pick<RunFlaryCliOptions, "env" | "runner" | "log"> = {},
+  options: Pick<RunFlaryCliOptions, "env" | "runner" | "log" | "progress"> = {},
 ): Promise<FlaryProjectState> {
   const target = resolve(input.target);
   const env = options.env ?? process.env;
@@ -1996,6 +2010,7 @@ export async function prepareQuickstartProject(
         hasNewFlags: true,
         ...(input.accountId ? { account: input.accountId } : {}),
       },
+      true,
     );
     await installProject(target, state, runner, env);
   } else {
@@ -2042,7 +2057,7 @@ export async function deployQuickstartProject(
     readonly accountId: string;
     readonly cloudflareAccessToken?: string;
   },
-  options: Pick<RunFlaryCliOptions, "env" | "runner" | "log"> = {},
+  options: Pick<RunFlaryCliOptions, "env" | "runner" | "log" | "progress"> = {},
 ): Promise<FlaryProjectState> {
   const env = {
     ...(options.env ?? process.env),
@@ -2054,6 +2069,7 @@ export async function deployQuickstartProject(
     account: input.accountId,
     prompt: defaultPrompt,
     log: options.log ?? (() => undefined),
+    progress: options.progress,
   });
 }
 

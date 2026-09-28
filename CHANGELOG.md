@@ -2,6 +2,20 @@
 
 All notable changes to Flary are documented in this file.
 
+## 1.0.3 - 2026-09-28
+
+### Changed
+
+- Update the Flue runtime, SDK, CLI, and Vite integration to 2.1.1 while retaining the beta.9 legacy
+  export bridge and Flary session rollback compatibility patch.
+- Simplify local onboarding with `npm run setup`, a four-step installer, saved drafts, clearer
+  typography, and progress and recovery messages during deployment.
+
+### Fixed
+
+- Verify existing Cloudflare credentials and show a persistent connected indicator.
+- Allow project creation after the installer has saved its initial setup state.
+
 ## 1.0.2 - 2026-09-23
 
 ### Added

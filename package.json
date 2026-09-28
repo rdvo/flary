@@ -1,6 +1,6 @@
 {
   "name": "flary",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Durable, provider-neutral AI agent harness for Cloudflare Workers",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -9,6 +9,7 @@
     "flary": "dist/cli.js"
   },
   "scripts": {
+    "setup": "node scripts/start-installer.cjs",
     "build": "rimraf dist && tsx build.ts",
     "build:watch": "rimraf dist && tsx build.ts --watch",
     "check": "tsc --project tsconfig.build.json --noEmit && npm run lint && npm run format:check",
@@ -54,9 +55,9 @@
     "@cloudflare/sandbox": "0.12.4",
     "@cloudflare/shell": "0.4.3",
     "@earendil-works/pi-ai": "^0.83.0",
-    "@flue/runtime": "2.1.0",
+    "@flue/runtime": "2.1.1",
     "@flue/runtime-legacy": "npm:@flue/runtime@1.0.0-beta.9",
-    "@flue/sdk": "2.1.0",
+    "@flue/sdk": "2.1.1",
     "@flue/sdk-legacy": "npm:@flue/sdk@1.0.0-beta.9",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "acorn": "^8.18.0",
@@ -71,8 +72,8 @@
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",
     "@cloudflare/workers-types": "^4.20250729.0",
-    "@flue/cli": "2.1.0",
-    "@flue/vite": "2.1.0",
+    "@flue/cli": "2.1.1",
+    "@flue/vite": "2.1.1",
     "@oxlint/plugins": "1.81.0",
     "@types/glob": "^8.1.0",
     "@types/node": "^22.20.1",
@@ -124,6 +125,7 @@
     "templates/mail/src/**/*",
     "docs/quickstart.md",
     "npm-patches/*.patch",
+    "scripts/start-installer.cjs",
     "scripts/apply-dependency-patches.cjs",
     "scripts/apply-flue2-session-patch.cjs"
   ],

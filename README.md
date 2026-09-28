@@ -10,6 +10,27 @@ secrets, and data.
 Flary does not need a VPS. It generates the Cloudflare Worker and durable resources that your
 project uses.
 
+## Beginner quick start from a clone
+
+Run the local setup assistant from the repository:
+
+```bash
+git clone https://github.com/rdvo/flary.git
+cd flary
+npm run setup
+```
+
+The launcher checks for Node.js `22.19.0` or newer, updates dependencies when needed using the
+pinned pnpm `8.15.4` lockfile, builds the CLI when needed, and opens the browser assistant at
+`http://127.0.0.1:43817`. It creates the generated project outside the checkout at `~/flary-project`
+by default, so an existing checkout and its Git state stay safe. The browser guides you through
+**Your assistant**, **Connect accounts**, **Launch**, and **Try it**. Wrangler OAuth is selected
+automatically as the account connection when you have not configured a custom Cloudflare OAuth
+client.
+
+See the [local quick start](docs/quickstart.md) for recovery, the optional project-directory
+argument, and advanced OAuth setup.
+
 ## Create a project
 
 ```bash

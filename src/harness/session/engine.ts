@@ -178,14 +178,14 @@ export function requiresFlue2StableRelease(version: string): boolean {
 }
 
 export async function loadPinnedFlue2Runtime(): Promise<{
-  readonly version: "2.1.0";
+  readonly version: "2.1.1";
   readonly runtime: typeof import("@flue/runtime");
   readonly sdk: typeof import("@flue/sdk");
   readonly capabilities: SessionEngineCapabilities;
 }> {
   const [runtime, sdk] = await Promise.all([import("@flue/runtime"), import("@flue/sdk")]);
   return {
-    version: "2.1.0",
+    version: "2.1.1",
     runtime,
     sdk,
     capabilities: FLUE_2_0_2_FLARY_CAPABILITIES,
