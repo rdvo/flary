@@ -64,6 +64,9 @@ function testEnvironment() {
           conversation: { messages: [], settlements: [], offset: "0_0" },
         });
       }
+      if (request.method === "POST" && url.pathname.endsWith("/messages")) {
+        return Response.json({ submissionId: "submission-1", offset: "0_0" }, { status: 202 });
+      }
       if (request.method === "DELETE" && url.pathname.startsWith("/apps/docs/threads/chat_")) {
         threads.delete(key);
         return Response.json({ ok: true });
@@ -75,6 +78,11 @@ function testEnvironment() {
     APP_ENV: "production",
     FLARY_DOCS_AGENT_TOKEN: "test-docs-agent-token-that-is-long-enough",
     FLARY_DOCS_AGENT: agent,
+    DOCS_CHAT_RATE_LIMITER: {
+      async limit() {
+        return { success: true };
+      },
+    },
   };
   return { env, calls };
 }
@@ -142,6 +150,52 @@ test("docs chat creates, restores, and deletes browser-owned sessions", async ()
   );
   assert.equal(deleted.status, 200);
   assert.equal(calls.at(-1)?.method, "DELETE");
+});
+
+test("docs chat admits a first message from an already-open page without a session", async () => {
+  const { env, calls } = testEnvironment();
+  const admitted = await site.request(
+    "https://flary.dev/api/docs-chat/messages",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: "What is the latest version?" }),
+    },
+    env,
+  );
+  assert.equal(admitted.status, 202);
+  const cookie = browserCookie(admitted);
+  const first = (await admitted.json()) as SessionPayload & { submissionId: string };
+  assert.equal(first.submissionId, "submission-1");
+  assert.match(first.session.reference, /^v1\./);
+  assert.equal(calls.at(-1)?.path, `/apps/docs/threads/chat_${first.session.id}/messages`);
+
+  const history = await site.request(
+    "https://flary.dev/api/docs-chat/history",
+    { headers: { cookie, "x-flary-docs-session-ref": first.session.reference } },
+    env,
+  );
+  assert.equal(history.status, 200);
+  assert.equal(calls.at(-1)?.path, `/apps/docs/threads/chat_${first.session.id}/conversation`);
+
+  const invalid = await site.request(
+    "https://flary.dev/api/docs-chat/messages",
+    {
+      method: "POST",
+      headers: {
+        cookie,
+        "content-type": "application/json",
+        "x-flary-docs-session-ref": "invalid",
+      },
+      body: JSON.stringify({ message: "What is the latest version?" }),
+    },
+    env,
+  );
+  assert.equal(invalid.status, 401);
+  assert.equal(
+    ((await invalid.json()) as { error: { type: string } }).error.type,
+    "chat_session_invalid",
+  );
 });
 
 test("docs chat lists and renames every durable session owned by the browser", async () => {

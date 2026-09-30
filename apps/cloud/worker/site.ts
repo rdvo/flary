@@ -303,7 +303,9 @@ api.get("/docs-chat/realtime", async (context) => {
 });
 
 api.post("/docs-chat/messages", async (context) => {
-  const session = await docsChatSession(context.req.raw, context.env, false);
+  // Older open pages can submit before they have created a session. Return
+  // its reference with admission so those clients can continue the same chat.
+  const session = await docsChatSession(context.req.raw, context.env);
   if (session instanceof Response) return session;
   if (!context.env.DOCS_CHAT_RATE_LIMITER && context.env.APP_ENV === "production") {
     return context.json(
