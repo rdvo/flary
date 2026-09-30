@@ -157,8 +157,8 @@
     tools: Map<string, LiveTool>;
   };
 
-  for (const root of document.querySelectorAll<HTMLElement>("[data-flary-chat]")) {
-    if (root.dataset.ready === "true") continue;
+  function initializeDocsChat(root: HTMLElement): void {
+    if (root.dataset.ready === "true") return;
     root.dataset.ready = "true";
     const launcher = root.querySelector<HTMLButtonElement>("[data-chat-open]")!;
     const closer = root.querySelector<HTMLButtonElement>("[data-chat-close]")!;
@@ -465,11 +465,13 @@
     };
 
     const setOpen = async (open: boolean) => {
+      const generation = sessionGeneration;
       panel.hidden = !open;
       launcher.setAttribute("aria-expanded", String(open));
       if (open && !started) {
         started = true;
         await syncSessionList().catch(() => undefined);
+        if (generation !== sessionGeneration) return;
         renderSessionList();
         if (currentSessionReference) await loadSession(currentSessionReference);
         else {
@@ -479,7 +481,7 @@
           status.textContent = "New chat";
         }
       }
-      if (open) input.focus();
+      if (open && generation === sessionGeneration) input.focus();
     };
 
     const loadSession = async (reference?: string, forceNew = false) => {
@@ -1219,7 +1221,20 @@
       sessionToggle.setAttribute("aria-expanded", "false");
     }
     renderSessionList();
+    document.addEventListener("astro:before-swap", () => {
+      panel.hidden = true;
+      stopSessionConnections();
+    }, { once: true });
   }
+
+  function mountDocsChat(): void {
+    for (const root of document.querySelectorAll<HTMLElement>("[data-flary-chat]")) {
+      initializeDocsChat(root);
+    }
+  }
+
+  document.addEventListener("astro:page-load", mountDocsChat);
+  mountDocsChat();
 
   async function request<T>(url: string, init?: RequestInit): Promise<T> {
     const response = await fetch(url, init);
