@@ -2,6 +2,7 @@ import { z } from "flary";
 
 import { app } from "./flary";
 import { docsCorpus } from "./corpus";
+import { latestFlaryRelease } from "./releases";
 
 const resultSchema = z.object({
   id: z.string(),
@@ -56,7 +57,16 @@ export const openFlarySource = app.fn({
   },
 });
 
-export const docsTools = app.tools({ searchFlary, openFlarySource });
+export const getFlaryRelease = app.fn({
+  description:
+    "Check the current latest Flary package version directly from the official npm registry.",
+  input: z.object({}).strict(),
+  output: z.object({ version: z.string(), tag: z.literal("latest"), url: z.string().url() }),
+  policy: { operation: "read", capabilities: ["docs.read"] },
+  run: () => latestFlaryRelease(),
+});
+
+export const docsTools = app.tools({ searchFlary, openFlarySource, getFlaryRelease });
 
 function tokens(value: string): string[] {
   return [...new Set(value.toLowerCase().match(/[a-z0-9_.@/-]{2,}/g) ?? [])].slice(0, 16);
