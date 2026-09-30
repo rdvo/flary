@@ -2,13 +2,51 @@
 
 **Build durable AI agents in TypeScript. Deploy them to your Cloudflare account.**
 
-Flary is an open-source framework for typed AI functions and persistent agent threads. It supplies
-tools, MCP and OpenAPI connections, approvals, durable history, workspaces, provider switching,
-subagents, and realtime events. You own the Worker, Cloudflare resources, provider accounts,
-secrets, and data.
+Flary is an open-source TypeScript framework for applications where an AI agent needs to keep
+working across conversations, use your tools, ask for approval, and preserve its files. Define typed
+functions and agents, then serve them from a Worker in your own Cloudflare account.
 
-Flary does not need a VPS. It generates the Cloudflare Worker and durable resources that your
-project uses.
+You own the Worker, storage, provider accounts, secrets, and data. The generated deployment uses
+Cloudflare's durable resources and does not require a VPS. Cloudflare and model-provider usage are
+billed through your accounts.
+
+## What Flary provides
+
+| Capability                         | What you can build with it                                                                                                     |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Typed functions                    | Finite operations with validated inputs and outputs, called from your application.                                             |
+| Persistent agent threads           | Assistants that retain conversation state, resume work, and stream events to reconnecting clients.                             |
+| Tools, MCP, and OpenAPI            | Agents that discover and call application actions and connected services without loading every tool schema into every request. |
+| Approvals, user input, and secrets | Workflows that pause for a human decision or missing information and continue through the same thread.                         |
+| Durable workspaces                 | Agents that read and edit files, keep Git state, and recover their workspace when a thread resumes.                            |
+| Models and subagents               | Provider adapters, model selection policies, and delegation to specialized agents.                                             |
+| Browser and Sandbox adapters       | Optional web interaction and command execution when your deployment supplies the required resources.                           |
+| Clients and deployment             | HTTP and realtime clients, React bindings, a local installer, and generated Cloudflare projects.                               |
+| Mail application                   | A separate starter for a business inbox with inbound mail, sending, attachments, team access, and live updates.                |
+
+Mail is one application you can deploy with Flary. The framework also supports product assistants,
+support agents, document-writing agents, and backend AI operations inside an existing application.
+You supply the business logic, data sources, and authorized connections those agents need.
+
+## When to use Flary
+
+Flary is a good fit when you want a TypeScript application with persistent agents, tool access,
+human approvals, and files on Cloudflare. Its value is the integration: one authoring API, a host
+protocol your UI can consume, durable state, and a generated deployment.
+
+A single text-generation call may only need a provider SDK. An existing application with its own
+agent host can use Flary's focused exports without adopting the generated project templates.
+
+## How Flary relates to Flue
+
+Flary builds on [Flue](https://github.com/withastro/flue) for its canonical agent session runtime.
+Flue already provides agent authoring, durable execution, tools, sandboxes, and deployment options,
+including Cloudflare. Those capabilities overlap; Flary does not claim them as exclusive features.
+
+Flary adds its `flary()`, `app.fn()`, and `app.agent()` API, application and tenant controls,
+protected tool execution, workspace and connection adapters, clients, onboarding, and starter
+applications around that runtime. Choose Flary when that assembled application layer matches what
+you need. Choose Flue directly when you prefer its harness API and deployment model.
 
 ## Beginner quick start from a clone
 
@@ -202,6 +240,25 @@ processes against `/workspace`.
 - **Run:** one finite function invocation.
 - **Workspace:** files and Git state for agent work.
 - **Connection:** an authorized provider, MCP, or API account.
+
+## Current scope and gaps
+
+- **Knowledge ingestion:** durable files and R2 tools are available, but the local installer does
+  not yet provide a PDF/image upload, OCR, indexing, and cited retrieval pipeline. Connect or build
+  that pipeline for your corpus.
+- **Connections:** MCP and provider connection primitives are available. Each integration still
+  needs its credentials, permissions, and application-specific setup; this is not a universal
+  connector marketplace.
+- **Cloudflare login:** the standard setup uses Wrangler OAuth. A Flary-branded OAuth client remains
+  an optional configuration, rather than the default connection flow.
+- **Application channels:** clients can connect your UI or bot to an agent. Telegram, Discord, and
+  other channel integrations require application code and are not included as finished templates.
+- **Validation:** the repository contains contract, restart, adapter, and packed-consumer checks.
+  Live provider tests require configured credentials. Flary does not publish comparative cost,
+  speed, or reliability benchmarks against Flue.
+
+See the [architecture](ARCHITECTURE.md) for runtime ownership and the [changelog](CHANGELOG.md) for
+released changes.
 
 ## Documentation
 
