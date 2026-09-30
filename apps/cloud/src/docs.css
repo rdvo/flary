@@ -220,10 +220,6 @@
   border-color: rgba(45, 33, 22, 0.1);
 }
 
-.flary-chat__session.is-active {
-  box-shadow: inset 2px 0 #c9672d;
-}
-
 .flary-chat__session-open {
   display: grid;
   gap: 3px;
