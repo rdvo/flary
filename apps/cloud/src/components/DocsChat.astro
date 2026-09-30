@@ -62,6 +62,10 @@
 </div>
 
 <script>
+  import { createElement, useLayoutEffect } from "react";
+  import { createRoot, type Root } from "react-dom/client";
+  import { FlaryMarkdown, flaryMarkdownStyles } from "flary/react";
+
   type ChatTextPart = {
     type: "text" | "reasoning";
     text: string;
@@ -157,6 +161,17 @@
     tools: Map<string, LiveTool>;
   };
 
+  type DocsChatMarkdownProps = {
+    text: string;
+    streaming: boolean;
+    onCommit(): void;
+  };
+
+  function DocsChatMarkdown({ text, streaming, onCommit }: DocsChatMarkdownProps) {
+    useLayoutEffect(onCommit, [text, streaming, onCommit]);
+    return createElement(FlaryMarkdown, { children: text, streaming, styled: false });
+  }
+
   function initializeDocsChat(root: HTMLElement): void {
     if (root.dataset.ready === "true") return;
     root.dataset.ready = "true";
@@ -174,6 +189,7 @@
     const newButtons = [...root.querySelectorAll<HTMLButtonElement>("[data-chat-new]")];
     const turns = new Map<string, LiveTurn>();
     const turnsBySubmission = new Map<string, LiveTurn>();
+    const markdownRoots = new Map<HTMLElement, Root>();
     const settlementWaiters = new Map<string, {
       resolve(): void;
       reject(error: Error): void;
@@ -192,6 +208,28 @@
     let realtimeCursor = 0;
     let reconnectTimer: number | undefined;
     let sessionGeneration = 0;
+
+    const renderMarkdown = (target: HTMLElement, text: string, streaming = false) => {
+      let markdownRoot = markdownRoots.get(target);
+      if (!markdownRoot) {
+        markdownRoot = createRoot(target);
+        markdownRoots.set(target, markdownRoot);
+      }
+      markdownRoot.render(createElement(DocsChatMarkdown, { text, streaming, onCommit: scrollToLatest }));
+    };
+
+    const unmountMarkdownRoots = () => {
+      for (const markdownRoot of markdownRoots.values()) markdownRoot.unmount();
+      markdownRoots.clear();
+    };
+
+    const installMarkdownStyles = () => {
+      if (root.querySelector("[data-flary-markdown-styles]")) return;
+      const style = document.createElement("style");
+      style.dataset.flaryMarkdownStyles = "true";
+      style.textContent = flaryMarkdownStyles;
+      root.appendChild(style);
+    };
 
     const persistChatIndex = () => {
       chatIndex.current = currentSessionReference;
@@ -532,6 +570,7 @@
 
     const render = (items: ChatMessage[]) => {
       cancelAnswerAnimations();
+      unmountMarkdownRoots();
       messages.replaceChildren();
       turns.clear();
       turnsBySubmission.clear();
@@ -559,7 +598,8 @@
     const appendMessage = (role: "user" | "assistant", text: string) => {
       const element = document.createElement("div");
       element.className = `flary-chat__message flary-chat__message--${role}`;
-      addLinkedText(element, text);
+      if (role === "assistant") renderMarkdown(element, text);
+      else element.textContent = text;
       messages.appendChild(element);
       messages.scrollTop = messages.scrollHeight;
     };
@@ -710,10 +750,9 @@
       scrollToLatest();
     };
 
-    const renderAnswer = (turn: LiveTurn) => {
+    const renderAnswer = (turn: LiveTurn, streaming = false) => {
       turn.answer.hidden = turn.answerText.length === 0;
-      turn.answer.replaceChildren();
-      if (turn.answerText) addLinkedText(turn.answer, turn.answerText);
+      renderMarkdown(turn.answer, turn.answerText, streaming);
       scrollToLatest();
     };
 
@@ -736,7 +775,7 @@
         const take = revealChunkSize(turn.pendingAnswerText.length);
         turn.answerText += turn.pendingAnswerText.slice(0, take);
         turn.pendingAnswerText = turn.pendingAnswerText.slice(take);
-        renderAnswer(turn);
+        renderAnswer(turn, true);
         if (turn.pendingAnswerText) turn.answerFrame = window.requestAnimationFrame(paint);
       };
       turn.answerFrame = window.requestAnimationFrame(paint);
@@ -751,7 +790,7 @@
             turn.answerFrame = undefined;
             turn.answerText += turn.pendingAnswerText;
             turn.pendingAnswerText = "";
-            renderAnswer(turn);
+            renderAnswer(turn, true);
           }
           return;
         }
@@ -1231,9 +1270,11 @@
       sessionToggle.setAttribute("aria-expanded", "false");
     }
     renderSessionList();
+    installMarkdownStyles();
     document.addEventListener("astro:before-swap", () => {
       panel.hidden = true;
       stopSessionConnections();
+      unmountMarkdownRoots();
     }, { once: true });
   }
 
@@ -1253,30 +1294,6 @@
     };
     if (!response.ok) throw new Error(value.error?.message ?? "Chat is unavailable.");
     return value as T;
-  }
-
-  function addLinkedText(target: HTMLElement, text: string): void {
-    const pattern = /\[([^\]]+)]\((https:\/\/[^)\s]+)\)|`([^`\n]+)`|(https:\/\/[^\s]+)/g;
-    let offset = 0;
-    for (const match of text.matchAll(pattern)) {
-      const index = match.index ?? 0;
-      target.appendChild(document.createTextNode(text.slice(offset, index)));
-      if (match[3]) {
-        const code = document.createElement("code");
-        code.textContent = match[3];
-        target.appendChild(code);
-        offset = index + match[0].length;
-        continue;
-      }
-      const link = document.createElement("a");
-      link.href = match[2] ?? match[4]!;
-      link.textContent = match[1] ?? match[4]!;
-      link.target = "_blank";
-      link.rel = "noreferrer";
-      target.appendChild(link);
-      offset = index + match[0].length;
-    }
-    target.appendChild(document.createTextNode(text.slice(offset)));
   }
 
   function toolLabel(name: string, input: unknown, completed: boolean): string {

@@ -239,6 +239,11 @@ Your web UI, Telegram bot, Discord bot, mobile app, or backend can open a thread
 stream events, reconnect from a cursor, and respond to approvals. You do not write a route for each
 agent operation.
 
+For a web app, use `FlaryAgentConsole` from `flary/react` for the ready thread UI. Assistant answers
+render Markdown while streaming, with readable headings, lists, tables, and code blocks with copy
+buttons. Styles are included. Use `FlaryMarkdown` in your own layout to get the same rendering. See
+[the React UI guide](https://flary.dev/docs/clients/) for examples.
+
 ### Persistent files
 
 Give each thread a durable serverless filesystem with one option:

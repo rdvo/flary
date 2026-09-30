@@ -9,8 +9,13 @@ const consumer = path.join(temporary, "consumer");
 fs.mkdirSync(consumer);
 
 function run(command, args, cwd, options = {}) {
+  const env = { ...process.env };
+  // npm run forwards user config as CLI environment. npm 11 rejects an inherited
+  // allow-scripts flag on project installs; each temporary consumer owns its policy.
+  delete env.npm_config_allow_scripts;
   const result = spawnSync(command, args, {
     cwd,
+    env,
     encoding: "utf8",
     stdio: options.quiet ? "pipe" : "inherit",
   });
@@ -23,9 +28,24 @@ function run(command, args, cwd, options = {}) {
   }
 }
 
+function allowConsumerBuildScripts(manifest) {
+  manifest.allowScripts = {
+    [`flary@${require(path.join(repository, "package.json")).version}`]: true,
+    esbuild: true,
+    workerd: true,
+    sharp: true,
+  };
+  return manifest;
+}
+
 run("npm", ["run", "build"], repository);
 run("npm", ["pack", "--pack-destination", temporary, "--silent"], repository);
 run("npm", ["init", "-y"], consumer, { quiet: true });
+const consumerManifestPath = path.join(consumer, "package.json");
+fs.writeFileSync(
+  consumerManifestPath,
+  `${JSON.stringify(allowConsumerBuildScripts(require(consumerManifestPath)), null, 2)}\n`,
+);
 const manifest = require(path.join(repository, "package.json"));
 const tarball = path.join(temporary, `flary-${manifest.version}.tgz`);
 run("npm", ["install", tarball, "--loglevel", "error"], consumer);
@@ -177,7 +197,9 @@ run(flaryBin, ["help"], consumer);
 const starter = path.join(temporary, "starter");
 run(flaryBin, ["create", starter], consumer);
 const starterManifestPath = path.join(starter, "package.json");
-const starterManifest = JSON.parse(fs.readFileSync(starterManifestPath, "utf8"));
+const starterManifest = allowConsumerBuildScripts(
+  JSON.parse(fs.readFileSync(starterManifestPath, "utf8")),
+);
 starterManifest.dependencies.flary = tarball;
 fs.writeFileSync(starterManifestPath, `${JSON.stringify(starterManifest, null, 2)}\n`);
 const starterAuth = fs.readFileSync(path.join(starter, "src", "flary.ts"), "utf8");
@@ -206,12 +228,35 @@ fs.cpSync(path.join(consumer, "node_modules/flary/templates/dashboard"), dashboa
 });
 fs.renameSync(path.join(dashboard, "gitignore"), path.join(dashboard, ".gitignore"));
 const dashboardManifestPath = path.join(dashboard, "package.json");
-const dashboardManifest = JSON.parse(fs.readFileSync(dashboardManifestPath, "utf8"));
+const dashboardManifest = allowConsumerBuildScripts(
+  JSON.parse(fs.readFileSync(dashboardManifestPath, "utf8")),
+);
 dashboardManifest.dependencies.flary = tarball;
 fs.writeFileSync(dashboardManifestPath, `${JSON.stringify(dashboardManifest, null, 2)}\n`);
 run("npm", ["install", "--loglevel", "error"], dashboard);
 run("npm", ["audit", "--audit-level=high"], dashboard);
 run("npm", ["run", "build"], dashboard);
+run(
+  "node",
+  [
+    "--input-type=module",
+    "--eval",
+    [
+      'import assert from "node:assert/strict";',
+      'import { createElement } from "react";',
+      'import { renderToStaticMarkup } from "react-dom/server";',
+      'import { FlaryMarkdown, flaryMarkdownStyles } from "flary/react";',
+      'const html = renderToStaticMarkup(createElement(FlaryMarkdown, { children: "**Ready**\\n\\n```ts\\nconst answer = 42;\\n```" }));',
+      "assert.match(html, /<strong>Ready<\\/strong>/);",
+      "assert.match(html, /data-flary-markdown-styles/);",
+      'assert.match(html, /aria-label="Copy Code"/);',
+      "assert.match(html, /const answer = 42;/);",
+      "assert.match(flaryMarkdownStyles, /code-block-body/);",
+      'console.log("Packed React renderer includes Markdown, code copying, and scoped styles.");',
+    ].join("\n"),
+  ],
+  dashboard,
+);
 if (!fs.existsSync(path.join(dashboard, "migrations/0001_dashboard.sql"))) {
   throw new Error("The dashboard template is missing its first-owner migration");
 }

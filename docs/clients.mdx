@@ -32,7 +32,9 @@ trusted server route, or the dashboard's secure cookie.
 
 Flary ships the same WebSocket console that the dashboard starter uses. It includes thread creation
 and deletion, replay, reconnect, optimistic messages, one ordered activity rail, tool details,
-approvals, interruption, and the composer.
+approvals, interruption, and the composer. Assistant answers render Markdown as they stream,
+including headings, lists, links, tables, and fenced code blocks with a copy button. Styling is
+included; your app does not need Tailwind.
 
 ```tsx
 import { flary } from "flary/client";
@@ -60,6 +62,24 @@ import { useFlaryThread } from "flary/react";
 const state = useFlaryThread({ thread });
 // state.turns, state.send(), state.interrupt(), state.approve()
 ```
+
+For a custom chat layout, use the same renderer for assistant messages:
+
+```tsx
+import { FlaryMarkdown } from "flary/react";
+
+<FlaryMarkdown streaming={turn.status === "working"}>{assistantMessage.text}</FlaryMarkdown>;
+```
+
+Pass the accumulated answer text on each update. `streaming` keeps unfinished formatting readable
+while tokens arrive; turn it off when the answer finishes. Code blocks scroll horizontally and
+enable copying once the answer is complete. Raw HTML stays disabled. Keep user messages as plain
+text so their input is shown exactly as entered.
+
+The renderer includes scoped CSS by default. To share one stylesheet across a transcript, render
+`<FlaryReactStyles />` once and pass `styled={false}` to each `FlaryMarkdown`. Override the
+`--flary-accent`, `--flary-code`, `--flary-line`, `--flary-muted`, and `--flary-mono` CSS variables
+to match your app. Advanced renderers can supply Streamdown `components` and `plugins` props.
 
 ## Build your own web UI
 

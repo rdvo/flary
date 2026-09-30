@@ -362,11 +362,25 @@
   border-radius: 4px;
   font-size: 0.9em;
 }
+.flary-chat__message--assistant pre code {
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  font-size: inherit;
+}
 .flary-chat__message--assistant {
   align-self: flex-start;
   max-width: 100%;
   padding-left: 0;
   background: transparent;
+  white-space: normal;
+  --flary-accent: #8b431f;
+  --flary-line: rgba(45, 33, 22, 0.12);
+  --flary-code: #f1ebe3;
+  --flary-panel: #fffdf9;
+  --flary-muted: #6f665e;
 }
 .flary-chat__message--user {
   align-self: flex-end;

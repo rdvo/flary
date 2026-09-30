@@ -2,6 +2,22 @@
 
 All notable changes to Flary are documented in this file.
 
+## 1.0.6 - 2026-09-30
+
+### Changed
+
+- Render assistant Markdown in the React console and docs chat, including streaming answers,
+  headings, lists, tables, links, and fenced code blocks with copy buttons.
+- Include scoped Markdown styles by default without requiring Tailwind. Export `flaryMarkdownStyles`
+  for applications that share one stylesheet across messages.
+
+### Fixed
+
+- Keep incomplete Markdown readable while answers stream and preserve React roots between updates.
+- Restore the docs chat after page navigation and create a session before the first message.
+- Correct docs-agent tool calls and fetch the current release from npm when asked.
+- Remove the colored stripe from the selected docs chat.
+
 ## 1.0.5 - 2026-09-29
 
 ### Changed

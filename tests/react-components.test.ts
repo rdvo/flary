@@ -17,9 +17,79 @@ test("FlaryMarkdown renders streaming Markdown as safe semantic HTML", () => {
       children: "A **fast** [link](/products/fast)<script>alert(1)</script>",
     }),
   );
-  assert.match(html, />fast<\/span>/);
+  assert.match(html, /<strong>fast<\/strong>/);
   assert.match(html, /href="\/products\/fast"/);
   assert.doesNotMatch(html, /<script>/);
+});
+
+test("FlaryMarkdown ships styled code blocks, lists, and tables without Tailwind", () => {
+  const html = renderToStaticMarkup(
+    createElement(FlaryMarkdown, {
+      children: [
+        "## Example",
+        "",
+        "- **Readable** answers with `inline code`.",
+        "",
+        "```ts",
+        'const html = "<script>example</script>";',
+        "const next = 2;",
+        "```",
+        "",
+        "| Feature | Ready |",
+        "| --- | --- |",
+        "| Markdown | Yes |",
+      ].join("\n"),
+    }),
+  );
+  assert.match(html, /data-flary-markdown-styles/);
+  assert.match(html, /<h2[^>]*>Example<\/h2>/);
+  assert.match(html, /<li[^>]*><strong>Readable<\/strong>/);
+  assert.match(html, /data-streamdown="inline-code"/);
+  assert.match(html, /data-streamdown="code-block-body"/);
+  assert.match(html, /aria-label="Copy Code"/);
+  assert.doesNotMatch(html, /aria-label="Download file"/);
+  assert.match(html, /&lt;script&gt;example&lt;\/script&gt;/);
+  assert.match(html, /const next = 2;/);
+  assert.match(html, /<table[^>]*>/);
+  assert.match(html, /<th[^>]*>Feature<\/th>/);
+  assert.match(html, /<td[^>]*>Yes<\/td>/);
+});
+
+test("FlaryMarkdown keeps incomplete emphasis and fenced code readable while streaming", () => {
+  const partial = renderToStaticMarkup(
+    createElement(FlaryMarkdown, {
+      styled: false,
+      streaming: true,
+      children: "A **readable",
+    }),
+  );
+  assert.match(partial, /<strong>readable<\/strong>/);
+  assert.doesNotMatch(partial, /\*\*|data-flary-markdown-styles/);
+  for (const suffix of ["", "\n```"]) {
+    const html = renderToStaticMarkup(
+      createElement(FlaryMarkdown, {
+        styled: false,
+        streaming: !suffix,
+        children: "```ts\nconst answer = 42;" + suffix,
+      }),
+    );
+    assert.match(html, /data-streamdown="code-block"/);
+    assert.match(html, /const answer = 42;/);
+    assert.doesNotMatch(html, /```/);
+    assert.match(html, /aria-label="Copy Code"/);
+    if (!suffix) assert.match(html, /disabled=""/);
+    else assert.doesNotMatch(html, /disabled=""/);
+  }
+});
+
+test("FlaryMarkdown does not turn unsafe URLs or HTML into executable content", () => {
+  const html = renderToStaticMarkup(
+    createElement(FlaryMarkdown, {
+      styled: false,
+      children: '[unsafe](javascript:alert%281%29)\n\n<img src=x onerror="alert(1)">',
+    }),
+  );
+  assert.doesNotMatch(html, /href="javascript:|<img|onerror=/);
 });
 
 test("FlaryReactStyles provides responsive, focus-visible defaults", () => {
