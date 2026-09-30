@@ -1167,6 +1167,16 @@
       const generation = sessionGeneration;
       let reference = currentSessionReference;
       try {
+        if (!reference) {
+          const snapshot = await chatRequest<ChatSnapshot>("/api/docs-chat/session", {
+            method: "POST",
+            headers: { "x-flary-docs-new-session": "1" },
+          });
+          if (generation !== sessionGeneration) return;
+          if (!snapshot.session) throw new Error("The chat service returned an invalid session.");
+          reference = snapshot.session.reference;
+          rememberSession(snapshot.session, { title: sessionTitle(message), touch: true });
+        }
         if (currentSession && currentSession.title === "New chat") {
           renameSession(currentSession, sessionTitle(message));
         }
