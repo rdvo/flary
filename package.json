@@ -1,6 +1,6 @@
 {
   "name": "flary",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Durable, provider-neutral AI agent harness for Cloudflare Workers",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -60,6 +60,7 @@
     "@flue/sdk": "2.2.2",
     "@flue/sdk-legacy": "npm:@flue/sdk@1.0.0-beta.9",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@streamdown/code": "2.0.0",
     "acorn": "^8.18.0",
     "hono": "4.12.34",
     "jsonc-parser": "^3.3.1",

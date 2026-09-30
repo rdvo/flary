@@ -2,6 +2,15 @@
 
 All notable changes to Flary are documented in this file.
 
+## 1.0.8 - 2026-09-30
+
+### Added
+
+- Include Shiki syntax highlighting in `FlaryMarkdown` by default, with warm Flary light and dark
+  palettes. Language grammars load on demand and highlighting works as answers stream.
+- Follow host light/dark themes or the system preference; use `colorScheme` to choose explicitly.
+  Preserve custom `shikiTheme` and `plugins.code` overrides.
+
 ## 1.0.7 - 2026-09-30
 
 ### Changed

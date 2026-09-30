@@ -181,7 +181,12 @@ import FlaryMark from "./FlaryMark.astro";
 
   function DocsChatMarkdown({ text, streaming, onCommit }: DocsChatMarkdownProps) {
     useLayoutEffect(onCommit, [text, streaming, onCommit]);
-    return createElement(FlaryMarkdown, { children: text, streaming, styled: false });
+    return createElement(FlaryMarkdown, {
+      children: text,
+      streaming,
+      styled: false,
+      colorScheme: "light",
+    });
   }
 
   function initializeDocsChat(root: HTMLElement): void {

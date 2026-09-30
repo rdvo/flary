@@ -72,14 +72,20 @@ import { FlaryMarkdown } from "flary/react";
 ```
 
 Pass the accumulated answer text on each update. `streaming` keeps unfinished formatting readable
-while tokens arrive; turn it off when the answer finishes. Code blocks scroll horizontally and
-enable copying once the answer is complete. Raw HTML stays disabled. Keep user messages as plain
-text so their input is shown exactly as entered.
+while tokens arrive; turn it off when the answer finishes. Code blocks include Shiki syntax
+highlighting, scroll horizontally, and enable copying once the answer is complete. Highlighting is
+included; no extra plugin or Tailwind setup is needed. Raw HTML stays disabled. Keep user messages
+as plain text so their input is shown exactly as entered.
 
 The renderer includes scoped CSS by default. To share one stylesheet across a transcript, render
 `<FlaryReactStyles />` once and pass `styled={false}` to each `FlaryMarkdown`. Override the
 `--flary-accent`, `--flary-code`, `--flary-line`, `--flary-muted`, and `--flary-mono` CSS variables
-to match your app. Advanced renderers can supply Streamdown `components` and `plugins` props.
+to match your app. The default Flary light and dark syntax palettes follow the host's `.light` /
+`.dark` class, `data-theme` / `data-color-mode` attribute, or system preference. Set
+`colorScheme="light"` or `colorScheme="dark"` for an explicit choice. Use
+`shikiTheme={["github-light", "github-dark"]}` to choose another pair of Shiki themes. Advanced
+renderers can supply Streamdown `components` and `plugins` props; a custom `plugins.code` replaces
+the built-in highlighter.
 
 ## Build your own web UI
 
