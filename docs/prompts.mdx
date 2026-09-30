@@ -1,0 +1,145 @@
+---
+title: Prompts and skills
+description:
+  Keep prompts in TypeScript or Markdown, render typed placeholders, and reuse agent instructions.
+section: Build
+order: 3
+---
+
+Flary supports two ways to write a prompt. Use a TypeScript callback when the text depends on your
+application logic. Use a `.prompt.md` file when you want instructions and their inputs in a
+separate, readable document.
+
+## Prompts in TypeScript
+
+A function's `prompt` accepts a string or a callback. A callback receives the validated input and
+returns the text to send to the model.
+
+```ts
+export const answer = app.fn({
+  input: z.object({ question: z.string() }),
+  output: z.object({ answer: z.string() }),
+  prompt: ({ question }) => `Answer this question as JSON: ${question}`,
+});
+```
+
+`${question}` is ordinary JavaScript interpolation. A plain string such as `"Answer {{question}}"`
+is passed through unchanged. Flary does not automatically treat inline strings as templates.
+
+## Prompts in Markdown
+
+Create a file named `prompts/support.prompt.md`:
+
+```md
+---
+name: Support reply
+model: inherit
+input:
+  customer.name: string
+  question: string
+---
+
+Help {{customer.name}} answer this question. Return JSON with one answer string.
+
+{{question}}
+```
+
+Load the file as text and call `compilePrompt`. In a Vite application, a
+[`?raw` import](https://vite.dev/guide/assets.html#importing-asset-as-string) supplies the source
+text:
+
+```ts
+import { flary, z } from "flary";
+import { compilePrompt } from "flary/prompts";
+import sourceText from "../prompts/support.prompt.md?raw";
+
+const app = flary({ model: "openai/gpt-5" });
+
+export const answer = app.fn({
+  input: z.object({
+    customer: z.object({ name: z.string() }),
+    question: z.string(),
+  }),
+  output: z.object({ answer: z.string() }),
+  prompt: async (input) => {
+    const compiled = await compilePrompt(
+      { path: "prompts/support.prompt.md", content: sourceText },
+      { values: input },
+    );
+    return compiled.rendered;
+  },
+});
+```
+
+Use Vite's client types for `?raw` imports. Other build systems can bundle the text or produce a
+prompt manifest during the build. Do not depend on reading repository files from a deployed Worker.
+
+The file path must end in `.prompt.md`. YAML frontmatter is optional.
+
+## What placeholders support
+
+`{{question}}` inserts a value. `{{customer.name}}` reads a nested object property. Spaces around
+the path are allowed. Strings are inserted directly; objects and arrays become formatted JSON.
+
+Declared inputs are required unless you set `required: false`. The compiler checks their types,
+rejects missing required values, and rejects undeclared top-level input values. Undeclared
+placeholders are inferred as required inputs of type `any`.
+
+```yaml
+input:
+  question: string
+  context:
+    type: object
+    required: false
+    description: Optional background for the reply
+```
+
+These are value placeholders, not an executable macro language. Loops, conditionals, includes,
+function calls, and Mustache block syntax are not supported. Secret-like paths such as
+`{{secrets.apiKey}}` are rejected. Use protected connection credentials for tools.
+
+Pass `values` to render the template. If you omit it, `compilePrompt` parses and validates the
+source but leaves the placeholders in `rendered`.
+
+## Model, tool, and limit metadata
+
+Frontmatter also accepts `description`, `model`, `thinking`, `profile`, `tools`, and `limits`.
+`model: inherit` uses the supplied `callerModel`; a fixed model takes precedence in the compiled
+result. The result contains the template, rendered text, normalized inputs, and hashes for both
+source and rendered content.
+
+Compilation returns metadata. It does not change an `app.fn()` or `app.agent()` configuration,
+attach tools, or enforce its limits. Apply those fields in your application if you want them to
+control execution. The example above uses only the rendered text and the application's model.
+
+## Manifests, revisions, and rollouts
+
+`buildPromptManifest` compiles supplied sources into a manifest. The Node-only directory helpers
+load `.prompt.md` files recursively. Flary's Vite plugin does not automatically discover Markdown
+prompts or build this manifest for you.
+
+The package also exports an in-memory append-only revision store and deterministic weighted rollout
+selection. You provide persistence and execution integration. The separate `apps/cloud` reference
+application has prompt revision APIs backed by D1 and R2; the generated dashboard does not include a
+prompt editor or rollout interface.
+
+## Reusable agent skills
+
+Use `app.skill()` to define reusable instructions and pass them to an agent:
+
+```ts
+const supportTone = app.skill({
+  name: "support-tone",
+  description: "Guidance for customer-facing replies",
+  instructions: "Explain the next step plainly. Use product sources for factual claims.",
+});
+
+export const support = app.agent({
+  name: "support",
+  instructions: "Help the customer resolve their question.",
+  skills: [supportTone],
+});
+```
+
+Skills receive a stable revision derived from their contents and are available for lazy discovery.
+You supply their instructions as text. Flary does not automatically load `SKILL.md` files.

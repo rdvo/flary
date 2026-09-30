@@ -1,0 +1,68 @@
+---
+title: Why choose Flary?
+description: Compare Flary's guided app setup with Flue and Cloudflare's Agents SDK.
+section: Start
+order: 5
+---
+
+Choose Flary when you want to start with an application in your own Cloudflare account: a personal
+AI dashboard, an agent backend, or a team inbox. The guided setup creates the project, connects your
+accounts, provisions its resources, deploys, and checks the result.
+
+You also get a TypeScript framework for extending that application. Define validated functions and
+agents, connect tools, add persistent files, and use the clients or React components in your own UI.
+
+## The reason to use Flary
+
+Flary brings application concerns together around the runtime: account setup, generated deployment,
+thread controls, tool connections, approvals, protected secret collection, workspaces, and
+interfaces. The Mail starter adds a browser inbox with its own email infrastructure.
+
+That is the advantage to evaluate: how well the assembled project fits the product you want to run
+and how much integration work it saves you. We have not published comparative speed, cost, or
+reliability benchmarks. An install still involves sign-in, configuration choices, and any required
+provider credentials.
+
+## Flary and Flue
+
+Flary uses [Flue](https://github.com/withastro/flue) for its canonical agent session runtime. Flue
+provides a programmable TypeScript harness with sessions, tools, skills, sandboxes, durable
+recovery, subagents, and multiple deployment targets, including Cloudflare.
+
+Use Flary when you want its `flary()`, `app.fn()`, and `app.agent()` APIs, Cloudflare app setup,
+interfaces, and starter applications. Use Flue directly when you prefer its harness authoring model
+or need its other hosting options. Many agent capabilities are shared through that dependency.
+
+## Flary and Cloudflare's Agents SDK
+
+[Cloudflare's Agents SDK](https://developers.cloudflare.com/agents/) provides durable identity and
+state, SQL storage, realtime connections, scheduling, and recoverable execution. Its starter
+includes streaming chat, tools, approvals, and scheduled tasks. Cloudflare also documents browser,
+Sandbox, MCP, and email integrations.
+
+Use Flary when its function and agent API, conversation controls, connection layer, workspace
+integration, and dashboard or Mail starter match your application. Use the Agents SDK when you want
+to build directly on Cloudflare's agent APIs and ecosystem. Durable Objects and WebSockets are part
+of the shared platform foundation; they are not exclusive Flary features.
+
+## Which starting point fits?
+
+| What you want                                                     | Starting point                              |
+| ----------------------------------------------------------------- | ------------------------------------------- |
+| A personal assistant with a ready dashboard                       | Flary dashboard                             |
+| A self-hosted browser inbox for your domain and team              | Flary Mail                                  |
+| Typed functions and durable agents inside an existing application | Flary backend or `flary init`               |
+| Direct control of Flue's programmable harness and hosting choices | Flue                                        |
+| Direct use of Cloudflare's Agent class and platform APIs          | Agents SDK                                  |
+| One text-generation request                                       | Your model provider's SDK may be sufficient |
+
+## What ownership means
+
+You own the generated project and operate the deployment. Cloudflare hosts its resources in your
+account, and your model provider bills your usage. Flary does not include managed hosting,
+deliverability operations, or an operator for your app.
+
+Mail provides a familiar web inbox, not complete Gmail feature parity or IMAP/POP synchronization.
+Browser execution, Sandbox, semantic recall, and some model operations require additional services.
+See [the full package](/docs/overview/) for those boundaries, then
+[choose your app](/docs/quickstart/).

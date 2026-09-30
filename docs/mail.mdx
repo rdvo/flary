@@ -1,0 +1,56 @@
+---
+title: Flary Mail
+description: Set up a self-hosted business inbox on your Cloudflare account.
+section: Start
+order: 4
+---
+
+Flary Mail is a web inbox deployed to your Cloudflare account. Before setup, add the domain to the
+Cloudflare account you will select for deployment. Enabling Email Routing replaces that domain's
+inbound MX records, so choose a domain where Flary should receive incoming mail. Do not use a domain
+whose existing provider must continue handling inbound mail.
+
+## Create and deploy
+
+Start the CLI wizard:
+
+```bash
+npx flary create my-mail
+```
+
+Choose **Flary Mail**, sign in through Wrangler OAuth if prompted, then select the Cloudflare
+account, enter the domain and initial mailbox names, and choose whether to deploy now. The wizard
+asks before it enables Email Routing and changes the MX records. It also enables Cloudflare Email
+Sending; that feature requires a Workers Paid plan.
+
+For non-interactive setup, provide the choices as flags:
+
+```bash
+npx flary create my-mail \
+  --template mail \
+  --domain example.com \
+  --mailboxes admin,support \
+  --package-manager npm \
+  --deploy \
+  --yes
+```
+
+`--yes` approves setup prompts, including replacing the domain's inbound MX records. Use it only
+when Flary should receive mail for that domain.
+
+After deployment, open the printed `/setup` URL and use `FLARY_SETUP_TOKEN` from `.dev.vars` to
+create the first owner. The owner can add team members and grant mailbox access.
+
+## Mailbox features and limits
+
+The web app includes Inbox, Sent, Outbox, Drafts, Archive, Spam, and Trash; compose and reply;
+attachments; team access; and live updates.
+
+Cloudflare Email Workers receive messages, and the Email Service sends them. D1 stores mailbox
+state, R2 stores raw messages and attachments, Queues handle parsing and sending, and a hibernating
+Durable Object per mailbox publishes live WebSocket events.
+
+Flary Mail does not provide IMAP or POP, and it does not sync an external mailbox into this inbox.
+Cloudflare's SMTP submission can send mail from compatible clients, but it does not synchronize
+messages with Outlook, Gmail, or another provider. A full two-way mailbox sync needs a separate
+bridge.

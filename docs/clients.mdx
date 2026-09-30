@@ -88,9 +88,12 @@ Use `thread.connect()` when the UI needs bidirectional WebSocket control. The co
 short-lived ticket, resumes from a durable cursor, and can sleep with its Thread Control Durable
 Object. SSE is the read-only fallback.
 
-## Telegram, Discord, CMS, or webhook
+## Build a Telegram, Discord, CMS, or webhook adapter
 
-The adapter is small:
+Flary provides the typed API and client for these integrations. The examples below describe an
+adapter you build in your application; Flary does not include ready-made Telegram or Discord bots.
+
+An adapter typically:
 
 1. Authenticate the incoming user or service.
 2. Map the external conversation to a Flary thread ID.

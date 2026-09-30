@@ -313,6 +313,85 @@ h1 {
   font-size: 12px;
 }
 
+.install-note,
+.section-note {
+  max-width: 760px;
+  margin: 20px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.section-body {
+  max-width: 560px;
+  margin: 24px 0 0;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.65;
+}
+
+.section-body + a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+  font-size: 14px;
+}
+
+.product-grid article {
+  display: flex;
+  flex-direction: column;
+}
+
+.product-grid article a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 24px;
+  font-size: 14px;
+}
+
+.prose-panel {
+  min-width: 0;
+  align-self: start;
+  padding: 32px;
+  border: 1px solid var(--line);
+  background: var(--paper-bright);
+}
+
+.prose-panel h3 {
+  margin: 0 0 24px;
+}
+
+.prose-panel p,
+.prose-panel li {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.65;
+}
+
+.prose-panel p:last-child {
+  margin-bottom: 0;
+}
+
+.prose-panel ul {
+  margin: 0 0 24px;
+  padding-left: 20px;
+}
+
+.prose-panel li + li {
+  margin-top: 10px;
+}
+
+.flow .clone-command {
+  min-height: 0;
+  padding: 20px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
 .details,
 .examples,
 .setup {
@@ -656,7 +735,7 @@ h3 {
 
 .flow {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 60px;
   padding: 120px 0;
   border-bottom: 1px solid var(--line);

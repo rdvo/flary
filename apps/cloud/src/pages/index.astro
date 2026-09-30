@@ -4,36 +4,57 @@ import { CodeExamples } from "../components/CodeExamples";
 import { InstallCommand } from "../components/InstallCommand";
 import SiteLayout from "../layouts/SiteLayout.astro";
 
-const capabilities = [
+const products = [
   {
-    title: "Persistent threads",
-    body: "Runs survive disconnects and resume from an exact event cursor.",
+    title: "Your AI assistant",
+    body: "Open a personal dashboard, choose a model provider, and connect the tools you use. Your assistant keeps its conversations and files between visits.",
+    href: "/docs/quickstart/",
+    link: "Install an assistant",
   },
   {
-    title: "Safe actions",
-    body: "Reads can run directly. Writes and sensitive browser actions can pause for approval.",
+    title: "Your team inbox",
+    body: "Receive and send email on your own domain. Give your team a familiar web inbox with replies, drafts, attachments, and live updates.",
+    href: "/docs/mail/",
+    link: "Explore Flary Mail",
   },
   {
-    title: "Small tool surface",
-    body: "Start with one executor and protected controls. Search and load application, MCP, and API tools only when needed.",
-  },
-  {
-    title: "Parallel execution",
-    body: "Run independent reads together and serialize writes by resource.",
-  },
-  {
-    title: "Provider sessions",
-    body: "Switch providers while Flary preserves the visible thread and cache lineage.",
-  },
-  {
-    title: "Workspaces and recall",
-    body: "Give agents branch-scoped files, diffs, checkpoints, and exact history lookup.",
+    title: "Agents in your app",
+    body: "Add an assistant to your existing product. Define its actions in TypeScript, then use the clients, React console, or embedded chat widget.",
+    href: "/docs/functions/",
+    link: "Build an agent backend",
   },
 ];
 
-const title = "Flary | Open-source agent infrastructure";
+const capabilities = [
+  {
+    title: "Pick your provider",
+    body: "Use your own model account or Workers AI. Connect services through MCP or OpenAPI and give each agent the tools it needs.",
+  },
+  {
+    title: "Keep the conversation",
+    body: "Return to the same thread, follow live activity, and resume accepted work after a disconnect or Worker restart.",
+  },
+  {
+    title: "Let agents work with files",
+    body: "Give an agent a persistent workspace to read, write, and edit. Keep Git history and checkpoints as the work progresses.",
+  },
+  {
+    title: "Stay involved",
+    body: "Ask for approval before an action, collect missing information, or request a secret through a protected form. The thread continues when you respond.",
+  },
+  {
+    title: "Add capabilities as needed",
+    body: "Enable browser automation, command execution, or specialized subagents when your application needs them. Optional services have their own setup and costs.",
+  },
+  {
+    title: "Make it your own",
+    body: "Edit the generated TypeScript, keep prompts in code or Markdown, and build your own interface. Your deployment stays in your Cloudflare account.",
+  },
+];
+
+const title = "Flary | Install AI and email in your Cloudflare account";
 const description =
-  "Build durable coding agents, support bots, and product copilots on Cloudflare Workers.";
+  "Install an AI assistant, a self-hosted team inbox, or an agent backend with Flary. One guided setup deploys the open-source app to your Cloudflare account.";
 ---
 
 <SiteLayout title={title} description={description}>
@@ -44,14 +65,10 @@ const description =
         <span>Flary</span>
       </a>
       <nav aria-label="Main navigation">
-        <a href="#examples">Examples</a>
-        <a href="#setup">Setup</a>
+        <a href="#choose">Apps</a>
+        <a href="#setup">Install</a>
         <a href="/docs/">Docs</a>
-        <a
-          href="https://github.com/rdvo/flary"
-          target="_blank"
-          rel="noreferrer"
-        >
+        <a href="https://github.com/rdvo/flary" target="_blank" rel="noreferrer">
           GitHub <ArrowUpRight size={13} strokeWidth={1.7} />
         </a>
       </nav>
@@ -59,150 +76,218 @@ const description =
 
     <section class="hero" id="top">
       <div class="hero-label">
-        <p class="eyebrow">Open-source agent infrastructure</p>
+        <p class="eyebrow">Open source. Installed in your account.</p>
       </div>
       <div class="hero-copy">
-        <h1>Durable agents,<br />inside your app.</h1>
+        <h1>AI and email,<br />in your hands.</h1>
         <p class="lede">
-          Build coding agents, support bots, and product copilots with
-          persistent threads, tools, and provider-neutral sessions.
+          Choose a personal AI assistant, a team inbox, or agents for your app.
+          Flary guides you through setup and deploys the result to your own
+          Cloudflare account.
         </p>
         <div class="actions">
-          <a
-            class="primary-link"
-            href="https://github.com/rdvo/flary"
-            target="_blank"
-            rel="noreferrer"
-          >
+          <a class="primary-link" href="/docs/quickstart/">
             <ArrowUpRight size={16} strokeWidth={1.7} />
-            View on GitHub
+            Choose your app
           </a>
           <InstallCommand client:idle />
         </div>
-        <p class="meta">Apache-2.0 · TypeScript · Cloudflare-native</p>
+        <p class="meta">Apache-2.0 · Your infrastructure · Your provider accounts</p>
+        <p class="install-note">
+          One guided install. You sign in and choose what to use. Cloudflare
+          and model-provider usage are billed to your accounts.
+        </p>
       </div>
     </section>
 
-    <section class="examples" id="examples">
+    <section class="details" id="choose">
       <div class="section-intro">
-        <p class="eyebrow">Real product patterns</p>
-        <h2>One runtime.<br />Different products.</h2>
+        <p class="eyebrow">Choose your starting point</p>
+        <h2>An assistant, an inbox,<br />or your next product.</h2>
       </div>
-      <CodeExamples client:visible />
-      <p class="editor-note">
-        These are editable Monaco files that use Flary’s public package APIs.
-        Tracked and Fairway Florist are verified Flary integrations.
+      <div class="capability-grid product-grid">
+        {products.map((product, index) => (
+          <article>
+            <span>{String(index + 1).padStart(2, "0")}</span>
+            <h3>{product.title}</h3>
+            <p>{product.body}</p>
+            <a href={product.href}>{product.link} <ArrowUpRight size={14} /></a>
+          </article>
+        ))}
+      </div>
+      <p class="section-note">
+        These are separate app templates. Choose one during setup, then customize
+        the generated project. The guided CLI offers all three; the local browser
+        installer currently focuses on an AI assistant.
       </p>
     </section>
 
     <section class="setup" id="setup">
       <div class="section-intro">
-        <p class="eyebrow">One guided setup</p>
-        <h2>From zero to a live<br />agent Worker.</h2>
+        <p class="eyebrow">One guided install</p>
+        <h2>Make your choices.<br />Flary handles the setup.</h2>
       </div>
       <div class="setup-grid">
         <article>
           <span>01</span>
-          <p class="setup-kicker">Create</p>
-          <h3>Run the wizard</h3>
+          <p class="setup-kicker">Choose</p>
+          <h3>Pick an app</h3>
           <p>
-            Choose a personal dashboard or an agent backend. Select your model
-            provider and optional features.
+            Run the guided CLI to choose a dashboard, agent backend, or Mail.
+            Already cloned the repo? Run npm run setup to open the assistant
+            installer in your browser.
           </p>
           <code>npx flary create</code>
         </article>
         <article>
           <span>02</span>
-          <p class="setup-kicker">Authorize</p>
-          <h3>Sign in to Cloudflare</h3>
+          <p class="setup-kicker">Connect</p>
+          <h3>Use your accounts</h3>
           <p>
-            Wrangler OAuth opens in your browser. Choose the account that will
-            own the Worker, secrets, and data.
+            Sign in to Cloudflare. Choose a model provider for AI, or a domain
+            and mailboxes for email. Add browser and Sandbox resources when needed.
           </p>
-          <code>No token copying</code>
+          <code>Browser sign-in</code>
         </article>
         <article>
           <span>03</span>
-          <p class="setup-kicker">Deploy</p>
-          <h3>Open the result</h3>
+          <p class="setup-kicker">Launch</p>
+          <h3>Open your app</h3>
           <p>
-            Flary provisions the resources, uploads secrets, deploys, and
-            checks the live Worker.
+            Flary builds the project, provisions its resources, uploads secrets,
+            deploys, and checks the result. Open the printed URL to finish owner
+            setup or connect your existing app.
           </p>
-          <code>npx flary deploy</code>
+          <code>Your Cloudflare deployment</code>
         </article>
       </div>
-      <div class="resource-line" aria-label="Cloudflare resource requirements">
+      <div class="resource-line" aria-label="Cloudflare resources">
         <div>
-          <span>Required for durable production</span>
-          <strong>Worker · Durable Objects · D1 · R2 · Queue</strong>
+          <span>Serverless foundation</span>
+          <strong>Workers · Durable Objects · D1 · R2 · Queues</strong>
         </div>
         <div>
-          <span>Optional by feature</span>
-          <strong>Browser Run · Sandbox</strong>
+          <span>Added by feature</span>
+          <strong>Browser Run · Sandbox · Email Routing and Sending</strong>
         </div>
       </div>
+      <p class="section-note">
+        The default AI setup needs no Docker or VPS. Sandbox command execution
+        has additional requirements. Mail needs a domain; setup asks before
+        changing its mail-routing records.
+        <a href="/docs/deploy/">See the deployment guide</a>.
+      </p>
     </section>
 
-    <section class="details" id="details">
+    <section class="details" id="included">
       <div class="section-intro">
-        <p class="eyebrow">The runtime layer</p>
-        <h2>Your product owns the experience.<br />Flary runs the agent.</h2>
+        <p class="eyebrow">More than a model call</p>
+        <h2>An assistant that can<br />keep working with you.</h2>
       </div>
       <div class="capability-grid">
-        {
-          capabilities.map((capability, index) => (
-            <article>
-              <span>{String(index + 1).padStart(2, "0")}</span>
-              <h3>{capability.title}</h3>
-              <p>{capability.body}</p>
-            </article>
-          ))
-        }
+        {capabilities.map((capability, index) => (
+          <article>
+            <span>{String(index + 1).padStart(2, "0")}</span>
+            <h3>{capability.title}</h3>
+            <p>{capability.body}</p>
+          </article>
+        ))}
+      </div>
+      <p class="section-note">
+        The framework also includes schedules, evaluations, usage tracking, and
+        recall adapters. <a href="/docs/overview/">See the full package and setup requirements</a>.
+      </p>
+    </section>
+
+    <section class="flow" id="mail">
+      <div>
+        <p class="eyebrow">Flary Mail</p>
+        <h2>A familiar inbox.<br />Your own deployment.</h2>
+        <p class="section-body">
+          Read, reply, compose, and organize mail with your team in the browser.
+          Mailbox changes arrive over WebSockets, while messages and attachments
+          stay in your Cloudflare storage.
+        </p>
+        <p class="section-body">
+          Flary Mail runs on Workers, D1, R2, Queues, and a hibernating Durable
+          Object per mailbox. It provides a web inbox; IMAP, POP, and external
+          mailbox synchronization are not included.
+        </p>
+        <a href="/docs/mail/">Install your team inbox <ArrowUpRight size={14} /></a>
+      </div>
+      <div class="prose-panel">
+        <p class="eyebrow">Ready in the Mail starter</p>
+        <ul>
+          <li>Mail on your own domain</li>
+          <li>Inbox, sent mail, drafts, and folders</li>
+          <li>Replies and attachments</li>
+          <li>Team access and live mailbox updates</li>
+        </ul>
+        <p>
+          You operate the app and pay Cloudflare for its usage. Flary does not
+          host your mailbox or manage it for you.
+        </p>
       </div>
     </section>
 
-    <section class="flow">
+    <section class="flow" id="why-flary">
       <div>
-        <p class="eyebrow">One clean boundary</p>
-        <h2>Your UI and auth.<br />Flary underneath.</h2>
+        <p class="eyebrow">Why Flary</p>
+        <h2>Start with the app.<br />Build from there.</h2>
+        <p class="section-body">
+          Choose Flary when you want the setup, app templates, connections,
+          durable threads, files, approvals, and interface brought together.
+          You can use the result or keep building on its TypeScript source.
+        </p>
+        <a href="/docs/why-flary/">Compare Flary, Flue, and the Agents SDK <ArrowUpRight size={14} /></a>
       </div>
-      <pre aria-label="Flary application architecture"><code>your product
-  ↓
-flary
-  ↓
-threads · tools · workspaces
-  ↓
-durable objects · d1 · optional r2
-  ↓
-openai · anthropic · google · kimi</code></pre>
-    </section>
-
-    <section class="flow">
-      <div>
-        <p class="eyebrow">A small model-visible core</p>
-        <h2>Many tools.<br />One safe runtime.</h2>
-        <p class="lede">
-          Common controls stay direct. Application tools remain in a private
-          catalog until the agent needs them. Schemas, credentials, and large
-          results do not fill every model request.
+      <div class="prose-panel">
+        <h3>Built on Flue. Built for Cloudflare.</h3>
+        <p>
+          Flue powers Flary’s agent session runtime. Its harness is a good fit
+          when you want to compose agent behavior directly or use another host.
         </p>
         <p>
-          <a href="/docs/tools/">See how tools, Code Mode, MCP, and OpenAPI work</a>
+          Cloudflare’s Agents SDK also provides durable state, realtime
+          connections, scheduling, tools, and starter apps. Flary’s focus is its
+          own authoring API and an assembled path to an assistant, backend, or
+          team inbox in your account.
         </p>
       </div>
-      <pre aria-label="Flary tool runtime"><code>model
-  ├─ request_user_input
-  ├─ request_secret
-  └─ execute
-       ├─ tools.search
-       ├─ tools.describe
-       ├─ tools.call
-       └─ tools.batch
-            ↓
-local · mcp · openapi · workspace
-            ↓
-policy · approval · replay · audit</code></pre>
+    </section>
+
+    <section class="examples" id="examples">
+      <div class="section-intro">
+        <p class="eyebrow">For developers</p>
+        <h2>Your product.<br />Your agent’s tools.</h2>
+      </div>
+      <CodeExamples client:visible />
+      <p class="editor-note">
+        Explore editable examples using the public package APIs, including
+        integrations for Tracked and Fairway Florist.
+      </p>
+    </section>
+
+    <section class="flow">
+      <div>
+        <p class="eyebrow">Take the first step</p>
+        <h2>Choose what you<br />want to run.</h2>
+        <p class="section-body">
+          Start with the guided install. For an existing project, use flary init
+          to add typed functions and agents to the deployment you already have.
+        </p>
+        <div class="actions">
+          <a class="primary-link" href="/docs/quickstart/">Open the install guide</a>
+          <InstallCommand client:visible />
+        </div>
+      </div>
+      <div class="prose-panel">
+        <p class="eyebrow">Working from a clone?</p>
+        <pre class="clone-command"><code>git clone https://github.com/rdvo/flary.git
+cd flary
+npm run setup</code></pre>
+        <p>The launcher checks dependencies and opens the local AI installer.</p>
+      </div>
     </section>
 
     <footer>
@@ -210,12 +295,8 @@ policy · approval · replay · audit</code></pre>
         <span class="mark" aria-hidden="true">f</span>
         <span>Flary</span>
       </a>
-      <p>Open-source agent infrastructure for Cloudflare Workers.</p>
-      <a
-        href="https://www.npmjs.com/package/flary"
-        target="_blank"
-        rel="noreferrer"
-      >
+      <p>Open-source AI apps and email, installed in your Cloudflare account.</p>
+      <a href="https://www.npmjs.com/package/flary" target="_blank" rel="noreferrer">
         npm <ArrowUpRight size={12} strokeWidth={1.7} />
       </a>
     </footer>

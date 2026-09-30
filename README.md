@@ -1,14 +1,22 @@
 # Flary
 
-**Build durable AI agents in TypeScript. Deploy them to your Cloudflare account.**
+**Install AI apps and email in your own Cloudflare account.**
 
-Flary is an open-source TypeScript framework for applications where an AI agent needs to keep
-working across conversations, use your tools, ask for approval, and preserve its files. Define typed
-functions and agents, then serve them from a Worker in your own Cloudflare account.
+Choose a personal AI dashboard, a self-hosted team inbox, or an agent backend for your existing
+product. Flary guides you through account setup, creates the project, provisions its resources,
+deploys, and checks the result. Each choice gives you a separate application you can customize.
+
+For developers, Flary is also a TypeScript framework for agents that keep working across
+conversations, use tools, ask for approval, and preserve their files. Define typed functions and
+agents, then connect your application through the clients or React components.
 
 You own the Worker, storage, provider accounts, secrets, and data. The generated deployment uses
 Cloudflare's durable resources and does not require a VPS. Cloudflare and model-provider usage are
 billed through your accounts.
+
+Read [the full package](https://flary.dev/docs/overview/),
+[the Mail guide](https://flary.dev/docs/mail/), or
+[the Flue and Agents SDK comparison](https://flary.dev/docs/why-flary/).
 
 ## What Flary provides
 
@@ -20,6 +28,8 @@ billed through your accounts.
 | Approvals, user input, and secrets | Workflows that pause for a human decision or missing information and continue through the same thread.                         |
 | Durable workspaces                 | Agents that read and edit files, keep Git state, and recover their workspace when a thread resumes.                            |
 | Models and subagents               | Provider adapters, model selection policies, and delegation to specialized agents.                                             |
+| Prompts and skills                 | Markdown prompts with typed placeholders, explicit compilation, revisions, rollout selection, and reusable instructions.       |
+| Automation and evaluation          | Thread schedules, evaluation helpers, recall adapters, usage tracking, and execution telemetry.                                |
 | Browser and Sandbox adapters       | Optional web interaction and command execution when your deployment supplies the required resources.                           |
 | Clients and deployment             | HTTP and realtime clients, React bindings, a local installer, and generated Cloudflare projects.                               |
 | Mail application                   | A separate starter for a business inbox with inbound mail, sending, attachments, team access, and live updates.                |
@@ -47,6 +57,11 @@ Flary adds its `flary()`, `app.fn()`, and `app.agent()` API, application and ten
 protected tool execution, workspace and connection adapters, clients, onboarding, and starter
 applications around that runtime. Choose Flary when that assembled application layer matches what
 you need. Choose Flue directly when you prefer its harness API and deployment model.
+
+Cloudflare's [Agents SDK](https://developers.cloudflare.com/agents/) also provides durable state,
+realtime connections, scheduling, recovery, tools, and starter apps. Flary's focus is its own
+authoring API and the assembled path to a dashboard, backend, or team inbox. Its value is the
+application integration and setup; we have not published comparative performance benchmarks.
 
 ## Beginner quick start from a clone
 
@@ -150,6 +165,30 @@ export const summarize = app.fn({
 
 const result = await summarize({ text: "The quarter closed above plan." });
 ```
+
+## Prompts in Markdown
+
+Keep a prompt in TypeScript or a `.prompt.md` file. Markdown prompts support YAML frontmatter and
+simple placeholders such as `{{question}}` and `{{customer.name}}`:
+
+```md
+---
+input:
+  question: string
+---
+
+Answer this question:
+
+{{question}}
+```
+
+Load the file as text, then call `compilePrompt` from `flary/prompts` with its path, content, and
+input values. Pass `compiled.rendered` to your function or agent. The compiler validates inputs; it
+does not automatically apply model, tool, or limit metadata to your application.
+
+The Vite plugin does not automatically discover prompt files, and inline strings do not render
+`{{variables}}`. Loops, conditions, includes, and executable macros are not supported. See
+[Prompts and skills](https://flary.dev/docs/prompts/) for a complete integration example.
 
 ## A persistent agent
 

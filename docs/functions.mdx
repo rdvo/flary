@@ -37,9 +37,10 @@ for await (const event of run.stream()) render(event);
 const result = await run.result();
 ```
 
-Named native steps store parsed results and reuse completed work after a restart. Keep prompt text,
-schemas, and tools in normal TypeScript files. The starter in `templates/starter` is built during
-package acceptance tests.
+Named native steps store parsed results and reuse completed work after a restart. You can keep
+prompts in TypeScript or use [Markdown prompts with typed placeholders](/docs/prompts/). Markdown
+sources must be loaded and compiled explicitly; inline strings do not render `{{variables}}`. The
+starter in `templates/starter` is built during package acceptance tests.
 
 ## Tested starter source
 

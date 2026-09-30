@@ -34,6 +34,12 @@ makes the host boundary easy to audit.
 | flary/execution   | Parallel scheduler, mode policy, approvals, and idempotency           |
 | flary/telemetry   | Usage, trace, and normalized model telemetry                          |
 | flary/vault       | Encrypted secret references and capability-scoped access              |
+| flary/mail        | Mail address, subject, reply-header, and threading helpers            |
+| flary/cli         | Project creation, setup, deployment, and diagnostic APIs              |
+
+See [What you get](/docs/overview/) for the complete package and which features need additional
+services. The [Mail application](/docs/mail/) is a generated starter; `flary/mail` exports its
+shared helpers, rather than a hosted mailbox service.
 
 ## Common imports
 

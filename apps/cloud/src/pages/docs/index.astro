@@ -14,22 +14,28 @@ const examples = entries.filter((entry) => entry.data.section === "Examples");
 ---
 
 <DocsLayout
-  title="Build with Flary"
-  description="Create a typed function or persistent agent and deploy it to your Cloudflare account."
+  title="Install and build with Flary"
+  description="Choose an AI assistant, a team inbox, or an agent backend. Install it in your Cloudflare account and make it your own."
 >
+  <p>
+    Flary brings app setup and an extensible TypeScript framework together. Start
+    with an application, then connect your accounts and add the behavior you need.
+    <a href="/docs/overview/">See the full package</a> or
+    <a href="/docs/why-flary/">compare Flary with Flue and the Agents SDK</a>.
+  </p>
   <section class="docs-start-grid">
     <a href="/docs/quickstart/">
       <FileCode2 size={18} strokeWidth={1.6} />
       <span>Start</span>
-      <h2>Run the wizard</h2>
-      <p>Choose a personal dashboard or headless agent backend and deploy it.</p>
-      <strong>Open guide <ArrowRight size={14} strokeWidth={1.7} /></strong>
+      <h2>Choose your app</h2>
+      <p>Install a personal AI dashboard, an agent backend, or a self-hosted team inbox.</p>
+      <strong>Open install guide <ArrowRight size={14} strokeWidth={1.7} /></strong>
     </a>
     <a href="/docs/clients/">
       <MessagesSquare size={18} strokeWidth={1.6} />
       <span>Connect</span>
       <h2>Build your UI or bot</h2>
-      <p>Use Flary headlessly from a web UI, mobile app, Telegram, Discord, or a webhook.</p>
+      <p>Connect your own UI, bot, or service through typed APIs and realtime clients.</p>
       <strong>Open client guide <ArrowRight size={14} strokeWidth={1.7} /></strong>
     </a>
     <a href="/docs/deploy/">
@@ -44,7 +50,7 @@ const examples = entries.filter((entry) => entry.data.section === "Examples");
   <section class="docs-install-block">
     <div>
       <span>Current release</span>
-      <h2>Install the latest release.</h2>
+      <h2>Add the framework to an existing project.</h2>
     </div>
     <pre><code>npm install flary</code></pre>
   </section>
@@ -54,7 +60,7 @@ const examples = entries.filter((entry) => entry.data.section === "Examples");
       <MessagesSquare size={18} strokeWidth={1.6} />
       <div>
         <span>Examples</span>
-        <h2>Start from a real product shape.</h2>
+        <h2>See what you can build.</h2>
       </div>
     </div>
     <div class="docs-example-links">

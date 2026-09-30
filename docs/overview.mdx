@@ -1,0 +1,109 @@
+---
+title: What you get
+description: The apps, framework, clients, and Cloudflare integrations included with Flary.
+section: Start
+order: 3
+---
+
+Flary is an open-source way to install and build applications in your own Cloudflare account. You
+can start with a personal AI assistant, a team inbox, or an agent backend for an existing product.
+Each choice generates a separate project you can run and customize.
+
+The framework brings typed functions, persistent agents, tools, human interaction, files, clients,
+and deployment together. [Flue powers the agent session runtime](/docs/why-flary/).
+
+## Choose an application
+
+**Personal dashboard.** A browser interface for durable agent threads, model providers, MCP
+connections, approvals, activity, and secret health. The generated dashboard has first-owner login
+and is designed for one owner.
+
+**Agent backend.** The same framework behind your own application. Define what the agent can do,
+supply trusted identity, and connect your website, mobile app, bot, or service through the client
+APIs. Starter examples do not provide finished Telegram or Discord applications.
+
+**Flary Mail.** A self-hosted browser inbox for your domain and team. It includes receiving and
+sending, folders, drafts, replies, attachments, team access, and live mailbox updates.
+
+Run `npx flary create` to choose among these templates. From a repository clone, `npm run setup`
+opens the local browser installer for an AI assistant. A hosted, terminal-free installer is not
+currently part of that flow.
+
+## Build with the framework
+
+| Capability              | What it lets you do                                                                                      | Guide                                               |
+| ----------------------- | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Typed functions         | Define one finite operation with validated inputs and outputs, using model calls or TypeScript logic.    | [Functions](/docs/functions/)                       |
+| Persistent agents       | Keep conversations and execution state across turns, reconnects, and Worker restarts.                    | [Agents](/docs/agents/)                             |
+| Conversation controls   | Edit, interrupt, fork, compact, roll back, export, and restore threads.                                  | [Threads](/docs/threads/)                           |
+| Tools and connections   | Discover and call application tools, MCP servers, OpenAPI services, public web tools, and R2 data.       | [Tools](/docs/tools/)                               |
+| Human interaction       | Pause for approval, a follow-up answer, or a protected secret request, then continue the thread.         | [Approvals and input](/docs/approvals-and-input/)   |
+| Workspaces and history  | Read and edit persistent files, use Git, create checkpoints, and restore workspace state.                | [Storage and recovery](/docs/storage-and-recovery/) |
+| Model providers         | Normalize provider requests, select models, manage credentials, and preserve provider-neutral history.   | [Connections](/docs/connections/)                   |
+| Subagents and schedules | Delegate to specialized agents and send work on a one-time, interval, or supported cron schedule.        | [Automation](/docs/subagents-and-automation/)       |
+| Prompts and skills      | Compile Markdown placeholders, create prompt manifests, select rollout variants, and reuse instructions. | [Prompts and skills](/docs/prompts/)                |
+| Browser and processes   | Add browser automation, screenshots, command execution, terminals, and process controls.                 | [Browser automation](/docs/browser-automation/)     |
+| Clients and interfaces  | Use HTTP and realtime APIs, React thread components, or the starter's embedded widget.                   | [Clients](/docs/clients/)                           |
+| Deployment              | Generate Cloudflare configuration, provision resources, upload secrets, deploy, and diagnose setup.      | [Deployment](/docs/deploy/)                         |
+
+The focused package exports also include recall, evaluations, execution scheduling, telemetry, and
+encrypted secret access. [Package exports](/docs/package-exports/) lists their import paths.
+
+## Understand the setup boundaries
+
+### Model operations
+
+Default provider operation handlers support text and structured-object generation. The typed APIs
+for embeddings, images, transcription, audio, video, reranking, and moderation require operation
+handlers supplied by the host. Their presence in the API does not mean a generated project connects
+every modality automatically.
+
+### Tools, browser, and command execution
+
+You define application tools and authorize external connections. Browser Run and Sandbox are
+optional resources. Sandbox command execution has additional plan and Docker-compatible build
+requirements; the default assistant installation does not need Docker.
+
+### Recall and a document corpus
+
+Recall includes scoped in-memory search, artifact indexing, and a Turbopuffer adapter for BM25,
+semantic, and hybrid retrieval. You supply the external service, embeddings where needed, and the
+indexing lifecycle.
+
+A workspace gives an agent files it can navigate and read. It does not automatically turn uploaded
+PDFs or images into a searchable corpus. A complete upload, extraction, OCR, indexing, and cited
+answer workflow still needs application integration.
+
+### Prompts and evaluations
+
+Markdown prompts are compiled explicitly. The library exports revision and rollout primitives; the
+generated dashboard has no prompt editor. The separate `apps/cloud` reference application contains
+prompt revision APIs with D1 and R2 persistence.
+
+Evaluation helpers support versioned datasets, exact/contains/schema/custom/LLM-judge grading,
+weighted scores, thresholds, and candidate comparisons with cost and latency. You provide the
+executor, any judge model, and report persistence. There is no generated evaluation dashboard.
+
+### Durable storage and observability
+
+Portable modules include in-memory implementations for local use and host interfaces. The Cloudflare
+package supplies durable implementations for sessions, workspaces, subagent coordination, tool
+journals, secret storage, and telemetry. Their bindings and host configuration matter; using an
+in-memory implementation alone does not persist data across restarts.
+
+Thread scheduling supports one-time and interval triggers. Its cron implementation supports minute
+and hour fields with wildcard, step, or fixed values, in UTC. The remaining cron fields must be
+wildcards. The generated dashboard does not expose a schedule editor.
+
+### Mail
+
+Mail runs in your Cloudflare account using Workers, D1, R2, Queues, Email Routing and Sending, and
+WebSockets backed by a hibernating Durable Object per mailbox. It does not include IMAP, POP,
+external mailbox synchronization, or managed mail operations. Read the [Mail guide](/docs/mail/)
+before connecting a domain that already receives email elsewhere.
+
+## What you operate
+
+Flary generates your project and deployment. You own its code, resources, data, and connected
+accounts. You maintain the application and pay Cloudflare and model providers for their usage. See
+[security and operations](/docs/operations/) when adapting a starter for production.

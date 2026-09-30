@@ -12,7 +12,6 @@ export default defineConfig({
     "/docs/getting-started": "/docs/quickstart",
     "/docs/self-hosting": "/docs/deploy",
     "/docs/one-off-agent": "/docs/functions",
-    "/docs/prompts": "/docs/functions",
     "/docs/durable-threads": "/docs/threads",
     "/docs/sessions-and-workspaces": "/docs/storage-and-recovery",
     "/docs/workspaces-history": "/docs/storage-and-recovery",

@@ -20,10 +20,15 @@ The command performs these steps:
 2. Build the project and generate the final Wrangler configuration.
 3. Let Wrangler provision binding-only D1 and R2 resources and named Queues.
 4. Upload required secrets from a temporary mode-`0600` file.
-5. Apply dashboard D1 migrations when the project is a dashboard.
-6. Deploy and check `/health` and the dashboard setup route.
+5. Apply D1 migrations when the project is a dashboard or Mail.
+6. Deploy and check `/health`, plus `/setup` for dashboard and Mail projects.
 7. For a personal backend with a provider, call the example function with its generated bearer
    token.
+
+For Mail projects, deployment also enables Email Routing and Email Sending for the configured
+domain. Email Routing replaces the domain's inbound MX records, so review the
+[Flary Mail guide](/docs/mail/) before the first deployment. Email Sending requires a Workers Paid
+plan.
 
 The temporary secret file is always removed. Repeated setup and deployment reuse stable Worker and
 resource names. Setup never deletes a Worker, database, bucket, queue, credential, archive, or

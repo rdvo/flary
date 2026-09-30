@@ -21,7 +21,20 @@ headless and exposes the same durable agent runtime through typed APIs.
 The mail starter receives and sends mail for selected addresses. It includes inbox, sent, draft,
 archive, spam, and trash folders; replies and attachments; team access; and WebSocket updates.
 
-## 2. Start the wizard
+## 2. Choose a setup path
+
+For a guided browser setup for your assistant, clone Flary and run the local setup assistant:
+
+```bash
+git clone https://github.com/rdvo/flary.git
+cd flary
+npm run setup
+```
+
+It opens the assistant in your browser and creates a project in `~/flary-project` by default. Keep
+the terminal open while you work through setup. This path requires Node.js 22.19 or newer.
+
+To choose a dashboard, backend, or Flary Mail starter from the terminal, run the CLI wizard:
 
 ```bash
 npx flary create
@@ -51,10 +64,11 @@ secrets. They do not enter source files or command arguments.
 
 The wizard installs packages, builds the Worker, creates required Cloudflare resources, uploads
 secrets, applies database migrations, deploys, and checks `/health`. For mail projects, it also
-enables Email Routing and Email Sending. Email Routing replaces the domain's MX records. The wizard
-asks for explicit approval before it makes this change.
+enables Email Routing and Email Sending. Email Routing replaces the domain's inbound MX records.
+Interactive setup asks for approval before making this change; the automated `--yes` option approves
+it as described below.
 
-If setup stops, continue from the project directory:
+If setup stops, continue from the generated project directory:
 
 ```bash
 npx flary setup
@@ -72,10 +86,8 @@ For a personal backend, use `FLARY_ACCESS_TOKEN` from `.dev.vars` as a bearer to
 Existing-application authentication stays closed in production until you add a trusted identity
 resolver.
 
-For mail, open the printed `/setup` URL and use `FLARY_SETUP_TOKEN` to create the first owner. The
-CLI uses Wrangler OAuth, so it does not need a Flary API key or a separate OAuth client. D1 stores
-mail state, R2 stores raw mail and attachments, Queues handle parse and send work, and a hibernating
-Durable Object sends live WebSocket events. The template does not use KV.
+For mail, open the printed `/setup` URL and use `FLARY_SETUP_TOKEN` to create the first owner. Read
+the [Flary Mail guide](/docs/mail/) for domain setup, the MX record change, and mailbox limits.
 
 Next, choose one guide:
 
@@ -98,6 +110,9 @@ OPENAI_API_KEY=... npx flary create my-flary \
 ```
 
 Create mail without interactive prompts:
+
+In this command, `--yes` approves setup prompts, including enabling Email Routing and replacing the
+domain's inbound MX records. Use it only when Flary should receive mail for that domain.
 
 ```bash
 npx flary create my-mail \
