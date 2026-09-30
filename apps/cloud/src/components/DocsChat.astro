@@ -4,6 +4,7 @@
     type="button"
     aria-label="Ask the Flary documentation agent"
     aria-expanded="false"
+    disabled
     data-chat-open
   >
     <span class="flary-chat__cat" aria-hidden="true"><i></i></span>
@@ -1271,6 +1272,7 @@
     }
     renderSessionList();
     installMarkdownStyles();
+    launcher.disabled = false;
     document.addEventListener("astro:before-swap", () => {
       panel.hidden = true;
       stopSessionConnections();

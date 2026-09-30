@@ -10,6 +10,7 @@ class ChatElement extends EventTarget {
   attributes = new Map<string, string>();
   children: ChatElement[] = [];
   hidden = false;
+  disabled = false;
   value = "";
   classList = { add() {} };
 
@@ -53,6 +54,7 @@ function chatWidget() {
   }
   const panel = elements.get("[data-chat-panel]")!;
   panel.hidden = true;
+  elements.get("[data-chat-open]")!.disabled = true;
   const newChat = new ChatElement();
   return {
     root: Object.assign(root, {
@@ -164,6 +166,7 @@ test("Ask Flary mounts after docs navigation without duplicate click handlers", 
   const open = (widget: ReturnType<typeof chatWidget>) => {
     document.dispatchEvent(new Event("astro:page-load"));
     document.dispatchEvent(new Event("astro:page-load"));
+    assert.equal(widget.launcher.disabled, false);
     widget.launcher.dispatchEvent(new Event("click"));
     assert.equal(widget.panel.hidden, false);
     assert.equal(widget.launcher.attributes.get("aria-expanded"), "true");

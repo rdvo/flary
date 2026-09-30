@@ -25,6 +25,11 @@
   box-shadow: 0 14px 36px rgba(37, 21, 11, 0.23);
 }
 
+.flary-chat__launcher:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 .flary-chat__cat {
   position: relative;
   display: block;
