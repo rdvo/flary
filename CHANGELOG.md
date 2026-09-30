@@ -2,6 +2,21 @@
 
 All notable changes to Flary are documented in this file.
 
+## 1.0.7 - 2026-09-30
+
+### Changed
+
+- Add file-type badges to Markdown code-block headers, including TypeScript, JavaScript, JSON,
+  Markdown, HTML, CSS, shell, and Python. Reduce the header height to keep answers compact.
+- Use the Flary flame logo across the website, docs chat, and favicon.
+- Tighten the docs chat header and composer, improve text sizing, and simplify connection status.
+
+### Fixed
+
+- Prevent website footer styles from adding empty space below the docs chat composer.
+- Make the chat textarea inherit the interface font.
+- Restore the cloud workspace adapter's file copy and patch operations.
+
 ## 1.0.6 - 2026-09-30
 
 ### Changed

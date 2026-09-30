@@ -1,0 +1,11 @@
+---
+interface Props {
+  class?: string;
+}
+
+const { class: className } = Astro.props;
+---
+
+<span class:list={["mark", className]} aria-hidden="true">
+  <img src="/flary-logo.png" alt="" width="29" height="29" />
+</span>

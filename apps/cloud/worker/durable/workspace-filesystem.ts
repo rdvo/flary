@@ -1,9 +1,11 @@
 import { z } from "zod";
 import {
+  ProjectFileCopyRequestSchema,
   ProjectFileDeleteRequestSchema,
   ProjectFileEditRequestSchema,
   ProjectFileListRequestSchema,
   ProjectFileMoveRequestSchema,
+  ProjectFilePatchRequestSchema,
   ProjectFileReadRequestSchema,
   ProjectFileWriteRequestSchema,
   StorageScopeSchema,
@@ -83,8 +85,16 @@ export class WorkspaceFilesystem {
       if (path.endsWith("/move")) {
         return Response.json(await workspace.move(ProjectFileMoveRequestSchema.parse(input)));
       }
+      if (path.endsWith("/copy")) {
+        return Response.json(await workspace.copy(ProjectFileCopyRequestSchema.parse(input)));
+      }
       if (path.endsWith("/edit")) {
         return Response.json(await workspace.edit(ProjectFileEditRequestSchema.parse(input)));
+      }
+      if (path.endsWith("/apply-patch")) {
+        return Response.json(
+          await workspace.applyPatch(ProjectFilePatchRequestSchema.parse(input)),
+        );
       }
       return Response.json({ error: "Not found" }, { status: 404 });
     } catch (error) {

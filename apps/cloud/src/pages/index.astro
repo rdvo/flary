@@ -3,6 +3,7 @@ import { ArrowUpRight } from "lucide-react";
 import { CodeExamples } from "../components/CodeExamples";
 import { InstallCommand } from "../components/InstallCommand";
 import SiteLayout from "../layouts/SiteLayout.astro";
+import FlaryMark from "../components/FlaryMark.astro";
 
 const products = [
   {
@@ -61,7 +62,7 @@ const description =
   <main class="page">
     <header class="nav">
       <a class="brand" href="#top" aria-label="Flary home">
-        <span class="mark" aria-hidden="true">f</span>
+        <FlaryMark />
         <span>Flary</span>
       </a>
       <nav aria-label="Main navigation">
@@ -292,7 +293,7 @@ npm run setup</code></pre>
 
     <footer>
       <a class="brand" href="#top">
-        <span class="mark" aria-hidden="true">f</span>
+        <FlaryMark />
         <span>Flary</span>
       </a>
       <p>Open-source AI apps and email, installed in your Cloudflare account.</p>

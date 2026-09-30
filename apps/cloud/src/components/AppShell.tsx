@@ -32,7 +32,7 @@ export function AppShell() {
       <header>
         <a className="brand" href="/" aria-label="Flary home">
           <span className="mark" aria-hidden="true">
-            f
+            <img src="/flary-logo.png" alt="" width="29" height="29" />
           </span>
           <span>Flary</span>
         </a>

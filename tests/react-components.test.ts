@@ -45,6 +45,11 @@ test("FlaryMarkdown ships styled code blocks, lists, and tables without Tailwind
   assert.match(html, /<h2[^>]*>Example<\/h2>/);
   assert.match(html, /<li[^>]*><strong>Readable<\/strong>/);
   assert.match(html, /data-streamdown="inline-code"/);
+  assert.match(html, /data-streamdown="code-block-header"/);
+  assert.match(html, /data-language="ts"/);
+  assert.match(html, /\[data-language="ts"\]::before/);
+  assert.match(html, /content:"TS"/);
+  assert.match(html, /min-height:36px/);
   assert.match(html, /data-streamdown="code-block-body"/);
   assert.match(html, /aria-label="Copy Code"/);
   assert.doesNotMatch(html, /aria-label="Download file"/);

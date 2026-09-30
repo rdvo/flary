@@ -15,6 +15,7 @@ import {
 import "../docs.css";
 import SiteLayout from "./SiteLayout.astro";
 import DocsChat from "../components/DocsChat.astro";
+import FlaryMark from "../components/FlaryMark.astro";
 import packageManifest from "../../../../package.json";
 
 interface Heading {
@@ -73,7 +74,7 @@ function navigationGroups(): Array<{
     <header class="docs-header">
       <div class="docs-header__inner">
         <a class="brand" href="https://flary.dev" aria-label="Flary home">
-          <span class="mark" aria-hidden="true">f</span>
+          <FlaryMark />
           <span>Flary</span>
         </a>
         <span class="docs-divider" aria-hidden="true"></span>

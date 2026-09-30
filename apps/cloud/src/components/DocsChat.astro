@@ -1,3 +1,7 @@
+---
+import FlaryMark from "./FlaryMark.astro";
+---
+
 <div class="flary-chat" data-flary-chat>
   <button
     class="flary-chat__launcher"
@@ -7,15 +11,18 @@
     disabled
     data-chat-open
   >
-    <span class="flary-chat__cat" aria-hidden="true"><i></i></span>
+    <FlaryMark class="flary-chat__mark" />
     <span>Ask Flary</span>
   </button>
 
   <section class="flary-chat__panel" aria-label="Flary documentation agent" hidden data-chat-panel>
     <header>
       <div class="flary-chat__identity">
-        <strong>Flary docs agent</strong>
-        <span data-chat-status>Durable, read-only session</span>
+        <FlaryMark class="flary-chat__mark" />
+        <div>
+          <strong>Ask Flary</strong>
+          <span data-chat-status>Search the docs</span>
+        </div>
       </div>
       <div class="flary-chat__header-actions">
         <button type="button" aria-expanded="true" data-chat-session-toggle>Chats</button>
@@ -30,7 +37,7 @@
           <button type="button" data-chat-new>New chat</button>
         </div>
         <div class="flary-chat__session-list" data-chat-session-list></div>
-        <p>This browser owns these chats. No account or fingerprint.</p>
+        <p>Chats are saved in this browser.</p>
       </aside>
       <div class="flary-chat__conversation">
         <div class="flary-chat__messages" aria-live="polite" data-chat-messages>
@@ -50,11 +57,15 @@
               required
               data-chat-input
             ></textarea>
-            <button type="submit" data-chat-send>Send</button>
+            <button type="submit" aria-label="Send" title="Send message" data-chat-send>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 19V5m-6 6 6-6 6 6" />
+              </svg>
+            </button>
           </div>
         </form>
         <footer>
-          Durable anonymous threads powered by <code>app.agent()</code>.
+          <span>Answers from Flary docs</span>
           <a href="https://github.com/rdvo/flary/tree/main/apps/docs-agent" target="_blank" rel="noreferrer">Source</a>
         </footer>
       </div>
@@ -544,11 +555,9 @@
           touch: forceNew,
         });
         render(snapshot.messages ?? []);
-        const realtime = await connectRealtime({ fresh: true, generation });
+        await connectRealtime({ fresh: true, generation });
         if (generation !== sessionGeneration) return;
-        status.textContent = realtime
-          ? "Live durable session connected"
-          : "Durable session connected";
+        status.textContent = "Ready";
         const active = [...(snapshot.messages ?? [])].reverse().find((message: ChatMessage) =>
           message.role === "assistant" &&
           Boolean(message.submissionId) &&
@@ -855,7 +864,7 @@
           state: "input-available",
           input: chunk.input,
         });
-        status.textContent = "Using tools…";
+        status.textContent = "Searching docs…";
         return;
       }
       if ((chunk.type === "tool-output" || chunk.type === "tool-output-error") && chunk.toolCallId) {
@@ -952,7 +961,7 @@
       reconnectTimer = window.setTimeout(() => {
         reconnectTimer = undefined;
         void connectRealtime({ fresh: false, generation: sessionGeneration }).then((connected) => {
-          if (connected) status.textContent = "Live durable session connected";
+          if (connected) status.textContent = "Ready";
         });
       }, 750);
     };
@@ -1045,7 +1054,7 @@
               window.clearTimeout(timeout);
               resolve(false);
             } else {
-              status.textContent = "Reconnecting to durable session…";
+              status.textContent = "Reconnecting…";
               scheduleRealtimeReconnect();
             }
           });
@@ -1108,7 +1117,7 @@
           }
         });
         source.addEventListener("error", () => {
-          status.textContent = "Reconnecting to durable session…";
+          status.textContent = "Reconnecting…";
         });
       });
 
@@ -1172,9 +1181,7 @@
         if (generation !== sessionGeneration) return;
         const snapshot = await chatRequest<ChatSnapshot>("/api/docs-chat/history", {}, reference);
         render(snapshot.messages ?? []);
-        status.textContent = realtimeSocket?.readyState === WebSocket.OPEN
-          ? "Live durable session connected"
-          : "Durable session connected";
+        status.textContent = "Ready";
       } catch (error) {
         if (generation !== sessionGeneration) return;
         appendMessage("assistant", error instanceof Error ? error.message : "Chat is unavailable.");
@@ -1248,9 +1255,7 @@
         if (generation !== sessionGeneration) return;
         const snapshot = await chatRequest<ChatSnapshot>("/api/docs-chat/history", {}, reference);
         render(snapshot.messages ?? []);
-        status.textContent = realtimeSocket?.readyState === WebSocket.OPEN
-          ? "Live durable session connected"
-          : "Durable session connected";
+        status.textContent = "Ready";
       } catch (error) {
         if (generation !== sessionGeneration) return;
         appendMessage("assistant", error instanceof Error ? error.message : "Chat is unavailable.");

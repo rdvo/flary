@@ -105,8 +105,10 @@ function workspaceTarget(env: Env, binding: ThreadBinding): WorkspaceToolTarget 
     read: (input) => call("read", input as unknown as JsonInput),
     write: (input) => call("write", input as unknown as JsonInput),
     edit: (input) => call("edit", input as unknown as JsonInput),
+    applyPatch: (input) => call("apply-patch", input as unknown as JsonInput),
     delete: (input) => call("delete", input as unknown as JsonInput),
     move: (input) => call("move", input as unknown as JsonInput),
+    copy: (input) => call("copy", input as unknown as JsonInput),
     list: (input) => call("list", input as unknown as JsonInput),
     stat: async (path) => {
       const result = await call("stat", { path });
