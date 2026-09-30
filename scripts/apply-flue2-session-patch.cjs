@@ -36,7 +36,7 @@ function applyFlue2SessionPatch(searchPaths) {
   const source = fs.readFileSync(file, "utf8");
   if (source.includes(PATCHED)) return true;
   if (!source.includes(ORIGINAL)) {
-    throw new Error("[flary] Flue 2.1.1 changed. The session rollback patch did not apply.");
+    throw new Error("[flary] Flue 2.2.2 changed. The session rollback patch did not apply.");
   }
   fs.writeFileSync(file, source.replace(ORIGINAL, PATCHED));
   return true;

@@ -91,8 +91,8 @@ export function createFlue2SessionEngine(options: CreateFlue2SessionEngineOption
   return {
     pin: {
       id: "flue-2",
-      version: "2.0.2",
-      revision: options.revision ?? "npm:@flue/runtime@2.0.2",
+      version: "2.2.2",
+      revision: options.revision ?? "npm:@flue/runtime@2.2.2",
     },
     capabilities: {
       durableAdmission: true,
@@ -176,8 +176,8 @@ export function createFlue2SessionEngine(options: CreateFlue2SessionEngineOption
         version: 1,
         source: {
           id: "flue-2",
-          version: "2.0.2",
-          revision: options.revision ?? "npm:@flue/runtime@2.0.2",
+          version: "2.2.2",
+          revision: options.revision ?? "npm:@flue/runtime@2.2.2",
         },
         threadId: input.threadId,
         ...(input.throughTurnId ? { throughTurnId: input.throughTurnId } : {}),

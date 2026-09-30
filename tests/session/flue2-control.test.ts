@@ -1,13 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readdirSync } from "node:fs";
 
 import { InMemoryConversationStreamStore, type ConversationRecord } from "@flue/runtime/adapter";
 import { agentStreamPath, handleAgentConversationRead } from "@flue/runtime/internal";
 
 import { createFlue2CanonicalControl } from "../../src/harness/session/flue2-control.ts";
-// Flue 2 pins this file name. This test exercises its real context builder.
-// @ts-expect-error Flue's private compiled symbol is intentionally not typed.
-import { rt as buildConversationContext } from "../../node_modules/@flue/runtime/dist/dispatch-Dohpn4Ea.mjs";
+// Exercise the pinned runtime's real context builder without pinning a build hash.
+const dispatchDirectory = new URL("../../node_modules/@flue/runtime/dist/", import.meta.url);
+const dispatchFile = readdirSync(dispatchDirectory).find((name) =>
+  /^dispatch-[\w-]+\.mjs$/.test(name),
+);
+assert.ok(dispatchFile, "The pinned Flue runtime must include its dispatch module");
+const { rt: buildConversationContext } = await import(
+  new URL(dispatchFile, dispatchDirectory).href
+);
 
 test("canonical rollback creates an active branch that survives store reattachment", async () => {
   const store = new InMemoryConversationStreamStore();

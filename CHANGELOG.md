@@ -2,6 +2,21 @@
 
 All notable changes to Flary are documented in this file.
 
+## 1.0.5 - 2026-09-29
+
+### Changed
+
+- Update the Flue runtime, SDK, CLI, and Vite integration to 2.2.2. Keep the beta.9 legacy export
+  bridge and the canonical session rollback patch.
+- Pin new Flue 2 session metadata to the installed 2.2.2 runtime.
+
+## 1.0.4 - 2026-09-29
+
+### Fixed
+
+- Decode internal Flary thread names before parsing approval requests.
+- Update the Undici pin used by Flary and its generated templates.
+
 ## 1.0.3 - 2026-09-28
 
 ### Changed

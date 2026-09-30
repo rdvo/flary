@@ -30,7 +30,7 @@ const completeCapabilities = {
   approvalContinuation: true,
 } as const;
 
-test("Flue 2.1.1 exposes the complete Flary session adapter", async () => {
+test("Flue 2.2.2 exposes the complete Flary session adapter", async () => {
   const loaded = await loadPinnedFlue2Runtime();
   const manifest = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
   assert.equal(loaded.version, manifest.dependencies["@flue/runtime"]);
@@ -38,7 +38,7 @@ test("Flue 2.1.1 exposes the complete Flary session adapter", async () => {
   assert.deepEqual(loaded.capabilities, FLUE_2_0_2_FLARY_CAPABILITIES);
   assert.doesNotThrow(() =>
     assertInteractiveSessionEngine({
-      pin: { id: "flue-2", version: "2.1.1", revision: "npm:2.1.1" },
+      pin: { id: "flue-2", version: "2.2.2", revision: "npm:2.2.2" },
       capabilities: loaded.capabilities,
     }),
   );
