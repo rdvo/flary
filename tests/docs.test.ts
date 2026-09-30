@@ -6,7 +6,7 @@ import test from "node:test";
 const root = path.resolve(import.meta.dirname, "..");
 const docsRoot = path.join(root, "docs");
 const sections = ["Start", "Build", "Connect", "Run", "Operate", "Examples", "Reference"];
-const redirects = new Set([
+const legacySlugs = new Set([
   "getting-started",
   "self-hosting",
   "one-off-agent",
@@ -55,6 +55,20 @@ test("documentation links resolve to a page or a declared redirect", () => {
         .replaceAll(path.sep, "/"),
     ),
   );
+  const astroConfig = fs.readFileSync(path.join(root, "apps/cloud/astro.config.ts"), "utf8");
+  const redirects = new Map(
+    [...astroConfig.matchAll(/"\/docs\/([^"]+)":\s*"\/docs\/([^"]+)"/g)].map((match) => [
+      match[1]!,
+      match[2]!,
+    ]),
+  );
+  for (const [slug, target] of redirects) {
+    assert.ok(!slugs.has(slug), `redirect shadows documentation page ${slug}`);
+    assert.ok(slugs.has(target), `redirect ${slug} targets missing docs page ${target}`);
+  }
+  for (const slug of legacySlugs) {
+    assert.ok(slugs.has(slug) || redirects.has(slug), `legacy docs route ${slug} is missing`);
+  }
   for (const file of files(docsRoot)) {
     const source = fs.readFileSync(file, "utf8");
     for (const match of source.matchAll(/\]\(\/docs\/([^/)]+(?:\/[^/)]+)*)\/?(?:#[^)]+)?\)/g)) {
@@ -65,8 +79,6 @@ test("documentation links resolve to a page or a declared redirect", () => {
       );
     }
   }
-  const astroConfig = fs.readFileSync(path.join(root, "apps/cloud/astro.config.ts"), "utf8");
-  for (const slug of redirects) assert.match(astroConfig, new RegExp(`\\/docs\\/${slug}`));
 });
 
 test("beginner documentation has no hard-coded release or internal engine setup", () => {
