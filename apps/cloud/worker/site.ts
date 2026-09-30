@@ -26,6 +26,7 @@ const DOCS_CHAT_MODEL = {
   provider: "flary-docs-gateway",
   model: "openai/gpt-5.5",
 } as const;
+const DOCS_CHAT_POLICY_MIGRATION = "server-limits-v1";
 
 type DocsChatSession = {
   id: string;
@@ -543,7 +544,43 @@ async function ensureDocsThread(env: SiteBindings, session: DocsChatSession): Pr
   }
   try {
     const current = await fetchDocsAgent(env, session, path);
-    if (current.ok || current.status !== 404) return current;
+    if (current.status === 200) {
+      const payload: unknown = await current
+        .clone()
+        .json()
+        .catch(() => undefined);
+      const binding = docsThreadNeedingPolicyMigration(payload, session);
+      if (!binding) return current;
+      const metadata = { ...(binding.metadata as Record<string, unknown>) };
+      for (const key of [
+        "flaryAdmittedRoles",
+        "flaryAdmittedScopes",
+        "flaryRuntimeAgentId",
+        "flaryAgentRevision",
+        "flaryModelPolicy",
+        "flaryDelegation",
+        "flaryCompaction",
+        "flaryLimits",
+      ]) {
+        delete metadata[key];
+      }
+      metadata.flaryDocsChatPolicyMigration = DOCS_CHAT_POLICY_MIGRATION;
+      return fetchDocsAgent(env, session, `/apps/${DOCS_CHAT_AGENT}/threads`, {
+        method: "POST",
+        body: JSON.stringify({
+          threadId: binding.threadId,
+          agentId: DOCS_CHAT_AGENT,
+          workspace: binding.workspace,
+          persona: binding.persona,
+          mode: binding.mode,
+          model: binding.model,
+          thinkingLevel: binding.thinkingLevel,
+          connectionIds: binding.connectionIds,
+          metadata,
+        }),
+      });
+    }
+    if (current.status !== 404) return current;
   } catch (error) {
     if (!(error instanceof Error) || !/thread was not found/i.test(error.message)) {
       throw error;
@@ -567,6 +604,74 @@ async function ensureDocsThread(env: SiteBindings, session: DocsChatSession): Pr
     }),
   });
   return created;
+}
+
+type DocsChatPolicyBinding = {
+  threadId: string;
+  workspace: Record<string, unknown>;
+  persona?: string;
+  mode: string;
+  model?: unknown;
+  thinkingLevel: string;
+  connectionIds: string[];
+  metadata: Record<string, unknown>;
+};
+
+function docsThreadNeedingPolicyMigration(
+  payload: unknown,
+  session: DocsChatSession,
+): DocsChatPolicyBinding | undefined {
+  const record = (value: unknown): Record<string, unknown> | undefined =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : undefined;
+  const binding = record(record(payload)?.binding);
+  const thread = record(binding?.thread);
+  const workspace = record(binding?.workspace);
+  const metadata = record(binding?.metadata);
+  const limits = record(metadata?.flaryLimits);
+  if (!binding || !thread || !workspace || !metadata || !limits) return;
+  if (
+    binding.status !== "active" ||
+    binding.parentThread !== undefined ||
+    metadata.channel !== "docs-widget" ||
+    metadata.anonymousBrowser !== true ||
+    metadata.flaryDocsChatPolicyMigration === DOCS_CHAT_POLICY_MIGRATION ||
+    binding.agentId !== DOCS_CHAT_AGENT ||
+    thread.organizationId !== session.tenantId ||
+    thread.appId !== DOCS_CHAT_AGENT ||
+    thread.agentId !== DOCS_CHAT_AGENT ||
+    thread.threadId !== threadId(session.id) ||
+    workspace.organizationId !== session.tenantId ||
+    workspace.appId !== DOCS_CHAT_AGENT ||
+    workspace.projectId !== "documentation" ||
+    workspace.workspaceId !== `session_${session.id}` ||
+    workspace.branch !== "main" ||
+    typeof binding.defaultMode !== "string" ||
+    typeof binding.defaultThinkingLevel !== "string" ||
+    !Array.isArray(binding.connectionIds) ||
+    binding.connectionIds.some((id) => typeof id !== "string")
+  ) {
+    return;
+  }
+  if (
+    Object.keys(limits).length !== 3 ||
+    limits.steps !== 8 ||
+    limits.toolCalls !== 12 ||
+    limits.timeoutMs !== 90_000
+  ) {
+    return;
+  }
+  return {
+    threadId: String(thread.threadId),
+    workspace,
+    ...(typeof binding.persona === "string" ? { persona: binding.persona } : {}),
+    mode: String(binding.defaultMode),
+    ...(binding.defaultModel !== undefined ? { model: binding.defaultModel } : {}),
+    thinkingLevel: String(binding.defaultThinkingLevel),
+    connectionIds: binding.connectionIds as string[],
+    metadata,
+  };
 }
 
 async function docsChatHistory(env: SiteBindings, session: DocsChatSession): Promise<Response> {

@@ -30,6 +30,13 @@ realtime APIs.
 You can later add an allowed-model list, custom limits, subagents, a mode, or a compaction policy.
 These controls are optional. Keep them out of the first agent until the product needs them.
 
+## Limits apply to the saved thread
+
+Step, tool-call, token, and cost limits accumulate across the conversation, including delegated
+work. They do not reset when a user sends another message. Set these limits when your product needs
+a total thread budget; a small tool-call limit can leave a chat unable to answer follow-ups. Use
+`limits.timeoutMs` to bound an individual execution without imposing a small lifetime budget.
+
 ## Models
 
 An agent can allow explicit provider switching:
