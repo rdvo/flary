@@ -9,7 +9,7 @@ overrides:
   dompurify: 3.4.13
   fast-uri: 3.1.5
   hono: 4.12.34
-  undici: 7.29.0
+  undici: 7.30.0
 
 patchedDependencies:
   '@cloudflare/codemode@0.5.1':
@@ -6510,7 +6510,7 @@ packages:
       sprintf-js: 1.1.3
       sql.js: 1.14.1
       turndown: 7.2.4(patch_hash=qwwqsl3u53inqobb5dgsi6nurq)
-      undici: 7.29.0
+      undici: 7.30.0
       yaml: 2.9.0
     optionalDependencies:
       '@mongodb-js/zstd': 7.0.0
@@ -7302,7 +7302,7 @@ packages:
     dependencies:
       '@cspotcode/source-map-support': 0.8.1
       sharp: 0.35.2
-      undici: 7.29.0
+      undici: 7.30.0
       workerd: 1.20260722.1
       ws: 8.21.0
       youch: 4.1.0-beta.10
@@ -8932,8 +8932,8 @@ packages:
     resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
     dev: true
 
-  /undici@7.29.0:
-    resolution: {integrity: sha512-IDxfleLmmbSskfWSUATiN1nfn2rDuvnMOqb5CWR92iIfojA0Ud+ulOAAEQ57LPr9rWmsreUyf5lwyao+7GNNVw==}
+  /undici@7.30.0:
+    resolution: {integrity: sha512-dkrQXeHSaoamnItlYbmzG0wFYrM0ZwDxCIg0A7aKjTyyhh9svRzCNFEzV+Vm05/yehjCzjDZ31KXfGEjYSztDQ==}
     engines: {node: '>=20.18.1'}
 
   /unenv@2.0.0-rc.24:

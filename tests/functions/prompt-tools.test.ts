@@ -7,7 +7,7 @@ import {
   createFlaryCodemodeApprovalBridge,
   type FlaryCodemodeApprovalRuntime,
 } from "../../src/harness/functions/codemode.ts";
-import { flaryInternalRoute } from "../../src/harness/functions/workflow.ts";
+import { flaryInternalRequest, flaryInternalRoute } from "../../src/harness/functions/workflow.ts";
 import type { ModelAdapter } from "../../src/harness/providers/index.ts";
 
 test("prompt functions expose one execute tool and validate the final output", async () => {
@@ -152,6 +152,8 @@ test("Codemode approvals map to Flue continuation and replay", async () => {
 
 test("the protected Flue agent route exposes Codemode approvals", async () => {
   const token = "t".repeat(32);
+  const runId = "org:app:agent:thread";
+  const bridgeRunIds: string[] = [];
   let decided: unknown;
   const bridge = {
     async list() {
@@ -180,7 +182,10 @@ test("the protected Flue agent route exposes Codemode approvals", async () => {
       async execute() {
         return null;
       },
-      approvalBridge: () => bridge,
+      approvalBridge: ({ context }) => {
+        bridgeRunIds.push(context.runId);
+        return bridge;
+      },
     },
   });
   const fn = app.fn({
@@ -198,7 +203,7 @@ test("the protected Flue agent route exposes Codemode approvals", async () => {
   });
   const route = flaryInternalRoute(fn);
   const request = new Request(
-    "https://flue.internal/agents/support/agent-instance?flary=approvals",
+    `https://flue.internal/agents/support/${encodeURIComponent(runId)}?flary=approvals`,
     { headers: { authorization: `Bearer ${token}` } },
   );
   const context = {
@@ -220,9 +225,12 @@ test("the protected Flue agent route exposes Codemode approvals", async () => {
   const response = await route(context, async () => undefined);
   assert.equal(response?.status, 200);
   assert.deepEqual(await response?.json(), { approvals: listed });
+  const direct = await flaryInternalRequest(fn, request, { FLARY_INTERNAL_TOKEN: token });
+  assert.equal(direct?.status, 200);
+  assert.deepEqual(await direct?.json(), { approvals: listed });
 
   const decisionRequest = new Request(
-    "https://flue.internal/agents/support/agent-instance?flary=approval",
+    `https://flue.internal/agents/support/${encodeURIComponent(runId)}?flary=approval`,
     {
       method: "POST",
       headers: {
@@ -248,4 +256,5 @@ test("the protected Flue agent route exposes Codemode approvals", async () => {
   };
   await route(decisionContext, async () => undefined);
   assert.equal((decided as { status: string }).status, "approved");
+  assert.deepEqual(bridgeRunIds, [runId, runId, runId]);
 });

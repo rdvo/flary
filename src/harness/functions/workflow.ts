@@ -568,7 +568,7 @@ export function flaryInternalRoute(
     const agentState = getAgentState(authoredValue);
     if (!functionState && !agentState) return context.notFound();
     const pathParts = request ? new URL(request.url).pathname.split("/").filter(Boolean) : [];
-    const runId = pathParts.at(-1) ?? "flary";
+    const runId = decodeURIComponent(pathParts.at(-1) ?? "flary");
     const bridge = functionState
       ? await functionState.app.approvalBridgeFor(authoredValue, {
           bindings: context.env,
@@ -619,7 +619,7 @@ export async function flaryInternalRequest(
   const functionState = getFunctionState(authoredValue);
   const agentState = getAgentState(authoredValue);
   if (!functionState && !agentState) return new Response(null, { status: 404 });
-  const runId = url.pathname.split("/").filter(Boolean).at(-1) ?? "flary";
+  const runId = decodeURIComponent(url.pathname.split("/").filter(Boolean).at(-1) ?? "flary");
   const bridge = functionState
     ? await functionState.app.approvalBridgeFor(authoredValue, {
         bindings: env,

@@ -1,6 +1,6 @@
 {
   "name": "flary",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Durable, provider-neutral AI agent harness for Cloudflare Workers",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -238,7 +238,7 @@
       "dompurify": "3.4.13",
       "fast-uri": "3.1.5",
       "hono": "4.12.34",
-      "undici": "7.29.0"
+      "undici": "7.30.0"
     },
     "patchedDependencies": {
       "@cloudflare/codemode@0.5.1": "patches/@cloudflare+codemode+0.5.1.patch",
@@ -253,6 +253,6 @@
     "fast-uri": "3.1.5",
     "hono": "$hono",
     "js-yaml": "4.3.1",
-    "undici": "7.29.0"
+    "undici": "7.30.0"
   }
 }
