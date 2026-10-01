@@ -8,10 +8,7 @@ import {
   type SandboxProcessOutputChunk,
 } from "./sandbox-process-registry.js";
 
-type LiveSandbox = Pick<
-  Sandbox<any>,
-  "exec" | "startProcess" | "getProcess" | "killProcess" | "getProcessLogs"
->;
+type LiveSandbox = Pick<Sandbox<any>, "exec" | "startProcess" | "getProcess" | "getProcessLogs">;
 
 export interface DurableSandboxProcessRuntimeOptions {
   readonly sandbox: LiveSandbox;
@@ -34,6 +31,10 @@ export class DurableSandboxProcessRuntime {
   readonly #registry: SqliteSandboxProcessRegistry;
   readonly #onSettled?: DurableSandboxProcessRuntimeOptions["onSettled"];
   readonly #notified = new Set<string>();
+  readonly #readyProcesses = new Set<string>();
+  readonly #pendingProcessOperations = new Map<string, Array<() => Promise<void>>>();
+  readonly #processOperations = new Map<string, Promise<void>>();
+  readonly #requestedCancellations = new Set<string>();
 
   constructor(options: DurableSandboxProcessRuntimeOptions) {
     this.#sandbox = options.sandbox;
@@ -48,7 +49,7 @@ export class DurableSandboxProcessRuntime {
       `mkdir -p ${shellQuote(processDirectory(record.id))}`,
       `rm -f ${shellQuote(fifo)}`,
       `mkfifo ${shellQuote(fifo)}`,
-      `exec ${record.command} < ${shellQuote(fifo)}`,
+      `exec 3<> ${shellQuote(fifo)} && exec ${record.command} <&3 3<&-`,
     ].join(" && ");
     try {
       await this.#sandbox.startProcess(command, {
@@ -56,25 +57,35 @@ export class DurableSandboxProcessRuntime {
         autoCleanup: false,
         cwd: record.cwd,
         onOutput: (stream, data) => {
-          void this.#registry.appendOutput({
-            processId: record.id,
-            stream,
-            text: data,
-          });
+          void this.#dispatch(record.id, async () => {
+            await this.#registry.appendOutput({
+              processId: record.id,
+              stream,
+              text: data,
+            });
+          }).catch(() => undefined);
         },
         onExit: (code) => {
-          void this.#finish(
-            record.id,
-            code === null || code !== 0 ? "failed" : "completed",
-            code ?? undefined,
-          );
+          void this.#dispatch(record.id, () =>
+            this.#finish(
+              record.id,
+              code === null || code !== 0 ? "failed" : "completed",
+              code ?? undefined,
+            ),
+          ).catch(() => undefined);
         },
         onError: () => {
-          void this.#finish(record.id, "failed", undefined, "sandbox_process_error");
+          void this.#dispatch(record.id, () =>
+            this.#finish(record.id, "failed", undefined, "sandbox_process_error"),
+          ).catch(() => undefined);
         },
       });
-      return this.#registry.start(record.id);
+      const started = await this.#registry.start(record.id);
+      await this.#activate(record.id);
+      return (await this.#registry.get(record.id)) ?? started;
     } catch (error) {
+      this.#pendingProcessOperations.delete(record.id);
+      this.#readyProcesses.delete(record.id);
       await this.#registry.fail(record.id, "sandbox_start_failed");
       throw error;
     }
@@ -91,7 +102,7 @@ export class DurableSandboxProcessRuntime {
     const record = await this.#registry.get(processId);
     if (!record) throw new Error(`Sandbox process '${processId}' was not found`);
     const live = await this.#sandbox.getProcess(processId);
-    await this.#refresh(record, live);
+    await this.#enqueue(processId, () => this.#refresh(record, live));
     return {
       process: (await this.#registry.get(processId))!,
       output: await this.#registry.readOutput(processId, { afterCursor }),
@@ -109,6 +120,7 @@ export class DurableSandboxProcessRuntime {
       processId: input.processId,
       data: input.data,
     });
+    if (request.status === "delivered") return request;
     try {
       const base64 = bytesToBase64(new TextEncoder().encode(input.data));
       const result = await this.#sandbox.exec(
@@ -140,20 +152,48 @@ export class DurableSandboxProcessRuntime {
       processId: input.processId,
       signal: input.signal,
     });
+    if (request.status === "delivered") return request;
+    const requestsCancellation = input.signal === "SIGKILL" || input.signal === "SIGTERM";
+    if (requestsCancellation) this.#requestedCancellations.add(input.processId);
     try {
-      await this.#sandbox.killProcess(input.processId, input.signal);
+      // SDK 0.12.4 accepts a signal argument but its implementation drops it.
+      // Use the live process PID so STOP/CONT and the requested signal reach
+      // the process rather than all being converted into termination.
+      const live = await this.#sandbox.getProcess(input.processId);
+      const pid = live?.pid;
+      if (!Number.isSafeInteger(pid) || pid === undefined || pid <= 0) {
+        throw new Error("The Sandbox did not return a valid live process PID");
+      }
+      const delivered = await this.#sandbox.exec(`/bin/kill -s ${input.signal.slice(3)} -- ${pid}`);
+      if (!delivered.success) throw new Error("The Sandbox rejected the process signal");
       if (input.signal === "SIGSTOP") {
         await this.#registry.sleep(input.processId);
       } else if (input.signal === "SIGCONT") {
         await this.#registry.wake(input.processId);
-      } else if (input.signal === "SIGKILL" || input.signal === "SIGTERM") {
-        await this.#registry.cancel(input.processId);
+      } else if (requestsCancellation) {
+        await this.#enqueue(input.processId, async () => {
+          const current = await this.#registry.get(input.processId);
+          if (
+            current &&
+            current.status !== "completed" &&
+            current.status !== "failed" &&
+            current.status !== "cancelled"
+          ) {
+            await this.#registry.cancel(input.processId);
+          }
+          const settled = await this.#registry.get(input.processId);
+          if (settled?.status === "cancelled") {
+            await this.#notify(input.processId, "cancelled", settled.exitCode);
+          }
+        });
+        this.#requestedCancellations.delete(input.processId);
       }
       return this.#registry.resolveControlRequest({
         requestId: request.id,
         status: "delivered",
       });
     } catch (error) {
+      if (requestsCancellation) this.#requestedCancellations.delete(input.processId);
       await this.#registry.resolveControlRequest({
         requestId: request.id,
         status: "failed",
@@ -175,24 +215,25 @@ export class DurableSandboxProcessRuntime {
     record: SandboxProcess,
     live: Awaited<ReturnType<LiveSandbox["getProcess"]>>,
   ): Promise<void> {
-    if (!live) return;
-    const logs = await this.#sandbox.getProcessLogs(record.id);
-    if (record.outputBytes === 0) {
-      if (logs.stdout) {
-        await this.#registry.appendOutput({
-          processId: record.id,
-          stream: "stdout",
-          text: logs.stdout,
-        });
-      }
-      if (logs.stderr) {
-        await this.#registry.appendOutput({
-          processId: record.id,
-          stream: "stderr",
-          text: logs.stderr,
-        });
-      }
+    let logs: Awaited<ReturnType<LiveSandbox["getProcessLogs"]>> | undefined;
+    try {
+      logs = await this.#sandbox.getProcessLogs(record.id);
+    } catch (error) {
+      if (live) throw error;
     }
+    if (logs) {
+      await this.#registry.reconcileOutput({
+        processId: record.id,
+        stream: "stdout",
+        text: logs.stdout,
+      });
+      await this.#registry.reconcileOutput({
+        processId: record.id,
+        stream: "stderr",
+        text: logs.stderr,
+      });
+    }
+    if (!live) return;
     const status = await live.getStatus();
     if (status === "completed") {
       await this.#finish(record.id, "completed", live.exitCode ?? 0);
@@ -219,6 +260,11 @@ export class DurableSandboxProcessRuntime {
       await this.#notify(processId, current.status, current.exitCode);
       return;
     }
+    if (this.#requestedCancellations.has(processId)) {
+      await this.#registry.cancel(processId);
+      await this.#notify(processId, "cancelled", exitCode);
+      return;
+    }
     if (state === "completed") {
       await this.#registry.complete(processId, exitCode ?? 0);
     } else {
@@ -241,6 +287,39 @@ export class DurableSandboxProcessRuntime {
       this.#notified.delete(key);
       throw error;
     }
+  }
+
+  #dispatch(processId: string, operation: () => Promise<void>): Promise<void> {
+    if (!this.#readyProcesses.has(processId)) {
+      const pending = this.#pendingProcessOperations.get(processId) ?? [];
+      pending.push(operation);
+      this.#pendingProcessOperations.set(processId, pending);
+      return Promise.resolve();
+    }
+    return this.#enqueue(processId, operation);
+  }
+
+  async #activate(processId: string): Promise<void> {
+    this.#readyProcesses.add(processId);
+    const pending = this.#pendingProcessOperations.get(processId) ?? [];
+    this.#pendingProcessOperations.delete(processId);
+    await Promise.all(pending.map((operation) => this.#enqueue(processId, operation)));
+  }
+
+  #enqueue(processId: string, operation: () => Promise<void>): Promise<void> {
+    const previous = this.#processOperations.get(processId) ?? Promise.resolve();
+    const current = previous.then(operation, operation);
+    const settled = current.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.#processOperations.set(processId, settled);
+    void settled.then(() => {
+      if (this.#processOperations.get(processId) === settled) {
+        this.#processOperations.delete(processId);
+      }
+    });
+    return current;
   }
 }
 

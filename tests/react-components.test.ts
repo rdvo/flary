@@ -60,6 +60,23 @@ test("FlaryMarkdown ships styled code blocks, lists, and tables without Tailwind
   assert.match(html, /<td[^>]*>Yes<\/td>/);
 });
 
+test("FlaryMarkdown line numbers use shared CSS counters without adding copy text", () => {
+  const markdown = renderToStaticMarkup(
+    createElement(FlaryMarkdown, {
+      lineNumbers: true,
+      styled: false,
+      children: "```ts\nconst value = 'copy target';\n```",
+    }),
+  );
+  const styles = renderToStaticMarkup(createElement(FlaryReactStyles));
+  assert.match(markdown, /class="\[counter-increment:line_0\] \[counter-reset:line\]"/);
+  assert.match(markdown, /before:content-\[counter\(line\)\]/);
+  assert.match(styles, /code\[class~=\"\[counter-reset:line\]\"\]/);
+  assert.match(styles, /content:counter\(line\);counter-increment:line/);
+  assert.match(styles, /user-select:none;-webkit-user-select:none/);
+  assert.doesNotMatch(markdown, /<span[^>]*>1<\/span>/);
+});
+
 test("FlaryMarkdown keeps incomplete emphasis and fenced code readable while streaming", () => {
   const partial = renderToStaticMarkup(
     createElement(FlaryMarkdown, {

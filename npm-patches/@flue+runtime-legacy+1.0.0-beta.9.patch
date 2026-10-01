@@ -441,6 +441,24 @@ index 94032552cc83d3596ae6e53bd46ec6c9c9749b01..fd33f9f39136b6a80ffddb69a9d36947
  			if (opts.isShutdownAbort?.(error)) {
  				if (submission.kind === "direct") observers.fail(submission.submissionId, error);
  				throw error;
+@@ -3463,6 +3571,16 @@
+ function matchesPersistedDirectSubmission(input, persistedInput, rows) {
+ 	try {
+-		return JSON.stringify(hydratePersistedDirectSubmission(persistedInput, rows)) === JSON.stringify(input);
++		const persisted = hydratePersistedDirectSubmission(persistedInput, rows);
++		// Admission time and tracing belong to the first accepted attempt, not
++		// the caller's idempotent request identity.
++		const identity = (value) => ({
++			kind: value.kind,
++			submissionId: value.submissionId,
++			agent: value.agent,
++			id: value.id,
++			payload: value.payload
++		});
++		return JSON.stringify(identity(persisted)) === JSON.stringify(identity(input));
+ 	} catch {
+ 		return false;
+ 	}
 diff --git a/node_modules/@flue/runtime-legacy/dist/internal.d.mts b/node_modules/@flue/runtime-legacy/dist/internal.d.mts
 index c785e222c499ceaf7d2638f8e73ea75a1e0720b6..38f58a47531d70c79048730bf8fff06a5a353cf7 100644
 --- a/node_modules/@flue/runtime-legacy/dist/internal.d.mts

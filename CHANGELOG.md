@@ -2,6 +2,28 @@
 
 All notable changes to Flary are documented in this file.
 
+## 1.0.9 - 2026-09-30
+
+### Fixed
+
+- Start Sandbox background processes without waiting for an stdin writer, and recover later
+  stdout/stderr output after reconnecting without duplicate log chunks.
+- Deliver the requested process signal, including pause/resume, despite the pinned Sandbox SDK
+  dropping its signal argument. Replay delivered controls without sending them again, and preserve
+  the live workspace when another process starts.
+- Persist scheduled messages and retry uncertain dispatches with their original submission key.
+  Recover accepted receipts and arbitrate schedule/projection alarms by the earliest wake time.
+- Match direct runtime retries by request identity instead of their new acceptance timestamp.
+- Rebuild Sandbox files from durable workspace storage when a backup is expired or missing.
+- Preserve reading position during chat streaming, add Stop and retry controls, support Enter to
+  send and Shift+Enter for a newline, and guard stale session callbacks and focus changes.
+- Render optional code line numbers in the standalone Markdown component without Tailwind.
+
+### Changed
+
+- Document schedule recovery, workspace durability boundaries, bounded process logs, and optional
+  telemetry integration.
+
 ## 1.0.8 - 2026-09-30
 
 ### Added

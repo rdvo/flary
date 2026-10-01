@@ -178,6 +178,67 @@ test("sandbox process output is chunked, byte bounded, and replayable by cursor"
   );
 });
 
+test("output reconciliation keeps per-stream UTF-8 offsets through restart and truncation", async () => {
+  const sql = sqlStore();
+  const options = { now: tickingClock(), maxOutputBytes: 8, maxChunkBytes: 4 };
+  const first = new SqliteSandboxProcessRegistry(sql, options);
+  await first.create({
+    id: "process_reconcile",
+    runId: "run_reconcile",
+    sandboxId: "sandbox_reconcile",
+    command: "printf output",
+  });
+  await first.start("process_reconcile");
+  await first.appendOutput({
+    processId: "process_reconcile",
+    stream: "stdout",
+    text: "A😀",
+  });
+  sql.database
+    .prepare("DELETE FROM flary_sandbox_process_output_offsets WHERE process_id = ? AND stream = ?")
+    .run("process_reconcile", "stdout");
+  await first.reconcileOutput({
+    processId: "process_reconcile",
+    stream: "stdout",
+    text: "A😀é",
+  });
+
+  const restarted = new SqliteSandboxProcessRegistry(sql, options);
+  await restarted.appendOutput({
+    processId: "process_reconcile",
+    stream: "stdout",
+    text: "é",
+  });
+  await restarted.reconcileOutput({
+    processId: "process_reconcile",
+    stream: "stdout",
+    text: "A😀éxyz",
+  });
+  await restarted.appendOutput({
+    processId: "process_reconcile",
+    stream: "stdout",
+    text: "xyz",
+  });
+  await restarted.reconcileOutput({
+    processId: "process_reconcile",
+    stream: "stdout",
+    text: "A😀éxyzΩ",
+  });
+
+  const output = await restarted.readOutput("process_reconcile");
+  assert.deepEqual(
+    output.map(({ text }) => text),
+    ["A", "😀", "é", "x"],
+  );
+  assert.equal(
+    output.reduce((total, chunk) => total + chunk.byteLength, 0),
+    8,
+  );
+  assert.equal((await restarted.get("process_reconcile"))?.outputBytes, 8);
+  assert.equal(output.at(-1)?.truncated, true);
+  assert.equal(new TextEncoder().encode(output.map(({ text }) => text).join("")).byteLength, 8);
+});
+
 test("stdin and signal requests are durable and resolve once", async () => {
   const sql = sqlStore();
   const clock = tickingClock();
@@ -276,5 +337,68 @@ test("process contracts reject raw environments and invalid transitions", async 
       signal: "SIGTERM",
     }),
     /cannot accept control requests while queued/,
+  );
+});
+
+test("concurrent registry instances share the process output byte limit", async () => {
+  const sql = sqlStore();
+  const first = new SqliteSandboxProcessRegistry(sql, { maxOutputBytes: 5, maxChunkBytes: 5 });
+  const second = new SqliteSandboxProcessRegistry(sql, { maxOutputBytes: 5, maxChunkBytes: 5 });
+  await first.create({
+    id: "concurrent",
+    runId: "run",
+    sandboxId: "sandbox",
+    command: "echo output",
+  });
+  await first.start("concurrent");
+  await Promise.all([
+    first.appendOutput({ processId: "concurrent", stream: "stdout", text: "abcd" }),
+    second.appendOutput({ processId: "concurrent", stream: "stderr", text: "efgh" }),
+  ]);
+  assert.equal((await first.get("concurrent"))?.outputBytes, 5);
+  assert.equal((await first.get("concurrent"))?.outputTruncated, true);
+});
+
+test("log output and reconciliation offsets commit together", async () => {
+  const sql = sqlStore();
+  let failOffsetWrite = false;
+  const registry = new SqliteSandboxProcessRegistry({
+    exec<T>(query: string, ...bindings: unknown[]) {
+      if (failOffsetWrite && query.includes("INSERT INTO flary_sandbox_process_output_offsets")) {
+        failOffsetWrite = false;
+        throw new Error("offset write interrupted");
+      }
+      return sql.exec<T>(query, ...bindings);
+    },
+    transactionSync<T>(closure: () => T) {
+      sql.database.exec("BEGIN IMMEDIATE");
+      try {
+        const result = closure();
+        sql.database.exec("COMMIT");
+        return result;
+      } catch (error) {
+        sql.database.exec("ROLLBACK");
+        throw error;
+      }
+    },
+  });
+  await registry.create({
+    id: "atomic",
+    runId: "run",
+    sandboxId: "sandbox",
+    command: "echo output",
+  });
+  await registry.start("atomic");
+  failOffsetWrite = true;
+  await assert.rejects(
+    registry.reconcileOutput({ processId: "atomic", stream: "stdout", text: "original" }),
+    /offset write interrupted/,
+  );
+  assert.equal((await registry.get("atomic"))?.outputBytes, 0);
+  await registry.reconcileOutput({ processId: "atomic", stream: "stdout", text: "original" });
+  await registry.reconcileOutput({ processId: "atomic", stream: "stdout", text: "original" });
+  assert.equal(
+    (await registry.readOutput("atomic")).map((chunk) => chunk.text).join(""),
+    "original",
   );
 });

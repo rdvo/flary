@@ -6,6 +6,7 @@ import {
   createCloudflareThreadService,
   handleFlarySessionProjectionQueue,
   handleFlaryThreadControlAlarm,
+  serializeProcessStart,
   handleFlaryThreadControlObjectRequest,
   handleFlaryThreadControlWebSocketMessage,
   projectionNeedsRecovery,
@@ -3649,4 +3650,385 @@ test("legacy export retry detects corrupt manifests and missing attachment objec
   const missingAttachment = await service.legacyExport!(target);
   assert.equal(missingAttachment.outcome, "failed");
   assert.equal(missingAttachment.errorCode, "legacy_export_missing_attachment");
+});
+
+async function scheduledRecoveryFixture(suffix: string) {
+  const controls = namespace();
+  const tenantId = `tenant_schedule_${suffix}`;
+  const threadId = `thread_schedule_${suffix}`;
+  const sends: Array<{ message: string; idempotencyKey: string }> = [];
+  const accepted = new Map<string, string>();
+  let loseNextReply = false;
+  const engine = {
+    idFromName(name: string) {
+      return name;
+    },
+    get() {
+      return {
+        async fetch(request: Request) {
+          if (request.method === "POST") {
+            const body = (await request.json()) as { message: string; idempotencyKey: string };
+            sends.push(body);
+            if (!accepted.has(body.idempotencyKey))
+              accepted.set(body.idempotencyKey, `submission_${suffix}`);
+            if (loseNextReply) {
+              loseNextReply = false;
+              throw new Error("network reply lost after acceptance");
+            }
+            return Response.json(
+              {
+                streamUrl: `https://flue.internal/agents/coder/${threadId}`,
+                offset: "0",
+                submissionId: accepted.get(body.idempotencyKey),
+              },
+              { status: 202 },
+            );
+          }
+          return Response.json(
+            [
+              {
+                type: "submission-settled",
+                position: { batch: 1, index: 0 },
+                conversationId: threadId,
+                submissionId: `submission_${suffix}`,
+                outcome: "completed",
+                result: { text: "scheduled result" },
+              },
+            ],
+            {
+              headers: {
+                "Stream-Next-Offset": "1",
+                "Stream-Up-To-Date": "true",
+                "Stream-Closed": "true",
+              },
+            },
+          );
+        },
+      };
+    },
+  };
+  const env = { FLARY_THREAD_CONTROL: controls, FLUE_CODER_AGENT: engine };
+  const service = createCloudflareThreadService({ env, namespace: controls });
+  const scope = {
+    authorization: { organizationId: tenantId, actor: { id: "user", kind: "user" as const } },
+    appId: "coder",
+  };
+  await service.create(scope, {
+    threadId,
+    agentId: "coder",
+    workspace: {
+      organizationId: tenantId,
+      appId: "coder",
+      projectId: "project",
+      workspaceId: "workspace",
+      branch: "main",
+    },
+  });
+  const target = { ...scope, threadId };
+  await service.scheduleAction!(target, "register", {
+    id: "once",
+    message: "original task",
+    trigger: { kind: "once", at: new Date(Date.now() + 60_000).toISOString() },
+  });
+  const storage = controls.stores.get(`thread:${tenantId}:coder:${threadId}`)!;
+  const scheduledFor = Date.now() - 1_000;
+  storage.sql.exec(
+    "UPDATE flary_thread_schedules SET next_run_at = ? WHERE schedule_id = 'once'",
+    scheduledFor,
+  );
+  const alarms: number[] = [];
+  const alarmStorage = {
+    ...storage,
+    async setAlarm(time: number | Date) {
+      alarms.push(Number(time));
+    },
+  };
+  const runAlarm = async () => {
+    const work: Promise<unknown>[] = [];
+    await handleFlaryThreadControlAlarm({
+      storage: alarmStorage,
+      env,
+      execution: {
+        waitUntil(promise) {
+          work.push(promise);
+        },
+      },
+    });
+    const results = await Promise.allSettled(work);
+    assert.ok(
+      results.every((result) => result.status === "fulfilled"),
+      "projection recovery must complete",
+    );
+  };
+  const claim = (message?: string) => {
+    const timestamp = new Date().toISOString();
+    storage.sql.exec(
+      `INSERT INTO flary_thread_schedule_runs (schedule_id, scheduled_for, status, created_at, updated_at)
+      VALUES ('once', ?, 'claimed', ?, ?)`,
+      scheduledFor,
+      timestamp,
+      timestamp,
+    );
+    storage.sql.exec("UPDATE flary_thread_schedules SET enabled = 0 WHERE schedule_id = 'once'");
+    if (message)
+      storage.sql.exec(
+        `INSERT INTO flary_thread_schedule_dispatches
+      (schedule_id, scheduled_for, message, retry_at) VALUES ('once', ?, ?, ?)`,
+        scheduledFor,
+        message,
+        scheduledFor,
+      );
+  };
+  const status = () =>
+    storage.sql
+      .exec<{ status: string }>(
+        "SELECT status FROM flary_thread_schedule_runs WHERE schedule_id = 'once'",
+      )
+      .toArray()[0]?.status;
+  return {
+    storage,
+    service,
+    target,
+    scheduledFor,
+    sends,
+    accepted,
+    alarms,
+    runAlarm,
+    claim,
+    status,
+    loseReply() {
+      loseNextReply = true;
+    },
+  };
+}
+
+test("schedule recovers a frozen claim even when its one-time schedule is disabled", async () => {
+  const fixture = await scheduledRecoveryFixture("legacy_claim");
+  fixture.claim("original task");
+  await fixture.runAlarm();
+  assert.equal(fixture.status(), "admitted");
+  assert.equal(fixture.sends.length, 1);
+  assert.equal(fixture.sends[0]?.idempotencyKey, `schedule_once_${fixture.scheduledFor}`);
+  await fixture.runAlarm();
+  assert.equal(fixture.sends.length, 1, "completed firing must not send again");
+});
+
+test("schedule retries a lost acceptance reply with its original message, key, and usage reservation", async () => {
+  const fixture = await scheduledRecoveryFixture("lost_reply");
+  fixture.loseReply();
+  await fixture.runAlarm();
+  assert.equal(fixture.status(), "claimed");
+  const fence = fixture.storage.sql
+    .exec<{ settled_at: string | null }>("SELECT settled_at FROM flary_legacy_export_submissions")
+    .toArray()[0];
+  assert.equal(fence?.settled_at, null, "uncertain work must keep export blocked");
+  assert.ok(fixture.alarms.length > 0, "disabled once schedule still needs a recovery alarm");
+  await fixture.service.scheduleAction!(fixture.target, "register", {
+    id: "once",
+    message: "edited task",
+    trigger: { kind: "interval", intervalMs: 60_000 },
+    enabled: false,
+  });
+  fixture.storage.sql.exec(
+    "UPDATE flary_thread_schedule_dispatches SET retry_at = ?",
+    Date.now() - 1,
+  );
+  await fixture.runAlarm();
+  assert.equal(fixture.sends.length, 2);
+  assert.equal(fixture.accepted.size, 1, "runtime accepted only one idempotent submission");
+  assert.deepEqual(
+    fixture.sends[0],
+    fixture.sends[1],
+    "retry uses the original claimed message after an edit",
+  );
+  assert.equal(fixture.status(), "admitted");
+  assert.equal(
+    fixture.storage.sql.exec("SELECT reservation_id FROM flary_interactive_reservations").toArray()
+      .length,
+    1,
+  );
+});
+
+test("schedule recovery retains its message after deleting the schedule", async () => {
+  const fixture = await scheduledRecoveryFixture("deleted");
+  fixture.claim("original task");
+  await fixture.service.scheduleAction!(fixture.target, "delete", { id: "once" });
+  await fixture.runAlarm();
+  assert.equal(fixture.sends[0]?.message, "original task");
+  assert.equal(fixture.status(), "admitted");
+});
+
+test("schedule recovers an admitted receipt without resubmitting", async () => {
+  const fixture = await scheduledRecoveryFixture("receipt");
+  fixture.claim();
+  const admission = {
+    streamUrl: `https://flue.internal/agents/coder/receipt`,
+    offset: "0",
+    submissionId: "submission_receipt",
+  };
+  fixture.storage.sql.exec(
+    "UPDATE flary_thread_schedule_runs SET status = 'admitted', admission_json = ?",
+    JSON.stringify(admission),
+  );
+  await fixture.runAlarm();
+  assert.equal(fixture.sends.length, 0);
+  const projection = fixture.storage.sql
+    .exec<{ value_json: string }>(
+      "SELECT value_json FROM flary_thread_control WHERE key = ?",
+      "projection:submission_receipt",
+    )
+    .toArray()[0];
+  assert.equal(JSON.parse(projection!.value_json).status, "completed");
+});
+
+test("projection recovery cannot postpone an earlier scheduled alarm", async () => {
+  const fixture = await scheduledRecoveryFixture("alarm_order");
+  const future = Date.now() + 5_000;
+  fixture.storage.sql.exec("UPDATE flary_thread_schedules SET next_run_at = ?", future);
+  fixture.storage.sql.exec(
+    "INSERT INTO flary_thread_control (key, value_json) VALUES (?, ?)",
+    "projection:pending_without_receipt",
+    JSON.stringify({ status: "active" }),
+  );
+  await fixture.runAlarm();
+  assert.equal(fixture.alarms.at(-1), future);
+  assert.equal(fixture.sends.length, 0);
+});
+
+test("legacy claim with a missing original schedule remains visible and does not submit guessed work", async () => {
+  const fixture = await scheduledRecoveryFixture("missing_original");
+  fixture.claim();
+  fixture.storage.sql.exec("DELETE FROM flary_thread_schedules");
+  await fixture.runAlarm();
+  assert.equal(fixture.status(), "outcome_unknown");
+  assert.equal(fixture.sends.length, 0);
+});
+
+test("legacy claim without a frozen request is not guessed from an editable schedule", async () => {
+  const fixture = await scheduledRecoveryFixture("legacy_without_snapshot");
+  fixture.claim();
+  await fixture.runAlarm();
+  assert.equal(fixture.status(), "outcome_unknown");
+  assert.equal(fixture.sends.length, 0);
+});
+
+test("schedule history exposes retry timing and accepted dispatch attempt counts", async () => {
+  const fixture = await scheduledRecoveryFixture("history");
+  fixture.loseReply();
+  await fixture.runAlarm();
+  let history = (await fixture.service.scheduleAction!(fixture.target, "history", {
+    scheduleId: "once",
+  })) as { runs: Array<{ attempts: number; retry_at: number | null; error: string }> };
+  assert.equal(history.runs[0]?.attempts, 1);
+  assert.ok(history.runs[0]!.retry_at! > Date.now());
+  assert.match(history.runs[0]!.error, /reply lost/);
+  fixture.storage.sql.exec(
+    "UPDATE flary_thread_schedule_dispatches SET retry_at = ?",
+    Date.now() - 1,
+  );
+  await fixture.runAlarm();
+  history = (await fixture.service.scheduleAction!(fixture.target, "history", {
+    scheduleId: "once",
+  })) as typeof history;
+  assert.equal(history.runs[0]?.attempts, 2);
+  assert.equal(history.runs[0]?.retry_at, null);
+});
+
+test("schedule admission audit recovers once after its acceptance boundary", async () => {
+  const fixture = await scheduledRecoveryFixture("audit_recovery");
+  fixture.claim("original task");
+  const key = `schedule-audit:schedule_once_${fixture.scheduledFor}`;
+  const payload = JSON.stringify({
+    scheduleId: "once",
+    scheduledFor: fixture.scheduledFor,
+    attempts: 1,
+  });
+  fixture.storage.sql.exec(
+    "INSERT INTO flary_thread_control (key, value_json) VALUES (?, ?)",
+    key,
+    payload,
+  );
+  await fixture.runAlarm();
+  // Simulate interruption after append but before clearing its pending marker.
+  fixture.storage.sql.exec(
+    "INSERT INTO flary_thread_control (key, value_json) VALUES (?, ?)",
+    key,
+    payload,
+  );
+  await fixture.runAlarm();
+  const rows = fixture.storage.sql
+    .exec(
+      "SELECT sequence FROM flary_session_ledger_records WHERE json_extract(record_json, '$.sourceCursor') = ?",
+      key,
+    )
+    .toArray();
+  assert.equal(rows.length, 1);
+  assert.equal(
+    fixture.storage.sql.exec("SELECT key FROM flary_thread_control WHERE key = ?", key).toArray()
+      .length,
+    0,
+  );
+});
+
+test("a scheduled firing denied before dispatch settles its fence without sending", async () => {
+  const fixture = await scheduledRecoveryFixture("budget_denied");
+  const row = fixture.storage.sql
+    .exec<{ value_json: string }>(
+      "SELECT value_json FROM flary_thread_control WHERE key = 'binding'",
+    )
+    .toArray()[0]!;
+  const binding = JSON.parse(row.value_json);
+  binding.metadata = { ...binding.metadata, flaryLimits: { steps: 1 } };
+  fixture.storage.sql.exec(
+    "UPDATE flary_thread_control SET value_json = ? WHERE key = 'binding'",
+    JSON.stringify(binding),
+  );
+  fixture.storage.sql.exec(
+    `INSERT INTO flary_interactive_reservations (reservation_id, kind, state, reserved_json, created_at, updated_at)
+    VALUES ('existing', 'provider-step', 'held', ?, ?, ?)`,
+    JSON.stringify({
+      steps: 1,
+      toolCalls: 0,
+      tokens: 0,
+      costUsd: 0,
+      sandboxSeconds: 0,
+      browserSeconds: 0,
+    }),
+    new Date().toISOString(),
+    new Date().toISOString(),
+  );
+  await fixture.runAlarm();
+  assert.equal(fixture.status(), "failed");
+  assert.equal(fixture.sends.length, 0);
+  assert.ok(
+    fixture.storage.sql
+      .exec<{ settled_at: string }>("SELECT settled_at FROM flary_legacy_export_submissions")
+      .toArray()[0]?.settled_at,
+  );
+});
+
+test("process starts serialize workspace preparation and recover after a failed start", async () => {
+  const storage = sqlStorage();
+  const order: string[] = [];
+  let release!: () => void;
+  const paused = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const first = serializeProcessStart(storage.sql, async () => {
+    order.push("first prepare");
+    await paused;
+    order.push("first started");
+    throw new Error("first startup failed");
+  });
+  const result = assert.rejects(first, /first startup failed/);
+  const second = serializeProcessStart(storage.sql, async () => {
+    order.push("second prepare");
+    return "second started";
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, ["first prepare"]);
+  release();
+  await result;
+  assert.equal(await second, "second started");
+  assert.deepEqual(order, ["first prepare", "first started", "second prepare"]);
 });

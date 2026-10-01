@@ -118,12 +118,14 @@ interface ThreadControlWebSocketHost {
 
 interface ThreadControlStorage {
   sql: {
+    readonly projectionOwner?: object;
     exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): { toArray(): T[] };
     transactionSync<T>(closure: () => T): T;
   };
   /** Durable Object storage owns transactionSync in the Workers runtime. */
   transactionSync?<T>(closure: () => T): T;
   setAlarm?(scheduledTime: number | Date): Promise<void>;
+  deleteAlarm?(): Promise<void>;
   /** Removes all Durable Object storage, including internal metadata. */
   deleteAll?(): Promise<void>;
 }
@@ -135,6 +137,7 @@ interface ThreadControlStorage {
  */
 function normalizeThreadControlStorage(input: ThreadControlStorage): ThreadControlStorage {
   const rawSql = input.sql as {
+    readonly projectionOwner?: object;
     exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): { toArray(): T[] };
     transactionSync?<T>(closure: () => T): T;
   };
@@ -145,10 +148,14 @@ function normalizeThreadControlStorage(input: ThreadControlStorage): ThreadContr
   const owner = input.transactionSync ? input : rawSql;
   return {
     sql: {
+      projectionOwner: rawSql.projectionOwner ?? rawSql,
       exec: rawSql.exec.bind(rawSql),
       transactionSync: transactionSync.bind(owner),
     },
     ...(typeof input.setAlarm === "function" ? { setAlarm: input.setAlarm.bind(input) } : {}),
+    ...(typeof input.deleteAlarm === "function"
+      ? { deleteAlarm: input.deleteAlarm.bind(input) }
+      : {}),
     ...(typeof input.deleteAll === "function" ? { deleteAll: input.deleteAll.bind(input) } : {}),
   };
 }
@@ -1526,6 +1533,14 @@ export async function handleFlaryThreadControlObjectRequest(input: {
       updated_at TEXT NOT NULL,
       UNIQUE (schedule_id, scheduled_for)
     );
+    CREATE TABLE IF NOT EXISTS flary_thread_schedule_dispatches (
+      schedule_id TEXT NOT NULL,
+      scheduled_for INTEGER NOT NULL,
+      message TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      retry_at INTEGER NOT NULL,
+      PRIMARY KEY (schedule_id, scheduled_for)
+    );
     CREATE TABLE IF NOT EXISTS flary_realtime_tickets (
       ticket_hash TEXT PRIMARY KEY NOT NULL,
       expires_at TEXT NOT NULL,
@@ -1970,6 +1985,7 @@ async function dispatchThreadControl(
       "flary_terminal_tickets",
       "flary_thread_schedules",
       "flary_thread_schedule_runs",
+      "flary_thread_schedule_dispatches",
       "flary_subagent_config",
       "flary_subagent_sequence",
       "flary_subagent_threads",
@@ -1978,6 +1994,7 @@ async function dispatchThreadControl(
       "flary_subagent_activity",
       "flary_subagent_idempotency",
       "flary_sandbox_processes",
+      "flary_sandbox_process_output_offsets",
       "flary_sandbox_process_output",
       "flary_sandbox_process_control",
       "flary_sandbox_process_lifecycle",
@@ -2637,7 +2654,7 @@ async function dispatchThreadControl(
         webSockets: host.webSockets,
       }),
     );
-    await host.storage?.setAlarm?.(Date.now() + 30_000);
+    await scheduleNextAlarm(sql, host.storage);
     return { tracked: true };
   }
   if (method === "accountUsage") {
@@ -2977,124 +2994,266 @@ export async function handleFlaryThreadControlAlarm(input: {
     input.execution?.waitUntil(work);
   }
   const now = Date.now();
+  // An outbox keeps the original message after a schedule is edited/deleted.
+  // Keep this initializer here too: alarms can wake pre-upgrade objects before
+  // their first request has initialized the new table.
+  storage.sql.exec(`CREATE TABLE IF NOT EXISTS flary_thread_schedule_dispatches (
+    schedule_id TEXT NOT NULL, scheduled_for INTEGER NOT NULL,
+    message TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+    retry_at INTEGER NOT NULL, PRIMARY KEY (schedule_id, scheduled_for)
+  )`);
+  // Pre-upgrade claims have no frozen request. Their original message cannot
+  // be proven from an editable schedule, so retain the fence for resolution.
+  storage.sql.exec(`UPDATE flary_thread_schedule_runs SET status = 'outcome_unknown',
+    error = 'The original scheduled message is unavailable; operator resolution is required'
+    WHERE status = 'claimed' AND NOT EXISTS (
+      SELECT 1 FROM flary_thread_schedule_dispatches d
+      WHERE d.schedule_id = flary_thread_schedule_runs.schedule_id
+        AND d.scheduled_for = flary_thread_schedule_runs.scheduled_for
+    )`);
   const due = storage.sql
-    .exec<{
-      schedule_id: string;
-      schedule_json: string;
-      next_run_at: number;
-    }>(
-      `SELECT schedule_id, schedule_json, next_run_at
-     FROM flary_thread_schedules
-     WHERE enabled = 1 AND next_run_at <= ?
-     ORDER BY next_run_at ASC
-     LIMIT 100`,
+    .exec<{ schedule_id: string; schedule_json: string; next_run_at: number }>(
+      `SELECT schedule_id, schedule_json, next_run_at FROM flary_thread_schedules
+       WHERE enabled = 1 AND next_run_at <= ? ORDER BY next_run_at ASC LIMIT 100`,
       now,
     )
     .toArray();
-  const gateway = createCloudflareFlueGateway(input.env, {
-    token:
-      typeof input.env.FLARY_INTERNAL_TOKEN === "string"
-        ? input.env.FLARY_INTERNAL_TOKEN
-        : undefined,
-  });
-  let deferredExportLeaseUntil: number | undefined;
   for (const row of due) {
-    const schedule = objectValue(JSON.parse(row.schedule_json));
-    const scheduledFor = Number(row.next_run_at);
-    const admissionId = `schedule_${row.schedule_id}_${scheduledFor}`;
-    const claimed = storage.sql.transactionSync(() => {
+    storage.sql.transactionSync(() => {
+      if (
+        legacyExportLeaseActive(
+          readLegacyExportState(readControlValue(storage.sql, "legacy-export")),
+        )
+      )
+        return;
+      const schedule = objectValue(JSON.parse(row.schedule_json));
+      const scheduledFor = Number(row.next_run_at);
       const existing = storage.sql
-        .exec<{ status: string }>(
-          `SELECT status FROM flary_thread_schedule_runs
-         WHERE schedule_id = ? AND scheduled_for = ?`,
+        .exec(
+          "SELECT status FROM flary_thread_schedule_runs WHERE schedule_id = ? AND scheduled_for = ?",
           row.schedule_id,
           scheduledFor,
         )
         .toArray()[0];
-      if (existing) return false;
-      const exportState = readLegacyExportState(readControlValue(storage.sql, "legacy-export"));
-      if (legacyExportLeaseActive(exportState)) {
-        deferredExportLeaseUntil = Date.parse(exportState?.leaseUntil ?? "");
-        return false;
+      if (!existing) {
+        const timestamp = new Date().toISOString();
+        storage.sql.exec(
+          `INSERT INTO flary_thread_schedule_runs
+          (schedule_id, scheduled_for, status, created_at, updated_at)
+          VALUES (?, ?, 'claimed', ?, ?)`,
+          row.schedule_id,
+          scheduledFor,
+          timestamp,
+          timestamp,
+        );
+        storage.sql.exec(
+          `INSERT INTO flary_thread_schedule_dispatches
+          (schedule_id, scheduled_for, message, retry_at) VALUES (?, ?, ?, ?)`,
+          row.schedule_id,
+          scheduledFor,
+          String(schedule.message ?? ""),
+          now,
+        );
+        rearmLegacyExportSubmission(storage.sql, `schedule_${row.schedule_id}_${scheduledFor}`);
       }
       const nextRunAt = nextScheduleTime(schedule, scheduledFor);
       storage.sql.exec(
-        `INSERT INTO flary_thread_schedule_runs
-          (schedule_id, scheduled_for, status, created_at, updated_at)
-         VALUES (?, ?, 'claimed', ?, ?)`,
-        row.schedule_id,
-        scheduledFor,
-        new Date().toISOString(),
-        new Date().toISOString(),
-      );
-      rearmLegacyExportSubmission(storage.sql, admissionId);
-      storage.sql.exec(
         `UPDATE flary_thread_schedules
-         SET next_run_at = ?, enabled = ?, updated_at = ?
-         WHERE schedule_id = ? AND next_run_at = ?`,
+        SET next_run_at = ?, enabled = ?, updated_at = ? WHERE schedule_id = ? AND next_run_at = ?`,
         nextRunAt ?? scheduledFor,
         nextRunAt === undefined ? 0 : 1,
         new Date().toISOString(),
         row.schedule_id,
         scheduledFor,
       );
-      return true;
     });
-    if (!claimed) continue;
+  }
+  const gateway = createCloudflareFlueGateway(input.env, {
+    token:
+      typeof input.env.FLARY_INTERNAL_TOKEN === "string"
+        ? input.env.FLARY_INTERNAL_TOKEN
+        : undefined,
+  });
+  const pending = storage.sql
+    .exec<{
+      schedule_id: string;
+      scheduled_for: number;
+      message: string;
+      attempts: number;
+    }>(
+      `SELECT d.schedule_id, d.scheduled_for, d.message, d.attempts
+     FROM flary_thread_schedule_dispatches d JOIN flary_thread_schedule_runs r
+       ON r.schedule_id = d.schedule_id AND r.scheduled_for = d.scheduled_for
+     WHERE r.status = 'claimed' AND d.retry_at <= ? ORDER BY d.retry_at LIMIT 100`,
+      now,
+    )
+    .toArray();
+  for (const row of pending) {
+    const admissionId = `schedule_${row.schedule_id}_${row.scheduled_for}`;
+    if (
+      legacyExportLeaseActive(readLegacyExportState(readControlValue(storage.sql, "legacy-export")))
+    )
+      continue;
     try {
+      rearmLegacyExportSubmission(storage.sql, admissionId);
       await reserveRootInteractiveUsage(storage.sql, input.env, binding, {
         reservationId: `turn_${admissionId}`,
         kind: "provider-step",
         delta: emptyUsage({ steps: 1 }),
       });
-      const admission = await gateway.send(
+    } catch (error) {
+      // No send has happened for this attempt. On a replay, however, a prior
+      // send may already have been accepted; never release that uncertain fence.
+      if (row.attempts > 0) {
+        storage.sql.exec(
+          `UPDATE flary_thread_schedule_runs SET status = 'outcome_unknown', error = ?, updated_at = ?
+          WHERE schedule_id = ? AND scheduled_for = ?`,
+          redactErrorMessage(error, "Scheduled submission failed"),
+          new Date().toISOString(),
+          row.schedule_id,
+          row.scheduled_for,
+        );
+      } else {
+        settleLegacyExportSubmission(storage.sql, admissionId);
+        storage.sql.exec(
+          `UPDATE flary_thread_schedule_runs SET status = 'failed', error = ?, updated_at = ?
+          WHERE schedule_id = ? AND scheduled_for = ?`,
+          redactErrorMessage(error, "Scheduled submission failed"),
+          new Date().toISOString(),
+          row.schedule_id,
+          row.scheduled_for,
+        );
+      }
+      continue;
+    }
+    // Persist retry intent and arm recovery before crossing the send boundary.
+    const retryAt = Date.now() + Math.min(300_000, 2_000 * 2 ** Math.min(row.attempts, 8));
+    storage.sql.exec(
+      `UPDATE flary_thread_schedule_dispatches SET attempts = attempts + 1, retry_at = ?
+      WHERE schedule_id = ? AND scheduled_for = ?`,
+      retryAt,
+      row.schedule_id,
+      row.scheduled_for,
+    );
+    await scheduleNextAlarm(storage.sql, storage);
+    let admission: FlueAdmission;
+    try {
+      admission = await gateway.send(
         runtimeAgentId(binding),
         threadName(binding.thread),
-        String(schedule.message ?? ""),
+        row.message,
         { idempotencyKey: admissionId },
       );
+    } catch (error) {
+      const accepted = fluePostAcceptanceAdmission(error);
+      if (!accepted) {
+        // A lost network reply cannot prove rejection. Replay exactly the same
+        // runtime idempotency key and keep the export fence until resolution.
+        storage.sql.exec(
+          `UPDATE flary_thread_schedule_runs SET error = ?, updated_at = ?
+          WHERE schedule_id = ? AND scheduled_for = ?`,
+          redactErrorMessage(error, "Scheduled submission failed"),
+          new Date().toISOString(),
+          row.schedule_id,
+          row.scheduled_for,
+        );
+        continue;
+      }
+      admission = accepted;
+    }
+    storage.sql.transactionSync(() => {
       storage.sql.exec(
-        `UPDATE flary_thread_schedule_runs
-         SET status = 'admitted', admission_json = ?, updated_at = ?
-         WHERE schedule_id = ? AND scheduled_for = ?`,
+        `UPDATE flary_thread_schedule_runs SET status = 'admitted', admission_json = ?, error = NULL, updated_at = ?
+        WHERE schedule_id = ? AND scheduled_for = ?`,
         JSON.stringify(admission),
         new Date().toISOString(),
         row.schedule_id,
-        scheduledFor,
+        row.scheduled_for,
       );
-      await appendLedger(storage.sql, binding, "schedule.run", {
-        scheduleId: row.schedule_id,
-        scheduledFor,
-        admission,
-      });
-      const projection = projectAdmission({
-        sql: storage.sql,
-        env: input.env,
-        binding,
+      put(storage.sql, `projection:${admission.submissionId}`, {
         admission,
         admissionId,
+        status: "active",
       });
-      input.execution?.waitUntil(projection);
-    } catch (error) {
-      settleLegacyExportSubmission(storage.sql, admissionId);
-      storage.sql.exec(
-        `UPDATE flary_thread_schedule_runs
-         SET status = 'failed', error = ?, updated_at = ?
-         WHERE schedule_id = ? AND scheduled_for = ?`,
-        error instanceof Error ? error.message : String(error),
-        new Date().toISOString(),
-        row.schedule_id,
-        scheduledFor,
-      );
+      put(storage.sql, `schedule-audit:${admissionId}`, {
+        scheduleId: row.schedule_id,
+        scheduledFor: row.scheduled_for,
+        admission,
+        attempts: row.attempts + 1,
+      });
+    });
+    const work = projectAdmission({
+      sql: storage.sql,
+      env: input.env,
+      binding,
+      admission,
+      admissionId,
+      webSockets: input.webSockets,
+    });
+    if (input.execution) input.execution.waitUntil(work);
+    else await work;
+  }
+  // Upgrade admitted rows that previously reached storage before their
+  // projection was started. They need receipt recovery, never another send.
+  const receipts = storage.sql
+    .exec<{ schedule_id: string; scheduled_for: number; admission_json: string }>(
+      `SELECT r.schedule_id, r.scheduled_for, r.admission_json FROM flary_thread_schedule_runs r
+     WHERE r.status = 'admitted' AND r.admission_json IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM flary_thread_control c WHERE c.key = 'projection:' || json_extract(r.admission_json, '$.submissionId')
+     ) LIMIT 100`,
+    )
+    .toArray();
+  for (const row of receipts) {
+    const admission = FlueAdmissionSchema.parse(JSON.parse(row.admission_json));
+    if (readControlValue(storage.sql, `projection:${admission.submissionId}`)) continue;
+    const admissionId = `schedule_${row.schedule_id}_${row.scheduled_for}`;
+    put(storage.sql, `projection:${admission.submissionId}`, {
+      admission,
+      admissionId,
+      status: "active",
+    });
+    const work = projectAdmission({
+      sql: storage.sql,
+      env: input.env,
+      binding,
+      admission,
+      admissionId,
+      webSockets: input.webSockets,
+    });
+    if (input.execution) input.execution.waitUntil(work);
+    else await work;
+  }
+  const audits = storage.sql
+    .exec<{ key: string; value_json: string }>(
+      "SELECT key, value_json FROM flary_thread_control WHERE key LIKE 'schedule-audit:%' LIMIT 100",
+    )
+    .toArray();
+  for (const audit of audits) {
+    const sourceCursor = audit.key;
+    const recorded = storage.sql
+      .exec(
+        `SELECT sequence FROM flary_session_ledger_records
+      WHERE session_id = ? AND json_extract(record_json, '$.sourceCursor') = ? LIMIT 1`,
+        binding.thread.threadId,
+        sourceCursor,
+      )
+      .toArray()[0];
+    try {
+      if (!recorded)
+        await appendLedger(
+          storage.sql,
+          binding,
+          "schedule.run",
+          objectValue(JSON.parse(audit.value_json)),
+          { sourceCursor },
+        );
+      storage.sql.exec("DELETE FROM flary_thread_control WHERE key = ?", audit.key);
+    } catch {
+      // Receipt/projection state is already durable. Keep its pending audit
+      // for the next wake instead of treating accepted work as a failed send.
     }
   }
   await scheduleNextAlarm(storage.sql, storage);
-  if (deferredExportLeaseUntil && storage.setAlarm) {
-    await storage.setAlarm(Math.max(Date.now() + 1_000, deferredExportLeaseUntil));
-  }
-  if (projections.length > 0 && storage.setAlarm) {
-    await storage.setAlarm(Date.now() + 30_000);
-  }
 }
 
 /** Only an interrupted active projection is safe to resume after eviction. */
@@ -3893,6 +4052,23 @@ async function executeRealtimeCommand(
   if (!response.ok) throw new Error("The realtime result was not stored");
 }
 
+const processStarts = new WeakMap<object, Promise<unknown>>();
+
+export async function serializeProcessStart<T>(
+  sql: ThreadControlStorage["sql"],
+  start: () => Promise<T>,
+): Promise<T> {
+  const owner = sql.projectionOwner ?? sql;
+  const previous = processStarts.get(owner) ?? Promise.resolve();
+  const pending = previous.then(start, start);
+  processStarts.set(owner, pending);
+  try {
+    return await pending;
+  } finally {
+    if (processStarts.get(owner) === pending) processStarts.delete(owner);
+  }
+}
+
 async function processAction(
   sql: ThreadControlStorage["sql"],
   env: Record<string, unknown>,
@@ -3924,7 +4100,6 @@ async function processAction(
         sessionId: binding.thread.threadId,
       })
     : undefined;
-  if (workspaceBackend && action === "start") await workspaceBackend.prepare();
   const runtime = new DurableSandboxProcessRuntime({
     sandbox,
     registry,
@@ -3950,12 +4125,33 @@ async function processAction(
   if (action === "start") {
     const command = String(input.command ?? "").trim();
     if (!command) throw new Error("A process command is required");
-    return runtime.start({
-      id: processId || `process_${crypto.randomUUID().replaceAll("-", "")}`,
-      runId: binding.thread.threadId,
-      sandboxId,
-      command,
-      cwd: typeof input.cwd === "string" ? input.cwd : "/workspace",
+    return serializeProcessStart(sql, async () => {
+      if (workspaceBackend) {
+        const active = await registry.list({
+          runId: binding.thread.threadId,
+          status: ["running", "sleeping"],
+          limit: 1000,
+        });
+        let preserveLiveWorkspace = false;
+        for (const process of active) {
+          const live = await sandbox.getProcess(process.id);
+          if (live) {
+            const status = await live.getStatus();
+            if (status === "running" || status === "starting") {
+              preserveLiveWorkspace = true;
+              break;
+            }
+          }
+        }
+        await workspaceBackend.prepare({ preserveLiveWorkspace });
+      }
+      return runtime.start({
+        id: processId || `process_${crypto.randomUUID().replaceAll("-", "")}`,
+        runId: binding.thread.threadId,
+        sandboxId,
+        command,
+        cwd: typeof input.cwd === "string" ? input.cwd : "/workspace",
+      });
     });
   }
   if (!processId) throw new Error("A process ID is required");
@@ -4134,10 +4330,12 @@ async function scheduleAction(
     const scheduleId = typeof input.scheduleId === "string" ? input.scheduleId : undefined;
     const rows = sql
       .exec<Record<string, unknown>>(
-        `SELECT run_sequence, schedule_id, scheduled_for, status,
-              admission_json, error, created_at, updated_at
-       FROM flary_thread_schedule_runs
-       ${scheduleId ? "WHERE schedule_id = ?" : ""}
+        `SELECT r.run_sequence, r.schedule_id, r.scheduled_for, r.status,
+              r.admission_json, r.error, r.created_at, r.updated_at, d.attempts,
+              CASE WHEN r.status = 'claimed' THEN d.retry_at ELSE NULL END AS retry_at
+       FROM flary_thread_schedule_runs r LEFT JOIN flary_thread_schedule_dispatches d
+         ON d.schedule_id = r.schedule_id AND d.scheduled_for = r.scheduled_for
+       ${scheduleId ? "WHERE r.schedule_id = ?" : ""}
        ORDER BY run_sequence DESC
        LIMIT ?`,
         ...(scheduleId ? [scheduleId] : []),
@@ -4269,14 +4467,44 @@ async function scheduleNextAlarm(
   storage?: ThreadControlStorage,
 ): Promise<void> {
   if (!storage?.setAlarm) return;
-  const row = sql
+  const now = Date.now();
+  const candidates: number[] = [];
+  const lease = readLegacyExportState(readControlValue(sql, "legacy-export"));
+  const dispatchFloor = legacyExportLeaseActive(lease)
+    ? Date.parse(lease!.leaseUntil!)
+    : now + 1_000;
+  const schedule = sql
     .exec<{ next_run_at: number }>(
-      `SELECT next_run_at FROM flary_thread_schedules
-     WHERE enabled = 1 ORDER BY next_run_at ASC LIMIT 1`,
+      "SELECT next_run_at FROM flary_thread_schedules WHERE enabled = 1 ORDER BY next_run_at LIMIT 1",
     )
     .toArray()[0];
-  if (row) await storage.setAlarm(Number(row.next_run_at));
+  if (schedule) candidates.push(Math.max(dispatchFloor, Number(schedule.next_run_at)));
+  const dispatch = sql
+    .exec<{ retry_at: number }>(
+      `SELECT d.retry_at FROM flary_thread_schedule_dispatches d
+    JOIN flary_thread_schedule_runs r ON r.schedule_id = d.schedule_id AND r.scheduled_for = d.scheduled_for
+    WHERE r.status = 'claimed' ORDER BY d.retry_at LIMIT 1`,
+    )
+    .toArray()[0];
+  if (dispatch) candidates.push(Math.max(dispatchFloor, Number(dispatch.retry_at)));
+  const active = sql
+    .exec<{ value_json: string }>(
+      "SELECT value_json FROM flary_thread_control WHERE key LIKE 'projection:%'",
+    )
+    .toArray()
+    .some((row) => projectionNeedsRecovery(objectValue(JSON.parse(row.value_json))));
+  if (active) candidates.push(now + 30_000);
+  if (
+    sql
+      .exec("SELECT key FROM flary_thread_control WHERE key LIKE 'schedule-audit:%' LIMIT 1")
+      .toArray().length > 0
+  )
+    candidates.push(now + 30_000);
+  if (candidates.length > 0) await storage.setAlarm(Math.min(...candidates));
+  else await storage.deleteAlarm?.();
 }
+
+const activeProjectionWork = new WeakMap<object, Map<string, Promise<void>>>();
 
 async function projectAdmission(input: {
   readonly sql: ThreadControlStorage["sql"];
@@ -4289,6 +4517,22 @@ async function projectAdmission(input: {
   readonly turnMessage?: string;
   readonly webSockets?: ThreadControlWebSocketHost;
 }): Promise<void> {
+  const owner = input.sql.projectionOwner ?? input.sql;
+  let work = activeProjectionWork.get(owner);
+  if (!work) {
+    work = new Map();
+    activeProjectionWork.set(owner, work);
+  }
+  const existing = work.get(input.admission.submissionId);
+  if (existing) return existing;
+  const pending = projectAdmissionWork(input).finally(() => {
+    work!.delete(input.admission.submissionId);
+  });
+  work.set(input.admission.submissionId, pending);
+  return pending;
+}
+
+async function projectAdmissionWork(input: Parameters<typeof projectAdmission>[0]): Promise<void> {
   const gateway = createCloudflareFlueGateway(input.env, {
     token:
       typeof input.env.FLARY_INTERNAL_TOKEN === "string"
@@ -5596,6 +5840,7 @@ async function appendLedger(
   recordType: SessionRecordType,
   payload: Record<string, unknown>,
   options: {
+    readonly sourceCursor?: string;
     readonly producer?: SessionRecord["producer"];
     readonly encryptedContentRef?: SessionRecord["encryptedContentRef"];
   } = {},
@@ -5607,7 +5852,8 @@ async function appendLedger(
     sessionId: binding.thread.threadId,
     threadId: binding.thread.threadId,
     agentId: binding.agentId,
-    sourceCursor: `control:${Date.now()}:${crypto.randomUUID().replaceAll("-", "")}`,
+    sourceCursor:
+      options.sourceCursor ?? `control:${Date.now()}:${crypto.randomUUID().replaceAll("-", "")}`,
     recordType,
     recordedAt: new Date().toISOString(),
     attempt: 0,

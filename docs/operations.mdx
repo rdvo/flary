@@ -23,3 +23,8 @@ Before production:
 
 Use Cloudflare logs and Flary's tenant-scoped usage and audit APIs for operations. Public audit
 views contain hashes, sizes, state, and safe metadata, not secret values.
+
+Process output has bounded retention and cursor replay. Schedule history exposes failed or pending
+dispatches and their retry timing. Use these alongside `audit.list()` to investigate a thread. The
+exported `flary/telemetry` store is available for applications to wire into their own tracing or
+reporting; deploying Flary does not automatically install a telemetry dashboard or exporter.

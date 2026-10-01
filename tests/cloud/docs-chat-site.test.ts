@@ -134,6 +134,9 @@ function testEnvironment() {
         });
         return Response.json({ submissionId: "submission-1", offset: "0_0" }, { status: 202 });
       }
+      if (request.method === "POST" && url.pathname.endsWith("/interrupt")) {
+        return Response.json({ ok: true }, { status: 202 });
+      }
       if (request.method === "DELETE" && url.pathname.startsWith("/apps/docs/threads/chat_")) {
         threads.delete(key);
         return Response.json({ ok: true });
@@ -159,6 +162,38 @@ function browserCookie(response: Response): string {
   assert.ok(setCookie, "the response must create a browser owner cookie");
   return setCookie.split(";", 1)[0]!;
 }
+
+test("docs chat interrupts only a browser-owned signed session", async () => {
+  const { env, calls } = testEnvironment();
+  const created = await site.request(
+    "https://flary.dev/api/docs-chat/session",
+    { method: "POST" },
+    env,
+  );
+  const cookie = browserCookie(created);
+  const { session } = (await created.json()) as SessionPayload;
+  const interrupt = (reference: string, sessionId = session.id, ownerCookie = cookie) =>
+    site.request(
+      "https://flary.dev/api/docs-chat/interrupt",
+      {
+        method: "POST",
+        headers: {
+          cookie: ownerCookie,
+          "content-type": "application/json",
+          "x-flary-docs-session-ref": reference,
+        },
+        body: JSON.stringify({ sessionId, submissionId: "submission-1" }),
+      },
+      env,
+    );
+  assert.equal((await interrupt(session.reference)).status, 202);
+  assert.equal(calls.at(-1)?.path, `/apps/docs/threads/chat_${session.id}/interrupt`);
+  const acceptedCalls = calls.length;
+  assert.equal((await interrupt(session.reference, "somebody-else")).status, 400);
+  assert.equal((await interrupt("invalid")).status, 401);
+  assert.equal((await interrupt(session.reference, session.id, "")).status, 401);
+  assert.equal(calls.length, acceptedCalls, "invalid targets must never reach the runtime");
+});
 
 test("docs chat creates, restores, and deletes browser-owned sessions", async () => {
   const { env, calls } = testEnvironment();

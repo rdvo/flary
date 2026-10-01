@@ -37,6 +37,8 @@ export const flaryMarkdownStyles = `
 .flary-markdown pre{color:var(--sdm-fg,inherit);color:light-dark(var(--sdm-fg,inherit),var(--shiki-dark,var(--sdm-fg,inherit)));max-width:100%;margin:0;overflow:auto;white-space:pre;tab-size:2;text-align:left;line-height:1.6}
 .flary-markdown pre code{display:block;padding:0;background:transparent;white-space:pre;overflow-wrap:normal;word-break:normal}
 .flary-markdown pre code>span{display:block;min-height:1.6em}.flary-markdown pre code span[style]{color:var(--sdm-c,inherit);color:light-dark(var(--sdm-c,inherit),var(--shiki-dark,var(--sdm-c,inherit)));background:var(--sdm-tbg,transparent);background:light-dark(var(--sdm-tbg,transparent),var(--shiki-dark-bg,var(--sdm-tbg,transparent)))}
+.flary-markdown pre code[class~="[counter-reset:line]"]{counter-reset:line}
+.flary-markdown pre code[class~="[counter-reset:line]"]>span[class*="before:content-[counter(line)]"]::before{display:inline-block;width:2.75em;margin-right:1em;color:var(--flary-muted,#687078);text-align:right;content:counter(line);counter-increment:line;user-select:none;-webkit-user-select:none}
 .flary-markdown [data-streamdown="table-wrapper"]{display:flex;flex-direction:column;gap:8px;max-width:100%;min-width:0;margin:1em 0;padding:0;border:0;border-radius:0;background:transparent}
 .flary-markdown [data-streamdown="table-wrapper"]>div{max-width:100%;overflow:auto;border:1px solid var(--flary-line,light-dark(#d9dde1,#444d56));border-radius:8px}
 .flary-markdown [data-streamdown="table-wrapper"]>div:first-child:not(:last-child){display:flex;justify-content:flex-end;gap:4px;overflow:visible;border:0}

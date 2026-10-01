@@ -40,10 +40,13 @@ import FlaryMark from "./FlaryMark.astro";
         <p>Chats are saved in this browser.</p>
       </aside>
       <div class="flary-chat__conversation">
-        <div class="flary-chat__messages" aria-live="polite" data-chat-messages>
-          <div class="flary-chat__message flary-chat__message--assistant">
-            Ask about Flary. I search the real documentation and starter source.
+        <div class="flary-chat__message-area">
+          <div class="flary-chat__messages" aria-live="polite" data-chat-messages>
+            <div class="flary-chat__message flary-chat__message--assistant">
+              Ask about Flary. I search the real documentation and starter source.
+            </div>
           </div>
+          <button type="button" class="flary-chat__latest" data-chat-latest hidden>Jump to latest</button>
         </div>
         <form data-chat-form>
           <label for="flary-chat-message">Ask about Flary</label>
@@ -62,7 +65,10 @@ import FlaryMark from "./FlaryMark.astro";
                 <path d="M12 19V5m-6 6 6-6 6 6" />
               </svg>
             </button>
+            <button type="button" class="flary-chat__stop" data-chat-stop hidden>Stop</button>
           </div>
+          <button type="button" class="flary-chat__retry" data-chat-retry hidden>Retry last question</button>
+          <p class="flary-chat__composer-hint">Enter sends · Shift+Enter adds a line</p>
         </form>
         <footer>
           <span>Answers from Flary docs</span>
@@ -172,6 +178,17 @@ import FlaryMark from "./FlaryMark.astro";
     startedAt: number;
     tools: Map<string, LiveTool>;
   };
+  type ActiveSubmission = {
+    question: string;
+    generation: number;
+    reference?: string;
+    sessionId?: string;
+    submissionId?: string;
+    controller: AbortController;
+    stopController?: AbortController;
+    stopPending: boolean;
+    settled: boolean;
+  };
 
   type DocsChatMarkdownProps = {
     text: string;
@@ -200,6 +217,9 @@ import FlaryMark from "./FlaryMark.astro";
     const form = root.querySelector<HTMLFormElement>("[data-chat-form]")!;
     const input = root.querySelector<HTMLTextAreaElement>("[data-chat-input]")!;
     const send = root.querySelector<HTMLButtonElement>("[data-chat-send]")!;
+    const stop = root.querySelector<HTMLButtonElement>("[data-chat-stop]")!;
+    const retry = root.querySelector<HTMLButtonElement>("[data-chat-retry]")!;
+    const jumpLatest = root.querySelector<HTMLButtonElement>("[data-chat-latest]")!;
     const sessionsPanel = root.querySelector<HTMLElement>("[data-chat-sessions]")!;
     const sessionList = root.querySelector<HTMLElement>("[data-chat-session-list]")!;
     const sessionToggle = root.querySelector<HTMLButtonElement>("[data-chat-session-toggle]")!;
@@ -212,6 +232,7 @@ import FlaryMark from "./FlaryMark.astro";
       reject(error: Error): void;
     }>();
     const settledSubmissions = new Set<string>();
+    const stoppedSubmissions = new Set<string>();
     const settlementErrors = new Map<string, Error>();
     const intentionallyClosedSockets = new WeakSet<WebSocket>();
     const storageKey = "flary.docs.sessions.v1";
@@ -225,6 +246,19 @@ import FlaryMark from "./FlaryMark.astro";
     let realtimeCursor = 0;
     let reconnectTimer: number | undefined;
     let sessionGeneration = 0;
+    let activeSubmission: ActiveSubmission | undefined;
+    let failedQuestion: string | undefined;
+    let followingLatest = true;
+    let focusGeneration = 0;
+
+    const setStatus = (value: string) => {
+      if (!activeSubmission?.stopPending) status.textContent = value;
+    };
+    const lockSessionNavigation = (locked: boolean) => {
+      sessionToggle.disabled = locked;
+      for (const button of newButtons) button.disabled = locked;
+      sessionList.inert = locked;
+    };
 
     const renderMarkdown = (target: HTMLElement, text: string, streaming = false) => {
       let markdownRoot = markdownRoots.get(target);
@@ -425,6 +459,16 @@ import FlaryMark from "./FlaryMark.astro";
 
     const stopSessionConnections = () => {
       sessionGeneration += 1;
+      focusGeneration += 1;
+      if (activeSubmission) {
+        activeSubmission.controller.abort();
+        activeSubmission.stopController?.abort();
+        activeSubmission = undefined;
+      }
+      stop.hidden = true;
+      retry.hidden = true;
+      failedQuestion = undefined;
+      lockSessionNavigation(false);
       cancelAnswerAnimations();
       activeStream?.close();
       activeStream = undefined;
@@ -442,9 +486,11 @@ import FlaryMark from "./FlaryMark.astro";
       settlementWaiters.clear();
       settledSubmissions.clear();
       settlementErrors.clear();
+      stoppedSubmissions.clear();
     };
 
     const switchSession = async (session: StoredChatSession) => {
+      if (activeSubmission?.stopPending) return;
       if (session.reference === currentSessionReference) return;
       stopSessionConnections();
       currentSession = session;
@@ -458,11 +504,12 @@ import FlaryMark from "./FlaryMark.astro";
     };
 
     const createSession = async () => {
+      if (activeSubmission?.stopPending) return;
       stopSessionConnections();
       currentSession = undefined;
       currentSessionReference = undefined;
       persistChatIndex();
-      render([]);
+      render([], true);
       input.disabled = false;
       send.disabled = false;
       status.textContent = "New chat";
@@ -470,10 +517,11 @@ import FlaryMark from "./FlaryMark.astro";
         sessionsPanel.hidden = true;
         sessionToggle.setAttribute("aria-expanded", "false");
       }
-      input.focus();
+      if (!panel.hidden) input.focus();
     };
 
     const deleteSession = async (session: StoredChatSession) => {
+      if (activeSubmission?.stopPending) return;
       const wasCurrent = session.reference === currentSessionReference;
       const previousSessions = [...chatIndex.sessions];
       // Remove the row before the remote purge. The server marks the thread
@@ -486,7 +534,7 @@ import FlaryMark from "./FlaryMark.astro";
       }
       persistChatIndex();
       if (wasCurrent && !currentSession) {
-        render([]);
+        render([], true);
         input.disabled = false;
         send.disabled = false;
         status.textContent = "New chat";
@@ -521,8 +569,13 @@ import FlaryMark from "./FlaryMark.astro";
 
     const setOpen = async (open: boolean) => {
       const generation = sessionGeneration;
+      const focusToken = ++focusGeneration;
       panel.hidden = !open;
       launcher.setAttribute("aria-expanded", String(open));
+      if (!open) {
+        launcher.focus();
+        return;
+      }
       if (open && !started) {
         started = true;
         await syncSessionList().catch(() => undefined);
@@ -530,13 +583,19 @@ import FlaryMark from "./FlaryMark.astro";
         renderSessionList();
         if (currentSessionReference) await loadSession(currentSessionReference);
         else {
-          render([]);
+          render([], true);
           input.disabled = false;
           send.disabled = false;
           status.textContent = "New chat";
         }
       }
-      if (open && generation === sessionGeneration) input.focus();
+      if (
+        open &&
+        generation === sessionGeneration &&
+        focusToken === focusGeneration &&
+        !panel.hidden &&
+        !input.disabled
+      ) input.focus();
     };
 
     const loadSession = async (reference?: string, forceNew = false) => {
@@ -559,18 +618,21 @@ import FlaryMark from "./FlaryMark.astro";
           title: firstQuestion ? sessionTitle(firstQuestion) : undefined,
           touch: forceNew,
         });
-        render(snapshot.messages ?? []);
+        render(snapshot.messages ?? [], true);
         await connectRealtime({ fresh: true, generation });
         if (generation !== sessionGeneration) return;
         status.textContent = "Ready";
-        const active = [...(snapshot.messages ?? [])].reverse().find((message: ChatMessage) =>
+        const history = snapshot.messages ?? [];
+        const active = [...history].reverse().find((message: ChatMessage) =>
           message.role === "assistant" &&
           Boolean(message.submissionId) &&
           (message.parts ?? []).some((part: ChatPart) => part.type !== "dynamic-tool" && part.state === "streaming") &&
           !(snapshot.settlements ?? []).some((settlement) => settlement.submissionId === message.submissionId),
         );
         if (active?.submissionId && snapshot.cursor) {
-          void continueSubmission(active.submissionId, snapshot.cursor);
+          const activeIndex = history.lastIndexOf(active);
+          const question = history.slice(0, activeIndex).reverse().find((message) => message.role === "user")?.text ?? "";
+          void continueSubmission(active.submissionId, snapshot.cursor, question);
         } else {
           input.disabled = false;
           send.disabled = false;
@@ -583,40 +645,55 @@ import FlaryMark from "./FlaryMark.astro";
       }
     };
 
-    const render = (items: ChatMessage[]) => {
+    const render = (items: ChatMessage[], forceLatest = false) => {
+      const previousScrollTop = messages.scrollTop;
+      const wasFollowingLatest = followingLatest;
       cancelAnswerAnimations();
       unmountMarkdownRoots();
       messages.replaceChildren();
       turns.clear();
       turnsBySubmission.clear();
       if (items.length === 0) {
-        appendMessage("assistant", "Ask me about agents, tools, threads, deployment, or storage. I answer from the real Flary docs and starter source.");
-        return;
-      }
-      let historyTurnKey: string | undefined;
-      let historyTurnOrdinal = 0;
-      for (const item of items) {
-        if (item.role === "user") {
-          appendMessage("user", item.text);
-          historyTurnOrdinal += 1;
-          historyTurnKey = `history-${historyTurnOrdinal}`;
-          continue;
+        appendMessage(
+          "assistant",
+          "Ask me about agents, tools, threads, deployment, or storage. I answer from the real Flary docs and starter source.",
+          false,
+        );
+      } else {
+        let historyTurnKey: string | undefined;
+        let historyTurnOrdinal = 0;
+        for (const item of items) {
+          if (item.role === "user") {
+            appendMessage("user", item.text, false);
+            historyTurnOrdinal += 1;
+            historyTurnKey = `history-${historyTurnOrdinal}`;
+            continue;
+          }
+          renderAssistant({
+            ...item,
+            submissionId: item.submissionId ?? historyTurnKey,
+          });
         }
-        renderAssistant({
-          ...item,
-          submissionId: item.submissionId ?? historyTurnKey,
-        });
       }
-      messages.scrollTop = messages.scrollHeight;
+      if (forceLatest || wasFollowingLatest) {
+        scrollToLatest(forceLatest);
+      } else {
+        messages.scrollTop = previousScrollTop;
+        jumpLatest.hidden = false;
+      }
     };
 
-    const appendMessage = (role: "user" | "assistant", text: string) => {
+    const appendMessage = (
+      role: "user" | "assistant",
+      text: string,
+      forceLatest = role === "user",
+    ) => {
       const element = document.createElement("div");
       element.className = `flary-chat__message flary-chat__message--${role}`;
       if (role === "assistant") renderMarkdown(element, text);
       else element.textContent = text;
       messages.appendChild(element);
-      messages.scrollTop = messages.scrollHeight;
+      scrollToLatest(forceLatest);
     };
 
     const renderAssistant = (message: ChatMessage, animate = false) => {
@@ -846,17 +923,17 @@ import FlaryMark from "./FlaryMark.astro";
       }
       if (chunk.type === "message-started" && chunk.messageId) {
         ensureTurn(chunk.messageId, chunk.submissionId ?? activeSubmissionId);
-        status.textContent = "Thinking…";
+        setStatus("Thinking…");
         return;
       }
       if (chunk.type === "message-delta" && chunk.messageId && typeof chunk.delta === "string") {
         const turn = ensureTurn(chunk.messageId, chunk.submissionId ?? activeSubmissionId);
         if (chunk.kind === "reasoning") {
           updateReasoning(turn, `${turn.reasoningText}${chunk.delta}`);
-          status.textContent = "Thinking…";
+          setStatus("Thinking…");
         } else {
           queueAnswerText(turn, chunk.delta);
-          status.textContent = "Writing…";
+          setStatus("Writing…");
         }
         return;
       }
@@ -869,7 +946,7 @@ import FlaryMark from "./FlaryMark.astro";
           state: "input-available",
           input: chunk.input,
         });
-        status.textContent = "Searching docs…";
+        setStatus("Searching docs…");
         return;
       }
       if ((chunk.type === "tool-output" || chunk.type === "tool-output-error") && chunk.toolCallId) {
@@ -915,26 +992,38 @@ import FlaryMark from "./FlaryMark.astro";
       else waiter.resolve();
     };
 
-    const waitForRealtimeSubmission = (submissionId: string) => {
+    const waitForRealtimeSubmission = (submissionId: string, signal?: AbortSignal) => {
       if (settledSubmissions.has(submissionId)) {
         const error = settlementErrors.get(submissionId);
         return error ? Promise.reject(error) : Promise.resolve();
       }
+      if (signal?.aborted) return Promise.reject(new Error("The request was cancelled."));
       return new Promise<void>((resolve, reject) => {
+        const cleanup = () => {
+          window.clearTimeout(timeout);
+          signal?.removeEventListener("abort", onAbort);
+        };
+        const onAbort = () => {
+          settlementWaiters.delete(submissionId);
+          cleanup();
+          reject(new Error("The request was cancelled."));
+        };
         const timeout = window.setTimeout(() => {
           settlementWaiters.delete(submissionId);
+          cleanup();
           reject(new Error("The live connection did not receive the final event."));
         }, 100_000);
         settlementWaiters.set(submissionId, {
           resolve() {
-            window.clearTimeout(timeout);
+            cleanup();
             resolve();
           },
           reject(error) {
-            window.clearTimeout(timeout);
+            cleanup();
             reject(error);
           },
         });
+        signal?.addEventListener("abort", onAbort, { once: true });
       });
     };
 
@@ -947,6 +1036,7 @@ import FlaryMark from "./FlaryMark.astro";
       const submissionId = typeof payload.submissionId === "string"
         ? payload.submissionId
         : sourceSubmission;
+      if (submissionId && stoppedSubmissions.has(submissionId)) return;
       if (typeof payload.type === "string") {
         const chunk = { ...payload, submissionId: payload.submissionId ?? submissionId } as StreamChunk;
         if (chunk.type === "message-delta" && chunk.kind === "reasoning") {
@@ -957,7 +1047,7 @@ import FlaryMark from "./FlaryMark.astro";
       }
       if (record.recordType === "turn.started" && submissionId) {
         ensureTurn(`turn-${submissionId}`, submissionId);
-        status.textContent = "Thinking…";
+        setStatus("Thinking…");
       }
     };
 
@@ -966,7 +1056,7 @@ import FlaryMark from "./FlaryMark.astro";
       reconnectTimer = window.setTimeout(() => {
         reconnectTimer = undefined;
         void connectRealtime({ fresh: false, generation: sessionGeneration }).then((connected) => {
-          if (connected) status.textContent = "Ready";
+          if (connected) setStatus("Ready");
         });
       }, 750);
     };
@@ -974,10 +1064,13 @@ import FlaryMark from "./FlaryMark.astro";
     const connectRealtime = async ({
       fresh,
       generation = sessionGeneration,
+      signal,
     }: {
       fresh: boolean;
       generation?: number;
+      signal?: AbortSignal;
     }): Promise<boolean> => {
+      if (signal?.aborted) return false;
       if (realtimeSocket?.readyState === WebSocket.OPEN) return true;
       try {
         const ticket = await chatRequest<{ url: string; expiresAt: string }>(
@@ -986,18 +1079,39 @@ import FlaryMark from "./FlaryMark.astro";
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ after: fresh ? 0 : realtimeCursor }),
+            signal,
           },
         );
-        if (generation !== sessionGeneration) return false;
+        if (generation !== sessionGeneration || signal?.aborted) return false;
         const socket = new WebSocket(ticket.url);
         realtimeSocket = socket;
         return await new Promise<boolean>((resolve) => {
           let ready = false;
-          const timeout = window.setTimeout(() => {
-            if (!ready) resolve(false);
+          let settled = false;
+          let timeout: number | undefined;
+          const cleanupHandshake = () => {
+            if (timeout !== undefined) window.clearTimeout(timeout);
+            signal?.removeEventListener("abort", onAbort);
+          };
+          const finishHandshake = (connected: boolean) => {
+            if (settled) return;
+            settled = true;
+            cleanupHandshake();
+            resolve(connected);
+          };
+          const onAbort = () => {
+            intentionallyClosedSockets.add(socket);
+            finishHandshake(false);
+            socket.close();
+          };
+          timeout = window.setTimeout(() => {
+            if (!ready) finishHandshake(false);
+            intentionallyClosedSockets.add(socket);
             socket.close();
           }, 10_000);
+          signal?.addEventListener("abort", onAbort, { once: true });
           socket.addEventListener("message", (event) => {
+            if (generation !== sessionGeneration) return;
             let frame: RealtimeFrame;
             try {
               frame = JSON.parse(String(event.data)) as RealtimeFrame;
@@ -1008,13 +1122,12 @@ import FlaryMark from "./FlaryMark.astro";
               if (generation !== sessionGeneration) {
                 intentionallyClosedSockets.add(socket);
                 socket.close(1000, "session changed");
-                resolve(false);
+                finishHandshake(false);
                 return;
               }
               ready = true;
-              window.clearTimeout(timeout);
               if (fresh) realtimeCursor = Math.max(realtimeCursor, frame.cursor);
-              resolve(true);
+              finishHandshake(true);
               return;
             }
             if (frame.type === "events" && Array.isArray(frame.records)) {
@@ -1033,38 +1146,41 @@ import FlaryMark from "./FlaryMark.astro";
               intentionallyClosedSockets.add(socket);
               socket.close(1012, "resync");
               void chatRequest<ChatSnapshot>("/api/docs-chat/history").then((snapshot) => {
+                if (generation !== sessionGeneration) return;
                 render(snapshot.messages ?? []);
                 return connectRealtime({ fresh: true, generation });
               });
               return;
             }
             if (frame.type === "error") {
-              status.textContent = frame.message ?? "The live connection reported an error";
+              setStatus(frame.message ?? "The live connection reported an error");
             }
           });
           socket.addEventListener("error", () => {
             if (!ready) {
-              window.clearTimeout(timeout);
-              resolve(false);
+              finishHandshake(false);
             }
           });
           socket.addEventListener("close", () => {
             if (realtimeSocket === socket) realtimeSocket = undefined;
+            if (generation !== sessionGeneration) {
+              if (!ready) finishHandshake(false);
+              return;
+            }
             if (intentionallyClosedSockets.has(socket)) {
-              window.clearTimeout(timeout);
-              if (!ready) resolve(false);
+              if (!ready) finishHandshake(false);
               return;
             }
             if (!ready) {
-              window.clearTimeout(timeout);
-              resolve(false);
+              finishHandshake(false);
             } else {
-              status.textContent = "Reconnecting…";
+              setStatus("Reconnecting…");
               scheduleRealtimeReconnect();
             }
           });
         });
-      } catch {
+      } catch (error) {
+        if (signal?.aborted) throw error;
         return false;
       }
     };
@@ -1074,8 +1190,13 @@ import FlaryMark from "./FlaryMark.astro";
       offset: string,
       generation = sessionGeneration,
       reference = currentSessionReference,
+      signal?: AbortSignal,
     ) =>
       new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) {
+          reject(new Error("The request was cancelled."));
+          return;
+        }
         activeStream?.close();
         const session = reference
           ? `&session=${encodeURIComponent(reference)}`
@@ -1084,16 +1205,18 @@ import FlaryMark from "./FlaryMark.astro";
         activeStream = source;
         const seen = new Set<string>();
         const timeout = window.setTimeout(() => {
-          source.close();
-          reject(new Error("The answer is still running. Reopen chat to reconnect."));
+          finish(new Error("The answer is still running. Reopen chat to reconnect."));
         }, 100_000);
         const finish = (error?: Error) => {
           window.clearTimeout(timeout);
+          signal?.removeEventListener("abort", onAbort);
           source.close();
           if (activeStream === source) activeStream = undefined;
           if (error) reject(error);
           else resolve();
         };
+        const onAbort = () => finish(new Error("The request was cancelled."));
+        signal?.addEventListener("abort", onAbort, { once: true });
         source.addEventListener("data", (event) => {
           if (generation !== sessionGeneration) {
             finish(new Error("The active chat changed."));
@@ -1122,7 +1245,7 @@ import FlaryMark from "./FlaryMark.astro";
           }
         });
         source.addEventListener("error", () => {
-          status.textContent = "Reconnecting…";
+          setStatus("Reconnecting…");
         });
       });
 
@@ -1130,12 +1253,24 @@ import FlaryMark from "./FlaryMark.astro";
       submissionId: string,
       generation = sessionGeneration,
       reference = currentSessionReference,
+      signal?: AbortSignal,
     ) => {
       const deadline = Date.now() + 100_000;
       while (Date.now() < deadline) {
         if (generation !== sessionGeneration) throw new Error("The active chat changed.");
-        await new Promise((resolve) => window.setTimeout(resolve, 800));
-        const snapshot = await chatRequest<ChatSnapshot>("/api/docs-chat/history", {}, reference);
+        if (signal?.aborted) throw new Error("The request was cancelled.");
+        await new Promise<void>((resolve, reject) => {
+          const timeout = window.setTimeout(() => {
+            signal?.removeEventListener("abort", onAbort);
+            resolve();
+          }, 800);
+          const onAbort = () => {
+            window.clearTimeout(timeout);
+            reject(new Error("The request was cancelled."));
+          };
+          signal?.addEventListener("abort", onAbort, { once: true });
+        });
+        const snapshot = await chatRequest<ChatSnapshot>("/api/docs-chat/history", { signal }, reference);
         const settlement = snapshot.settlements?.find((item) => item.submissionId === submissionId);
         render(snapshot.messages ?? []);
         if (!settlement) continue;
@@ -1157,82 +1292,136 @@ import FlaryMark from "./FlaryMark.astro";
       offset: string,
       generation = sessionGeneration,
       reference = currentSessionReference,
+      signal?: AbortSignal,
     ) => {
+      if (signal?.aborted) throw new Error("The request was cancelled.");
       const connected = realtimeSocket?.readyState === WebSocket.OPEN
         ? true
-        : await connectRealtime({ fresh: true, generation });
+        : await connectRealtime({ fresh: true, generation, signal });
       if (connected) {
-        await waitForRealtimeSubmission(submissionId).catch((error) => {
-          if (generation !== sessionGeneration) throw error;
-          return waitFor(submissionId, generation, reference);
+        await waitForRealtimeSubmission(submissionId, signal).catch((error) => {
+          if (generation !== sessionGeneration || signal?.aborted) throw error;
+          return waitFor(submissionId, generation, reference, signal);
         });
         return;
       }
-      await streamSubmission(submissionId, offset, generation, reference).catch((error) => {
-        if (generation !== sessionGeneration) throw error;
-        return waitFor(submissionId, generation, reference);
+      if (signal?.aborted) throw new Error("The request was cancelled.");
+      await streamSubmission(submissionId, offset, generation, reference, signal).catch((error) => {
+        if (generation !== sessionGeneration || signal?.aborted) throw error;
+        return waitFor(submissionId, generation, reference, signal);
       });
     };
 
-    const continueSubmission = async (submissionId: string, offset: string) => {
+    const continueSubmission = async (submissionId: string, offset: string, question: string) => {
       const generation = sessionGeneration;
-      let reference = currentSessionReference;
+      const reference = currentSessionReference;
+      const run: ActiveSubmission = {
+        question,
+        generation,
+        reference,
+        sessionId: currentSession?.id,
+        submissionId,
+        controller: new AbortController(),
+        stopPending: false,
+        settled: false,
+      };
+      const focusToken = focusGeneration;
+      activeSubmission = run;
       input.disabled = true;
       send.disabled = true;
+      stop.hidden = !run.sessionId;
       try {
-        await observeSubmission(submissionId, offset, generation, reference);
-        if (generation !== sessionGeneration) return;
+        await observeSubmission(submissionId, offset, generation, reference, run.controller.signal);
+        if (activeSubmission !== run || generation !== sessionGeneration) return;
         await waitForAnswerAnimations();
-        if (generation !== sessionGeneration) return;
-        const snapshot = await chatRequest<ChatSnapshot>("/api/docs-chat/history", {}, reference);
+        if (activeSubmission !== run || generation !== sessionGeneration || run.stopPending) return;
+        const snapshot = await chatRequest<ChatSnapshot>(
+          "/api/docs-chat/history",
+          { signal: run.controller.signal },
+          reference,
+        );
+        if (activeSubmission !== run || generation !== sessionGeneration || run.stopPending) return;
         render(snapshot.messages ?? []);
+        run.settled = true;
         status.textContent = "Ready";
       } catch (error) {
-        if (generation !== sessionGeneration) return;
+        run.settled = true;
+        if (
+          activeSubmission !== run ||
+          generation !== sessionGeneration ||
+          run.stopPending ||
+          run.controller.signal.aborted
+        ) return;
         appendMessage("assistant", error instanceof Error ? error.message : "Chat is unavailable.");
         status.textContent = "Could not complete the answer";
+        if (question) {
+          failedQuestion = question;
+          retry.hidden = false;
+        }
       } finally {
-        input.disabled = false;
-        send.disabled = false;
-        input.focus();
+        if (activeSubmission === run && !run.stopPending) {
+          activeSubmission = undefined;
+          stop.hidden = true;
+          stop.disabled = false;
+          input.disabled = false;
+          send.disabled = false;
+          if (focusToken === focusGeneration && generation === sessionGeneration && !panel.hidden) {
+            input.focus();
+          }
+        }
       }
     };
 
-    launcher.addEventListener("click", () => void setOpen(panel.hidden));
-    closer.addEventListener("click", () => void setOpen(false));
-    sessionToggle.addEventListener("click", () => {
-      sessionsPanel.hidden = !sessionsPanel.hidden;
-      sessionToggle.setAttribute("aria-expanded", String(!sessionsPanel.hidden));
-    });
-    for (const button of newButtons) {
-      button.addEventListener("click", () => void createSession());
-    }
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const message = input.value.trim();
-      if (!message || send.disabled) return;
-      appendMessage("user", message);
-      input.value = "";
+    const submitQuestion = async (
+      message: string,
+      options: { appendUser?: boolean; clearInput?: boolean } = {},
+    ) => {
+      const question = message.trim();
+      if (!question || activeSubmission || send.disabled) return;
+      if (options.appendUser !== false) appendMessage("user", question);
+      if (options.clearInput !== false) input.value = "";
+      failedQuestion = undefined;
+      retry.hidden = true;
       input.disabled = true;
       send.disabled = true;
+      stop.hidden = true;
       status.textContent = "Thinking…";
       const generation = sessionGeneration;
+      const focusToken = focusGeneration;
+      const run: ActiveSubmission = {
+        question,
+        generation,
+        reference: currentSessionReference,
+        sessionId: currentSession?.id,
+        controller: new AbortController(),
+        stopPending: false,
+        settled: false,
+      };
+      activeSubmission = run;
       let reference = currentSessionReference;
       try {
         if (!reference) {
-          const snapshot = await chatRequest<ChatSnapshot>("/api/docs-chat/session", {
-            method: "POST",
-            headers: { "x-flary-docs-new-session": "1" },
-          });
-          if (generation !== sessionGeneration) return;
+          const snapshot = await chatRequest<ChatSnapshot>(
+            "/api/docs-chat/session",
+            {
+              method: "POST",
+              headers: { "x-flary-docs-new-session": "1" },
+              signal: run.controller.signal,
+            },
+          );
+          if (activeSubmission !== run || generation !== sessionGeneration) return;
           if (!snapshot.session) throw new Error("The chat service returned an invalid session.");
           reference = snapshot.session.reference;
-          rememberSession(snapshot.session, { title: sessionTitle(message), touch: true });
+          run.reference = reference;
+          run.sessionId = snapshot.session.id;
+          rememberSession(snapshot.session, { title: sessionTitle(question), touch: true });
         }
         if (currentSession && currentSession.title === "New chat") {
-          renameSession(currentSession, sessionTitle(message));
+          renameSession(currentSession, sessionTitle(question));
         }
         if (currentSession) rememberSession(currentSession);
+        run.reference = reference;
+        run.sessionId ??= currentSession?.id;
         const admission = await chatRequest<{
           submissionId: string;
           offset: string;
@@ -1242,39 +1431,209 @@ import FlaryMark from "./FlaryMark.astro";
           {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ message }),
+            body: JSON.stringify({ message: question }),
+            signal: run.controller.signal,
           },
           reference,
         );
-        if (generation !== sessionGeneration) return;
+        if (activeSubmission !== run || generation !== sessionGeneration) return;
         if (admission.session) {
           reference = admission.session.reference;
+          run.reference = reference;
+          run.sessionId = admission.session.id;
           rememberSession(admission.session, {
-            title: sessionTitle(message),
+            title: sessionTitle(question),
             touch: true,
           });
         }
-        await observeSubmission(admission.submissionId, admission.offset, generation, reference);
-        if (generation !== sessionGeneration) return;
+        run.submissionId = admission.submissionId;
+        stop.hidden = !run.sessionId;
+        await observeSubmission(
+          admission.submissionId,
+          admission.offset,
+          generation,
+          reference,
+          run.controller.signal,
+        );
+        if (activeSubmission !== run || generation !== sessionGeneration || run.stopPending) return;
         await waitForAnswerAnimations();
-        if (generation !== sessionGeneration) return;
-        const snapshot = await chatRequest<ChatSnapshot>("/api/docs-chat/history", {}, reference);
+        if (activeSubmission !== run || generation !== sessionGeneration || run.stopPending) return;
+        const snapshot = await chatRequest<ChatSnapshot>(
+          "/api/docs-chat/history",
+          { signal: run.controller.signal },
+          reference,
+        );
+        if (activeSubmission !== run || generation !== sessionGeneration || run.stopPending) return;
         render(snapshot.messages ?? []);
+        run.settled = true;
         status.textContent = "Ready";
       } catch (error) {
-        if (generation !== sessionGeneration) return;
+        run.settled = true;
+        if (
+          activeSubmission !== run ||
+          generation !== sessionGeneration ||
+          run.stopPending ||
+          run.controller.signal.aborted
+        ) return;
         appendMessage("assistant", error instanceof Error ? error.message : "Chat is unavailable.");
         status.textContent = "Could not complete the answer";
+        failedQuestion = question;
+        retry.hidden = false;
       } finally {
+        if (activeSubmission === run && !run.stopPending) {
+          activeSubmission = undefined;
+          stop.hidden = true;
+          stop.disabled = false;
+          input.disabled = false;
+          send.disabled = false;
+          if (focusToken === focusGeneration && generation === sessionGeneration && !panel.hidden) {
+            input.focus();
+          }
+        }
+      }
+    };
+
+    const stopSubmission = async () => {
+      const run = activeSubmission;
+      const generation = sessionGeneration;
+      const focusToken = focusGeneration;
+      if (
+        !run ||
+        run.stopPending ||
+        !run.submissionId ||
+        !run.sessionId ||
+        !run.reference ||
+        run.generation !== generation ||
+        currentSessionReference !== run.reference
+      ) return;
+      run.stopPending = true;
+      run.stopController = new AbortController();
+      lockSessionNavigation(true);
+      stop.disabled = true;
+      status.textContent = "Stopping…";
+      try {
+        const result = await chatRequest<{ ok?: boolean }>(
+          "/api/docs-chat/interrupt",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ sessionId: run.sessionId, submissionId: run.submissionId }),
+            signal: run.stopController.signal,
+          },
+          run.reference,
+        );
+        if (!result.ok) throw new Error("The chat service did not accept the stop request.");
+        if (
+          activeSubmission !== run ||
+          generation !== sessionGeneration ||
+          currentSessionReference !== run.reference
+        ) return;
+        stoppedSubmissions.add(run.submissionId);
+        const turn = turnsBySubmission.get(run.submissionId);
+        if (turn) {
+          turn.activityLabel.textContent = "Stop request accepted";
+          turn.activity.open = false;
+          const pulse = turn.activity.querySelector<HTMLElement>(".flary-chat__activity-pulse");
+          if (pulse) pulse.className = "flary-chat__activity-pulse";
+        }
+        cancelAnswerAnimations();
+        run.controller.abort();
+        activeSubmission = undefined;
+        run.stopPending = false;
+        run.stopController = undefined;
+        lockSessionNavigation(false);
+        stop.hidden = true;
+        stop.disabled = false;
+        retry.hidden = true;
         input.disabled = false;
         send.disabled = false;
-        input.focus();
+        status.textContent = "Stop request accepted";
+        if (focusToken === focusGeneration && !panel.hidden) input.focus();
+      } catch (error) {
+        if (
+          activeSubmission !== run ||
+          generation !== sessionGeneration ||
+          currentSessionReference !== run.reference
+        ) return;
+        run.stopPending = false;
+        run.stopController = undefined;
+        lockSessionNavigation(false);
+        stop.disabled = false;
+        if (run.settled) {
+          activeSubmission = undefined;
+          stop.hidden = true;
+          input.disabled = false;
+          send.disabled = false;
+          status.textContent = "The answer finished before Stop completed";
+          if (failedQuestion) retry.hidden = false;
+          if (focusToken === focusGeneration && !panel.hidden) input.focus();
+        } else {
+          status.textContent = error instanceof Error
+            ? `Could not stop the answer: ${error.message}`
+            : "Could not stop the answer. Try again.";
+        }
       }
+    };
+
+    launcher.addEventListener("click", () => void setOpen(panel.hidden));
+    closer.addEventListener("click", () => void setOpen(false));
+    panel.addEventListener("keydown", (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || panel.hidden) return;
+      event.preventDefault();
+      void setOpen(false);
+    });
+    sessionToggle.addEventListener("click", () => {
+      if (activeSubmission?.stopPending) return;
+      sessionsPanel.hidden = !sessionsPanel.hidden;
+      sessionToggle.setAttribute("aria-expanded", String(!sessionsPanel.hidden));
+    });
+    for (const button of newButtons) {
+      button.addEventListener("click", () => void createSession());
+    }
+    retry.addEventListener("click", () => {
+      if (failedQuestion) void submitQuestion(failedQuestion, { appendUser: false, clearInput: false });
+    });
+    stop.addEventListener("click", () => void stopSubmission());
+    input.addEventListener("keydown", (event: KeyboardEvent) => {
+      if (
+        event.key !== "Enter" ||
+        event.shiftKey ||
+        event.isComposing ||
+        event.keyCode === 229
+      ) return;
+      event.preventDefault();
+      form.requestSubmit();
+    });
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const message = input.value.trim();
+      if (!message || send.disabled) return;
+      void submitQuestion(message);
     });
 
-    function scrollToLatest(): void {
-      messages.scrollTop = messages.scrollHeight;
+    function isNearLatest(): boolean {
+      return messages.scrollHeight - messages.clientHeight - messages.scrollTop <= 48;
     }
+
+    function scrollToLatest(force = false): void {
+      if (force) followingLatest = true;
+      if (!followingLatest) {
+        jumpLatest.hidden = false;
+        return;
+      }
+      messages.scrollTop = messages.scrollHeight;
+      jumpLatest.hidden = true;
+    }
+
+    messages.addEventListener("scroll", () => {
+      followingLatest = isNearLatest();
+      jumpLatest.hidden = followingLatest;
+    });
+    jumpLatest.addEventListener("click", () => scrollToLatest(true));
+
+    root.addEventListener("focusin", (event) => {
+      if (event.target !== input) focusGeneration += 1;
+    });
 
     if (window.matchMedia("(max-width: 700px)").matches) {
       sessionsPanel.hidden = true;

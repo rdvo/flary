@@ -4,7 +4,14 @@ import type { FlaryToolConnection } from "../functions/types.js";
 
 type WorkspaceSandbox = Pick<
   Sandbox<any>,
-  "createBackup" | "restoreBackup" | "listFiles" | "readFile" | "writeFile" | "mkdir" | "watch"
+  | "createBackup"
+  | "restoreBackup"
+  | "listFiles"
+  | "readFile"
+  | "writeFile"
+  | "deleteFile"
+  | "mkdir"
+  | "watch"
 >;
 
 interface WorkspaceExecutionSql {
@@ -76,15 +83,34 @@ export class CloudflareSandboxWorkspaceBackend implements WorkspaceExecutionBack
     `);
   }
 
-  async prepare(): Promise<void> {
+  async prepare(options: { readonly preserveLiveWorkspace?: boolean } = {}): Promise<void> {
     if (this.#prepared) return;
+    if (options.preserveLiveWorkspace) {
+      await this.#sandbox.watch("/workspace", {
+        recursive: true,
+        exclude: ["node_modules", ".cache", ".DS_Store"],
+      });
+      this.#prepared = true;
+      return;
+    }
     const latest = this.#sql
       .exec<{ value_json: string }>(
         "SELECT value_json FROM flary_workspace_execution_state WHERE key = 'latest-backup'",
       )
       .toArray()[0];
     if (latest) {
-      await this.#sandbox.restoreBackup(JSON.parse(latest.value_json) as DirectoryBackup);
+      const backup = JSON.parse(latest.value_json) as DirectoryBackup;
+      try {
+        await this.#sandbox.restoreBackup(backup);
+      } catch (error) {
+        if (!isMissingOrExpiredBackup(error)) throw error;
+        // A failed restore can leave a partial tree behind. Remove its files
+        // before rebuilding from the durable workspace, or a later scan could
+        // copy stale backup content back over the authoritative files.
+        await this.#clearWorkspaceFiles();
+        await this.#hydrateSandbox();
+        this.#sql.exec("DELETE FROM flary_workspace_execution_state WHERE key = 'latest-backup'");
+      }
     } else {
       await this.#hydrateSandbox();
     }
@@ -169,6 +195,20 @@ export class CloudflareSandboxWorkspaceBackend implements WorkspaceExecutionBack
       await this.#sandbox.writeFile(absolute, String(opened.content ?? ""), {
         encoding: opened.encoding === "base64" ? "base64" : "utf8",
       });
+    }
+  }
+
+  async #clearWorkspaceFiles(): Promise<void> {
+    const scan = await this.#sandbox.listFiles("/workspace", {
+      recursive: true,
+      includeHidden: true,
+    });
+    for (const file of scan.files) {
+      if (file.type !== "file" || excluded(file.relativePath)) continue;
+      const result = await this.#sandbox.deleteFile(file.absolutePath);
+      if (!result.success) {
+        throw new Error(`Could not remove stale Sandbox workspace file: ${file.relativePath}`);
+      }
     }
   }
 
@@ -296,4 +336,9 @@ function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+
+function isMissingOrExpiredBackup(error: unknown): boolean {
+  const code = record(error).code;
+  return code === "BACKUP_NOT_FOUND" || code === "BACKUP_EXPIRED";
 }

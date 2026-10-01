@@ -294,13 +294,48 @@
   background: #fffdf9;
 }
 
+.flary-chat__message-area {
+  position: relative;
+  min-height: 0;
+}
+
 .flary-chat__messages {
   display: flex;
   flex-direction: column;
   gap: 11px;
   min-height: 0;
+  height: 100%;
   padding: 20px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.flary-chat__latest {
+  position: absolute;
+  right: 16px;
+  bottom: 12px;
+  min-height: 34px;
+  padding: 6px 11px;
+  color: #54483e;
+  cursor: pointer;
+  background: rgba(255, 253, 249, 0.96);
+  border: 1px solid rgba(45, 33, 22, 0.18);
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(37, 21, 11, 0.1);
+  font: inherit;
+  font-size: 11px;
+}
+
+.flary-chat__latest:hover {
+  color: #17130f;
+  background: #fff;
+  border-color: rgba(45, 33, 22, 0.28);
+}
+
+.flary-chat__latest[hidden],
+.flary-chat__stop[hidden],
+.flary-chat__retry[hidden] {
+  display: none;
 }
 
 .flary-chat__message {
@@ -546,6 +581,53 @@
 .flary-chat__conversation form button:disabled {
   cursor: wait;
   opacity: 0.55;
+}
+
+.flary-chat__conversation form .flary-chat__stop {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 56px;
+  padding: 0 10px;
+  color: #54483e;
+  background: transparent;
+  border: 1px solid rgba(45, 33, 22, 0.18);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.flary-chat__conversation form .flary-chat__stop:hover:not(:disabled) {
+  color: #17130f;
+  background: rgba(43, 34, 27, 0.045);
+}
+
+.flary-chat__retry {
+  min-height: 30px;
+  margin-top: 7px;
+  padding: 4px 8px;
+  color: #754021;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 11px;
+}
+
+.flary-chat__retry:hover {
+  background: rgba(43, 34, 27, 0.045);
+  border-color: rgba(45, 33, 22, 0.1);
+}
+
+.flary-chat__composer-hint {
+  margin: 5px 4px 0;
+  color: #766d65;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.flary-chat :is(button, textarea, a):focus-visible {
+  outline: 2px solid rgba(168, 85, 44, 0.72);
+  outline-offset: 2px;
 }
 
 .flary-chat__conversation > footer {

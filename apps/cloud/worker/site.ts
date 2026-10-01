@@ -303,6 +303,34 @@ api.get("/docs-chat/realtime", async (context) => {
   );
 });
 
+api.post("/docs-chat/interrupt", async (context) => {
+  const session = await docsChatSession(context.req.raw, context.env, false);
+  if (session instanceof Response) return session;
+  const input = (await context.req.json().catch(() => null)) as {
+    sessionId?: unknown;
+    submissionId?: unknown;
+  } | null;
+  if (
+    input?.sessionId !== session.id ||
+    typeof input.submissionId !== "string" ||
+    !/^[A-Za-z0-9._:-]{1,256}$/.test(input.submissionId)
+  ) {
+    return context.json(
+      { error: { type: "invalid_interrupt", message: "Choose an active response to stop." } },
+      400,
+    );
+  }
+  // The framework interrupt operation stops the active work in this chat.
+  // Resolve the target exclusively from the browser-owned signed reference.
+  const upstream = await fetchDocsAgent(
+    context.env,
+    session,
+    `/apps/${DOCS_CHAT_AGENT}/threads/${encodeURIComponent(threadId(session.id))}/interrupt`,
+    { method: "POST" },
+  );
+  return withDocsCookies(safeUpstreamResponse(upstream), session.cookies);
+});
+
 api.post("/docs-chat/messages", async (context) => {
   // Older open pages can submit before they have created a session. Return
   // its reference with admission so those clients can continue the same chat.

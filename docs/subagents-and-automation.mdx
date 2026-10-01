@@ -36,5 +36,18 @@ limits transactionally across the full tree.
 Shared workspaces are the default for child agents. Possible writes are serialized. User-created
 thread forks use isolated workspace branches.
 
-Durable schedules can start a function or agent command later. Schedule history includes attempts,
-retry state, pause, resume, cancellation, and the created run or thread reference.
+Thread schedules submit an agent message once, at an interval, or with the supported UTC cron
+patterns. Each firing saves its message before dispatch and uses a stable submission key. If a
+Worker restarts or loses the runtime's acceptance reply, it retries that same message and key.
+Editing or deleting the schedule affects future firings; it does not change already claimed work.
+
+Schedule history shows admission status, dispatch attempts, the next retry time, and the last
+dispatch error. A runtime outage keeps the firing pending with exponential backoff, capped at five
+minutes. An uncertain acceptance keeps the thread's export fence closed until recovery resolves it.
+Claims created before this recovery support that lack their original message appear as
+`outcome_unknown` and need operator resolution; Flary does not guess their request from a schedule
+that may have changed.
+
+The generated host supports one-time triggers, intervals of at least one second, and UTC cron
+patterns for minutes and hours using a fixed value, `*`, or `*/n`. Day, month, and weekday fields
+must be `*`. This is not a general cron or timezone engine.

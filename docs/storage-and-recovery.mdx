@@ -46,7 +46,23 @@ portable, ordered JSONL record. Both methods enforce the same tenant access rule
 
 Files written in `/workspace` are synchronized to durable workspace storage. Every completed coding
 turn records a tree hash, Git state, changed files, diff, checks, environment hash, and artifact
-references. A replacement Sandbox restores the last complete checkpoint from R2.
+references. A replacement Sandbox normally restores its latest R2 backup. If that backup has expired
+or is missing, Flary clears partial restore files and rebuilds from the durable workspace, including
+binary files. Authentication, service, and integrity failures still surface as errors.
+
+Changes become durable when the operation settles and synchronizes its files. A process writing to
+the live Sandbox is not itself a continuous filesystem backup. Dependencies and cache folders are
+excluded and may need to be rebuilt after replacement.
+
+Background processes can start without an stdin writer. Flary persists bounded stdout and stderr
+chunks with replay cursors, then reconciles the Sandbox's accumulated logs after a reconnect.
+Repeated attachment does not replay already recorded bytes. These are process logs; Cloudflare
+Worker logs and the thread's audit ledger serve different operational needs.
+
+Process starts serialize workspace preparation. When another process is still alive in the same
+Sandbox, its current files are preserved rather than replaced by an earlier backup. Delivered stdin
+and signal request IDs can be replayed without sending the control twice. Pause and resume deliver
+the requested Unix signals to the live process PID.
 
 ## Read old sessions
 

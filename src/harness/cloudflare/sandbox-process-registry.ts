@@ -146,6 +146,7 @@ interface SqlRows<T> {
 }
 
 interface SqlStorage {
+  transactionSync?<T>(closure: () => T): T;
   exec<T = Record<string, unknown>>(query: string, ...bindings: unknown[]): SqlRows<T>;
 }
 
@@ -166,6 +167,11 @@ interface OutputRow {
 interface OutputStateRow {
   total_bytes: number;
   truncated: number;
+}
+
+interface OutputOffsetRow {
+  callback_bytes: number;
+  log_bytes: number;
 }
 
 interface ControlRow {
@@ -236,6 +242,13 @@ export class SqliteSandboxProcessRegistry {
       );
       CREATE INDEX IF NOT EXISTS flary_sandbox_process_output_replay
       ON flary_sandbox_process_output (process_id, cursor);
+      CREATE TABLE IF NOT EXISTS flary_sandbox_process_output_offsets (
+        process_id TEXT NOT NULL,
+        stream TEXT NOT NULL,
+        callback_bytes INTEGER NOT NULL DEFAULT 0,
+        log_bytes INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (process_id, stream)
+      );
       CREATE TABLE IF NOT EXISTS flary_sandbox_process_control (
         sequence INTEGER PRIMARY KEY AUTOINCREMENT,
         request_id TEXT NOT NULL UNIQUE,
@@ -287,6 +300,10 @@ export class SqliteSandboxProcessRegistry {
 
   async get(processId: string): Promise<SandboxProcess | undefined> {
     const id = IdentifierSchema.parse(processId);
+    return this.#readProcess(id);
+  }
+
+  #readProcess(id: string): SandboxProcess | undefined {
     const row = this.#sql
       .exec<ProcessRow>(
         `SELECT record_json
@@ -428,19 +445,94 @@ export class SqliteSandboxProcessRegistry {
     text: string;
     occurredAt?: string;
   }): Promise<readonly SandboxProcessOutputChunk[]> {
-    const process = await this.#requireProcess(input.processId);
-    if (!["running", "sleeping"].includes(process.status)) {
+    return this.#appendObservedOutput(input, "callback");
+  }
+
+  /**
+   * Reconcile one of the SDK's accumulated log snapshots against output already
+   * received through onOutput or imported from an earlier snapshot.
+   */
+  async reconcileOutput(input: {
+    processId: string;
+    stream: SandboxProcessOutputStream;
+    text: string;
+    occurredAt?: string;
+  }): Promise<readonly SandboxProcessOutputChunk[]> {
+    return this.#appendObservedOutput(input, "logs");
+  }
+
+  async #appendObservedOutput(
+    input: {
+      processId: string;
+      stream: SandboxProcessOutputStream;
+      text: string;
+      occurredAt?: string;
+    },
+    source: "callback" | "logs",
+  ): Promise<readonly SandboxProcessOutputChunk[]> {
+    const write = () => this.#writeObservedOutput(input, source);
+    return this.#sql.transactionSync ? this.#sql.transactionSync(write) : write();
+  }
+
+  #writeObservedOutput(
+    input: {
+      processId: string;
+      stream: SandboxProcessOutputStream;
+      text: string;
+      occurredAt?: string;
+    },
+    source: "callback" | "logs",
+  ): readonly SandboxProcessOutputChunk[] {
+    const process = this.#readProcess(input.processId);
+    if (!process) throw new Error(`Sandbox process '${input.processId}' was not found`);
+    const stream = SandboxProcessOutputStreamSchema.parse(input.stream);
+    const occurredAt = TimestampSchema.parse(input.occurredAt ?? this.#now());
+    const encoded = new TextEncoder().encode(input.text);
+    if (encoded.byteLength === 0) return [];
+
+    const previous = this.#readOutputOffsets(process.id, stream);
+    const next = { ...previous };
+    let duplicateBytes: number;
+    if (source === "callback") {
+      const callbackEnd = previous.callback_bytes + encoded.byteLength;
+      duplicateBytes = Math.min(
+        encoded.byteLength,
+        Math.max(0, previous.log_bytes - previous.callback_bytes),
+      );
+      next.callback_bytes = callbackEnd;
+    } else {
+      duplicateBytes = Math.max(previous.log_bytes, previous.callback_bytes);
+      next.log_bytes = Math.max(previous.log_bytes, encoded.byteLength);
+      duplicateBytes = Math.min(encoded.byteLength, duplicateBytes);
+    }
+
+    const uniqueText = utf8Suffix(encoded, duplicateBytes);
+    if (uniqueText.length === 0 || (source === "callback" && process.outputTruncated)) {
+      this.#writeOutputOffsets(process.id, stream, next);
+      return [];
+    }
+    if (source === "callback" && !["running", "sleeping"].includes(process.status)) {
       throw new Error(
         `Sandbox process '${process.id}' cannot accept output while ${process.status}`,
       );
     }
-    const stream = SandboxProcessOutputStreamSchema.parse(input.stream);
-    const occurredAt = TimestampSchema.parse(input.occurredAt ?? this.#now());
+    if (
+      source === "logs" &&
+      !["queued", "running", "sleeping", "completed", "failed", "cancelled"].includes(
+        process.status,
+      )
+    ) {
+      throw new Error(`Sandbox process '${process.id}' has an invalid output state`);
+    }
+
+    const uniqueEncoded = new TextEncoder().encode(uniqueText);
     let remaining = this.#maxOutputBytes - Math.min(process.outputBytes, this.#maxOutputBytes);
-    const encoded = new TextEncoder().encode(input.text);
-    if (encoded.byteLength === 0 || process.outputTruncated) return [];
-    const acceptedLength = Math.min(encoded.byteLength, remaining);
-    const accepted = encoded.slice(0, acceptedLength);
+    if (process.outputTruncated) {
+      this.#writeOutputOffsets(process.id, stream, next);
+      return [];
+    }
+    const acceptedLength = Math.min(uniqueEncoded.byteLength, remaining);
+    const accepted = uniqueEncoded.slice(0, acceptedLength);
     const chunks: SandboxProcessOutputChunk[] = [];
     let offset = 0;
     while (offset < accepted.byteLength) {
@@ -449,7 +541,7 @@ export class SqliteSandboxProcessRegistry {
       if (safeEnd === offset) break;
       const bytes = accepted.slice(offset, safeEnd);
       const isLast = safeEnd === accepted.byteLength;
-      const truncated = isLast && acceptedLength < encoded.byteLength;
+      const truncated = isLast && acceptedLength < uniqueEncoded.byteLength;
       const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
       const row = this.#sql
         .exec<{ cursor: number }>(
@@ -483,7 +575,8 @@ export class SqliteSandboxProcessRegistry {
       remaining -= bytes.byteLength;
     }
 
-    const outputTruncated = acceptedLength < encoded.byteLength || offset < accepted.byteLength;
+    const outputTruncated =
+      acceptedLength < uniqueEncoded.byteLength || offset < accepted.byteLength;
     if (outputTruncated && !chunks.some((chunk) => chunk.truncated)) {
       const row = this.#sql
         .exec<{ cursor: number }>(
@@ -519,6 +612,7 @@ export class SqliteSandboxProcessRegistry {
       outputTruncated: process.outputTruncated || outputTruncated,
       updatedAt: occurredAt,
     });
+    this.#writeOutputOffsets(process.id, stream, next);
     return chunks.map(clone);
   }
 
@@ -793,6 +887,58 @@ export class SqliteSandboxProcessRegistry {
     );
   }
 
+  #readOutputOffsets(processId: string, stream: SandboxProcessOutputStream): OutputOffsetRow {
+    const row = this.#sql
+      .exec<OutputOffsetRow>(
+        `SELECT callback_bytes, log_bytes
+         FROM flary_sandbox_process_output_offsets
+         WHERE process_id = ? AND stream = ?`,
+        processId,
+        stream,
+      )
+      .toArray()[0];
+    if (!row) {
+      // Treat previously stored process output as an already captured prefix
+      // when opening records created before durable offsets were introduced.
+      const captured = this.#sql
+        .exec<{ captured_bytes: number }>(
+          `SELECT COALESCE(SUM(byte_length), 0) AS captured_bytes
+           FROM flary_sandbox_process_output
+           WHERE process_id = ? AND stream = ?`,
+          processId,
+          stream,
+        )
+        .toArray()[0];
+      return {
+        callback_bytes: Number(captured?.captured_bytes ?? 0),
+        log_bytes: 0,
+      };
+    }
+    return {
+      callback_bytes: Number(row.callback_bytes),
+      log_bytes: Number(row.log_bytes),
+    };
+  }
+
+  #writeOutputOffsets(
+    processId: string,
+    stream: SandboxProcessOutputStream,
+    offsets: OutputOffsetRow,
+  ): void {
+    this.#sql.exec(
+      `INSERT INTO flary_sandbox_process_output_offsets
+        (process_id, stream, callback_bytes, log_bytes)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(process_id, stream) DO UPDATE SET
+         callback_bytes = excluded.callback_bytes,
+         log_bytes = excluded.log_bytes`,
+      processId,
+      stream,
+      offsets.callback_bytes,
+      offsets.log_bytes,
+    );
+  }
+
   #appendLifecycle(input: Omit<SandboxProcessLifecycleEvent, "cursor">): void {
     const row = this.#sql
       .exec<{ cursor: number }>(
@@ -880,6 +1026,14 @@ function utf8Boundary(bytes: Uint8Array, start: number, proposedEnd: number): nu
     }
   }
   return start;
+}
+
+function utf8Suffix(bytes: Uint8Array, offset: number): string {
+  let start = Math.min(Math.max(offset, 0), bytes.byteLength);
+  while (start < bytes.byteLength && (bytes[start]! & 0b1100_0000) === 0b1000_0000) {
+    start += 1;
+  }
+  return new TextDecoder("utf-8", { fatal: true }).decode(bytes.slice(start));
 }
 
 function clone<T>(value: T): T {
