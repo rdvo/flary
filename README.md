@@ -19,6 +19,20 @@ You need a domain whose DNS is on Cloudflare (it shows as **Active** there). All
 app. Sending to any address needs the **Workers Paid** plan; on the free plan you can send only to your own verified
 addresses.
 
+### Easiest: ask your coding agent
+
+Paste this into Claude Code, Cursor, Codex or any agent that can run commands:
+
+```text
+Install Flary for me (https://github.com/rdvo/flary): clone it into a folder named flary, then run
+`npm install` and `npm run setup` in it. When setup prints a Cloudflare link and asks for a token, show me
+the link, wait for me to make the token, and have me paste it into the setup prompt myself (don't ask me to
+paste it to you). When setup finishes, give me the link it prints. If setup stops, read its "To fix:" line
+and tell me what to do.
+```
+
+You make the token and open the last link; the agent does the rest.
+
 ### 1. Run the installer
 
 ```sh
