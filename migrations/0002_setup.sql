@@ -1,4 +1,5 @@
--- What this install keeps about itself: `domain`, the mail domain picked on the first-run screen.
+-- What this install keeps about itself: `domain`, `host` (its web address), `org_name`, `logo_at` (when the logo in R2 was
+-- last changed) and `welcomed` (the owner has seen the invite step), all set from the setup wizard and the org panel.
 CREATE TABLE IF NOT EXISTS setting (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL

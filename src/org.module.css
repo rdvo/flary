@@ -58,6 +58,12 @@ button:disabled{opacity:.45;cursor:default}
 .at{display:flex;align-items:center;gap:8px}.at i{flex:none;color:var(--text);font-size:14px;font-style:normal}
 .form>button{justify-self:start;height:40px;padding:0 20px;border:0;border-radius:20px;color:var(--base);background:var(--text);font-weight:600;cursor:pointer}
 .hint{margin:0;color:var(--muted);font-size:12px}
+.logoRow{display:flex;align-items:center;gap:12px}
+.logoBox{display:grid;place-items:center;width:56px;height:56px;border:1px dashed var(--line);border-radius:10px;overflow:hidden}
+.logoBox img{max-width:100%;max-height:100%;object-fit:contain}.logoBox i{color:var(--muted);font-size:11px;font-style:normal}
+.form label.file{display:inline-flex;align-items:center;height:32px;padding:0 12px;border:1px solid color-mix(in srgb,var(--text) 16%,transparent);border-radius:16px;color:var(--text);font-size:13px;cursor:pointer}
+.file input{display:none}
+.logoRow .secondary{height:32px;padding:0 12px;font-size:13px}
 .hint a{color:var(--text);text-underline-offset:2px}
 .buttons{display:flex;flex-wrap:wrap;gap:8px}
 .primary,.secondary{height:40px;padding:0 20px;border:0;border-radius:20px;color:var(--base);background:var(--text);font-weight:600;cursor:pointer}

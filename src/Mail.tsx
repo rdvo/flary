@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { ArchiveIcon, ArrowsClockwiseIcon, ArrowBendDoubleUpLeftIcon, ArrowBendUpLeftIcon, ArrowBendUpRightIcon, ArrowLeftIcon, CaretLeftIcon, CaretRightIcon, CheckIcon, DotsThreeIcon, EnvelopeOpenIcon, EnvelopeSimpleIcon, FileIcon, LinkIcon,
   ListBulletsIcon, ListIcon, ListNumbersIcon, MagnifyingGlassIcon, MinusIcon, PaperPlaneRightIcon, PaperclipIcon, PencilSimpleIcon, StackIcon, StarIcon, TextBIcon, TextItalicIcon, TextUnderlineIcon, TrashIcon, TrayArrowDownIcon, TrayIcon,
   PasswordIcon, SignOutIcon, UsersIcon, WarningOctagonIcon, XIcon, type Icon } from '@phosphor-icons/react';
-import product from '../product.json';
 import { api, dark, navigate, onSchemeChange, useData, type MailboxInfo, type Session } from './api';
+import { BrandMark } from './Brand';
 import styles from './mail.module.css';
 
 type Folder = 'inbox' | 'starred' | 'sent' | 'drafts' | 'all' | 'spam' | 'trash';
@@ -259,7 +259,7 @@ export function Mail({ session, box, onBox, onCounts }: { session: Session; box:
   const all = threads.length > 0 && checked.length === threads.length;
   // The unread count moves with what is on screen, ahead of the server's own count.
   const unreadNow = Math.max(0, (data?.counts.inbox ?? 0) + (folder !== 'inbox' ? 0 : threads.filter(thread => thread.unread).length - (data?.threads ?? []).filter(thread => thread.unread).length));
-  useEffect(() => { document.title = unreadNow ? `Inbox (${unreadNow}) · ${box.address} · ${product.name}` : `${box.address} · ${product.name}`; }, [unreadNow, box.address]);
+  useEffect(() => { document.title = unreadNow ? `Inbox (${unreadNow}) · ${box.address} · ${session.brand.name}` : `${box.address} · ${session.brand.name}`; }, [unreadNow, box.address, session.brand.name]);
   const pick = (id: string) => setChecked(checked.includes(id) ? checked.filter(item => item !== id) : [...checked, id]);
   const go = (next: Folder) => { setFolder(next); setOffset(0); setOpen(''); setDrawer(false); };
   // What can be done to a conversation depends on the folder it is seen in; the same set serves the toolbar and a row's hover.
@@ -279,7 +279,7 @@ export function Mail({ session, box, onBox, onCounts }: { session: Session; box:
   return <div className={styles.app} data-slim={slim || undefined}>
     <header className={styles.top}>
       <Tool label="Main menu" icon={ListIcon} onClick={() => { if (window.matchMedia('(max-width:820px)').matches) setDrawer(true); else setSlim(!slim); }} />
-      <span className={`wordmark ${styles.brand}`}>{product.name}</span>
+      <BrandMark brand={session.brand} className={styles.brand} />
       <label className={styles.search}><MagnifyingGlassIcon size={20} aria-hidden="true" /><input ref={searchBox} value={query} placeholder={`Search ${many ? box.address : 'mail'}`} aria-label="Search mail" onChange={event => setQuery(event.target.value)} />
         {query && <button type="button" aria-label="Clear search" onClick={() => setQuery('')}><XIcon size={16} /></button>}</label>
       <div className={styles.right}>
@@ -293,7 +293,7 @@ export function Mail({ session, box, onBox, onCounts }: { session: Session; box:
     <div className={styles.mail}>
       {drawer && <div className={styles.scrim} onClick={() => setDrawer(false)} />}
       <nav className={`${styles.rail} ${drawer ? styles.shown : ''}`} aria-label="Folders">
-        <div className={styles.drawerHead}><span className="wordmark">{product.name}</span></div>
+        <div className={styles.drawerHead}><BrandMark brand={session.brand} /></div>
         <button type="button" className={styles.new} onClick={() => { setDrawer(false); compose(BLANK); }}><PencilSimpleIcon size={20} /><span>Compose</span></button>
         {FOLDERS.map(([id, label, FolderIcon]) => { const count = id === 'inbox' ? unreadNow : id === 'drafts' ? data?.counts.drafts : id === 'spam' ? data?.counts.spam : 0;
           return <button type="button" key={id} className={styles.folder} title={label} aria-current={folder === id ? 'true' : undefined} onClick={() => go(id)}>

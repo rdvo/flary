@@ -1,16 +1,16 @@
 #!/usr/bin/env node
-// npm run setup: puts this app on your own Cloudflare account with one API token. It asks for the token and the domain,
-// then makes the database, the file bucket and the tables, deploys, turns on Email Routing with the catch-all pointed at
-// the Worker, sets the domain up to send, and prints one link. Each step says what it does and skips what already exists,
-// so running it again is safe. `npm run setup -- --check` only reports. The token is used by this run and never saved.
+// npm run setup: puts this app on your own Cloudflare account. It asks for one thing, a Cloudflare API token, then makes the
+// database and the file bucket, deploys, keeps the token on the Worker as a secret, and prints one link. That link opens the
+// setup wizard, where you pick your domain and name your organisation, and the app sets up mail through the Cloudflare API.
+// Each step skips what already exists, so running it again is safe (it is also how you update). `-- --check` only reports.
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { argv, env, exit, platform, stdin, stdout } from 'node:process';
-import { createInterface } from 'node:readline/promises';
+import { argv, env, exit, platform } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { CloudflareError, TOKEN_NEEDS, client, findZone, inspect, listZones, mailState, repair, tokenLink } from '../shared/cloudflare.mjs';
+import { ask, askHidden, pickAccount, stop } from './cli.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const product = JSON.parse(readFileSync(join(root, 'product.json'), 'utf8'));
@@ -19,25 +19,9 @@ const script = config.name, database = config.d1_databases[0].database_name, buc
 const ANSWERS = join(root, 'setup.json');
 const saved = existsSync(ANSWERS) ? JSON.parse(readFileSync(ANSWERS, 'utf8')) : {};
 const checkOnly = argv.includes('--check');
-const DOMAIN_RE = /^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 
 const step = text => console.log(`→ ${text}`);
 const ok = text => console.log(`  ✓ ${text}`);
-/** The one way this script stops: what went wrong, and the one thing to do about it. */
-const stop = (problem, fix) => { console.error(`\n✗ ${problem}\n  To fix: ${fix}\n`); exit(1); };
-
-// A fresh prompt each time, closed after, so commands run in between get the terminal to themselves.
-const ask = async (question, fallback = '') => {
-  const rl = createInterface({ input: stdin, output: stdout });
-  try { return (await rl.question(`${question}${fallback ? ` [${fallback}]` : ''}: `)).trim() || fallback; } finally { rl.close(); }
-};
-/** Asks without echoing what is typed or pasted. */
-const askHidden = async question => {
-  const rl = createInterface({ input: stdin, output: stdout, terminal: true });
-  stdout.write(`${question}: `);
-  rl._writeToOutput = () => {};
-  try { return (await rl.question('')).trim(); } finally { rl.close(); stdout.write('\n'); }
-};
 
 /** Runs wrangler with this run's token. CI=1 keeps it from prompting and from writing ids back into wrangler.json. */
 const wrangler = (args, accountId, token) => {
@@ -51,46 +35,28 @@ const denied = (what, needs) => stop(`The Cloudflare token is not allowed to ${w
 // 0. Ready to run?
 if (!existsSync(join(root, 'node_modules', 'wrangler'))) stop('The project’s packages are not installed.', 'Run `npm install` in this folder, then `npm run setup` again.');
 
-// 1. The token. Never written anywhere; CLOUDFLARE_API_TOKEN works too, for people who keep one in their shell.
+// 1. The token: the only question. It goes to Cloudflare and onto the Worker as a secret, never into a file here.
 console.log(`\n${product.name} setup${checkOnly ? ' (check only: nothing is changed)' : ''}\n`);
 let token = env.CLOUDFLARE_API_TOKEN || '';
 if (!token) {
-  console.log(`It needs a Cloudflare API token. Make one here, with the permissions already picked:\n\n  ${tokenLink(`${product.name} setup`)}\n`);
+  console.log(`It needs a Cloudflare API token. Make one here, with the permissions already picked:\n\n  ${tokenLink(product.name)}\n`);
   console.log(`On that page, check the token has all of these (add any that are missing), then Continue to summary > Create Token:\n${TOKEN_NEEDS.map(line => `  ${line}`).join('\n')}\n`);
-  token = await askHidden('Paste the token (it is not shown or saved)');
+  token = await askHidden('Paste the token (it is not shown)');
 }
 if (!token) stop('No token was given.', 'Run `npm run setup` again and paste the token when it asks.');
 const cf = client(token);
 
-// 2. The domain, picked from the ones the token can see.
-step('Finding the domains this token can set up');
-let zones;
-try { zones = await listZones(cf); } catch (error) {
-  if (error instanceof CloudflareError && error.status === 0) stop('Could not reach the Cloudflare API.', 'Check the internet connection and run setup again.');
-  if (error instanceof CloudflareError && error.denied) stop('Cloudflare did not accept that token.', 'Copy the whole token again (it is shown once, right after Create Token), or make a new one with the link above.');
+// 2. The account, and a domain the wizard can use.
+step('Checking the token');
+const account = await pickAccount(cf, saved), accountId = account.id;
+let zones = [];
+try { zones = (await listZones(cf)).filter(zone => zone.accountId === accountId); } catch (error) {
+  if (error instanceof CloudflareError && error.denied) denied('list your domains', 'Zone Read on all zones');
   stop(`Cloudflare answered: ${error.message}`, 'Run setup again in a minute.');
 }
-if (!zones.length) stop('The token cannot see any active domain.', 'Give the token Zone Read on "All zones", and make sure the domain shows as Active in the Cloudflare dashboard.');
-let domain = (env.DOMAIN || '').toLowerCase();
-if (!domain) {
-  zones.sort((a, b) => a.name.localeCompare(b.name));
-  console.log(zones.map((zone, index) => `  ${index + 1}. ${zone.name}`).join('\n'));
-  const fallback = saved.domain && zones.some(zone => zone.name === saved.domain) ? saved.domain : zones.length === 1 ? zones[0].name : '';
-  const picked = (await ask('Your domain (number or name)', fallback)).toLowerCase();
-  domain = /^\d+$/.test(picked) ? zones[Number(picked) - 1]?.name || '' : picked;
-}
-if (!DOMAIN_RE.test(domain)) stop(`"${domain || 'nothing'}" is not one of the domains listed.`, 'Run setup again and type a number from the list.');
-const zone = zones.find(item => item.name === domain) || await findZone(cf, domain).catch(() => null);
-if (!zone) stop(`${domain} is not an active domain on the token’s account.`, `Add ${domain} to Cloudflare and wait until it shows as Active (its nameservers must point to Cloudflare), or give the token access to it.`);
-const accountId = zone.accountId;
-
-// 3. The web address.
-let host = (env.HOST || '').toLowerCase();
-if (!host) host = (await ask(`Web address for ${product.name}`, saved.host && (saved.host === domain || saved.host.endsWith(`.${domain}`)) ? saved.host : `mail.${domain}`)).toLowerCase();
-host = host.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-if (!(host === domain || host.endsWith(`.${domain}`)) || !DOMAIN_RE.test(host)) stop(`${host} is not on ${domain}.`, `Run setup again and use ${domain} or a name under it, like mail.${domain}.`);
-if (!checkOnly) writeFileSync(ANSWERS, `${JSON.stringify({ domain, host }, null, 2)}\n`);
-const c = { product: product.name, domain, host, script, accountId, zone };
+if (!zones.length) stop(`The token cannot see an active domain in ${account.name}.`, 'Add your domain to Cloudflare and wait until it shows as Active (its nameservers must point to Cloudflare), and make the token with the link above so it has Zone Read on all zones.');
+ok(`${account.name}: ${zones.map(zone => zone.name).join(', ')}`);
+if (!checkOnly) writeFileSync(ANSWERS, `${JSON.stringify({ accountId }, null, 2)}\n`);
 
 const findDatabase = async () => ((await cf('GET', `/accounts/${accountId}/d1/database?name=${encodeURIComponent(database)}`)) || []).find(item => item.name === database) || null;
 const query = async (id, sql) => (await cf('POST', `/accounts/${accountId}/d1/database/${id}/query`, { sql }))?.[0]?.results || [];
@@ -99,7 +65,17 @@ const ownerExists = async id => {
   try { return Number((await query(id, 'SELECT COUNT(*) AS n FROM account'))[0]?.n || 0) > 0; }
   catch (error) { if (/no such table/i.test(error.message)) return false; throw error; }
 };
+/** What the wizard saved: the domain and the web address. */
+const settingsOf = async id => {
+  try { return Object.fromEntries((await query(id, "SELECT key,value FROM setting WHERE key IN ('domain','host')")).map(row => [row.key, row.value])); }
+  catch (error) { if (/no such table/i.test(error.message)) return {}; throw error; }
+};
 const workersDev = async () => { try { return (await cf('GET', `/accounts/${accountId}/workers/subdomain`))?.subdomain || ''; } catch (error) { if (error instanceof CloudflareError && error.denied) throw error; return ''; } };
+/** The mail, sending and web-address steps for an install whose wizard has run. */
+const contextOf = async settings => {
+  const zone = settings.domain ? await findZone(cf, settings.domain) : null;
+  return zone ? { product: product.name, domain: settings.domain, host: settings.host || '', script, accountId, zone } : null;
+};
 
 // --check: say where things stand, change nothing.
 if (checkOnly) {
@@ -115,8 +91,9 @@ if (checkOnly) {
     try { await cf('GET', `/accounts/${accountId}/workers/scripts/${script}/settings`); deployed = true; } catch (error) { if (error instanceof CloudflareError && error.denied) throw error; }
     line(deployed, `Worker ${script} is deployed`, 'Run `npm run setup`.');
     const owner = db ? await ownerExists(db.uuid) : false;
-    line(owner, 'Owner account', `Open https://${host} and create it, or run \`npm run setup\` for a fresh setup link.`);
-    for (const item of await inspect(cf, c)) line(item.ok, `${item.label}${item.detail ? ` (${item.detail})` : ''}`, item.fix);
+    line(owner, 'The setup wizard has been finished', 'Run `npm run setup` for a fresh link to the wizard.');
+    const c = db && owner ? await contextOf(await settingsOf(db.uuid)) : null;
+    if (c) for (const item of await inspect(cf, c)) line(item.ok, `${item.label}${item.detail ? ` (${item.detail})` : ''}`, item.fix);
   } catch (error) {
     if (error instanceof CloudflareError && error.denied) stop('The token is not allowed to read everything setup checks.', `Make sure the token has: ${TOKEN_NEEDS.join('; ')}.`);
     stop(`Cloudflare answered: ${error.message}`, 'Run the check again in a minute.');
@@ -125,30 +102,14 @@ if (checkOnly) {
   exit(lines.some(text => text.startsWith('  ✗')) ? 1 : 0);
 }
 
-// 4. Before anything is made: if the domain's mail goes somewhere today, say so and ask for the domain, typed.
-step(`Checking where mail for ${domain} goes now`);
-let confirmed = '';
-try {
-  const mail = await mailState(cf, zone, script);
-  if (!mail.catchAllOurs && mail.elsewhere.length) {
-    console.log(`\n  Stop and read this. Setup would send ALL mail for ${domain} to ${product.name}:\n${mail.elsewhere.map(text => `   - ${text}`).join('\n')}`);
-    console.log(`  After this, that mail arrives in ${product.name} instead, and the old place gets nothing new.\n`);
-    confirmed = (await ask(`Type ${domain} to go on, or press Enter to stop`)).toLowerCase();
-    if (confirmed !== domain) stop('Stopped before changing anything.', `Nothing was changed. Run setup again and type ${domain} when you are ready for its mail to come to ${product.name}.`);
-  } else ok(mail.catchAllOurs ? `Mail already comes to ${product.name}` : 'Nothing to move');
-} catch (error) {
-  if (error instanceof CloudflareError && error.denied) denied(`read ${domain}’s DNS and Email Routing`, 'DNS Edit, Zone Settings Edit and Email Routing Rules Edit');
-  stop(`Could not read where mail for ${domain} goes: ${error.message}`, 'Run setup again in a minute.');
-}
-
-// 5. A workers.dev name for the account: deploying needs one, and wrangler can't make one without asking.
+// 3. A workers.dev name for the account: deploying needs one, and wrangler can't make one without asking.
 step('Checking the account has a workers.dev address');
 let subdomain = '';
 try { subdomain = await workersDev(); } catch { denied('read Workers settings', 'Workers Scripts Edit'); }
 if (!subdomain) stop('This Cloudflare account has never opened Workers, so it has no workers.dev address yet.', `Open https://dash.cloudflare.com/${accountId}/workers/onboarding once and pick a name, then run setup again.`);
 ok(`${subdomain}.workers.dev`);
 
-// 6. Database, bucket and tables. Each is made only if missing.
+// 4. Database and bucket, each made only if missing. The app makes its own tables on its first request.
 step(`Making the database ${database}`);
 let db;
 try {
@@ -173,14 +134,9 @@ try {
   stop(`Could not make the file bucket: ${error.message}`, 'Run setup again in a minute.');
 }
 
-step('Making the tables');
-const migrated = wrangler(['d1', 'migrations', 'apply', database, '--remote'], accountId, token);
-if (!migrated.ok) stop(`The tables were not made. Wrangler said:\n${tail(migrated.out)}`, /Authentication|10000|not authorized/i.test(migrated.out) ? 'Add Account D1 Edit to the token and run setup again.' : 'Run setup again; it carries on from here.');
-ok('Up to date');
-
-// 7. Build and deploy. DOMAIN goes in as a variable; `npm run deploy` keeps it (--keep-vars).
+// 5. Build and deploy.
 step('Building and uploading the app (about a minute)');
-const deployed = wrangler(['deploy', '--var', `DOMAIN:${domain}`], accountId, token);
+const deployed = wrangler(['deploy'], accountId, token);
 if (!deployed.ok) {
   const out = deployed.out;
   if (/workers\.dev subdomain/i.test(out)) stop('This Cloudflare account has no workers.dev address yet.', `Open https://dash.cloudflare.com/${accountId}/workers/onboarding once and pick a name, then run setup again.`);
@@ -188,30 +144,49 @@ if (!deployed.ok) {
   if (/vite|build/i.test(out) && !/Uploaded|Deployed/i.test(out)) stop(`The app did not build. The build said:\n${tail(out)}`, 'Run `npm install` again, then `npm run setup`.');
   stop(`The deploy did not finish. Wrangler said:\n${tail(out)}`, 'Run setup again; it carries on from here.');
 }
-ok(`Live at https://${script}.${subdomain}.workers.dev`);
+const live = `https://${script}.${subdomain}.workers.dev`;
+ok(`Live at ${live}`);
 
-// 8. The owner account. If none exists, a fresh one-time setup code goes in as a secret and into the link printed below.
-step('Checking for the owner account');
-let code = '';
+// 6. The token goes onto the Worker, so the wizard and Setup health never ask for it. If the wizard has not been finished,
+// a fresh one-time setup code goes on too, and into the link printed below.
+// PUT /accounts/{a}/workers/scripts/{name}/secrets needs Workers Scripts Edit; each replaces the value from any earlier run.
+step('Keeping the token on the app');
+let code = '', owner = false;
 try {
-  if (await ownerExists(db.uuid)) ok('Already made');
-  else {
+  await cf('PUT', `/accounts/${accountId}/workers/scripts/${script}/secrets`, { name: 'CF_API_TOKEN', text: token, type: 'secret_text' });
+  owner = await ownerExists(db.uuid);
+  if (!owner) {
     code = randomBytes(18).toString('base64url');
-    // PUT /accounts/{a}/workers/scripts/{name}/secrets needs Workers Scripts Edit. It replaces the code from any earlier run.
     await cf('PUT', `/accounts/${accountId}/workers/scripts/${script}/secrets`, { name: 'SETUP_TOKEN', text: code, type: 'secret_text' });
-    ok('Not yet: the link below makes it');
   }
+  ok('Done');
 } catch (error) {
   if (error instanceof CloudflareError && error.denied) denied('set a Worker secret', 'Account Workers Scripts Edit');
-  stop(`Could not check for the owner account: ${error.message}`, 'Run setup again in a minute.');
+  stop(`Could not store the token: ${error.message}`, 'Run setup again in a minute.');
 }
 
-// 9. Mail in, mail out and the web address: the same steps, in the same order, as the app's Setup health panel.
-const result = await repair(cf, c, { confirmed, say: step });
-if (result.confirm) stop('Mail for the domain started going somewhere else while setup ran.', 'Run setup again and read the list it shows.');
-if (result.failed) stop(result.failed.problem, result.failed.fix);
+if (code) {
+  console.log(`\nDone. Open this link to finish in your browser (it works once):\n\n  ${live}/#setup=${code}\n`);
+  console.log('There you name your organisation, pick your domain and make your account; the app sets up the mail.\n');
+  exit(0);
+}
 
-const base = `https://${host}`;
-console.log(`\nDone. ${code ? `Open this link to make the owner account (it works once):\n\n  ${base}/#setup=${code}` : `Open ${product.name}:\n\n  ${base}`}\n`);
-console.log(`A new web address can take a few minutes to get its certificate. Until then, ${code ? `the same link works at https://${script}.${subdomain}.workers.dev/#setup=${code}` : `use https://${script}.${subdomain}.workers.dev`}.`);
-console.log('Sending to addresses outside your own verified ones needs the Workers Paid plan. Check any time with `npm run setup -- --check`.\n');
+// 7. Already set up: an update. Mail in, mail out and the web address are checked and put right, as Setup health does.
+const c = await contextOf(await settingsOf(db.uuid)).catch(() => null);
+if (!c) { console.log(`\nDone. Open ${live}\n`); exit(0); }
+step(`Checking where mail for ${c.domain} goes`);
+let confirmed = '';
+try {
+  const mail = await mailState(cf, c.zone, script);
+  if (!mail.catchAllOurs && mail.elsewhere.length) {
+    console.log(`\n  Stop and read this. Setup would send ALL mail for ${c.domain} here:\n${mail.elsewhere.map(text => `   - ${text}`).join('\n')}\n`);
+    confirmed = (await ask(`Type ${c.domain} to go on, or press Enter to leave mail as it is`)).toLowerCase();
+  } else ok(mail.catchAllOurs ? 'Mail comes here' : 'Nothing to move');
+} catch (error) {
+  if (error instanceof CloudflareError && error.denied) denied(`read ${c.domain}’s DNS and Email Routing`, 'DNS Edit, Zone Settings Edit and Email Routing Rules Edit');
+  stop(`Could not read where mail for ${c.domain} goes: ${error.message}`, 'Run setup again in a minute.');
+}
+const result = await repair(cf, c, { confirmed, say: step });
+if (result.confirm) stop('Mail was left where it goes now.', `Run setup again and type ${c.domain} when you want its mail to come here.`);
+if (result.failed) stop(result.failed.problem, result.failed.fix);
+console.log(`\nDone. Open https://${c.host || `${script}.${subdomain}.workers.dev`}\n`);

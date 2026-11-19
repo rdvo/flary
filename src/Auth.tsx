@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import product from '../product.json';
+import type { Brand } from './api';
+import { BrandMark } from './Brand';
 import styles from './auth.module.css';
 
 type Need = '' | 'password' | 'setup' | 'code';
@@ -10,7 +11,7 @@ export const post = async <T = Record<string, string | boolean | undefined>>(pat
 
 /** The sign-in. It asks for each thing the server says is still missing: your own password on a first sign-in, and the
  * six-digit code where two-step sign-in applies (setting it up first if it isn't yet). */
-export function SignIn({ domain, address: start = '', onDone }: { domain: string; address?: string; onDone: () => void }) {
+export function SignIn({ brand, domain, address: start = '', onDone }: { brand: Brand; domain: string; address?: string; onDone: () => void }) {
   const [address, setAddress] = useState(start), [password, setPassword] = useState(''), [next, setNext] = useState(''), [code, setCode] = useState('');
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [need, setNeed] = useState<Need>(''), [setup, setSetup] = useState<{ secret: string; qr: string } | null>(null);
   const go = async () => {
@@ -32,7 +33,7 @@ export function SignIn({ domain, address: start = '', onDone }: { domain: string
   };
   const disabled = busy || !address || !password || (need === 'password' && next.length < 10) || ((need === 'setup' || need === 'code') && code.length !== 6);
   return <main className={styles.screen}><section className={styles.card}>
-    <header><h1 className="wordmark">{product.name}</h1></header>
+    <header><h1><BrandMark brand={brand} /></h1></header>
     <p>{need === 'password' ? 'First sign-in: choose your own password.'
       : need === 'setup' ? 'Set up two-step sign-in. Scan this with an authenticator app (1Password, Google Authenticator, Authy), then enter the six-digit code it shows.'
       : need === 'code' ? 'Enter the six-digit code from your authenticator app.' : `Sign in with your @${domain} address.`}</p>

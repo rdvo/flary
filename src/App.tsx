@@ -4,6 +4,7 @@ import { ChangePassword, SignIn } from './Auth';
 import { Setup } from './Setup';
 import { Mail } from './Mail';
 import { Org } from './Org';
+import { Welcome } from './Welcome';
 
 const BOX = 'mailbox';
 
@@ -18,11 +19,20 @@ export function App() {
   }, [session.reload]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const data = session.data;
+  // The organisation's logo becomes the tab icon.
+  const logo = data?.brand.logo ?? null;
+  useEffect(() => {
+    let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (!logo) { link?.remove(); return; }
+    if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.append(link); }
+    link.href = logo;
+  }, [logo]);
   if (!data) return session.error ? <p style={{ padding: 24, color: 'var(--red)' }}>{session.error}</p> : null;
-  if (data.setup) return <Setup domain={data.domain} onDone={address => { setJustMade(address); void session.reload(); }} />;
-  if (!data.account) return <SignIn domain={data.domain} address={justMade} onDone={() => { void session.reload(); }} />;
+  if (data.setup) return <Setup brand={data.brand} onDone={address => { setJustMade(address); void session.reload(); }} />;
+  if (!data.account) return <SignIn brand={data.brand} domain={data.domain} address={justMade} onDone={() => { void session.reload(); }} />;
 
-  if (path === '/org' && data.account.role !== 'member') return <Org session={data} />;
+  if (data.account.role === 'owner' && data.welcomed === false) return <Welcome session={data} onDone={() => { void session.reload(); }} />;
+  if (path === '/org' && data.account.role !== 'member') return <Org session={data} onBrand={() => { void session.reload(); }} />;
   if (path === '/password') return <ChangePassword address={data.account.address} onBack={() => navigate('/')} />;
   const box = data.mailboxes.find(item => item.id === chosen) ?? data.mailboxes[0];
   if (!box) return <p style={{ padding: 24 }}>You have no mailbox. Ask the owner.</p>;

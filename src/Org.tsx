@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowLeftIcon, SignOutIcon, XIcon } from '@phosphor-icons/react';
-import product from '../product.json';
-import { api, navigate, type Role, type Session } from './api';
+import { api, navigate, type Brand, type Role, type Session } from './api';
+import { BrandMark, readLogoFile } from './Brand';
 import { Health } from './Health';
 import styles from './org.module.css';
 
@@ -15,12 +15,12 @@ const initial = (name: string) => (name.trim()[0] || '?').toUpperCase();
 const local = (value: string) => value.trim().toLowerCase().split('@')[0];
 
 /** The org panel: who can sign in, and which addresses deliver where. The owner changes it; admins can look. */
-export function Org({ session }: { session: Session }) {
+export function Org({ session, onBrand }: { session: Session; onBrand: () => void }) {
   const owner = session.account!.role === 'owner', domain = session.domain;
   const [org, setOrg] = useState<Snapshot | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [issued, setIssued] = useState<Snapshot['issued'] | null>(null), [copied, setCopied] = useState(false), [editing, setEditing] = useState<{ id: string; name: string; role: Role } | null>(null);
   const [person, setPerson] = useState({ address: '', name: '', role: 'member' as Role }), [shared, setShared] = useState({ address: '', name: '' }), [alias, setAlias] = useState<Record<string, string>>({});
-  useEffect(() => { document.title = `People and mailboxes · ${product.name}`; }, []);
+  useEffect(() => { document.title = `People and mailboxes · ${session.brand.name}`; }, [session.brand.name]);
   const run = async (work: Promise<Snapshot>) => {
     setBusy(true); setError('');
     try { const result = await work; setOrg(result); if (result.issued) { setIssued(result.issued); setCopied(false); } return true; }
@@ -30,14 +30,14 @@ export function Org({ session }: { session: Session }) {
   useEffect(() => { void run(api<Snapshot>('/api/org')); }, []);
   const call = (path: string, method: string, body?: unknown) => run(api<Snapshot>(`/api/org/${path}`, { method, body }));
   const nameOf = (id: string) => org?.people.find(item => item.id === id)?.name ?? 'Someone removed';
-  const note = issued ? [`${product.name} sign-in`, `Go to: ${location.origin}`, `Address: ${issued.address}`, `Password: ${issued.password}`,
+  const note = issued ? [`${session.brand.name} mail`, `Go to: ${session.host ? `https://${session.host}` : location.origin}`, `Address: ${issued.address}`, `Password: ${issued.password}`,
     'You will choose your own password the first time you sign in.', ...(issued.role !== 'member' ? ['You will also set up two-step sign-in with an authenticator app.'] : [])].join('\n') : '';
   const signOut = () => { void api('/api/auth/signout', { method: 'POST' }).finally(() => location.assign('/')); };
 
   return <div className={styles.page}>
     <header className={styles.top}>
       <button type="button" className={styles.back} onClick={() => navigate('/')}><ArrowLeftIcon size={18} />Mail</button>
-      <span className="wordmark">{product.name}</span>
+      <BrandMark brand={session.brand} />
       <span className={styles.gap} />
       <span className={styles.domain}>{domain}</span>
       <button type="button" className={styles.icon} aria-label="Sign out" title="Sign out" onClick={signOut}><SignOutIcon size={18} /></button>
@@ -123,7 +123,38 @@ export function Org({ session }: { session: Session }) {
         </div>
       </section>
 
-      {owner && <Health domain={domain} />}
+      {owner && <Organisation brand={session.brand} onSaved={onBrand} />}
+      {owner && <Health session={session} />}
     </main>
   </div>;
+}
+
+/** The organisation's name and logo, shown on the sign-in page and at the top of every page. Owner only. */
+function Organisation({ brand, onSaved }: { brand: Brand; onSaved: () => void }) {
+  const [name, setName] = useState(brand.name), [busy, setBusy] = useState(false), [error, setError] = useState(''), [saved, setSaved] = useState(false);
+  const save = async (body: { name?: string; logo?: string | null }) => {
+    setBusy(true); setError(''); setSaved(false);
+    try { await api('/api/brand', { method: 'PUT', body }); setSaved(true); onSaved(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'That didn’t work.'); } finally { setBusy(false); }
+  };
+  const pick = async (file: File | undefined) => {
+    if (!file) return;
+    try { await save({ logo: await readLogoFile(file) }); } catch (cause) { setError(cause instanceof Error ? cause.message : 'That picture could not be used.'); }
+  };
+  return <section className={styles.section}>
+    <div className={styles.head}><h2>Organisation</h2><p>The name and logo on the sign-in page and at the top of every page.</p></div>
+    <div className={styles.body}>
+      {error && <p role="alert" className={styles.error}>{error}</p>}
+      <form className={styles.form} onSubmit={event => { event.preventDefault(); void save({ name }); }}>
+        <label>Name<input required maxLength={80} value={name} onChange={event => { setName(event.target.value); setSaved(false); }} /></label>
+        <div className={styles.logoRow}>
+          <span className={styles.logoBox}>{brand.logo ? <img src={brand.logo} alt="" /> : <i>Logo</i>}</span>
+          <label className={styles.file}>{brand.logo ? 'Change logo' : 'Add a logo'}<input type="file" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={event => { void pick(event.target.files?.[0]); event.target.value = ''; }} /></label>
+          {brand.logo && <button type="button" className={styles.secondary} disabled={busy} onClick={() => { void save({ logo: null }); }}>Remove</button>}
+        </div>
+        <p className={styles.hint}>PNG, JPEG or WebP, up to 512 KB.</p>
+        <div className={styles.buttons}><button type="submit" className={styles.primary} disabled={busy || !name.trim() || name.trim() === brand.name}>{busy ? 'Saving…' : saved ? 'Saved' : 'Save name'}</button></div>
+      </form>
+    </div>
+  </section>;
 }

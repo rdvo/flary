@@ -27,5 +27,16 @@
 .card form>button.plain{margin-top:-4px;padding:0 4px;color:var(--muted);background:transparent;font-weight:500}
 .error{margin:0;color:var(--red);font-size:13px}
 .note{margin:0;color:var(--muted);font-size:12px}
+.count{margin:-12px 0 12px!important;font-size:12px!important}
+/* The logo picker: a square preview, a file button, and a line on what it takes. */
+.logo{display:grid;grid-template-columns:auto auto auto 1fr;align-items:center;gap:8px 12px}
+.logoBox{display:grid;place-items:center;width:56px;height:56px;border:1px dashed var(--line);border-radius:10px;overflow:hidden}
+.logoBox img{max-width:100%;max-height:100%;object-fit:contain}.logoBox i{color:var(--muted);font-size:11px;font-style:normal}
+.card label.file{display:inline-flex;align-items:center;height:32px;padding:0 12px;border:1px solid color-mix(in srgb,var(--text) 16%,transparent);border-radius:16px;color:var(--text);cursor:pointer}
+.file input{display:none}
+.logo small{grid-column:1/-1;color:var(--muted);font-size:12px}
+.logo button.plain{height:32px;padding:0 4px;border:0;color:var(--muted);background:transparent;cursor:pointer}
+.secret{color:var(--text);font:12px var(--mono);user-select:all}
+.link{padding:0;border:0;color:var(--text);background:transparent;font-size:12px;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
 .qr{display:grid;justify-items:start;gap:8px}.qr img{border-radius:8px;background:#fff}.qr small{color:var(--muted);font-size:12px}
 .qr code{color:var(--text);font:12px var(--mono);word-break:break-all;user-select:all}

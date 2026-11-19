@@ -14,3 +14,6 @@ html,body{margin:0;background:var(--base);color:var(--text);font:14px/20px var(-
 button,input,select,textarea{font:inherit}
 :focus-visible{outline:2px solid var(--green);outline-offset:2px}
 .wordmark{font-weight:750;letter-spacing:-.02em}
+.brandmark{display:inline-flex;align-items:center;gap:10px;min-width:0}
+.brandmark img{flex:none;max-width:120px;height:28px;object-fit:contain;border-radius:6px}
+.brandmark span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

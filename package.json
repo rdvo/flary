@@ -1,5 +1,5 @@
 {
-  "name": "orgmail",
+  "name": "flary",
   "private": true,
   "version": "0.1.0",
   "description": "Self-hosted org panel and webmail for your own domain, on your own Cloudflare account.",

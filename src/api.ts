@@ -3,7 +3,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 export type Role = 'owner' | 'admin' | 'member';
 export type Account = { id: string; name: string; role: Role; address: string; mailboxId: string };
 export type MailboxInfo = { id: string; address: string; name: string; kind: 'personal' | 'shared'; unread: number };
-export type Session = { domain: string; setup: boolean; account: Account | null; mailboxes: MailboxInfo[] };
+export type Brand = { name: string; logo: string | null };
+export type Session = { domain: string; host: string; brand: Brand; setup: boolean; account: Account | null; mailboxes: MailboxInfo[]; welcomed?: boolean; cloudflare?: boolean };
 
 /** Fired when the server says the session is gone, so the app shows the sign-in again. */
 export const SIGNED_OUT = 'session-ended';
