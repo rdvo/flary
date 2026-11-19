@@ -1,0 +1,35 @@
+{
+  "name": "orgmail",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Self-hosted org panel and webmail for your own domain, on your own Cloudflare account.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "recover-owner": "node scripts/recover-owner.mjs",
+    "build": "vite build",
+    "deploy": "wrangler deploy --keep-vars",
+    "check": "tsc -p tsconfig.json && tsc -p worker/tsconfig.json"
+  },
+  "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
+    "postal-mime": "^4.2.1",
+    "qrcode": "^1.5.4",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261118.1",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.8",
+    "wrangler": "^4.164.0"
+  }
+}

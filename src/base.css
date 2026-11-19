@@ -1,0 +1,16 @@
+:root{
+  color-scheme:light dark;
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI Variable Text","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  --base:#fafafa;--surface:#fff;--text:#202020;--muted:#626262;--line:#e3e3e3;--line-soft:#eeeeee;
+  --green:#218358;--red:#ba3838;--warning:#98651d;--on-strong:#fff;
+}
+@media(prefers-color-scheme:dark){:root{
+  --base:#171717;--surface:#202020;--text:#ededed;--muted:#b1b1b1;--line:#383838;--line-soft:#2d2d2d;
+  --green:#83c49b;--red:#ef9696;--warning:#e0b366;--on-strong:#171717;
+}}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;background:var(--base);color:var(--text);font:14px/20px var(--font);-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit}
+:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.wordmark{font-weight:750;letter-spacing:-.02em}

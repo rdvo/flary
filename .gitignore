@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.wrangler/
+# Written by `npm run setup`: your domain and web address (never the token).
+setup.json
+.dev.vars
+.env
+*.log
+.DS_Store

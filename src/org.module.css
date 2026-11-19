@@ -1,0 +1,76 @@
+.page{min-height:100dvh;background:var(--base)}
+.top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:16px;height:56px;padding:0 16px;border-bottom:1px solid var(--line);background:var(--surface)}
+.top :global(.wordmark){font-size:18px}
+.back{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px 0 8px;border:0;border-radius:16px;color:var(--text);background:transparent;cursor:pointer}
+.back:hover,.icon:hover{background:color-mix(in srgb,var(--text) 8%,transparent)}
+.gap{flex:1}
+.domain{color:var(--muted);font-size:13px}
+.icon{display:grid;place-items:center;width:36px;height:36px;border:0;border-radius:50%;color:var(--muted);background:transparent;cursor:pointer}
+
+.column{width:min(960px,100%);margin:0 auto;padding:32px 24px 96px}
+.column>h1{margin:0 0 8px;font-size:24px;font-weight:650;letter-spacing:-.01em}
+.lead{margin:0;color:var(--muted)}
+.error{display:flex;align-items:center;gap:10px;margin:16px 0 0;padding:8px 8px 8px 14px;border-radius:8px;color:var(--red);background:color-mix(in srgb,var(--red) 9%,var(--surface));font-size:13px}
+.error button{display:grid;place-items:center;width:24px;height:24px;margin-left:auto;border:0;border-radius:50%;color:inherit;background:transparent;cursor:pointer}
+
+/* Each section: its title and a sentence on the left, its contents on the right, divided by one hairline. */
+.section{display:grid;grid-template-columns:240px minmax(0,1fr);gap:32px;padding:32px 0;border-bottom:1px solid var(--line)}
+.head h2{margin:0 0 8px;font-size:15px;font-weight:650}.head p{margin:0;color:var(--muted);font-size:13px;line-height:19px}
+.body{display:grid;gap:24px;min-width:0;align-content:start}
+
+.list{margin:0;padding:0;list-style:none;border-top:1px solid var(--line-soft)}
+.list>li{display:flex;align-items:center;gap:12px;min-width:0;padding:12px 0;border-bottom:1px solid var(--line-soft)}
+.list>li.box{display:grid;gap:10px}
+.boxTop{display:flex;align-items:center;gap:12px;min-width:0}
+.empty{color:var(--muted)}
+.face{display:grid;flex:none;place-items:center;width:36px;height:36px;border-radius:50%;color:#fff;font-weight:600}
+.who{display:grid;flex:1;gap:1px;min-width:0}
+.who strong{display:flex;align-items:center;gap:8px;font-weight:600}.who span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.who small{color:var(--muted);font-size:12px}
+.badge{padding:0 6px;border-radius:4px;color:var(--muted);background:color-mix(in srgb,var(--text) 7%,transparent);font-size:11px;font-weight:500;line-height:18px}
+.badge[data-role=owner]{color:var(--green);background:color-mix(in srgb,var(--green) 13%,transparent)}
+.actions{display:flex;flex:none;gap:6px}
+.actions button,.inlineForm button,.issued button,.aliasForm button{height:32px;padding:0 12px;border:1px solid color-mix(in srgb,var(--text) 16%,transparent);border-radius:16px;color:var(--text);background:transparent;font-size:13px;cursor:pointer}
+.actions button:hover,.inlineForm button:hover,.aliasForm button:hover{background:color-mix(in srgb,var(--text) 6%,transparent)}
+button:disabled{opacity:.45;cursor:default}
+.quiet{border-color:transparent!important}
+
+.chips{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding-left:48px}
+.label{width:64px;color:var(--muted);font-size:12px}
+.chip{display:inline-flex;align-items:center;gap:4px;height:26px;padding:0 6px 0 10px;border:1px solid var(--line);border-radius:13px;font-size:12px}
+.chip button{display:grid;place-items:center;width:18px;height:18px;padding:0;border:0;border-radius:50%;color:var(--muted);background:transparent;cursor:pointer}
+.chip button:hover{color:var(--text);background:color-mix(in srgb,var(--text) 8%,transparent)}
+.none{color:var(--muted);font-size:12px}
+.add{height:26px;padding:0 8px;border:1px dashed var(--line);border-radius:13px;color:var(--muted);background:transparent;font-size:12px}
+.aliasForm{display:inline-flex;align-items:center;gap:4px;height:26px}
+.aliasForm input{width:96px;height:26px;padding:0 8px;border:1px dashed var(--line);border-radius:13px;outline:0;color:var(--text);background:transparent;font-size:12px}
+.aliasForm input:focus{border-style:solid;border-color:var(--green)}
+.aliasForm i{color:var(--muted);font-size:12px;font-style:normal}.aliasForm button{height:26px;padding:0 10px;font-size:12px}
+
+.inlineForm{display:flex;flex:1;flex-wrap:wrap;align-items:center;gap:8px}
+.inlineForm input,.inlineForm select{height:34px;padding:0 10px;border:1px solid color-mix(in srgb,var(--text) 16%,transparent);border-radius:8px;color:var(--text);background:transparent}
+.inlineForm input{flex:1;min-width:160px}
+
+.form{display:grid;gap:12px;max-width:480px}
+.form h3{margin:0;font-size:14px;font-weight:600}
+.form label{display:grid;gap:6px;color:var(--muted);font-size:13px}
+.form input,.form select{width:100%;height:40px;padding:0 12px;border:1px solid color-mix(in srgb,var(--text) 16%,transparent);border-radius:8px;outline:0;color:var(--text);background:transparent;font-size:14px}
+.form input:focus,.form select:focus{border-color:var(--green)}
+.at{display:flex;align-items:center;gap:8px}.at i{flex:none;color:var(--text);font-size:14px;font-style:normal}
+.form>button{justify-self:start;height:40px;padding:0 20px;border:0;border-radius:20px;color:var(--base);background:var(--text);font-weight:600;cursor:pointer}
+.hint{margin:0;color:var(--muted);font-size:12px}
+.hint a{color:var(--text);text-underline-offset:2px}
+.buttons{display:flex;flex-wrap:wrap;gap:8px}
+.primary,.secondary{height:40px;padding:0 20px;border:0;border-radius:20px;color:var(--base);background:var(--text);font-weight:600;cursor:pointer}
+.secondary{border:1px solid color-mix(in srgb,var(--text) 16%,transparent);color:var(--text);background:transparent}
+
+.issued{display:grid;gap:8px;padding:12px 14px;border-radius:8px;background:color-mix(in srgb,var(--green) 12%,var(--surface));font-size:13px}
+.issued pre{margin:0;font:13px/20px var(--mono);white-space:pre-wrap;user-select:all}
+.issued div{display:flex;gap:6px}
+
+@media(max-width:760px){
+  .section{grid-template-columns:minmax(0,1fr);gap:16px}
+  .column{padding:24px 16px 72px}
+  .domain{display:none}
+  .list>li:not(.box){flex-wrap:wrap}
+  .chips{padding-left:0}
+}
