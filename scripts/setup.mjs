@@ -9,7 +9,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { argv, env, exit, platform } from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { CloudflareError, TOKEN_NEEDS, client, findZone, inspect, listZones, mailState, repair, tokenLink } from '../shared/cloudflare.mjs';
+import { CloudflareError, TOKEN_NEEDS, changes, client, findZone, inspect, listZones, repair, tokenLink } from '../shared/cloudflare.mjs';
 import { ask, askHidden, pickAccount, stop } from './cli.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -177,16 +177,16 @@ if (!c) { console.log(`\nDone. Open ${live}\n`); exit(0); }
 step(`Checking where mail for ${c.domain} goes`);
 let confirmed = '';
 try {
-  const mail = await mailState(cf, c.zone, script);
-  if (!mail.catchAllOurs && mail.elsewhere.length) {
-    console.log(`\n  Stop and read this. Setup would send ALL mail for ${c.domain} here:\n${mail.elsewhere.map(text => `   - ${text}`).join('\n')}\n`);
-    confirmed = (await ask(`Type ${c.domain} to go on, or press Enter to leave mail as it is`)).toLowerCase();
-  } else ok(mail.catchAllOurs ? 'Mail comes here' : 'Nothing to move');
+  const plan = await changes(cf, c);
+  if (plan.confirm.length) {
+    console.log(`\n  Stop and read this. Setup would change these for ${c.domain}:\n${plan.confirm.map(text => `   - ${text}`).join('\n')}\n`);
+    confirmed = (await ask(`Type ${c.domain} to go on, or press Enter to leave things as they are`)).toLowerCase();
+  } else ok(plan.state.catchAllOurs ? 'Mail comes here' : 'Nothing to move');
 } catch (error) {
   if (error instanceof CloudflareError && error.denied) denied(`read ${c.domain}’s DNS and Email Routing`, 'DNS Edit, Zone Settings Edit and Email Routing Rules Edit');
   stop(`Could not read where mail for ${c.domain} goes: ${error.message}`, 'Run setup again in a minute.');
 }
 const result = await repair(cf, c, { confirmed, say: step });
-if (result.confirm) stop('Mail was left where it goes now.', `Run setup again and type ${c.domain} when you want its mail to come here.`);
+if (result.confirm) stop('Nothing was changed.', `Run setup again and type ${c.domain} when you want its mail to come here.`);
 if (result.failed) stop(result.failed.problem, result.failed.fix);
 console.log(`\nDone. Open https://${c.host || `${script}.${subdomain}.workers.dev`}\n`);

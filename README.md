@@ -67,8 +67,11 @@ To replace it, paste a new one in Setup health, or run `npm run setup` again wit
 ### If the domain already gets mail
 
 If mail for the domain goes somewhere today (Google Workspace, Microsoft 365, forwarding rules), the wizard stops before
-it changes anything, lists where the mail goes now, and goes on only if you type the domain. After that, all of its mail
-comes here. Address rules you already had in Email Routing keep working and win over the catch-all.
+it changes anything, lists what it will change, and goes on only if you type the domain. Then it does those changes for
+you: it deletes the old MX records (Cloudflare refuses to receive mail while they exist), adds Cloudflare to your existing
+SPF record without dropping anything it already allows, and replaces any DNS record already on the web address you chose.
+After that, all of the domain's mail comes here. Address rules you already had in Email Routing keep working and win over
+the catch-all.
 
 ### When something goes wrong
 
@@ -87,7 +90,6 @@ again, or, in the app, open **Setup health** (People and mailboxes, owner only) 
 | The deploy did not finish. | Read the lines Wrangler printed under it, then run setup again; it carries on from there. |
 | The app did not build. | Run `npm install` again, then `npm run setup`. |
 | https://*address* already opens another Worker | Choose another web address, or remove it from that Worker first. |
-| An error about an existing DNS record for the web address | Delete that record in DNS > Records, or choose another web address. |
 | Could not reach the Cloudflare API. | Check the internet connection and try again. |
 
 `npm run setup -- --check` only reports where things stand and changes nothing.

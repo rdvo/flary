@@ -1,4 +1,4 @@
-import { client, domainService, findZone, inspect, listZones, mailState, repair, runsVersion, CloudflareError, type Cf, type Context, type Zone } from '../shared/cloudflare.mjs';
+import { changes, client, domainService, findZone, inspect, listZones, repair, runsVersion, CloudflareError, type Cf, type Context, type Zone } from '../shared/cloudflare.mjs';
 import { hasAccounts, passwordHash, type Account } from './auth';
 import { badLogo, readLogo, saveLogo, settings } from './brand';
 import { DOMAIN_RE, PRODUCT, changed, cleanName, json, localPart, readJson, sha, type Bindings, type Env } from './util';
@@ -152,9 +152,10 @@ export async function firstRun(request: Request, env: Env) {
   if (!host) return json({ error: `The web address must be ${domain} or a name under it, like mail.${domain}.` }, 400);
   const c: Context = { product: PRODUCT, domain, host, script: proof.script, accountId: proof.accountId, zone };
   try {
-    // Never redirect a domain's mail without the owner typing the domain: ask before the account exists, so they can stop.
-    const state = await mailState(proof.cf, zone, proof.script);
-    if (!state.catchAllOurs && state.elsewhere.length && String(input.confirmed || '').trim().toLowerCase() !== domain) return json({ confirm: state.elsewhere }, 409);
+    // Never take a domain's mail or web address from somewhere else without the owner typing the domain: ask before the
+    // account exists, so they can stop.
+    const plan = await changes(proof.cf, c);
+    if (plan.confirm.length && String(input.confirmed || '').trim().toLowerCase() !== domain) return json({ confirm: plan.confirm }, 409);
   } catch (error) { return cloudflareProblem(error); }
 
   const address = await createOwner(env, owner, { domain, host, org });

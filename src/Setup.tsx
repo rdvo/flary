@@ -26,9 +26,9 @@ const linkCode = (() => {
 /** "Type the domain to go on": shown whenever setting up would send mail that goes somewhere today to this app instead. */
 export function Redirect({ domain, places, value, onChange }: { domain: string; places: string[]; value: string; onChange: (value: string) => void }) {
   return <div className={styles.warn} role="alert">
-    <strong>{domain} already gets mail somewhere else</strong>
+    <strong>This takes over things {domain} uses today</strong>
     <ul>{places.map(place => <li key={place}>{place}</li>)}</ul>
-    <p>Going on sends all mail for {domain} here instead, for everyone at {domain}. Type <b>{domain}</b> to go on, or stop here.</p>
+    <p>Going on makes these changes, and all mail for {domain} comes here instead, for everyone at {domain}. Type <b>{domain}</b> to go on, or stop here.</p>
     <input autoComplete="off" spellCheck={false} value={value} onChange={event => onChange(event.target.value.trim().toLowerCase())} placeholder={domain} aria-label={`Type ${domain} to go on`} />
   </div>;
 }
