@@ -27,10 +27,12 @@ Paste this into Claude Code, Cursor, Codex or any agent that can run commands:
 Install Flary for me (https://github.com/rdvo/flary): clone it into a folder named flary, run `npm install`,
 then run `npm run setup` and keep it running until it ends. When it opens a Cloudflare page in my browser, tell
 me to choose Allow. When it prints a setup link, give it to me and wait while I finish the wizard. If it lists
-DNS records to change, show me the list and the link, and wait. When it ends, tell me what it printed.
+DNS records to change: if you have Cloudflare's MCP server (mcp.cloudflare.com) connected, make exactly those
+changes with it; otherwise show me the list and the link, and wait. When it ends, tell me what it printed.
 ```
 
-You click **Allow** on Cloudflare's page, fill in the wizard, and the agent does the rest.
+You click **Allow** on Cloudflare's page, fill in the wizard, and the agent does the rest. With Cloudflare's MCP server
+connected to your agent, it can also make any DNS changes setup asks for, so you never open the DNS page.
 
 ### Or run it yourself
 
