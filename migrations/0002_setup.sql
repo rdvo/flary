@@ -1,5 +1,6 @@
 -- What this install keeps about itself: `domain`, `host` (its web address), `org_name`, `logo_at` (when the logo in R2 was
--- last changed) and `welcomed` (the owner has seen the invite step), all set from the setup wizard and the org panel.
+-- last changed), `welcomed` (the owner has seen the invite step), `domains` (the installer's list for the wizard),
+-- `confirmed` (the domain typed to take over its mail) and `setup_report` (the installer's last run).
 CREATE TABLE IF NOT EXISTS setting (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL

@@ -24,16 +24,15 @@ addresses.
 Paste this into Claude Code, Cursor, Codex or any agent that can run commands:
 
 ```text
-Install Flary for me (https://github.com/rdvo/flary): clone it into a folder named flary, then run
-`npm install` and `npm run setup` in it. When setup prints a Cloudflare link and asks for a token, show me
-the link, wait for me to make the token, and have me paste it into the setup prompt myself (don't ask me to
-paste it to you). When setup finishes, give me the link it prints. If setup stops, read its "To fix:" line
-and tell me what to do.
+Install Flary for me (https://github.com/rdvo/flary): clone it into a folder named flary, run `npm install`,
+then run `npm run setup` and keep it running until it ends. When it opens a Cloudflare page in my browser, tell
+me to choose Allow. When it prints a setup link, give it to me and wait while I finish the wizard. If it lists
+DNS records to change, show me the list and the link, and wait. When it ends, tell me what it printed.
 ```
 
-You make the token and open the last link; the agent does the rest.
+You click **Allow** on Cloudflare's page, fill in the wizard, and the agent does the rest.
 
-### 1. Run the installer
+### Or run it yourself
 
 ```sh
 git clone https://github.com/rdvo/flary.git
@@ -42,65 +41,55 @@ npm install
 npm run setup
 ```
 
-It asks for one thing, a Cloudflare API token, and prints a link that makes one with the permissions already picked. Then
-it makes the database and the file bucket, puts the app on your account and prints one link.
+1. **Sign in to Cloudflare.** Setup uses wrangler, Cloudflare's own tool, which comes with the project. Your browser opens
+   Cloudflare's own page; choose **Allow**. There is no token to make or paste, and the sign-in stays on your computer.
+2. **It builds and deploys** the app, makes its database and file bucket, and prints one link.
+3. **Open the link and follow the wizard:** your organisation's name and logo, your domain, the web address
+   (`mail.<your domain>` unless you change it), and your account.
+4. **Setup carries on** on your computer once the wizard is done: it turns on mail for the domain, sends all of it to the
+   app, sets the domain up to send, and puts the app on its web address.
+5. **Sign in,** set up two-step sign-in with an authenticator app, and invite your team (or skip that for later).
 
-### 2. Open the link and follow the wizard
+### If the domain already gets mail, or the web address is taken
 
-1. **Your organisation**: its name and, if you like, a logo.
-2. **Your domain**: picked from the domains in your Cloudflare account, and the web address for the app
-   (`mail.<your domain>` unless you change it).
-3. **Your account**: your name, your address and a password.
+If mail for the domain goes somewhere today (Google Workspace, Microsoft 365, another server, forwarding rules), the
+wizard lists what would change and goes on only if you type the domain. Address rules you already had in Email Routing
+keep working and win over the catch-all.
 
-Press **Finish setup** and the app sets up the rest through the Cloudflare API: it turns on mail for the domain, sends all of
-it to the app, sets the domain up to send, and puts the app on its web address. Then you sign in, set up two-step sign-in
-with an authenticator app, and invite your team (or skip that for later).
+Wrangler's sign-in can't edit DNS records, so when old records are in the way (another server's MX records, an SPF record
+that needs Cloudflare added, a record already on the web address), setup lists exactly what to change, with a link to the
+domain's DNS page, and carries on by itself once you have made the changes. Or paste a Cloudflare API token with DNS Edit
+when it asks, and it makes them for you; the token is used once and not saved.
 
 ### Or: the Deploy to Cloudflare button
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)][deploy]
 
-Click it, sign in to Cloudflare, and press Deploy. Open the address it gives you; the wizard starts by asking for a
-Cloudflare API token (with a link that makes one), then goes on as above.
+Click it, sign in to Cloudflare, and press Deploy. With no installer on your computer, the wizard starts by asking for a
+Cloudflare API token, made with a link that picks its permissions, and uses it once to set up your mail. It is not kept.
 
 <!-- The repository the button deploys. Change this one line to your copy; it must be a PUBLIC GitHub or GitLab repo. -->
 [deploy]: https://deploy.workers.cloudflare.com/?url=https://github.com/rdvo/flary
 
-### The token
-
-The link opens Cloudflare's token form with the permissions picked. Check the form lists all of these, and add any that
-are missing (two of them may not be picked for you):
+A token for the button, or for checking from Setup health, needs:
 
 - Account: Workers Scripts Edit, D1 Edit, Workers R2 Storage Edit, Account Settings Read, Email Sending Edit
 - Zone: Zone Read, DNS Edit, Zone Settings Edit, Workers Routes Edit, Email Routing Rules Edit
 
-The app keeps the token as an encrypted secret on its Worker (`CF_API_TOKEN`), so nothing asks for it again: the owner's
-**Setup health** panel uses it to check and fix the mail setup. It is never sent to a browser or written to a file here.
-To replace it, paste a new one in Setup health, or run `npm run setup` again with the new one.
-
-### If the domain already gets mail
-
-If mail for the domain goes somewhere today (Google Workspace, Microsoft 365, forwarding rules), the wizard stops before
-it changes anything, lists what it will change, and goes on only if you type the domain. Then it does those changes for
-you: it deletes the old MX records (Cloudflare refuses to receive mail while they exist), adds Cloudflare to your existing
-SPF record without dropping anything it already allows, and replaces any DNS record already on the web address you chose.
-After that, all of the domain's mail comes here. Address rules you already had in Email Routing keep working and win over
-the catch-all.
-
 ### When something goes wrong
 
 Every stop says what went wrong and one thing to do, starting **To fix:**. Fix that one thing and run `npm run setup`
-again, or, in the app, open **Setup health** (People and mailboxes, owner only) and press **Fix**.
+again. In the app, **Setup health** (People and mailboxes, owner only) shows what setup last did.
 
 | It says | Do this |
 |---|---|
 | The project’s packages are not installed. | Run `npm install`, then `npm run setup`. |
-| Cloudflare did not accept that token. | Copy the whole token again (it is shown once), or make a new one with the link. |
-| The token cannot see an active domain | Give the token Zone Read on "All zones", and check the domain shows as Active in Cloudflare. |
+| Cloudflare did not accept the sign-in. | Run `npx wrangler login`, choose Allow, and run setup again. |
+| There is no active domain in … | Add the domain to Cloudflare and wait until it shows as Active. |
 | This Cloudflare account has never opened Workers | Open the link it prints once and pick a name. |
 | R2 is not turned on for this Cloudflare account. | Open the link it prints and turn on R2. |
-| The Cloudflare token is not allowed to … | Add the permission it names to the token, or make a new one with the link. |
-| The Cloudflare token is not allowed to do this (…) | Add the permission it names, or do the step by hand: the line after **To fix** is the exact dashboard path. Email Sending is the likeliest, because Cloudflare's docs don't say which permission it needs. |
+| Cloudflare did not allow setup to … | Run `npx wrangler login`, choose Allow, and run setup again. |
+| These DNS records need changing | Make the listed changes on the DNS page it links to; setup carries on by itself. |
 | The deploy did not finish. | Read the lines Wrangler printed under it, then run setup again; it carries on from there. |
 | The app did not build. | Run `npm install` again, then `npm run setup`. |
 | https://*address* already opens another Worker | Choose another web address, or remove it from that Worker first. |
@@ -110,8 +99,8 @@ again, or, in the app, open **Setup health** (People and mailboxes, owner only) 
 
 ### Updating
 
-Pull the new code, then `npm install` and `npm run setup` again. Once the wizard is done, setup also checks the mail setup
-and puts right anything that is off. New tables are made by the app itself on its next request.
+Pull the new code, then `npm install` and `npm run setup` again (or ask your agent to). Once the wizard is done, setup
+also checks the mail setup and puts right anything that is off. New tables are made by the app itself on its next request.
 
 ## Using it
 
@@ -140,8 +129,7 @@ If the owner loses their password or their authenticator app, run this from this
 npm run recover-owner
 ```
 
-It asks for a Cloudflare API token for the account the app runs on (the setup token works) and asks you to type the
-owner's address. Then it gives the owner a one-time password, removes their two-step sign-in and signs them out
+It signs in to Cloudflare the way setup does and asks you to type the owner's address. Then it gives the owner a one-time password, removes their two-step sign-in and signs them out
 everywhere. At the next sign-in the owner chooses a new password and sets up two-step again. It changes only the owner
 account. Anyone who can run it already controls the Cloudflare account.
 
@@ -165,6 +153,9 @@ account. Anyone who can run it already controls the Cloudflare account.
 - Received HTML is shown in a sandboxed frame that runs no scripts and loads only pictures (https and inline), inline
   styles and fonts. Mail in Spam, or that failed the sender check, loads no outside pictures. Attachments are served with `nosniff` and a
   `sandbox` content security policy, and only plain images and PDFs open in the browser; everything else downloads.
+- **No Cloudflare token is kept anywhere.** `npm run setup` signs in with wrangler, whose login stays on your computer,
+  and does every Cloudflare step from there. The app itself holds no Cloudflare credentials. A token pasted in the wizard
+  (Deploy button) or in Setup health is used for that one request and not stored or logged.
 - **Who can claim a fresh install.** Until the owner account exists, anyone who finds the address sees the setup
   wizard, so it accepts only proof that the visitor controls the Cloudflare account the app runs in:
   - a **setup code**: a random secret (`SETUP_TOKEN`) that `npm run setup` stores on the Worker and puts in the link it
@@ -176,13 +167,8 @@ account. Anyone who can run it already controls the Cloudflare account.
     is never sent to the browser and can't be given to an upload in another account. A stranger's token only reaches
     the stranger's own account, where no Worker runs this version, so it fails whatever domain they name.
 
-  A pasted token that passes is kept, like the installer's. Attempts are rate-limited (10 per visitor per 15 minutes, 60
-  in all per hour), and once the owner exists the wizard's endpoints answer "not found" for good. The reasoning is also
-  in `worker/setup.ts`.
-- **The kept Cloudflare token** is a Worker secret. It is never sent to a browser or logged, and the app does only fixed
-  things with it (the mail, sending and web-address steps in `shared/cloudflare.mjs`), for the owner. Make it with the
-  link so it has only the permissions listed above. Anyone who can sign in as the owner can run those steps, which is one
-  more reason two-step sign-in is required.
+  Attempts are rate-limited (10 per visitor per 15 minutes, 60 in all per hour), and once the owner exists the wizard's
+  endpoints answer "not found" for good. The reasoning is also in `worker/setup.ts`.
 - The organisation's logo must be a PNG, JPEG or WebP under 512 KB, and is served with `nosniff` and a `sandbox` policy.
 - No secrets live in this repository. `setup.json` keeps only your Cloudflare account id, and is ignored by git.
 

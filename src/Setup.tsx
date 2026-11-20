@@ -7,8 +7,8 @@ import { readLogoFile } from './Brand';
 import styles from './auth.module.css';
 
 export type StepKey = 'site' | 'routing' | 'catchAll' | 'sending';
-export type Failed = { key: StepKey; problem: string; fix: string };
-type Created = { created?: boolean; address?: string; url?: string; kept?: boolean; done?: StepKey[]; failed?: Failed; confirm?: string[] };
+export type Failed = { key: StepKey; problem: string; fix: string; records?: string[] };
+type Created = { created?: boolean; address?: string; url?: string; pending?: boolean; done?: StepKey[]; failed?: Failed; confirm?: string[] };
 
 export const stepLabel = (key: StepKey, domain: string, host: string) => ({
   site: `Your site is on https://${host}`, routing: `Mail for ${domain} is turned on`,
@@ -37,8 +37,8 @@ type Step = 'proof' | 'business' | 'domain' | 'you';
 const NUMBERED: Step[] = ['business', 'domain', 'you'];
 
 /** The setup wizard, shown only while no account exists: your organisation, your domain, then you. The installer's link
- * proves this is your copy; without it (a Deploy-button install) the first step asks for a Cloudflare API token instead.
- * The last step creates the owner and sets up mail in, mail out and the web address through the Cloudflare API. */
+ * proves this is your copy, and the installer, still running, sets up mail once the wizard is done. Without the link (a
+ * Deploy-button install) the first step asks for a Cloudflare API token, and the last step sets up mail here with it. */
 export function Setup({ brand, onDone }: { brand: Brand; onDone: (address: string) => void }) {
   const [step, setStep] = useState<Step>('proof');
   const [code, setCode] = useState(linkCode), [byCode, setByCode] = useState(Boolean(linkCode)), [cfToken, setCfToken] = useState('');
@@ -82,15 +82,16 @@ export function Setup({ brand, onDone }: { brand: Brand; onDone: (address: strin
   if (result) {
     const elsewhere = result.url && new URL(result.url).hostname !== location.hostname;
     return <main className={styles.screen}><section className={styles.card}>
-      <header><h1>{org} is set up</h1></header>
+      <header><h1>{result.pending ? 'Almost done' : `${org} is set up`}</h1></header>
       <ul className={styles.steps}>
         <li data-ok="true">Your account is {result.address}</li>
         {(result.done || []).map(key => <li key={key} data-ok="true">{stepLabel(key, domain, host)}</li>)}
-        {result.failed && <li data-ok="false">{stepLabel(result.failed.key, domain, host)}<small>{result.failed.problem}</small><small><b>To fix:</b> {result.failed.fix}</small></li>}
+        {result.failed && <li data-ok="false">{stepLabel(result.failed.key, domain, host)}<small>{result.failed.problem}</small>
+          {result.failed.records?.map(line => <small key={line}>{line}</small>)}<small><b>To fix:</b> {result.failed.fix}</small></li>}
       </ul>
-      {result.failed && <p className={styles.note}>The steps after this one are not done yet. Once it is fixed, open Setup health in People and mailboxes and press Fix.</p>}
-      {result.kept === false && <p className={styles.note}>The Cloudflare token could not be kept, so Setup health will ask for one.</p>}
-      {elsewhere && <p className={styles.note}>Your web address is <a href={result.url}>{result.url}</a>. Its certificate can take a few minutes; you can sign in here meanwhile.</p>}
+      {result.pending && <p className={styles.note}>Go back to the terminal (or your coding agent): the installer is now setting up mail for {domain} and your web address. If a DNS record has to change, it says which. You can sign in here meanwhile.</p>}
+      {result.failed && <p className={styles.note}>The steps after this one are not done yet. Once it is fixed, run <b>npm run setup</b> again, or open Setup health in People and mailboxes.</p>}
+      {!result.pending && elsewhere && <p className={styles.note}>Your web address is <a href={result.url}>{result.url}</a>. Its certificate can take a few minutes; you can sign in here meanwhile.</p>}
       <form onSubmit={event => { event.preventDefault(); onDone(String(result.address || '').split('@')[0]); }}><button type="submit" autoFocus>Sign in</button></form>
     </section></main>;
   }
@@ -101,7 +102,7 @@ export function Setup({ brand, onDone }: { brand: Brand; onDone: (address: strin
 
     {step === 'proof' && <>
       <p>{byCode ? (linkCode && busy ? 'Checking your setup link…' : 'Enter the setup code the installer printed.')
-        : `Paste a Cloudflare API token for the account you deployed ${product.name} to. It proves this is your copy, and ${product.name} uses it to set up your mail.`}</p>
+        : `Paste a Cloudflare API token for the account you deployed ${product.name} to. It proves this is your copy, and sets up your mail. It is used once and not kept.`}</p>
       <form onSubmit={event => { event.preventDefault(); void check(); }}>
         {byCode ? <label>Setup code<input required autoFocus autoComplete="off" spellCheck={false} value={code} onChange={event => setCode(event.target.value.trim())} /></label>
           : <>

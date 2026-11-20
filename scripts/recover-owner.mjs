@@ -1,31 +1,28 @@
 #!/usr/bin/env node
 // npm run recover-owner: for an owner who lost their password or their authenticator. It gives the owner account a one-time
 // password, removes its two-step sign-in and signs it out everywhere. At the next sign-in the owner chooses a new password
-// and sets up two-step again. It asks for a Cloudflare API token for the account the app runs on (the same kind setup uses);
-// the token is used by this run and never saved.
+// and sets up two-step again. It signs in to Cloudflare the way setup does (wrangler's sign-in, or CLOUDFLARE_API_TOKEN);
+// nothing is saved.
 import { pbkdf2Sync, randomBytes, randomInt } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { env } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { CloudflareError, client } from '../shared/cloudflare.mjs';
-import { ask, askHidden, pickAccount, stop } from './cli.mjs';
+import { ask, pickAccount, signIn, stop } from './cli.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const config = JSON.parse(readFileSync(join(root, 'wrangler.json'), 'utf8'));
 const database = config.d1_databases[0].database_name;
 const saved = existsSync(join(root, 'setup.json')) ? JSON.parse(readFileSync(join(root, 'setup.json'), 'utf8')) : {};
 
-const token = env.CLOUDFLARE_API_TOKEN || await askHidden('Cloudflare API token (not shown or saved)');
-if (!token) stop('No token was given.', 'Run it again and paste the token when it asks.');
-const cf = client(token);
+const cf = client((await signIn(root)).token);
 const accountId = (await pickAccount(cf, saved)).id;
 let db;
 try {
   db = ((await cf('GET', `/accounts/${accountId}/d1/database?name=${encodeURIComponent(database)}`)) || []).find(item => item.name === database);
-  if (!db) stop(`There is no database named ${database} on that account.`, 'Run this with a token for the account the app runs on.');
+  if (!db) stop(`There is no database named ${database} on that account.`, 'Pick the account the app runs on.');
 } catch (error) {
-  if (error instanceof CloudflareError && error.denied) stop('Cloudflare did not accept that token, or it lacks D1 access.', 'Use a token with Account D1 Edit (the setup token works).');
+  if (error instanceof CloudflareError && error.denied) stop('Cloudflare did not allow reading the database.', 'Run `npx wrangler login` and choose Allow, then run this again.');
   stop(`Cloudflare answered: ${error.message}`, 'Try again in a minute.');
 }
 /** Runs SQL with bound parameters on the live database and returns its rows. */

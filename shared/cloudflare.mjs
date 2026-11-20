@@ -31,12 +31,15 @@ export class CloudflareError extends Error {
   }
 }
 
-/** A function that calls the API with this token and returns `result`; `.page()` follows `result_info` across pages. */
+/** A function that calls the API with this token and returns `result`; `.page()` follows `result_info` across pages. The token
+ * may be a function that returns it, for sign-ins whose token is renewed while setup runs. `cf.lookup`, when set, reads DNS
+ * records another way for a sign-in that cannot read them through the API (see `records`). */
 export function client(token) {
   const call = async (method, path, body) => {
     let response;
+    const bearer = typeof token === 'function' ? await token() : token;
     try {
-      response = await fetch(`${API}${path}`, { method, headers: { authorization: `Bearer ${token}`, ...(body ? { 'content-type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+      response = await fetch(`${API}${path}`, { method, headers: { authorization: `Bearer ${bearer}`, ...(body ? { 'content-type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
     } catch { throw new CloudflareError(0, []); }
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.success === false) throw new CloudflareError(response.status, data.errors || []);
@@ -99,13 +102,21 @@ const describe = rule => (rule.actions || []).map(action => action.type === 'for
   : action.type === 'worker' ? `goes to the Worker ${(action.value || []).join(', ')}` : 'is dropped').join(' and ');
 const permissionOrNull = async work => { try { return await work(); } catch (error) { if (error instanceof CloudflareError && error.denied) throw error; return null; } };
 
+/** DNS records of one name and type: `{ id?, type, name, content, priority? }`. Through the API when the sign-in may read DNS
+ * (GET …/dns_records needs DNS Read); otherwise through `cf.lookup`, which the setup script points at the domain's own
+ * Cloudflare nameservers. Those records have no `id`, so they can be read but not changed. */
+export async function records(cf, zone, name, type) {
+  try { return await cf('GET', `/zones/${zone.id}/dns_records?type=${type}&name=${encodeURIComponent(name)}&per_page=100`) || []; }
+  catch (error) { if (error instanceof CloudflareError && error.denied && cf.lookup) return cf.lookup(zone, name, type); throw error; }
+}
+
 /** Where the domain's mail goes now. `elsewhere` lists, in plain words, every place mail would stop going if the catch-all
  * is pointed at `script`: an outside provider's MX records (while Email Routing is off), a catch-all that forwards or goes
- * to another Worker, and address rules that forward. Empty when nothing would be redirected.
- * GET …/email/routing needs Zone Settings Read; …/rules and …/rules/catch_all need Email Routing Rules Read; dns_records needs DNS Read. */
+ * to another Worker, and address rules that forward. Empty when nothing would be redirected. `outside` is those MX records.
+ * GET …/email/routing and the rules need Email Routing (or Zone Settings) Read. */
 export async function mailState(cf, zone, script) {
   const routing = await permissionOrNull(() => cf('GET', `/zones/${zone.id}/email/routing`));
-  const mx = await cf('GET', `/zones/${zone.id}/dns_records?type=MX&name=${encodeURIComponent(zone.name)}`) || [];
+  const mx = await records(cf, zone, zone.name, 'MX');
   const catchAll = await permissionOrNull(() => cf('GET', `/zones/${zone.id}/email/routing/rules/catch_all`));
   const rules = ((await permissionOrNull(() => cf('GET', `/zones/${zone.id}/email/routing/rules?per_page=50`))) || [])
     .filter(rule => rule.enabled && !(rule.matchers || []).some(matcher => matcher.type === 'all'));
@@ -122,55 +133,89 @@ export async function mailState(cf, zone, script) {
 // Email Routing's own SPF mechanism. Cloudflare refuses to turn routing on while another server's MX records exist (error
 // 2008), and it leaves an existing SPF record alone, asking for its include to be merged in by hand; setup does both.
 const SPF_INCLUDE = 'include:_spf.mx.cloudflare.net';
-const isSpf = record => record.type === 'TXT' && /^"?v=spf1(\s|"|$)/i.test(String(record.content || ''));
+const unquote = value => String(value || '').replace(/^"|"$/g, '').replace(/"\s+"/g, '');
+const isSpf = record => record.type === 'TXT' && /^v=spf1(\s|$)/i.test(unquote(record.content));
 /** An SPF record's content with these includes added after `v=spf1`, keeping everything it already says. */
-const withIncludes = (content, includes) => String(content).replace(/^("?)v=spf1/i, `$1v=spf1 ${includes.join(' ')}`);
+const withIncludes = (content, includes) => unquote(content).replace(/^v=spf1/i, `v=spf1 ${includes.join(' ')}`);
+const absolute = (name, domain) => { const plain = String(name || '').replace(/\.$/, '').toLowerCase(); return !plain || plain === '@' ? domain : plain === domain || plain.endsWith(`.${domain}`) ? plain : `${plain}.${domain}`; };
 
-/** Every change that needs the domain typed first, in plain words, and the records those changes touch: mail that goes
- * somewhere else today, the other server's MX records (deleted), and DNS records already on the web address (replaced).
- * `confirm` is empty when nothing would be taken from somewhere else. */
-export async function changes(cf, c) {
-  const state = await mailState(cf, c.zone, c.script), confirm = state.catchAllOurs ? [] : [...state.elsewhere];
-  const removeMx = state.routingOn ? [] : state.outside;
-  if (removeMx.length) confirm.push(`Its MX records (${removeMx.map(record => record.content).join(', ')}) are deleted: Cloudflare must be the only place that receives mail for ${c.domain}.`);
-  const spf = state.routingOn ? [] : (await cf('GET', `/zones/${c.zone.id}/dns_records?type=TXT&name=${encodeURIComponent(c.domain)}`) || []).filter(isSpf);
-  const mergeSpf = spf.length && !spf.some(record => String(record.content).includes(SPF_INCLUDE)) ? spf[0] : null;
-  let replaceHost = [];
-  if (c.host) {
-    const found = await domainService(cf, c.accountId, c.host);
-    if (!found) replaceHost = (await cf('GET', `/zones/${c.zone.id}/dns_records?name=${encodeURIComponent(c.host)}`) || []).filter(record => ['A', 'AAAA', 'CNAME'].includes(record.type));
-    if (replaceHost.length) confirm.push(`https://${c.host} points to ${replaceHost.map(record => record.content).join(', ')} today. That record is replaced so the address opens ${c.product}.`);
-  }
-  if (confirm.length && mergeSpf) confirm.push(`Cloudflare is added to its SPF record, keeping what it already allows: ${withIncludes(mergeSpf.content, [SPF_INCLUDE])}`);
-  return { state, confirm, removeMx, mergeSpf, replaceHost };
+/* A DNS edit setup needs: { op: 'delete' | 'set' | 'add', type, name, content, to?, priority? }. `content` is the record as it
+ * is (delete, set) or as it should be (add); `to` is the new content of a set. */
+export const describeEdit = edit => edit.op === 'delete' ? `Delete the ${edit.type} record ${edit.name} → ${edit.content}`
+  : edit.op === 'set' ? `Change the ${edit.type} record ${edit.name} to: ${edit.to}`
+  : `Add a ${edit.type} record ${edit.name}: ${edit.content}${edit.priority !== undefined ? ` (priority ${edit.priority})` : ''}`;
+
+/** Thrown when DNS records must change and the sign-in in use may not change them. */
+export class DnsNeeded extends Error {
+  constructor(edits) { super('These DNS records need changing.'); this.edits = edits; }
 }
 
-/** The sending domain and the DNS records it still lacks. GET …/email/sending/subdomains[/{tag}/dns]; no permission is documented. */
+/** Makes the edits through the API. Each record is found again by name, type and content, so edits worked out from records
+ * read another way still land. POST/PATCH/DELETE …/dns_records need DNS Edit; without it, DnsNeeded lists them all. */
+export async function applyEdits(cf, zone, edits) {
+  if (!edits.length) return false;
+  try {
+    for (const edit of edits) {
+      if (edit.op === 'add') { await cf('POST', `/zones/${zone.id}/dns_records`, { type: edit.type, name: edit.name, content: edit.content, ttl: 1, ...(edit.priority !== undefined ? { priority: edit.priority } : {}) }); continue; }
+      const found = (await cf('GET', `/zones/${zone.id}/dns_records?type=${edit.type}&name=${encodeURIComponent(edit.name)}&per_page=100`) || [])
+        .find(record => unquote(record.content).replace(/\.$/, '') === unquote(edit.content).replace(/\.$/, ''));
+      if (!found) continue;
+      if (edit.op === 'delete') await cf('DELETE', `/zones/${zone.id}/dns_records/${found.id}`);
+      else await cf('PATCH', `/zones/${zone.id}/dns_records/${found.id}`, { content: edit.to });
+    }
+  } catch (error) { if (error instanceof CloudflareError && error.denied) throw new DnsNeeded(edits); throw error; }
+  return true;
+}
+
+/** Every change that needs the domain typed first, in plain words, and the DNS edits that go with it: mail that goes somewhere
+ * else today, the other server's MX records (deleted), Cloudflare added to an existing SPF record, and DNS records already on
+ * the web address (deleted so the address can open the app). `confirm` is empty when nothing is taken from elsewhere. */
+export async function changes(cf, c) {
+  const state = await mailState(cf, c.zone, c.script), confirm = state.catchAllOurs ? [] : [...state.elsewhere];
+  const mailEdits = [];
+  if (!state.routingOn) {
+    for (const record of state.outside) mailEdits.push({ op: 'delete', type: 'MX', name: c.domain, content: record.content });
+    if (mailEdits.length) confirm.push(`Its MX records (${state.outside.map(record => record.content).join(', ')}) are deleted: Cloudflare must be the only place that receives mail for ${c.domain}.`);
+    const spf = (await records(cf, c.zone, c.domain, 'TXT')).filter(isSpf);
+    if (spf.length && !spf.some(record => unquote(record.content).includes(SPF_INCLUDE))) {
+      const to = withIncludes(spf[0].content, [SPF_INCLUDE]);
+      mailEdits.push({ op: 'set', type: 'TXT', name: c.domain, content: spf[0].content, to });
+      confirm.push(`Cloudflare is added to its SPF record, keeping what it already allows: ${to}`);
+    }
+  }
+  const hostEdits = [];
+  if (c.host && !await domainService(cf, c.accountId, c.host)) {
+    for (const type of ['A', 'AAAA', 'CNAME']) for (const record of await records(cf, c.zone, c.host, type)) hostEdits.push({ op: 'delete', type, name: c.host, content: record.content });
+    if (hostEdits.length) confirm.push(`https://${c.host} points to ${hostEdits.map(edit => edit.content).join(', ')} today. That record is deleted so the address opens ${c.product}.`);
+  }
+  return { state, confirm, mailEdits, hostEdits };
+}
+
+/** The sending domain and the DNS edits it still needs. GET …/email/sending/subdomains[/{tag}/dns] needs Email Sending Read. */
 export async function sendingState(cf, zone) {
   const sender = ((await cf('GET', `/zones/${zone.id}/email/sending/subdomains`)) || []).find(item => item.name === zone.name) || null;
   if (!sender?.tag) return { onboarded: false, enabled: false, tag: '', missing: [] };
   return { onboarded: true, enabled: sender.enabled !== false, tag: sender.tag, missing: await missingRecords(cf, zone, sender.tag) };
 }
 
-const unquote = value => String(value || '').replace(/^"|"$/g, '').replace(/"\s+"/g, '');
-const absolute = (name, domain) => { const plain = String(name || '').replace(/\.$/, '').toLowerCase(); return !plain || plain === '@' ? domain : plain === domain || plain.endsWith(`.${domain}`) ? plain : `${plain}.${domain}`; };
 async function missingRecords(cf, zone, tag) {
   const wanted = await cf('GET', `/zones/${zone.id}/email/sending/subdomains/${tag}/dns`) || [], missing = [];
   for (const record of wanted) {
     if (!record.type || !record.content) continue;
     const name = absolute(record.name, zone.name);
-    const existing = await cf('GET', `/zones/${zone.id}/dns_records?type=${record.type}&name=${encodeURIComponent(name)}`) || [];
-    if (existing.some(item => unquote(item.content) === unquote(record.content))) continue;
+    const existing = await records(cf, zone, name, record.type);
+    const same = item => unquote(item.content).replace(/\.$/, '').toLowerCase() === unquote(record.content).replace(/\.$/, '').toLowerCase();
+    if (existing.some(same)) continue;
     // A name may have only one SPF record: what the wanted one includes is merged into the one already there.
-    const spf = record.type === 'TXT' && isSpf(record) ? existing.find(isSpf) : null;
+    const spf = isSpf(record) ? existing.find(isSpf) : null;
     if (spf) {
       const includes = unquote(record.content).split(/\s+/).filter(term => /^include:/i.test(term) && !unquote(spf.content).toLowerCase().includes(term.toLowerCase()));
-      if (includes.length) missing.push({ type: 'TXT', name, content: withIncludes(spf.content, includes), merge: spf.id });
+      if (includes.length) missing.push({ op: 'set', type: 'TXT', name, content: spf.content, to: withIncludes(spf.content, includes) });
       continue;
     }
     // Cloudflare adds DMARC only where none exists; an existing policy is the owner's to keep.
     if (record.type === 'TXT' && name.startsWith('_dmarc.') && existing.length) continue;
-    missing.push({ type: record.type, name, content: record.content, ...(record.priority !== undefined ? { priority: record.priority } : {}) });
+    missing.push({ op: 'add', type: record.type, name, content: unquote(record.content), ...(record.priority !== undefined ? { priority: record.priority } : {}) });
   }
   return missing;
 }
@@ -179,19 +224,21 @@ async function missingRecords(cf, zone, tag) {
 export const STEPS = {
   site: { doing: c => `Putting ${c.product} on https://${c.host}`, needs: 'Workers Scripts Edit and Workers Routes Edit',
     dashboard: c => `Workers & Pages > ${c.script} > Settings > Domains & Routes > Add > Custom domain > ${c.host}. If Cloudflare says the name already has a DNS record, delete that record (DNS > Records) or choose another web address.` },
-  routing: { doing: c => `Turning on Email Routing for ${c.domain}`, needs: 'Zone Settings Edit and DNS Edit',
+  routing: { doing: c => `Turning on Email Routing for ${c.domain}`, needs: 'Email Routing Edit (or Zone Settings Edit)',
     dashboard: c => `Compute > Email Service > Email Routing > Onboard Domain > ${c.domain}. Cloudflare adds and locks its MX and SPF records.` },
   catchAll: { doing: c => `Sending all mail for ${c.domain} to ${c.product}`, needs: 'Email Routing Rules Edit',
     dashboard: c => `Compute > Email Service > Email Routing > ${c.domain} > Routing rules > Catch-all: action "Send to a Worker", destination ${c.script}, then make it Active.` },
-  sending: { doing: c => `Setting up ${c.domain} to send mail`, needs: 'Email Sending Edit and DNS Edit',
+  sending: { doing: c => `Setting up ${c.domain} to send mail`, needs: 'Email Sending Edit',
     dashboard: c => `Compute > Email Service > Email Sending > Onboard Domain > ${c.domain}, and keep the records it adds.` },
 };
 
-/** A step's failure in plain words: what went wrong and the one thing to do. */
+/** A step's failure in plain words: what went wrong and the one thing to do. A DnsNeeded failure also lists the records. */
 export function explain(key, error, c) {
   const step = STEPS[key], detail = error instanceof Error ? error.message : String(error);
+  if (error instanceof DnsNeeded) return { problem: 'These DNS records need changing, and this sign-in can’t change DNS records.', records: error.edits.map(describeEdit),
+    fix: `Make these changes at https://dash.cloudflare.com/${c.accountId}/${c.domain}/dns/records, then carry on.` };
   if (error instanceof CloudflareError && error.denied)
-    return { problem: `The Cloudflare token is not allowed to do this (${detail}).`, fix: `Add ${step.needs} to the token and try again, or do it in the dashboard: ${step.dashboard(c)}` };
+    return { problem: `Cloudflare did not allow this (${detail}).`, fix: `Sign in again, or give the token ${step.needs}, and try again. Or do it in the dashboard: ${step.dashboard(c)}` };
   if (error instanceof CloudflareError && error.status === 0) return { problem: 'Could not reach the Cloudflare API.', fix: 'Check the internet connection and try again.' };
   return { problem: detail, fix: `Do it in the Cloudflare dashboard: ${step.dashboard(c)}` };
 }
@@ -220,9 +267,10 @@ export async function inspect(cf, c) {
 }
 
 /** Makes every red item green, in order, stopping at the first failure. It never takes mail or a web address from somewhere
- * else on its own: when `changes` lists anything, it returns `{ confirm }` unless `confirmed` is the domain, typed. `say` is
- * called with each step's one line before it runs. Returns `{ done: string[], failed?: { key, problem, fix }, confirm?: string[] }`. */
-export async function repair(cf, c, { confirmed = '', say = () => {} } = {}) {
+ * else on its own: when `changes` lists anything, it returns `{ confirm }` unless `confirmed` is the domain, typed. DNS edits
+ * go through `dns` (a client allowed to edit DNS), which is `cf` unless given. `say` is called with each step's one line
+ * before it runs. Returns `{ done, failed?: { key, problem, fix, records? }, confirm? }`. */
+export async function repair(cf, c, { confirmed = '', say = () => {}, dns = cf } = {}) {
   const done = [];
   const run = async (key, work) => {
     say(STEPS[key].doing(c));
@@ -235,17 +283,17 @@ export async function repair(cf, c, { confirmed = '', say = () => {} } = {}) {
   const state = plan.state;
   const routing = await run('routing', async () => {
     if (state.routingOn) return false;
-    // Cloudflare refuses while another server's MX records exist, and keeps an existing SPF record as it is. Needs DNS Edit.
-    for (const record of plan.removeMx) await cf('DELETE', `/zones/${c.zone.id}/dns_records/${record.id}`);
-    if (plan.mergeSpf) await cf('PATCH', `/zones/${c.zone.id}/dns_records/${plan.mergeSpf.id}`, { content: withIncludes(plan.mergeSpf.content, [SPF_INCLUDE]) });
-    // The documented "Enable Email Routing": adds and locks the MX and SPF records. Needs Zone Settings Write.
+    // Cloudflare refuses while another server's MX records exist, and keeps an existing SPF record as it is. The web
+    // address's edits go with them, so someone making the changes by hand gets one list.
+    await applyEdits(dns, c.zone, [...plan.mailEdits, ...plan.hostEdits]);
+    // The documented "Enable Email Routing": adds and locks the MX and SPF records.
     await cf('POST', `/zones/${c.zone.id}/email/routing/dns`, { name: c.domain });
     return true;
   });
   if (routing.failed) return { done, failed: routing.failed };
   const catchAll = await run('catchAll', async () => {
     if (state.catchAllOurs) return false;
-    // Needs Email Routing Rules Write. wrangler.json has no `addresses`, so deploys never fight over this rule.
+    // wrangler.json has no `addresses`, so deploys never fight over this rule.
     await cf('PUT', `/zones/${c.zone.id}/email/routing/rules/catch_all`, { name: `${c.product}: all mail`, enabled: true, matchers: [{ type: 'all' }], actions: [{ type: 'worker', value: [c.script] }] });
     return true;
   });
@@ -255,12 +303,7 @@ export async function repair(cf, c, { confirmed = '', say = () => {} } = {}) {
     if (!tag) { tag = (await cf('POST', `/zones/${c.zone.id}/email/sending/subdomains`, { name: c.domain }))?.tag; changed = true; }
     if (!tag) throw new Error('Cloudflare did not return the sending domain.');
     // The docs don't say whether onboarding adds these records itself, as the dashboard does, so any still missing are added.
-    for (const { merge, ...record } of await missingRecords(cf, c.zone, tag)) {
-      if (merge) await cf('PATCH', `/zones/${c.zone.id}/dns_records/${merge}`, { content: record.content });
-      else await cf('POST', `/zones/${c.zone.id}/dns_records`, { ...record, ttl: 1 });
-      changed = true;
-    }
-    return changed;
+    return await applyEdits(dns, c.zone, await missingRecords(cf, c.zone, tag)) || changed;
   });
   if (sending.failed) return { done, failed: sending.failed };
   // Last, because a clash with an existing DNS record is the likeliest failure and should not hold up mail.
@@ -270,7 +313,7 @@ export async function repair(cf, c, { confirmed = '', say = () => {} } = {}) {
       if (found?.service === c.script) return false;
       if (found) throw new Error(`https://${c.host} already opens another Worker, ${found.service}. Choose another web address, or remove it from ${found.service} first.`);
       // A custom domain can't be made over an existing record; the owner agreed to replace it when typing the domain.
-      for (const record of plan.replaceHost) await cf('DELETE', `/zones/${c.zone.id}/dns_records/${record.id}`);
+      await applyEdits(dns, c.zone, plan.hostEdits);
       // PUT /accounts/{a}/workers/domains {hostname, service, zone_id} needs Workers Scripts Write.
       await cf('PUT', `/accounts/${c.accountId}/workers/domains`, { hostname: c.host, service: c.script, zone_id: c.zone.id });
       return true;

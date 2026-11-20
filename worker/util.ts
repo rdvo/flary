@@ -12,7 +12,7 @@ export interface MailBinding {
 }
 
 /** What the runtime hands the Worker. The domain is picked in the setup wizard and kept in `setting`; a DOMAIN variable, if
- * set, wins. CF_API_TOKEN is the Cloudflare token given at install, kept as a secret so setup never asks for it again. */
+ * set, wins. SETUP_TOKEN is the one-time code in the installer's link. */
 export type Bindings = {
   DB: D1Database;
   FILES: R2Bucket;
@@ -21,7 +21,6 @@ export type Bindings = {
   CF_VERSION_METADATA?: WorkerVersionMetadata;
   DOMAIN?: string;
   SETUP_TOKEN?: string;
-  CF_API_TOKEN?: string;
 };
 /** The bindings with the mail domain settled (empty until the first-run screen has run). */
 export type Env = Bindings & { DOMAIN: string };

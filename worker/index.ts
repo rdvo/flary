@@ -15,8 +15,8 @@ async function api(request: Request, env: Env, context: ExecutionContext) {
     const [account, saved] = await Promise.all([readSession(request, env), settings(env)]);
     const shared = { domain: domainOf(env), host: saved.host || '', brand: brandOf(saved) };
     if (!account) return json({ ...shared, setup: !(await hasAccounts(env)), account: null, mailboxes: [] });
-    // Only the owner needs to know whether the welcome step is done and whether a Cloudflare token is kept.
-    const owner = account.role === 'owner' ? { welcomed: Boolean(saved.welcomed), cloudflare: Boolean(env.CF_API_TOKEN) } : {};
+    // Only the owner needs to know whether the welcome step is done.
+    const owner = account.role === 'owner' ? { welcomed: Boolean(saved.welcomed) } : {};
     return json({ ...shared, ...owner, setup: false, account: { id: account.id, name: account.name, role: account.role, address: account.address, mailboxId: account.mailboxId }, mailboxes: await myMailboxes(env, account) });
   }
   if (path === '/api/brand/logo' && request.method === 'GET') return logoFile(env);
