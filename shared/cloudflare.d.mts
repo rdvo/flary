@@ -14,7 +14,7 @@ export type Cf = {
   page(path: string, limit?: number): Promise<any[]>;
   lookup?: (zone: Zone, name: string, type: string) => Promise<DnsRecord[]>;
 };
-export function client(token: string | (() => Promise<string> | string)): Cf;
+export function client(token: string | ((renew?: boolean) => Promise<string> | string)): Cf;
 
 export type Zone = { id: string; name: string; accountId: string; accountName: string };
 export function listZones(cf: Cf): Promise<Zone[]>;

@@ -73,8 +73,9 @@ export async function signIn(root) {
   }
   if (!token) stop('You are not signed in to Cloudflare.', 'Run `npm run setup` again and choose Allow on the Cloudflare page it opens.');
   let at = Date.now();
-  // wrangler renews its token when asked for it; its tokens last about an hour, so a long setup asks again now and then.
-  const current = () => { if (Date.now() - at > 10 * 60_000) { token = read() || token; at = Date.now(); } return token; };
+  // wrangler renews its token when asked for it, which retires the old one: any wrangler command run meanwhile can do that,
+  // so a refused request asks again at once (renew), and a long setup asks every few minutes anyway.
+  const current = renew => { if (renew || Date.now() - at > 300_000) { token = read() || token; at = Date.now(); } return token; };
   return { token: current, viaWrangler: true };
 }
 

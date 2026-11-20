@@ -32,16 +32,18 @@ export class CloudflareError extends Error {
 }
 
 /** A function that calls the API with this token and returns `result`; `.page()` follows `result_info` across pages. The token
- * may be a function that returns it, for sign-ins whose token is renewed while setup runs. `cf.lookup`, when set, reads DNS
+ * may be a function that returns it, for sign-ins whose token is renewed while setup runs: on a 401 it is asked again with
+ * `true` (for a fresh one) and the request is tried once more. `cf.lookup`, when set, reads DNS
  * records another way for a sign-in that cannot read them through the API (see `records`). */
 export function client(token) {
-  const call = async (method, path, body) => {
+  const call = async (method, path, body, renewed = false) => {
     let response;
-    const bearer = typeof token === 'function' ? await token() : token;
+    const bearer = typeof token === 'function' ? await token(renewed) : token;
     try {
       response = await fetch(`${API}${path}`, { method, headers: { authorization: `Bearer ${bearer}`, ...(body ? { 'content-type': 'application/json' } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
     } catch { throw new CloudflareError(0, []); }
     const data = await response.json().catch(() => ({}));
+    if (response.status === 401 && typeof token === 'function' && !renewed) return call(method, path, body, true);
     if (!response.ok || data.success === false) throw new CloudflareError(response.status, data.errors || []);
     return data;
   };

@@ -162,9 +162,11 @@ try {
     console.log('There you name your organisation, pick your domain and make your account.');
     console.log('Keep this running: when the wizard is done, setup carries on here and sets up your mail.\n');
     step('Waiting for the wizard');
-    for (;;) {
+    // A check that fails (a dropped connection, a sign-in being renewed) is simply tried again a moment later.
+    for (let failures = 0; ;) {
       await sleep(4000);
-      if (await ownerExists(db.uuid)) break;
+      try { if (await ownerExists(db.uuid)) break; failures = 0; }
+      catch (error) { if (++failures >= 15) throw error; }
     }
     ok('The wizard is done');
   }
