@@ -150,10 +150,11 @@ try {
     const code = randomBytes(18).toString('base64url');
     // PUT …/scripts/{name}/secrets needs Workers Scripts Edit; it replaces the code from any earlier run.
     await cf('PUT', `/accounts/${accountId}/workers/scripts/${script}/secrets`, { name: 'SETUP_TOKEN', text: code, type: 'secret_text' });
+    // Every domain, a few at a time: the wizard needs to know which ones already get mail somewhere else.
     const domains = [];
-    for (const zone of zones.slice(0, 20)) {
-      const plan = await changes(cf, { product: product.name, domain: zone.name, host: '', script, accountId, zone }).catch(() => ({ confirm: [] }));
-      domains.push({ name: zone.name, moves: plan.confirm });
+    for (let at = 0; at < zones.length; at += 6) {
+      domains.push(...await Promise.all(zones.slice(at, at + 6).map(async zone => ({ name: zone.name,
+        moves: (await changes(cf, { product: product.name, domain: zone.name, host: '', script, accountId, zone }).catch(() => ({ confirm: [] }))).confirm }))));
     }
     await saveSetting(db.uuid, 'domains', JSON.stringify(domains));
     ok('Ready');
