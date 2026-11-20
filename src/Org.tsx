@@ -19,7 +19,7 @@ export function Org({ session, onBrand }: { session: Session; onBrand: () => voi
   const owner = session.account!.role === 'owner', domain = session.domain;
   const [org, setOrg] = useState<Snapshot | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [issued, setIssued] = useState<Snapshot['issued'] | null>(null), [copied, setCopied] = useState(false), [editing, setEditing] = useState<{ id: string; name: string; role: Role } | null>(null);
-  const [person, setPerson] = useState({ address: '', name: '', role: 'member' as Role }), [shared, setShared] = useState({ address: '', name: '' }), [alias, setAlias] = useState<Record<string, string>>({});
+  const [person, setPerson] = useState({ address: '', first: '', last: '', role: 'member' as Role }), [shared, setShared] = useState({ address: '', name: '' }), [alias, setAlias] = useState<Record<string, string>>({});
   useEffect(() => { document.title = `People and mailboxes · ${session.brand.name}`; }, [session.brand.name]);
   const run = async (work: Promise<Snapshot>) => {
     setBusy(true); setError('');
@@ -73,12 +73,15 @@ export function Org({ session, onBrand }: { session: Session; onBrand: () => voi
                 </li>)}
             {!org && <li className={styles.empty}>Loading…</li>}
           </ul>
-          {owner && <form className={styles.form} onSubmit={event => { event.preventDefault(); void call('people', 'POST', person).then(ok => { if (ok) setPerson({ address: '', name: '', role: 'member' }); }); }}>
+          {owner && <form className={styles.form} onSubmit={event => { event.preventDefault(); void call('people', 'POST', { address: person.address, name: `${person.first.trim()} ${person.last.trim()}`.trim(), role: person.role }).then(ok => { if (ok) setPerson({ address: '', first: '', last: '', role: 'member' }); }); }}>
             <h3>Add a person</h3>
             <label>Address<span className={styles.at}><input required value={person.address} onChange={event => setPerson({ ...person, address: local(event.target.value) })} placeholder="name" /><i>@{domain}</i></span></label>
-            <label>Name on their mail<input required value={person.name} onChange={event => setPerson({ ...person, name: event.target.value })} placeholder="First and last name" /></label>
+            <div className={styles.pair}>
+              <label>First name<input required value={person.first} onChange={event => setPerson({ ...person, first: event.target.value })} /></label>
+              <label>Last name<input value={person.last} onChange={event => setPerson({ ...person, last: event.target.value })} /></label>
+            </div>
             <label>Role<select value={person.role} onChange={event => setPerson({ ...person, role: event.target.value as Role })}><option value="member">Member: their own mail</option><option value="admin">Admin: also views this page, needs two-step sign-in</option></select></label>
-            <button type="submit" disabled={busy || !person.address || !person.name}>{busy ? 'Saving…' : 'Add person'}</button>
+            <button type="submit" disabled={busy || !person.address || !person.first.trim()}>{busy ? 'Saving…' : 'Add person'}</button>
           </form>}
         </div>
       </section>

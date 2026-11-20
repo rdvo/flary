@@ -27,6 +27,7 @@
 .card form>button.plain{margin-top:-4px;padding:0 4px;color:var(--muted);background:transparent;font-weight:500}
 .error{margin:0;color:var(--red);font-size:13px}
 .note{margin:0;color:var(--muted);font-size:12px}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .count{margin:-12px 0 12px!important;font-size:12px!important}
 /* The logo picker: a square preview, a file button, and a line on what it takes. */
 .logo{display:grid;grid-template-columns:auto auto auto 1fr;align-items:center;gap:8px 12px}

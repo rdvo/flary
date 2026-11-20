@@ -44,7 +44,7 @@ export function Setup({ brand, onDone }: { brand: Brand; onDone: (address: strin
   const [code, setCode] = useState(linkCode), [byCode, setByCode] = useState(Boolean(linkCode)), [cfToken, setCfToken] = useState('');
   const [org, setOrg] = useState(brand.name === product.name ? '' : brand.name), [logo, setLogo] = useState('');
   const [domains, setDomains] = useState<string[]>([]), [domain, setDomain] = useState(''), [host, setHost] = useState('');
-  const [address, setAddress] = useState(''), [name, setName] = useState(''), [password, setPassword] = useState(''), [again, setAgain] = useState('');
+  const [address, setAddress] = useState(''), [first, setFirst] = useState(''), [last, setLast] = useState(''), [password, setPassword] = useState(''), [again, setAgain] = useState('');
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [confirm, setConfirm] = useState<string[] | null>(null), [typed, setTyped] = useState('');
   const [result, setResult] = useState<Created | null>(null);
   const proof = byCode ? { setupToken: code } : { cfToken };
@@ -70,7 +70,7 @@ export function Setup({ brand, onDone }: { brand: Brand; onDone: (address: strin
     if (password !== again) { setError('The two passwords don’t match.'); return; }
     setBusy(true); setError('');
     try {
-      const { ok, status, result } = await post<Created>('/api/setup', { ...proof, org, logo, domain, host, confirmed: typed, address, name, password });
+      const { ok, status, result } = await post<Created>('/api/setup', { ...proof, org, logo, domain, host, confirmed: typed, address, name: `${first.trim()} ${last.trim()}`.trim(), password });
       if (status === 409 && result.confirm) { setConfirm(result.confirm); return; }
       if (!ok || !result.created) { setError(result.error || 'That didn’t work.'); return; }
       setCfToken(''); setPassword(''); setAgain(''); setResult(result);
@@ -146,14 +146,17 @@ export function Setup({ brand, onDone }: { brand: Brand; onDone: (address: strin
     {step === 'you' && <>
       <p>You are the owner: you add everyone else.</p>
       <form onSubmit={event => { event.preventDefault(); void create(); }}>
-        <label>Your name<input required autoFocus autoComplete="name" value={name} onChange={event => setName(event.target.value)} placeholder="First and last name" /></label>
+        <div className={styles.pair}>
+          <label>First name<input required autoFocus autoComplete="given-name" value={first} onChange={event => setFirst(event.target.value)} /></label>
+          <label>Last name<input autoComplete="family-name" value={last} onChange={event => setLast(event.target.value)} /></label>
+        </div>
         <label>Your address<span className={styles.at}><input required autoComplete="username" value={address} onChange={event => setAddress(event.target.value.trim().toLowerCase())} placeholder="name" /><i>@{domain}</i></span></label>
         <label>Password<input type="password" required minLength={10} autoComplete="new-password" value={password} onChange={event => setPassword(event.target.value)} placeholder="At least 10 characters" /></label>
         <label>Password again<input type="password" required minLength={10} autoComplete="new-password" value={again} onChange={event => setAgain(event.target.value)} /></label>
         {confirm && <Redirect domain={domain} places={confirm} value={typed} onChange={setTyped} />}
         <p className={styles.note}>{busy ? 'Setting up your mail and web address. This can take a minute.' : 'Next you sign in and set up two-step sign-in with an authenticator app.'}</p>
         {error && <p role="alert" className={styles.error}>{error}</p>}
-        <button type="submit" disabled={busy || !address || !name || password.length < 10 || !again || Boolean(confirm && typed !== domain)}>{busy ? 'Setting up…' : 'Finish setup'}</button>
+        <button type="submit" disabled={busy || !address || !first.trim() || password.length < 10 || !again || Boolean(confirm && typed !== domain)}>{busy ? 'Setting up…' : 'Finish setup'}</button>
         {!busy && back('domain')}
       </form>
     </>}
