@@ -4,6 +4,15 @@ import { BrandMark } from './Brand';
 import styles from './auth.module.css';
 
 type Need = '' | 'password' | 'setup' | 'code';
+
+/** Live checks under a new password: long enough, and (with a second field) the same twice. Grey until something is typed. */
+export function PasswordChecks({ password, again }: { password: string; again?: string }) {
+  const state = (typed: boolean, ok: boolean) => !typed ? undefined : ok ? 'true' : 'false';
+  return <ul className={styles.checks} aria-live="polite">
+    <li data-ok={state(password.length > 0, password.length >= 10)}>At least 10 characters</li>
+    {again !== undefined && <li data-ok={state(again.length > 0, again === password && password.length > 0)}>Both passwords match</li>}
+  </ul>;
+}
 export const post = async <T = Record<string, string | boolean | undefined>>(path: string, body: unknown) => {
   const response = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   return { ok: response.ok, status: response.status, result: await response.json().catch(() => ({})) as T & { error?: string } };
@@ -42,7 +51,8 @@ export function SignIn({ brand, domain, address: start = '', onDone }: { brand: 
         <label>Address<span className={styles.at}><input required autoFocus autoComplete="username" value={address} onChange={event => setAddress(event.target.value.trim().toLowerCase())} placeholder="name" /><i>@{domain}</i></span></label>
         <label>Password<input type="password" required autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} /></label>
       </>}
-      {need === 'password' && <label>New password<input type="password" required autoFocus minLength={10} autoComplete="new-password" value={next} onChange={event => setNext(event.target.value)} placeholder="At least 10 characters" /></label>}
+      {need === 'password' && <><label>New password<input type="password" required autoFocus minLength={10} autoComplete="new-password" value={next} onChange={event => setNext(event.target.value)} placeholder="At least 10 characters" /></label>
+        <PasswordChecks password={next} /></>}
       {need === 'setup' && setup && <div className={styles.qr}><img src={setup.qr} alt="Two-step sign-in QR code" width={176} height={176} /><small>Or type this key into the app: <code>{setup.secret}</code></small></div>}
       {(need === 'setup' || need === 'code') && <label>Six-digit code<input required autoFocus inputMode="numeric" autoComplete="one-time-code" maxLength={7} value={code} onChange={event => setCode(event.target.value.replace(/[^0-9]/g, ''))} placeholder="123456" /></label>}
       {error && <p role="alert" className={styles.error}>{error}</p>}
@@ -73,6 +83,7 @@ export function ChangePassword({ address, onBack }: { address: string; onBack: (
         <label>Current password<input type="password" required autoFocus autoComplete="current-password" value={current} onChange={event => setCurrent(event.target.value)} /></label>
         <label>New password<input type="password" required minLength={10} autoComplete="new-password" value={next} onChange={event => setNext(event.target.value)} placeholder="At least 10 characters" /></label>
         <label>New password again<input type="password" required minLength={10} autoComplete="new-password" value={again} onChange={event => setAgain(event.target.value)} /></label>
+        <PasswordChecks password={next} again={again} />
         {error && <p role="alert" className={styles.error}>{error}</p>}
         <button type="submit" disabled={busy || !current || next.length < 10 || !again}>{busy ? 'Saving…' : 'Change password'}</button>
         <button type="button" className={styles.plain} onClick={onBack}>Cancel</button>

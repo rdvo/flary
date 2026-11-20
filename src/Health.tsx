@@ -44,7 +44,7 @@ export function Health({ session }: { session: Session }) {
       {error && <p role="alert" className={styles.error}>{error}</p>}
       <p className={styles.hint}>{installed ? `The installer last ran ${new Date(installed.at).toLocaleString()}. ` : ''}To check again and fix anything, run <b>npm run setup</b> in the {product.slug} folder, or ask your coding agent to. It signs in to Cloudflare on your computer; no token is kept here.</p>
       {paste ? <form className={styles.form} onSubmit={event => { event.preventDefault(); void run(false); }}>
-        <label>Cloudflare API token<input type="password" required autoComplete="off" spellCheck={false} value={cfToken} onChange={event => setCfToken(event.target.value.trim())} /></label>
+        <label>Cloudflare API token<input className={auth.masked} name="cloudflare-api-token" required autoComplete="off" data-1p-ignore data-lpignore="true" spellCheck={false} value={cfToken} onChange={event => setCfToken(event.target.value.trim())} /></label>
         <p className={styles.hint}><a href={tokenLink(product.name)} target="_blank" rel="noreferrer">Create a token</a> with the permissions already picked. It is used for this check and not kept.</p>
         <div className={styles.buttons}>
           <button type="submit" className={styles.primary} disabled={busy || !cfToken}>{busy ? 'Checking…' : report ? 'Check again' : 'Check'}</button>

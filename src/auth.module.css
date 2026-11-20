@@ -27,6 +27,13 @@
 .card form>button.plain{margin-top:-4px;padding:0 4px;color:var(--muted);background:transparent;font-weight:500}
 .error{margin:0;color:var(--red);font-size:13px}
 .note{margin:0;color:var(--muted);font-size:12px}
+.masked{-webkit-text-security:disc}
+/* Password checks: a grey dot until typed, then green when met and red when not. */
+.checks{display:grid;gap:4px;margin:-4px 0 0;padding:0;list-style:none;color:var(--muted);font-size:12px}
+.checks li{position:relative;padding-left:14px}
+.checks li::before{position:absolute;top:6px;left:0;width:6px;height:6px;border-radius:50%;background:var(--line);content:''}
+.checks li[data-ok=true]{color:var(--green)}.checks li[data-ok=true]::before{background:var(--green)}
+.checks li[data-ok=false]{color:var(--red)}.checks li[data-ok=false]::before{background:var(--red)}
 .pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .count{margin:-12px 0 12px!important;font-size:12px!important}
 /* The logo picker: a square preview, a file button, and a line on what it takes. */

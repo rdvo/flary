@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import product from '../product.json';
 import { TOKEN_NEEDS, tokenLink } from '../shared/cloudflare.mjs';
 import type { Brand } from './api';
-import { post } from './Auth';
+import { PasswordChecks, post } from './Auth';
 import { readLogoFile } from './Brand';
 import styles from './auth.module.css';
 
@@ -15,12 +15,14 @@ export const stepLabel = (key: StepKey, domain: string, host: string) => ({
   catchAll: `All mail for ${domain} comes here`, sending: `${domain} can send mail`,
 }[key]);
 
-/** The installer's link carries a setup code after the #, which never reaches the server's logs. It is read once, when the
- * app loads, then taken out of the address bar so it is not left on screen or in history. */
+/** The installer's link carries a setup code after the #, which never reaches the server's logs. It is taken out of the
+ * address bar so it is not left on screen or in history, and kept for this tab only, so a reload doesn't lose it. */
+const CODE_KEY = 'setup-code';
 const linkCode = (() => {
   const match = /^#setup=([\w-]{16,})$/.exec(location.hash);
   if (match) history.replaceState(null, '', location.pathname);
-  return match?.[1] ?? '';
+  try { if (match) sessionStorage.setItem(CODE_KEY, match[1]); return match?.[1] ?? sessionStorage.getItem(CODE_KEY) ?? ''; }
+  catch { return match?.[1] ?? ''; }
 })();
 
 /** "Type the domain to go on": shown whenever setting up would send mail that goes somewhere today to this app instead. */
@@ -74,6 +76,7 @@ export function Setup({ brand, onDone }: { brand: Brand; onDone: (address: strin
       if (status === 409 && result.confirm) { setConfirm(result.confirm); return; }
       if (!ok || !result.created) { setError(result.error || 'That didn’t work.'); return; }
       setCfToken(''); setPassword(''); setAgain(''); setResult(result);
+      try { sessionStorage.removeItem(CODE_KEY); } catch { /* Private mode: nothing was kept. */ }
     } catch { setError('Could not reach the server. Try again.'); } finally { setBusy(false); }
   };
   const back = (to: Step) => <button type="button" className={styles.plain} onClick={() => { setError(''); setStep(to); }}>Back</button>;
@@ -106,7 +109,7 @@ export function Setup({ brand, onDone }: { brand: Brand; onDone: (address: strin
       <form onSubmit={event => { event.preventDefault(); void check(); }}>
         {byCode ? <label>Setup code<input required autoFocus autoComplete="off" spellCheck={false} value={code} onChange={event => setCode(event.target.value.trim())} /></label>
           : <>
-            <label>Cloudflare API token<input type="password" required autoFocus autoComplete="off" spellCheck={false} value={cfToken} onChange={event => setCfToken(event.target.value.trim())} /></label>
+            <label>Cloudflare API token<input className={styles.masked} name="cloudflare-api-token" required autoFocus autoComplete="off" data-1p-ignore data-lpignore="true" spellCheck={false} value={cfToken} onChange={event => setCfToken(event.target.value.trim())} /></label>
             <p className={styles.note}><a href={tokenLink(`${product.name}`)} target="_blank" rel="noreferrer">Create a token</a> with the permissions already picked: choose <b>Continue to summary</b>, then <b>Create Token</b>, and copy it here. If the form lacks Email Routing Rules or Email Sending, add them. It needs: {TOKEN_NEEDS.join('; ')}.</p>
           </>}
         {error && <p role="alert" className={styles.error}>{error}</p>}
@@ -153,10 +156,11 @@ export function Setup({ brand, onDone }: { brand: Brand; onDone: (address: strin
         <label>Your address<span className={styles.at}><input required autoComplete="username" value={address} onChange={event => setAddress(event.target.value.trim().toLowerCase())} placeholder="name" /><i>@{domain}</i></span></label>
         <label>Password<input type="password" required minLength={10} autoComplete="new-password" value={password} onChange={event => setPassword(event.target.value)} placeholder="At least 10 characters" /></label>
         <label>Password again<input type="password" required minLength={10} autoComplete="new-password" value={again} onChange={event => setAgain(event.target.value)} /></label>
+        <PasswordChecks password={password} again={again} />
         {confirm && <Redirect domain={domain} places={confirm} value={typed} onChange={setTyped} />}
         <p className={styles.note}>{busy ? 'Setting up your mail and web address. This can take a minute.' : 'Next you sign in and set up two-step sign-in with an authenticator app.'}</p>
         {error && <p role="alert" className={styles.error}>{error}</p>}
-        <button type="submit" disabled={busy || !address || !first.trim() || password.length < 10 || !again || Boolean(confirm && typed !== domain)}>{busy ? 'Setting up…' : 'Finish setup'}</button>
+        <button type="submit" disabled={busy || !address || !first.trim() || password.length < 10 || password !== again || Boolean(confirm && typed !== domain)}>{busy ? 'Setting up…' : 'Finish setup'}</button>
         {!busy && back('domain')}
       </form>
     </>}
