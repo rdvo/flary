@@ -1,13 +1,13 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "flary",
+  "name": "flary-mail",
   "main": "worker/index.ts",
   "compatibility_date": "2026-11-18",
   "workers_dev": true,
   "build": { "command": "npm run build" },
   "assets": { "directory": "./dist", "binding": "ASSETS", "not_found_handling": "single-page-application", "run_worker_first": ["/api/*"] },
-  "d1_databases": [{ "binding": "DB", "database_name": "flary-db", "migrations_dir": "migrations" }],
-  "r2_buckets": [{ "binding": "FILES", "bucket_name": "flary-files" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "flary-mail-db", "migrations_dir": "migrations" }],
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "flary-mail-files" }],
   "send_email": [{ "name": "MAIL" }],
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
   "observability": { "enabled": true }
